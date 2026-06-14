@@ -1,0 +1,500 @@
+/**
+ * ZKTeco ADMS Push Protocol Service
+ * Implemented per: ZKTeco ADMS Developer Implementation Guide (ZLM60 firmware 8.0.4.3)
+ *
+ * Supported: M2F, SenseFace, K40 Pro, MB2000, SenseFace 4A/7A
+ *
+ * CRITICAL NOTES FROM GUIDE:
+ *  - transTimes must be LOWERCASE 't' — firmware silently ignores 'TransTimes'
+ *  - TransFlag MUST be numeric bitmask '1111000000' — text format silently ignored
+ *  - OPERLOGStamp MUST always be 0 — echoing stamp stops OPERLOG (= no FP templates)
+ *  - FP template data arrives via table=OPERLOG, NOT table=FP
+ *  - After every handshake: queue SET OPTION UserValidTimeFun=1
+ *  - Command IDs must be per-device monotonically increasing integers
+ */
+
+import pool from '../db.js';
+
+export const CHECK_TYPE_LABELS  = { 0:'Check In', 1:'Check Out', 2:'Break Out', 3:'Break In', 4:'OT In', 5:'OT Out' };
+export const VERIFY_TYPE_LABELS = { 1:'Fingerprint', 2:'Password', 4:'Card', 8:'Face', 20:'Password' };
+export const PRIVILEGE_LABELS   = { 0:'User', 1:'Enroller', 2:'Manager', 6:'Admin', 14:'Super Admin' };
+export const FINGER_LABELS      = [
+  'Right Index','Left Index','Right Middle','Left Middle',
+  'Right Ring','Left Ring','Right Pinky','Left Pinky','Right Thumb','Left Thumb',
+];
+export const fingerLabel = (id) => FINGER_LABELS[id] || `Finger ${id}`;
+
+// ── Timestamp helpers ──────────────────────────────────────────────────────
+
+/** Format a JS Date as device local time string: "YYYY-MM-DD HH:MM:SS" */
+export function formatZkTime(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ` +
+         `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+// ── Device helpers ─────────────────────────────────────────────────────────
+
+export async function upsertDevice(sn, ipAddress, opts = {}) {
+  const { firmware, platform } = opts;
+  const { rows } = await pool.query(
+    `INSERT INTO zkteco_devices (serial_number, name, ip_address, last_seen, last_ip, firmware_ver, platform)
+     VALUES ($1,$2,$3,NOW(),$4,$5,$6)
+     ON CONFLICT (serial_number) DO UPDATE SET
+       last_seen    = NOW(),
+       last_ip      = COALESCE(EXCLUDED.last_ip,      zkteco_devices.last_ip),
+       firmware_ver = COALESCE(EXCLUDED.firmware_ver, zkteco_devices.firmware_ver),
+       platform     = COALESCE(EXCLUDED.platform,     zkteco_devices.platform)
+     RETURNING *`,
+    [sn, sn, ipAddress, ipAddress, firmware||null, platform||null]
+  );
+  return rows[0];
+}
+
+export async function getDevice(sn) {
+  const { rows } = await pool.query('SELECT * FROM zkteco_devices WHERE serial_number=$1', [sn]);
+  return rows[0] || null;
+}
+
+export async function getDeviceStamp(sn) {
+  const { rows } = await pool.query('SELECT attlog_stamp FROM zkteco_devices WHERE serial_number=$1', [sn]);
+  return rows[0]?.attlog_stamp ?? null;
+}
+
+export async function updateDeviceStamp(sn) {
+  const stamp = Math.floor(Date.now() / 1000).toString();
+  await pool.query('UPDATE zkteco_devices SET attlog_stamp=$1 WHERE serial_number=$2', [stamp, sn]);
+  return stamp;
+}
+
+export async function resetDeviceStamp(sn) {
+  await pool.query('UPDATE zkteco_devices SET attlog_stamp=NULL WHERE serial_number=$1', [sn]);
+}
+
+export async function incrementLogCount(sn, count) {
+  if (!count) return;
+  await pool.query(
+    'UPDATE zkteco_devices SET log_count=COALESCE(log_count,0)+$1 WHERE serial_number=$2',
+    [count, sn]
+  );
+}
+
+// ── Command queue ──────────────────────────────────────────────────────────
+
+/**
+ * Queue a command for a device.
+ * Uses DB auto-increment id as cmdId (small integer) — firmware requires small IDs.
+ */
+export async function queueCommand(deviceSn, commandType, params = '') {
+  const { rows: [stub] } = await pool.query(
+    `INSERT INTO zkteco_commands (device_sn, command_payload, status)
+     VALUES ($1,'__PENDING__','PENDING') RETURNING id`,
+    [deviceSn]
+  );
+  const cmdId = stub.id;
+  const payload = params
+    ? `C:${cmdId}:${commandType} ${params}`.trimEnd()
+    : `C:${cmdId}:${commandType}`;
+  const { rows } = await pool.query(
+    'UPDATE zkteco_commands SET command_payload=$1 WHERE id=$2 RETURNING *',
+    [payload, cmdId]
+  );
+  return rows[0];
+}
+
+export async function getNextCommand(deviceSn) {
+  const { rows } = await pool.query(
+    `SELECT id, command_payload FROM zkteco_commands
+     WHERE device_sn=$1 AND status='PENDING' ORDER BY created_at ASC LIMIT 1`,
+    [deviceSn]
+  );
+  return rows[0] || null;
+}
+
+export async function markCommandSent(id) {
+  await pool.query(`UPDATE zkteco_commands SET status='SENT',sent_at=NOW() WHERE id=$1`, [id]);
+}
+
+export async function markCommandDone(id) {
+  await pool.query(`UPDATE zkteco_commands SET status='DONE',done_at=NOW() WHERE id=$1`, [id]);
+}
+
+export async function markCommandDoneByCmdId(rawCmdId) {
+  const id = parseInt(rawCmdId, 10);
+  if (!id) return;
+  const r = await pool.query(
+    `UPDATE zkteco_commands SET status='DONE',done_at=NOW() WHERE id=$1 AND status!='DONE' RETURNING id`,
+    [id]
+  );
+  if (r.rowCount) return;
+  await pool.query(
+    `UPDATE zkteco_commands SET status='DONE',done_at=NOW() WHERE command_payload LIKE $1 AND status!='DONE'`,
+    [`C:${id}:%`]
+  );
+}
+
+// ── ATTLOG parsing & storage ───────────────────────────────────────────────
+
+/**
+ * Parse ATTLOG rows from device.
+ * Row format (per guide): PIN\tTimestamp\tVerifyStatus\tInOut\tDoorId
+ */
+export function parseAttlog(body) {
+  const records = [];
+  for (const raw of body.replace(/\r/g,'').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const data  = line.startsWith('ATTLOG\t') ? line.slice(7) : line;
+    const parts = data.split('\t');
+    if (parts.length < 4) continue;
+    const [pin, dateStr, verifyStatus, inOut] = parts;
+    if (!pin || !dateStr) continue;
+    const checkTime = new Date(dateStr.replace(' ', 'T'));
+    if (isNaN(checkTime.getTime())) continue;
+    records.push({
+      pin       : pin.trim(),
+      checkTime,
+      checkType : parseInt(inOut)        || 0,
+      verifyType: parseInt(verifyStatus) || 0,
+      workCode  : 0,
+      rawLine   : line,
+    });
+  }
+  return records;
+}
+
+import { broadcastNotification }   from './liveNotifications.js';
+import { buildPunchNotification }  from './punchNotification.js';
+
+export async function saveAttlogs(deviceSn, records) {
+  let inserted = 0;
+  for (const r of records) {
+    const empRes = await pool.query('SELECT id FROM users WHERE device_id=$1 LIMIT 1', [r.pin]);
+    const employeeId = empRes.rows[0]?.id || null;
+    try {
+      const result = await pool.query(
+        `INSERT INTO zkteco_attendance_logs
+           (device_sn,pin,check_time,check_type,verify_type,work_code,raw_line,employee_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (device_sn,pin,check_time) DO NOTHING`,
+        [deviceSn,r.pin,r.checkTime,r.checkType,r.verifyType,r.workCode,r.rawLine,employeeId]
+      );
+      if (result.rowCount > 0) {
+        inserted++;
+        // Fire-and-forget: broadcast live notification
+        if (employeeId) {
+          buildPunchNotification(employeeId, r.checkTime)
+            .then(n => { if (n) broadcastNotification(n); })
+            .catch(() => {});
+        }
+      }
+    } catch { /* duplicate — skip */ }
+  }
+  return inserted;
+}
+
+// ── Key-value line parser ──────────────────────────────────────────────────
+
+/**
+ * Parse KEY=VALUE fields from tab or space-separated line.
+ * Example: "USER PIN=1\tName=John\tPri=0\tCard=0"
+ */
+export function parseKeyValueLine(line) {
+  const data = {};
+  const fields = line.includes('\t') ? line.split('\t') : line.split(/\s+/);
+  for (const field of fields) {
+    const idx = field.indexOf('=');
+    if (idx < 0) continue;
+    data[field.slice(0, idx).trim()] = field.slice(idx + 1).trim();
+  }
+  return data;
+}
+
+// ── User data ──────────────────────────────────────────────────────────────
+
+/**
+ * Save/update an enrolled user record from device OPERLOG.
+ * USER row format (guide §8):
+ *   USER PIN=X\tName=Y\tPri=Z\tPasswd=ABC\tCard=12345\tGrp=1\tVerify=-1\tVein=0\tFPCount=2\tFaceCount=1
+ */
+export async function saveDeviceUser(deviceSn, kv) {
+  const pin       = kv.PIN;
+  if (!pin) return;
+  const name      = kv.Name     || '';
+  const privilege = parseInt(kv.Pri)       || 0;
+  const card      = kv.Card               || '0';
+  const fpCount   = parseInt(kv.FPCount)  || 0;
+  const faceCount = parseInt(kv.FaceCount)|| 0;
+  // Passwd: empty string means no password — store NULL for clarity
+  const passwd    = kv.Passwd && kv.Passwd.trim() !== '' ? kv.Passwd.trim() : null;
+
+  const empRes    = await pool.query('SELECT id FROM users WHERE device_id=$1 LIMIT 1', [pin]);
+  const employeeId = empRes.rows[0]?.id || null;
+
+  await pool.query(
+    `INSERT INTO zkteco_users
+       (device_sn, pin, name, privilege, card_no, fp_count, face_count, passwd, employee_id, last_sync)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+     ON CONFLICT (device_sn, pin) DO UPDATE SET
+       name        = EXCLUDED.name,
+       privilege   = EXCLUDED.privilege,
+       card_no     = EXCLUDED.card_no,
+       fp_count    = EXCLUDED.fp_count,
+       face_count  = EXCLUDED.face_count,
+       passwd      = EXCLUDED.passwd,
+       employee_id = COALESCE(EXCLUDED.employee_id, zkteco_users.employee_id),
+       last_sync   = NOW()`,
+    [deviceSn, pin, name, privilege, card, fpCount, faceCount, passwd, employeeId]
+  );
+}
+
+// ── Fingerprint storage (with full template data) ─────────────────────────
+
+/**
+ * Save fingerprint record from device OPERLOG.
+ * Stores the actual base64 template for later device restore.
+ * FP row: "FP PIN=X\tFID=Y\tSize=Z\tValid=1\tTMP=<base64>"
+ */
+export async function saveFingerprintRecord(deviceSn, kv) {
+  const pin      = kv['PIN'] ?? kv['FP PIN'];
+  const fingerId = parseInt(kv.FID)  || 0;
+  const size     = parseInt(kv.Size) || 0;
+  const valid    = parseInt(kv.Valid) ?? 1;
+  const tmpData  = kv.TMP || null;
+
+  if (!pin) return;
+
+  // Calculate real binary size if template data available
+  let realSize = size;
+  if (tmpData) {
+    try { realSize = Buffer.byteLength(tmpData, 'base64'); } catch { realSize = size; }
+  }
+
+  await pool.query(
+    `INSERT INTO zkteco_fingerprints (device_sn,pin,finger_id,template_size,valid,template_data,enrolled_at)
+     VALUES ($1,$2,$3,$4,$5,$6,NOW())
+     ON CONFLICT (device_sn,pin,finger_id) DO UPDATE SET
+       template_size = EXCLUDED.template_size,
+       valid         = EXCLUDED.valid,
+       template_data = COALESCE(EXCLUDED.template_data, zkteco_fingerprints.template_data),
+       enrolled_at   = NOW()`,
+    [deviceSn, pin, fingerId, realSize, valid, tmpData]
+  );
+}
+
+// ── Device info ────────────────────────────────────────────────────────────
+
+export function parseDeviceInfo(rawBody) {
+  const info = {};
+  for (const line of rawBody.replace(/\r/g,'').split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('~')) continue;
+    const eq = t.indexOf('=');
+    if (eq < 0) continue;
+    info[t.slice(1, eq).trim()] = t.slice(eq + 1).trim();
+  }
+  return info;
+}
+
+/**
+ * Parse the INFO CSV string from getrequest query param.
+ * Format: "Ver 8.0.4.3, ..., <FPCount>, <FaceCount>, ..."
+ * Index 10 = FPCount
+ */
+export function parseInfoString(infoStr) {
+  if (!infoStr) return {};
+  const parts = infoStr.split(',').map(s => s.trim());
+  return {
+    firmware  : parts[0] || null,
+    fpCount   : parseInt(parts[10]) ?? null,
+    faceCount : parseInt(parts[11]) ?? null,
+  };
+}
+
+export async function saveDeviceInfo(deviceSn, info) {
+  await pool.query(
+    `INSERT INTO zkteco_device_info
+       (device_sn,user_count,fp_count,max_user,max_fp,device_name,firmware_ver,platform,raw_info,updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+     ON CONFLICT (device_sn) DO UPDATE SET
+       user_count   = EXCLUDED.user_count,
+       fp_count     = EXCLUDED.fp_count,
+       max_user     = EXCLUDED.max_user,
+       max_fp       = EXCLUDED.max_fp,
+       device_name  = COALESCE(EXCLUDED.device_name,  zkteco_device_info.device_name),
+       firmware_ver = COALESCE(EXCLUDED.firmware_ver, zkteco_device_info.firmware_ver),
+       platform     = COALESCE(EXCLUDED.platform,     zkteco_device_info.platform),
+       raw_info     = EXCLUDED.raw_info,
+       updated_at   = NOW()`,
+    [
+      deviceSn,
+      parseInt(info.UserCount) || 0,
+      parseInt(info.FPCount)   || 0,
+      parseInt(info.MaxUser)   || 0,
+      parseInt(info.MaxFP)     || 0,
+      info.DeviceName          || null,
+      info['Firmware Version'] || info.FirmwareVersion || null,
+      info.Platform            || null,
+      JSON.stringify(info),
+    ]
+  );
+}
+
+// ── ADMS response builder ──────────────────────────────────────────────────
+
+/**
+ * Build the ADMS registration response.
+ *
+ * CRITICAL (from guide):
+ *   - transTimes = LOWERCASE 't' (TransTimes is silently ignored by firmware)
+ *   - TransFlag  = numeric bitmask '1111000000'
+ *     Bit 1=AttLog, 2=OpLog, 3=AttPhoto, 4=EnrollFP (MUST be 1 for template capture)
+ *   - OPERLOGStamp MUST always be 0
+ *     (echoing the stamp causes device to stop pushing OPERLOG = no FP templates)
+ */
+// ── Java ZktecoService methods (all map to queueCommand) ──────────────────
+
+/**
+ * Java: addUserToDevice(deviceSN, fullName, userIdOnDevice, cardNumber, delays)
+ * Java: updateUserOnDevice(..., fingerprintTemplate, templateSize, appUserId, branchId)
+ * Guide §3: DATA UPDATE USERINFO
+ */
+export async function addOrUpdateUserOnDevice(deviceSn, fullName, pin, cardNumber = '', privilege = 0, expires = 0, endDatetime = '2099-12-31 23:59:00') {
+  const ed = endDatetime.replace('T', ' ').slice(0, 19);
+  return queueCommand(deviceSn, 'DATA UPDATE USERINFO',
+    `PIN=${pin}\tName=${fullName}\tPri=${privilege}\tPasswd=\tCard=${cardNumber||''}\tGrp=1\tTZ=1\tVerify=0\tExpires=${expires}\tStartDatetime=2000-01-01 00:00:00\tEndDatetime=${ed}`
+  );
+}
+
+/**
+ * Java: grantAccessWithFinger(deviceSN, fullName, cardNumber, userIdOnDevice, delays, ...)
+ * Combines upload user + restore fingerprint template in one call.
+ */
+export async function grantAccessWithFinger(deviceSn, fullName, pin, cardNumber, fingerprintTemplate, fingerPrintId, templateSize) {
+  // Step 1: Push user record
+  await addOrUpdateUserOnDevice(deviceSn, fullName, pin, cardNumber);
+  // Step 2: Restore fingerprint template (if available)
+  if (fingerprintTemplate && fingerPrintId != null) {
+    const size = templateSize ?? (Buffer.byteLength(fingerprintTemplate, 'base64'));
+    await queueCommand(deviceSn, 'DATA UPDATE FINGERTMP',
+      `PIN=${pin}\tFID=${fingerPrintId}\tSize=${size}\tValid=1\tTMP=${fingerprintTemplate}`
+    );
+  }
+}
+
+/**
+ * Push a JPEG face photo to a ZKTeco facial-recognition device.
+ * dataUrl: full data-URL  "data:image/jpeg;base64,/9j/..."  OR raw base64 string.
+ * Guide: DATA UPDATE BIOPHOTO  PIN=X\tFileName=face.jpg\tType=9\tSize=N\tContent=<base64>
+ */
+export async function pushBioPhotoToDevice(deviceSn, pin, dataUrl) {
+  const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+  const size   = Buffer.byteLength(base64, 'base64');
+  return queueCommand(deviceSn, 'DATA UPDATE BIOPHOTO',
+    `PIN=${pin}\tFileName=face.jpg\tType=9\tSize=${size}\tContent=${base64}`
+  );
+}
+
+/**
+ * Java: deleteUserFromDevice(deviceSN, userIdOnDevice, delays)
+ * Guide §4: DATA DELETE USERINFO
+ */
+export async function deleteUserFromDevice(deviceSn, pin) {
+  return queueCommand(deviceSn, 'DATA DELETE USERINFO', `PIN=${pin}`);
+}
+
+/**
+ * Java: unlockDoor(deviceSN) + unlockDoorFromMobileApp(deviceSN)
+ * Guide §12: AC_UNLOCK
+ */
+export async function unlockDoor(deviceSn) {
+  return queueCommand(deviceSn, 'AC_UNLOCK');
+}
+
+/**
+ * Java: rebootDevice(deviceSN)
+ * Guide §17 WARNING: wipes all FP templates from RAM
+ */
+export async function rebootDevice(deviceSn) {
+  return queueCommand(deviceSn, 'RESTART');
+}
+
+/**
+ * Java: cancelAlarm(deviceSN)
+ * ZKTeco alarm cancel command (device-specific, may return -3 on some firmware)
+ */
+export async function cancelAlarm(deviceSn) {
+  return queueCommand(deviceSn, 'AC_ALARM_CANCEL');
+}
+
+/**
+ * Java: enrollFingerprint(deviceSN, userPin, userName, fingerId, retry, overwrite)
+ * Guide §5: ENROLL_FP
+ */
+export async function enrollFingerprint(deviceSn, pin, name = '', fingerId = 0, retry = 3, overwrite = 1) {
+  return queueCommand(deviceSn, 'ENROLL_FP',
+    `PIN=${pin}\tName=${name}\tFID=${fingerId}\tRETRY=${retry}\tOVERWRITE=${overwrite}`
+  );
+}
+
+/**
+ * Java: enrollCard(deviceSN, userPin, retry)
+ * Card enrollment command (some firmware supports ENROLL_ID)
+ */
+export async function enrollCard(deviceSn, pin, retry = 3) {
+  // ENROLL_ID is the standard card enrollment command on ZKTeco devices
+  return queueCommand(deviceSn, 'ENROLL_ID', `PIN=${pin}\tRETRY=${retry}`);
+}
+
+/**
+ * Java: checkDevice(deviceSN) — CHECK command (may return -3 on GED firmware)
+ */
+export async function checkDevice(deviceSn) {
+  return queueCommand(deviceSn, 'CHECK');
+}
+
+/**
+ * Java: logDevice(deviceSN) — just returns current queue for the device
+ */
+export async function getDeviceLog(deviceSn) {
+  const { rows } = await pool.query(
+    `SELECT * FROM zkteco_commands WHERE device_sn=$1 ORDER BY created_at DESC LIMIT 50`,
+    [deviceSn]
+  );
+  return rows;
+}
+
+export function buildInitResponse(sn, stamp = null, tzOffset = 345) {
+  // Guide §11: use stored stamp so device sends only NEW records.
+  // When stamp=NULL (after reset): send 0 → device re-sends ALL records from epoch.
+  // Both 0 and "None" trigger full re-push; 0 is more universally supported by firmware.
+  // ZKTeco ADMS: 'None' = send all records from beginning (guide §11)
+  // '0' is ambiguous on some firmware; 'None' is the official "no stamp" value
+  const attlogStamp = stamp != null ? stamp : 'None';
+  const gmtDate     = new Date().toUTCString();
+  return [
+    `GET OPTION FROM: ${sn}`,
+    `ATTLOGStamp=${attlogStamp}`,
+    `OPERLOGStamp=0`,         // ALWAYS 0 per guide — echoing stops OPERLOG push
+    `BIODATAStamp=0`,
+    `ATTPHOTOStamp=0`,
+    `IDCARDStamp=0`,
+    `ERRORLOGStamp=0`,
+    `ErrorDelay=60`,
+    `Delay=30`,
+    `TimeZone=${tzOffset}`,
+    `transTimes=00:00;14:05`, // lowercase 't' — CRITICAL per guide
+    `TransInterval=1`,
+    // TransFlag=1111000000 per guide (bits 1-4 = AttLog, OpLog, AttPhoto, EnrollFP)
+    // 1111000000 ensures ENROLL_FP returns templates; extra bits ignored on most firmware
+    `TransFlag=1111000000`,
+    `Realtime=1`,
+    `Encrypt=None`,  // guide §1 specifies Encrypt=None
+    `ServerVer=2.4.1`,
+    `PushProtVer=2.4.1`,
+    `SupportPing=1`,
+    `PostSelfDefineDataType=PostVerifyData`,
+    `Date=${gmtDate}`,
+    '',
+  ].join('\r\n');
+}

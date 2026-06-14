@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+server/node_modules/
+dist-server/node_modules/
+
+# Build outputs
+dist/
+out/
+dist-server/
+dist-server-pkg/
+dist-installer/
+releases/
+
+# Environment / secrets — NEVER commit these
+.env
+.env.deploy
+server/.env
+
+# Logs
+*.log
+dev-server.log
+dev_run_output.log
+dev_run_session.log
+dev_server.log
+server-restart.log
+server_start.log
+server_start_err.log
+vite.log
+
+# Electron build cache
+.webpack/
+
+# Installer binaries (large, don't commit)
+installer/deps/node/
+installer/deps/*.exe
+installer/assets/*.exe
+
+# Large binary downloads
+server/downloads/*.apk
+server/downloads/*.exe
+server/downloads/*.zip
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json

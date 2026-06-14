@@ -1,0 +1,43 @@
+{
+  "name": "attendance-software",
+  "version": "1.0.0",
+  "description": "हाजिरी व्यवस्थापन प्रणाली - Attendance Management System",
+  "author": "eHajiri",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -n \"client,server\" -c \"blue,green\" \"vite\" \"node --watch server/index.js\"",
+    "dev:client": "vite",
+    "dev:server": "node --watch server/index.js",
+    "dev:electron": "concurrently -n \"vite,server,electron\" -c \"blue,green,yellow\" \"vite\" \"node --watch server/index.js\" \"wait-on http://localhost:4000 && electron .\"",
+    "build": "vite build",
+    "build:prod": "node installer/scripts/obfuscate-build.js",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "preview": "vite preview",
+    "seed": "node server/seed.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^6.22.3",
+    "velopack": "^0.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.4.0",
+    "@electron-forge/maker-squirrel": "^7.4.0",
+    "@electron-forge/maker-zip": "^7.4.0",
+    "@electron-forge/plugin-fuses": "^7.4.0",
+    "@electron/fuses": "^1.8.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.2.1",
+    "electron": "^31.0.0",
+    "javascript-obfuscator": "^5.4.3",
+    "vite": "^5.4.0",
+    "wait-on": "^7.2.0"
+  }
+}

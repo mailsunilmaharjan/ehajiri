@@ -1,0 +1,709 @@
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useLanguage } from '../../context/LanguageContext.jsx';
+import { useSettings } from '../../context/SettingsContext.jsx';
+import { useData }     from '../../context/DataContext.jsx';
+import { useAuth } from '../../context/AuthContext.jsx';
+import api from '../../api/client.js';
+import DataGrid from '../DataGrid/DataGrid.jsx';
+import useDateFormat from '../../hooks/useDateFormat.js';
+import { branchAbbr } from '../../utils/branchUtils.js';
+import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
+import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
+import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
+
+const MONTHS_EN = ['January','February','March','April','May','June',
+                   'July','August','September','October','November','December'];
+
+const DOW_FULL = { Sun:'Sunday', Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday', Thu:'Thursday', Fri:'Friday', Sat:'Saturday' };
+
+function getCurrentFiscalYear(fiscalYears = []) {
+  const today = new Date().toISOString().split('T')[0];
+  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
+      || fiscalYears.find(fy => fy.isDefault)
+      || fiscalYears[fiscalYears.length - 1] || null;
+}
+
+const abbrev = (name) => {
+  if (!name) return '—';
+  const words = name.trim().split(/\s+/);
+  if (words.length > 1) return words.map(w => w[0].toUpperCase()).join('');
+  return name.slice(0, 5);
+};
+
+const isoDate = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+/* ── Action Menu ─────────────────────────────────────────────── */
+const ActionMenu = ({ row, navigate, L, onReason }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const actions = [
+    {
+      label: L('बिदा आवेदन','Apply Leave'),
+      icon: '🏖️',
+      color: '#5b21b6',
+      bg: '#ede9fe',
+      onClick: () => {
+        navigate('/leave/apply', { state: { prefillDate: row.date, prefillStaffId: row.id } });
+        setOpen(false);
+      },
+    },
+    {
+      label: L('कार्यालय भ्रमण','Office Visit'),
+      icon: '🚗',
+      color: '#1e40af',
+      bg: '#dbeafe',
+      onClick: () => {
+        navigate('/office-visit/apply', { state: { prefillDate: row.date, prefillStaffId: row.id } });
+        setOpen(false);
+      },
+    },
+    {
+      label: L('अनुपस्थित कारण','Absent Reason'),
+      icon: '📝',
+      color: '#374151',
+      bg: '#f3f4f6',
+      onClick: () => { onReason(row); setOpen(false); },
+    },
+  ];
+
+  return (
+    <div ref={ref} style={{ position:'relative', display:'inline-block' }}>
+      <button
+        onClick={() => setOpen(p => !p)}
+        style={{
+          display:'inline-flex', alignItems:'center', gap:4,
+          padding:'4px 10px', height:28,
+          background: open ? '#1e40af' : '#1a56db',
+          color:'white', border:'none', borderRadius:6,
+          fontSize:12, fontWeight:600, cursor:'pointer', transition:'background .12s',
+        }}>
+        {L('कार्य','Action')}
+        <svg viewBox="0 0 20 20" fill="white" width="11" height="11"
+          style={{ transform: open?'rotate(180deg)':'none', transition:'transform .15s' }}>
+          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:600,
+          background:'white', border:'1px solid #e5e7eb', borderRadius:10,
+          boxShadow:'0 8px 24px rgba(0,0,0,.13)', overflow:'hidden', minWidth:175,
+        }}>
+          {actions.map(a => (
+            <button key={a.label} onClick={a.onClick}
+              style={{ width:'100%', display:'flex', alignItems:'center', gap:8,
+                padding:'9px 14px', border:'none', textAlign:'left', cursor:'pointer',
+                fontSize:13, background:'white', color:'#374151', transition:'background .1s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = a.bg; e.currentTarget.style.color = a.color; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.color = '#374151'; }}>
+              <span style={{ fontSize:16, flexShrink:0 }}>{a.icon}</span>
+              <span style={{ fontWeight:500 }}>{a.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ── Absent Reason Modal ─────────────────────────────────────── */
+const ReasonModal = ({ row, onClose, onSave, L, fd }) => {
+  const [reason, setReason] = useState('');
+  return (
+    <div className="modal-overlay">
+      <div style={{ background:'white', borderRadius:14, width:'min(480px,96vw)',
+        boxShadow:'0 20px 60px rgba(0,0,0,.18)', overflow:'hidden' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding:'16px 20px', borderBottom:'1px solid #f3f4f6',
+          display:'flex', justifyContent:'space-between', alignItems:'center', background:'#fafafa' }}>
+          <div>
+            <div style={{ fontSize:15, fontWeight:700, color:'#1f2937' }}>
+              📝 {L('अनुपस्थित कारण','Absent Reason')}
+            </div>
+            <div style={{ fontSize:12, color:'#9ca3af', marginTop:2 }}>
+              {row.fullName} — {fd(row.date)}
+            </div>
+          </div>
+          <button onClick={onClose}
+            style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1 }}
+            onMouseEnter={e=>e.currentTarget.style.background='#f3f4f6'}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}>✕</button>
+        </div>
+        <div style={{ padding:'20px' }}>
+          <label style={{ fontSize:13, fontWeight:600, color:'#374151', display:'block', marginBottom:8 }}>
+            {L('कारण लेख्नुस','Enter Reason')}:
+          </label>
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            rows={4}
+            placeholder={L('अनुपस्थितको कारण लेख्नुस...','Write the reason for absence...')}
+            style={{ width:'100%', border:'1.5px solid #d1d5db', borderRadius:8, padding:'10px 12px',
+              fontSize:13, resize:'vertical', outline:'none', boxSizing:'border-box' }}
+            onFocus={e => e.target.style.borderColor='#1a56db'}
+            onBlur={e => e.target.style.borderColor='#d1d5db'}
+            autoFocus
+          />
+        </div>
+        <div style={{ padding:'12px 20px 16px', borderTop:'1px solid #f3f4f6',
+          display:'flex', justifyContent:'flex-end', gap:10 }}>
+          <button onClick={onClose}
+            style={{ padding:'8px 18px', border:'1.5px solid #d1d5db', borderRadius:8,
+              background:'white', color:'#374151', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+            {L('रद्द','Cancel')}
+          </button>
+          <button onClick={() => { onSave(row, reason); onClose(); }}
+            disabled={!reason.trim()}
+            style={{ padding:'8px 20px', border:'none', borderRadius:8, background: reason.trim()?'#1a56db':'#93c5fd',
+              color:'white', fontSize:13, fontWeight:700, cursor: reason.trim()?'pointer':'not-allowed' }}>
+            {L('सेभ गर्नुस','Save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ── Advance Search Modal ─────────────────────────────────────── */
+const EMPTY_FILTERS = { _status:'working', staffId:'', branch:'', dept:'', post:'', grade:'', mode:'', timingType:'', shift:'' };
+
+const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees, shifts }) => {
+  const [local, setLocal] = useState({ ...filters });
+  const set = (k, v) => setLocal(p => ({ ...p, [k]: v }));
+
+  const modes       = (settings.modes      || []).map(m=>({ value:m.name, label:m.name }));
+  const grades      = (settings.grades     || []).map(g=>({ value:g.name, label:g.name }));
+  const timingTypes = (settings.timingTypes|| []).map(t=>({ value:t.name||t, label:t.name||t }));
+  const shiftOpts   = shifts.map(s=>({ value:s.code, label:s.name||s.code }));
+  const activeFlag  = (local._status || 'working') === 'working';
+  const empOpts     = employees.filter(e=>(e.active!==false)===activeFlag).sort((a,b)=>(a.fullName||'').localeCompare(b.fullName||'')).map(e=>({
+    value: String(e.id),
+    label: `${e.fullName||`Staff ${e.id}`}${e.position?` • ${abbrev(e.position)}`:''}${e.deviceId?` [${e.deviceId}]`:''}`,
+  }));
+  const filteredEmps = employees.filter(e=>(e.active!==false)===activeFlag);
+  const branches = [...new Set(filteredEmps.map(e=>e.branch).filter(Boolean))].sort().map(b=>({value:b,label:b}));
+  const depts    = [...new Set(filteredEmps.map(e=>e.department).filter(Boolean))].sort().map(d=>({value:d,label:d}));
+  const posts    = [...new Set(filteredEmps.map(e=>e.position).filter(Boolean))].sort().map(p=>({value:p,label:p}));
+
+  const Lbl  = ({ text }) => <div style={{ fontSize:13,fontWeight:600,color:'#111827',marginBottom:6 }}>{text}</div>;
+  const Field = ({ label, children }) => <div style={{ position:'relative',overflow:'visible' }}><Lbl text={label}/>{children}</div>;
+
+  return (
+    <div className="modal-overlay">
+      <div style={{ background:'white',borderRadius:16,width:'min(960px,96vw)',
+        boxShadow:'0 20px 60px rgba(0,0,0,.18)',overflow:'visible',position:'relative' }}
+        onClick={e=>e.stopPropagation()}>
+        <div style={{ padding:'18px 24px 14px',borderBottom:'1px solid #f3f4f6',
+          display:'flex',justifyContent:'space-between',alignItems:'center' }}>
+          <span style={{ fontSize:17,fontWeight:700,color:'#1e40af' }}>{L('एडभान्स खोज','Advance Search')}</span>
+          <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1,padding:'2px 6px',borderRadius:6 }}
+            onMouseEnter={e=>e.currentTarget.style.background='#f3f4f6'}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}>✕</button>
+        </div>
+        <div style={{ padding:'18px 24px',display:'flex',flexDirection:'column',gap:16 }}>
+          {/* Row 0: Status */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:14, marginBottom:4 }}>
+            <Field label={L('स्थिति','Status')}>
+              <div style={{ display:'flex', gap:0, border:'1px solid #d1d5db', borderRadius:8, overflow:'hidden' }}>
+                {[['working', L('कार्यरत','Working')], ['notworking', L('अवकाश','Not Working')]].map(([v, label]) => (
+                  <button key={v}
+                    onClick={() => { set('_status', v); set('staffId', ''); }}
+                    style={{ flex:1, padding:'8px 12px', border:'none', cursor:'pointer',
+                      fontSize:13, fontWeight:600, transition:'background .15s',
+                      background: (local._status || 'working') === v ? '#1a56db' : 'white',
+                      color: (local._status || 'working') === v ? 'white' : '#374151' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
+          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14 }}>
+            <Field label={L('कर्मचारी','Staff')}><SearchableCheckSelect options={empOpts} value={local.staffId} onChange={v=>set('staffId',v)} allLabel={L('All Staff','All Staff')} /></Field>
+            <Field label={L('शाखा','Branch')}><SearchableCheckSelect options={branches} value={local.branch} onChange={v=>set('branch',v)} allLabel={L('All Branches','All Branches')} /></Field>
+            <Field label={L('विभाग','Department')}><SearchableCheckSelect options={depts} value={local.dept} onChange={v=>set('dept',v)} allLabel={L('All Depts','All Depts')} /></Field>
+          </div>
+          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14 }}>
+            <Field label={L('पद','Post')}><SearchableCheckSelect options={posts} value={local.post} onChange={v=>set('post',v)} allLabel={L('All Posts','All Posts')} /></Field>
+            <Field label={L('ग्रेड','Grade')}><SearchableCheckSelect options={grades} value={local.grade} onChange={v=>set('grade',v)} allLabel={L('All Grades','All Grades')} /></Field>
+            <Field label={L('नियुक्ति','Mode')}><SearchableCheckSelect options={modes} value={local.mode} onChange={v=>set('mode',v)} allLabel={L('All Modes','All Modes')} /></Field>
+          </div>
+          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14 }}>
+            <Field label={L('टाइमिङ','Timing Type')}><SearchableCheckSelect options={timingTypes} value={local.timingType} onChange={v=>set('timingType',v)} allLabel={L('All Types','All Types')} /></Field>
+            <Field label={L('सिफ्ट','Shift')}><SearchableCheckSelect options={shiftOpts} value={local.shift} onChange={v=>set('shift',v)} allLabel={L('All Shifts','All Shifts')} /></Field>
+            <div />
+          </div>
+        </div>
+        <div style={{ padding:'12px 24px 18px',borderTop:'1px solid #f3f4f6',display:'flex',justifyContent:'flex-end',gap:10 }}>
+          <button onClick={() => { onApply({ ...EMPTY_FILTERS }); onClose(); }}
+            style={{ padding:'8px 20px',border:'1.5px solid #d1d5db',borderRadius:8,background:'white',color:'#374151',fontSize:14,fontWeight:600,cursor:'pointer' }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor='#9ca3af';e.currentTarget.style.background='#f9fafb';}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor='#d1d5db';e.currentTarget.style.background='white';}}>
+            {L('रिसेट','Reset')}
+          </button>
+          <button onClick={() => { onApply(local); onClose(); }}
+            style={{ padding:'8px 24px',border:'none',borderRadius:8,background:'#1a56db',color:'white',fontSize:14,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
+            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
+            {L('खोज्नुस','Search')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   Half Monthly Absent Report
+═══════════════════════════════════════════════════════════════ */
+const HalfAbsentReport = () => {
+  const [searchParams] = useSearchParams();
+  const navigate       = useNavigate();
+  const { language }   = useLanguage();
+  const { settings }   = useSettings();
+  const { filteredEmployees: employees, shifts } = useData();
+  const fd             = useDateFormat();
+  const L = (np, en)   => language === 'np' ? np : en;
+
+  const now     = new Date();
+  const useNP   = settings.defaultCalendar === 'np';
+  const todayBS = adToBS(now);
+  const urlHalf = parseInt(searchParams.get('half'));
+
+  const { isEmployee, currentUser } = useAuth();
+  const myEmpId = isEmployee ? String(currentUser?.id || '') : '';
+
+  const [year,        setYear]        = useState(useNP ? (todayBS?.year  || now.getFullYear())  : now.getFullYear());
+  const [month,       setMonth]       = useState(useNP ? (todayBS?.month || now.getMonth() + 1) : now.getMonth() + 1);
+  const [half,        setHalf]        = useState(urlHalf || (now.getDate() <= 15 ? 1 : 2));
+  const [data,        setData]        = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState(null);
+  const [showSearch,  setShowSearch]  = useState(false);
+  const [filters,     setFilters]     = useState({ ...EMPTY_FILTERS, staffId: myEmpId });
+  const [staffStatus, setStaffStatus] = useState('working'); // 'working' | 'notworking'
+  const [reasonRow,   setReasonRow]   = useState(null);
+  const [savedReasons, setSavedReasons] = useState({});  // key: `${empId}-${date}`
+
+  const currentFY = getCurrentFiscalYear(settings.fiscalYears || []);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      let apiUrl;
+      if (useNP) {
+        const s = half===1?1:16, e = half===1?15:getBSDays(year,month);
+        const sAD = bsToAD(year,month,s), eAD = bsToAD(year,month,e);
+        if (sAD && eAD) apiUrl = `/attendance/present-absent?startDate=${isoDate(sAD)}&endDate=${isoDate(eAD)}`;
+      }
+      if (!apiUrl) apiUrl = `/attendance/present-absent?year=${year}&month=${month}&half=${half}`;
+      apiUrl += `&active=${staffStatus === 'notworking' ? 'false' : 'true'}`;
+      setData(await api.get(apiUrl));
+    } catch(err) { setError(err.message); }
+    finally { setLoading(false); }
+  }, [year, month, half, useNP, staffStatus]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const period = data?.period;
+
+  /* Employee lookup map for phone/email */
+  const empMap = useMemo(() => {
+    const m = {};
+    employees.forEach(e => { m[String(e.id)] = e; });
+    return m;
+  }, [employees]);
+
+  /* Branch short-name lookup from settings (authoritative source) */
+  const branchShortMap = useMemo(() => {
+    const m = {};
+    (settings.branches || []).forEach(b => {
+      if (b.name && b.short_name) m[b.name.toLowerCase().trim()] = b.short_name;
+    });
+    return m;
+  }, [settings.branches]);
+
+  /* Build flat absent records from present-absent day-matrix */
+  const allRecords = useMemo(() => {
+    if (!data) return [];
+    const startBSDay = half === 1 ? 1 : 16;
+    const records = [];
+    (data.dates || []).forEach((d, idx) => {
+      if (d.isWeekend || d.isHoliday) return;  // skip non-working days
+      (data.employees || []).forEach(emp => {
+        if (emp.days[d.date] !== 'AB') return;
+        const detail = empMap[String(emp.id)] || {};
+        records.push({
+          _key: `${emp.id}-${d.date}`,
+          id: emp.id, empCode: emp.empCode,
+          fullName: emp.fullName,
+          postShort: emp.postShort, deptShort: emp.deptShort,
+          branchShort: branchShortMap[(emp.branch||'').toLowerCase().trim()] || emp.branchShort || abbrev(emp.branch),
+          position: emp.position, department: emp.department, branch: emp.branch,
+          grade: emp.grade, mode: emp.mode, timingType: emp.timingType, shift: emp.shift,
+          phone: detail.phone || '',
+          email: detail.email || '',
+          date: d.date,
+          bsDay: startBSDay + idx,
+          dayKey: d.dayKey,
+        });
+      });
+    });
+    return records;
+  }, [data, half, empMap]);
+
+  /* Client-side filtering */
+  const records = allRecords.filter(r => {
+    if (filters.staffId  && String(r.id) !== filters.staffId)       return false;
+    if (filters.branch   && r.branch     !== filters.branch)         return false;
+    if (filters.dept     && r.department !== filters.dept)           return false;
+    if (filters.post     && r.position   !== filters.post)           return false;
+    if (filters.grade    && r.grade      !== filters.grade)          return false;
+    if (filters.mode     && r.mode       !== filters.mode)           return false;
+    if (filters.timingType && r.timingType !== filters.timingType)   return false;
+    if (filters.shift    && r.shift      !== filters.shift)          return false;
+    return true;
+  });
+
+  const activeFilterCount = Object.entries(filters).filter(([k,v]) => k !== '_status' && Boolean(v)).length;
+  const uniqueAbsentStaff = new Set(records.map(r => r.id)).size;
+
+  const periodLabel = () => {
+    const mn     = useNP ? (BS_MONTHS_NP[month-1]||'') : MONTHS_EN[month-1];
+    const yr     = settings.nepaliDigits ? toNepaliDigits(year) : String(year);
+    const calStr = useNP ? ' BS' : '';
+    const hStr   = half===1 ? L('पहिलो अर्ध (१–१५)','1st Half (1–15)') : L('दोस्रो अर्ध (१६–अन्त)','2nd Half (16–End)');
+    return `${mn} ${yr}${calStr} · ${hStr}`;
+  };
+
+  /* ── DataGrid columns ── */
+  const columns = [
+    {
+      field:'fullName', header:L('नाम','Name'), sortable:true,
+      render: v => <span style={{ fontWeight:700, color:'#1f2937', fontSize:14 }}>{v}</span>,
+    },
+    {
+      field:'postShort', header:L('पद','Post'),
+      render: (v, row) => <span style={{ fontSize:14,color:'#0369a1',fontWeight:700 }}>{row.position || v || '—'}</span>,
+    },
+    {
+      field:'deptShort', header:L('विभाग','Dept.'),
+      render: (v, row) => <span style={{ fontSize:14,color:'#059669',fontWeight:700 }}>{row.department || v || '—'}</span>,
+    },
+    {
+      field:'branchShort', header:L('शाखा','Branch'),
+      render: (v, row) => <span style={{ fontSize:14,color:'#7c3aed',fontWeight:700 }}>{branchAbbr(row.branch, settings) || v || '—'}</span>,
+    },
+    {
+      field:'date', header:L('मिति','Date'), sortable:true,
+      render: v => <span style={{ fontWeight:600,color:'#374151',fontSize:14,whiteSpace:'nowrap' }}>{fd(v)}</span>,
+    },
+    {
+      field:'dayKey', header:L('दिन','Day'),
+      render: v => (
+        <span style={{ fontSize:14,color:'#6b7280',fontWeight:600 }}>
+          {(DOW_FULL[v] || v).slice(0,3)}
+        </span>
+      ),
+    },
+    {
+      field:'phone', header:L('मोबाइल','Mobile'),
+      render: v => v
+        ? <a href={`tel:${v}`} style={{ fontSize:12,color:'#0369a1',fontFamily:'monospace',
+            textDecoration:'none',fontWeight:600 }}
+            onMouseEnter={e=>e.currentTarget.style.textDecoration='underline'}
+            onMouseLeave={e=>e.currentTarget.style.textDecoration='none'}>
+            📱 {v}
+          </a>
+        : <span style={{ color:'#d1d5db' }}>—</span>,
+    },
+    {
+      field:'email', header:L('इमेल','Email'),
+      render: v => v
+        ? <a href={`mailto:${v}`} style={{ fontSize:12,color:'#0369a1',
+            textDecoration:'none',fontWeight:500 }}
+            onMouseEnter={e=>e.currentTarget.style.textDecoration='underline'}
+            onMouseLeave={e=>e.currentTarget.style.textDecoration='none'}>
+            ✉️ {v}
+          </a>
+        : <span style={{ color:'#d1d5db' }}>—</span>,
+    },
+    {
+      field:'_key', header:L('कार्य','Action'), sortable:false,
+      render: (_, row) => {
+        const key = `${row.id}-${row.date}`;
+        const savedReason = savedReasons[key];
+        return (
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <ActionMenu row={row} navigate={navigate} L={L} onReason={setReasonRow} />
+            {savedReason && (
+              <span style={{ fontSize:10,color:'#6b7280',fontStyle:'italic',maxWidth:120,
+                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}
+                title={savedReason}>
+                💬 {savedReason}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+
+  const rptTitle = 'Half Monthly Absent Report';
+  const rptSub = () => periodLabel();
+
+  const handlePrint = () => {
+    if (!records.length) return;
+
+    // A4 Portrait — fit all columns with tight padding/font
+    const TH = 'padding:5px 6px;border:1px solid #dedede;background:#efefef;font-size:10px;font-weight:700;text-align:center;white-space:nowrap;';
+    const TD = (align='left',color='#374151',fw=400) =>
+      `padding:4px 5px;border:1px solid #e5e7eb;font-size:10px;text-align:${align};color:${color};font-weight:${fw};`;
+
+    const dataRows = records.map((r,i) => {
+      const bg = i%2===0?'white':'#f9fafb';
+      return `<tr style="background:${bg}">
+        <td style="${TD('center','#6b7280',600)}">${i+1}</td>
+        <td style="${TD('left','#1f2937',700)}">${r.fullName}</td>
+        <td style="${TD('center','#0369a1',700)}">${r.postShort||'—'}</td>
+        <td style="${TD('center','#059669',700)}">${r.deptShort||'—'}</td>
+        <td style="${TD('center','#7c3aed',700)}">${r.branchShort||'—'}</td>
+        <td style="${TD('center','#374151',600)}">${fd(r.date)||r.date}</td>
+        <td style="${TD('center','#6b7280',500)}">${(DOW_FULL[r.dayKey]||r.dayKey).slice(0,3)}</td>
+        <td style="${TD('left','#0369a1')}">${r.phone||'—'}</td>
+        <td style="${TD('left','#6b7280')}">${r.email||'—'}</td>
+      </tr>`;
+    }).join('');
+
+    const contentHtml = `
+      <div style="margin-bottom:6px;font-size:10px;color:#6b7280;">
+        <strong style="color:#374151">${records.length}</strong> absent occurrences &nbsp;·&nbsp;
+        <strong style="color:#374151">${new Set(records.map(r=>r.id)).size}</strong> staff
+        &nbsp;·&nbsp; ${rptSub()}
+      </div>
+      <table style="border-collapse:collapse;width:100%;font-size:10px;table-layout:fixed">
+        <colgroup>
+          <col style="width:30px"><col style="width:22%"><col style="width:8%">
+          <col style="width:10%"><col style="width:8%"><col style="width:14%">
+          <col style="width:7%"><col style="width:13%"><col style="width:18%">
+        </colgroup>
+        <thead><tr>
+          <th style="${TH}">SN</th>
+          <th style="${TH};text-align:left">Name</th>
+          <th style="${TH}">Post</th>
+          <th style="${TH}">Dept.</th>
+          <th style="${TH}">Branch</th>
+          <th style="${TH}">Date</th>
+          <th style="${TH}">Day</th>
+          <th style="${TH};text-align:left">Mobile</th>
+          <th style="${TH};text-align:left">Email</th>
+        </tr></thead>
+        <tbody>${dataRows}</tbody>
+      </table>
+      <div style="margin-top:6px;font-size:9px;color:#9ca3af;">
+        Note: Action column (Apply Leave / Office Visit / Reason) is not shown in print view.
+      </div>`;
+
+    openPrintWindow(buildPrintDoc({
+      settings, language,
+      reportTitle: rptTitle,
+      reportSub: rptSub(),
+      contentHtml,
+      isLandscape: false,
+      extraStyle: `
+        table { font-size:10px !important; }
+        th, td { padding:4px 5px !important; font-size:10px !important; }
+        .print-header .co-name { font-size:13px; }
+      `,
+    }), false);
+  };
+
+  const exportCSV = () => {
+    if (!records.length) return;
+    const headers = ['Name','Post','Dept.','Branch','Date','Day','Mobile','Email','Reason'];
+    const dataRows = records.map(r => {
+      const reason = savedReasons[`${r.id}-${r.date}`] || '';
+      return [r.fullName,r.postShort,r.deptShort,r.branchShort,r.date,
+        DOW_FULL[r.dayKey]||r.dayKey, r.phone||'', r.email||'', reason]
+        .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
+    }).join('\n');
+    downloadCSV(getExcelHeaderRows(settings, language, rptTitle, rptSub()) + headers.join(',') + '\n' + dataRows,
+      `HalfAbsent_${period?.startDate||''}.csv`);
+  };
+
+  return (
+    <div className="page-container">
+
+      {/* ── Page Header ── */}
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">
+            📅 {L('अर्ध मासिक अनुपस्थित रिपोर्ट','Half Monthly Absent Report')}
+          </h1>
+          <p className="page-subtitle" style={{ margin:0 }}>
+            {currentFY && (
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+                padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
+                {currentFY.name}
+              </span>
+            )}
+            {periodLabel()}
+            {period && (
+              <span style={{ marginLeft:8,fontSize:11,color:'#9ca3af' }}>
+                {fd(period.startDate)} → {fd(period.endDate)}
+              </span>
+            )}
+          </p>
+        </div>
+        <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
+          <button onClick={handlePrint}
+            style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
+              borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
+            🖨️ Print
+          </button>
+          <button onClick={exportCSV}
+            style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
+            📥 Export
+          </button>
+          <ViewHalfMonthlyBtn year={year} month={month} half={half} useNP={useNP}
+            currentPath="/attendance/reports/half-monthly/absent" />
+        </div>
+      </div>
+
+      {/* ── Period selector ── */}
+      <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap' }}>
+        <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
+          value={year} onChange={e=>setYear(+e.target.value)}>
+          {useNP
+            ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
+                <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>))
+            : [now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
+                <option key={y} value={y}>{y}</option>))
+          }
+        </select>
+        <select className="form-control" style={{ width:useNP?120:140,height:36,fontSize:13 }}
+          value={month} onChange={e=>setMonth(+e.target.value)}>
+          {useNP
+            ? BS_MONTHS_NP.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
+            : MONTHS_EN.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
+          }
+        </select>
+        <div style={{ display:'flex',gap:0,border:'1px solid #d1d5db',borderRadius:8,overflow:'hidden' }}>
+          {[1,2].map(h=>(
+            <button key={h} onClick={()=>setHalf(h)}
+              style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
+                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
+              {h===1?L('पहिलो अर्ध','1st Half'):L('दोस्रो अर्ध','2nd Half')}
+            </button>
+          ))}
+        </div>
+
+        {/* Status badge */}
+        <span style={{ background: staffStatus==='working'?'#d1fae5':'#fee2e2',
+          color: staffStatus==='working'?'#065f46':'#991b1b',
+          border: `1px solid ${staffStatus==='working'?'#6ee7b7':'#fca5a5'}`,
+          borderRadius:20, padding:'4px 12px', fontSize:12, fontWeight:700 }}>
+          {staffStatus==='working' ? L('कार्यरत','Working') : L('अवकाश','Not Working')}
+        </span>
+
+        {/* Advance Search */}
+        <button onClick={() => setShowSearch(true)}
+          style={{ display:'inline-flex',alignItems:'center',gap:6,padding:'0 14px',height:36,
+            background:activeFilterCount>0?'#eff6ff':'white',
+            border:`1.5px solid ${activeFilterCount>0?'#1a56db':'#d1d5db'}`,
+            color:activeFilterCount>0?'#1e40af':'#374151',
+            borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+            <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
+          </svg>
+          {L('एडभान्स खोज','Advance Search')}
+          {activeFilterCount>0 && (
+            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
+              width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
+              fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
+          )}
+        </button>
+        <button className="btn btn-outline btn-sm" style={{ height:36 }} onClick={load} disabled={loading}>🔃</button>
+
+        {/* Summary badges */}
+        {data && !loading && (
+          <div style={{ display:'flex',gap:8,marginLeft:'auto',alignItems:'center' }}>
+            <span style={{ background:'#fee2e2',color:'#991b1b',borderRadius:20,
+              padding:'4px 12px',fontSize:12,fontWeight:700,border:'1px solid #fca5a5' }}>
+              {records.length} {L('कुल अनुपस्थित','Total Absences')}
+            </span>
+            <span style={{ background:'#fff5f5',color:'#dc2626',borderRadius:20,
+              padding:'4px 12px',fontSize:12,fontWeight:600,border:'1px solid #fca5a5' }}>
+              {uniqueAbsentStaff} {L('कर्मचारी','Staff')}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ background:'#fee2e2',border:'1px solid #fca5a5',borderRadius:8,
+          padding:'10px 16px',marginBottom:12,color:'#991b1b',fontWeight:600 }}>❌ {error}</div>
+      )}
+
+      {!loading && data && records.length === 0 && (
+        <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af',
+          background:'#f0fdf4',borderRadius:12,border:'1px solid #86efac' }}>
+          <div style={{ fontSize:40,marginBottom:12 }}>✅</div>
+          <div style={{ fontWeight:700,fontSize:16,color:'#065f46',marginBottom:6 }}>
+            {L('कोही अनुपस्थित छैन!','No Absences!')}
+          </div>
+          <div style={{ fontSize:13,color:'#6b7280' }}>
+            {L('यस अवधिमा सबै कर्मचारी उपस्थित थिए।','All staff were present during this period.')}
+          </div>
+        </div>
+      )}
+
+      {/* ── DataGrid ── */}
+      <DataGrid
+        columns={columns}
+        data={records}
+        defaultPageSize={50}
+        showSearch={true}
+        searchPlaceholder={L('नाम, मिति खोज्नुस...','Search name, date...')}
+        compact={false}
+        loading={loading}
+        showCheckbox={false}
+        autoWidth={true}
+        showFilterButton={false}
+      />
+
+      {/* ── Modals ── */}
+      {showSearch && (
+        <AdvanceSearchModal filters={filters} onApply={f=>{ setFilters({ ...f, staffId: myEmpId || f.staffId }); setStaffStatus(f._status || 'working'); }}
+          onClose={()=>setShowSearch(false)} L={L} settings={settings}
+          employees={employees} shifts={shifts} />
+      )}
+      {reasonRow && (
+        <ReasonModal
+          row={reasonRow}
+          onClose={() => setReasonRow(null)}
+          onSave={(row, reason) => {
+            setSavedReasons(p => ({ ...p, [`${row.id}-${row.date}`]: reason }));
+          }}
+          L={L} fd={fd}
+        />
+      )}
+    </div>
+  );
+};
+
+export default HalfAbsentReport;

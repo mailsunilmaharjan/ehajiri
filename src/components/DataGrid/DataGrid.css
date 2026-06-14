@@ -1,0 +1,320 @@
+/* ===== DataGrid ===== */
+.dg-container {
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.07);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Toolbar */
+.dg-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #f9fafb;
+  border-bottom: 1px solid #dedede;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 52px;
+}
+.dg-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+}
+.dg-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* Search box */
+.dg-searchbox {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 6px;
+  padding: 0 10px;
+  height: 32px;
+  gap: 6px;
+  min-width: 200px;
+  transition: border-color .15s;
+}
+.dg-searchbox:focus-within { border-color: #1a56db; box-shadow: 0 0 0 2px rgba(26,86,219,.1); }
+.dg-search-icon { width: 14px; height: 14px; color: #9ca3af; flex-shrink: 0; }
+.dg-search-input {
+  border: none; outline: none; font-size: 13px;
+  width: 100%; background: transparent; color: #111827;
+}
+.dg-search-input::placeholder { color: #9ca3af; }
+.dg-search-clear {
+  background: none; border: none; color: #9ca3af; font-size: 12px;
+  cursor: pointer; padding: 0; line-height: 1;
+}
+.dg-search-clear:hover { color: #374151; }
+
+/* Filter button */
+.dg-filter-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; height: 32px;
+  background: #fff; border: 1px solid #dedede; border-radius: 6px;
+  font-size: 13px; color: #374151; cursor: pointer;
+  transition: all .15s;
+}
+.dg-filter-btn:hover { background: #f3f4f6; }
+.dg-filter-btn.active { background: #eff6ff; border-color: #1a56db; color: #1a56db; }
+
+/* Selection bar */
+.dg-selection-bar {
+  background: #eff6ff;
+  border-bottom: 1px solid #dedede;
+  padding: 7px 14px;
+  display: flex; align-items: center; gap: 12px;
+  font-size: 13px; color: #1e40af;
+}
+.dg-selection-bar button {
+  background: none; border: 1px solid #1a56db; border-radius: 4px;
+  color: #1a56db; font-size: 12px; padding: 2px 8px; cursor: pointer;
+}
+.dg-selection-bar button:hover { background: #dbeafe; }
+.dg-delete-all-btn {
+  background: #fef2f2 !important;
+  border: 1px solid #fca5a5 !important;
+  color: #dc2626 !important;
+  border-radius: 5px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 3px 10px !important;
+  cursor: pointer !important;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: background .12s;
+}
+.dg-delete-all-btn:hover { background: #fee2e2 !important; }
+
+/* Scroll wrapper */
+.dg-scroll-wrapper {
+  overflow-x: auto;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  max-height: 520px;
+}
+
+/* Table */
+.dg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  color: #111827;
+  min-width: 600px;
+}
+/* auto-width: columns shrink/grow to content */
+.dg-table.auto-width { table-layout: auto; min-width: unset; }
+.dg-table.auto-width .dg-th,
+.dg-table.auto-width .dg-td { white-space: nowrap; }
+
+.dg-table.compact .dg-th { padding: 5px 9px; font-size: 14px; }
+.dg-table.compact .dg-td { padding: 4px 9px; font-size: 14px; }
+.dg-table.compact .dg-action-btn { width: 24px; height: 22px; font-size: 12px; }
+.dg-table.compact td.dg-checkbox-col,
+.dg-table.compact td.dg-sn-col { font-size: 14px; }
+
+/* ── Header row ── */
+.dg-header-row { position: sticky; top: 0; z-index: 2; }
+.dg-th {
+  background: #efefef;
+  border-bottom: 2px solid #dedede;
+  border-right: 1px solid #dedede;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #374151;
+  white-space: nowrap;
+  user-select: none;
+  position: relative;
+}
+.dg-th:last-child { border-right: none; }
+.dg-th.sortable { cursor: pointer; }
+.dg-th.sortable:hover { background: #e4e4e4; }
+.dg-th.sort-asc, .dg-th.sort-desc { background: #e0e7f0; color: #1a56db; }
+.dg-th-inner { display: flex; align-items: center; gap: 4px; justify-content: inherit; }
+.dg-sort-icon { font-size: 10px; opacity: .7; }
+.dg-sort-both { opacity: .4; }
+
+/* ── Checkbox column — narrow, lighter shade ── */
+.dg-checkbox-col { width: 20px; min-width: 20px; max-width: 20px; text-align: center; padding: 4px 2px !important; }
+
+/* ── SN column — compact width (force even in auto-layout tables) ── */
+.dg-sn-col { text-align: center; width: 32px !important; min-width: 28px !important; max-width: 36px !important; padding: 4px 2px !important; }
+
+/* SN and checkbox cells in body rows — light #efefef background */
+td.dg-checkbox-col,
+td.dg-sn-col {
+  background: #efefef !important;
+  border-right: 1px solid #dedede;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+/* Header checkbox + SN cells also #efefef */
+th.dg-checkbox-col,
+th.dg-sn-col {
+  background: #efefef !important;
+}
+
+.dg-checkbox { width: 14px; height: 14px; accent-color: #1a56db; cursor: pointer; }
+
+/* Filter row */
+.dg-filter-row .dg-filter-cell {
+  background: #ebebeb;
+  border-bottom: 1px solid #dedede;
+  padding: 5px 8px;
+}
+.dg-filter-input {
+  width: 100%; padding: 4px 7px;
+  border: 1px solid #dedede; border-radius: 4px;
+  font-size: 12px; color: #374151; background: #fff;
+}
+.dg-filter-input:focus { outline: none; border-color: #1a56db; }
+
+/* ── Body rows — white background, #dedede borders ── */
+.dg-td {
+  padding: 5px 10px;
+  border-bottom: 1px solid #dedede;
+  border-right: 1px solid #dedede;
+  vertical-align: middle;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.dg-td:last-child { border-right: none; }
+.dg-null { color: #d1d5db; }
+
+/* First data column */
+.dg-first-col {
+  color: #1f2937;
+  font-weight: 500;
+  background: #ffffff;
+}
+
+/* Row states */
+.dg-row { transition: background .1s; }
+/* No striped alternating — all rows white as requested */
+.dg-table.striped .dg-row:nth-child(even) .dg-td { background: #ffffff; }
+.dg-row:hover .dg-td { background: #f5f5f5 !important; }
+.dg-row.selected .dg-td { background: #dbeafe !important; }
+.dg-row.selected td.dg-checkbox-col,
+.dg-row.selected td.dg-sn-col { background: #c7d9f5 !important; }
+.dg-row:hover td.dg-checkbox-col,
+.dg-row:hover td.dg-sn-col { background: #e2e2e2 !important; }
+.dg-row.clickable { cursor: pointer; }
+.dg-row.clickable:hover .dg-first-col { color: #1a56db; }
+
+/* Keyboard-focused row (↑ ↓ navigation) — very subtle warm tint */
+.dg-row.kb-focus .dg-td { background: #fffef5 !important; outline: none; }
+.dg-row.kb-focus td.dg-checkbox-col,
+.dg-row.kb-focus td.dg-sn-col { background: #fefdf0 !important; }
+.dg-row.kb-focus .dg-first-col { color: #b45309 !important; }
+/* left accent bar on focused row */
+.dg-row.kb-focus .dg-td:first-child { box-shadow: inset 3px 0 0 #fbbf24; }
+
+/* Empty */
+.dg-empty { padding: 48px 20px; }
+.dg-empty-content { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.dg-empty-icon { font-size: 40px; opacity: .3; }
+.dg-empty-text { color: #9ca3af; font-size: 13px; }
+
+/* Footer */
+.dg-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #f9fafb;
+  border-top: 1px solid #dedede;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dg-info { font-size: 12px; color: #6b7280; white-space: nowrap; }
+.dg-paging { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dg-pagesize { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7280; }
+.dg-pagesize select {
+  padding: 3px 6px; border: 1px solid #dedede; border-radius: 4px;
+  font-size: 12px; background: #fff; cursor: pointer;
+}
+.dg-page-btns { display: flex; align-items: center; gap: 2px; }
+.pg-btn {
+  min-width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #fff; border: 1px solid #dedede; border-radius: 4px;
+  font-size: 12px; color: #374151; cursor: pointer;
+  transition: all .1s; padding: 0 5px;
+}
+.pg-btn:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; }
+.pg-btn.active { background: #1a56db; border-color: #1a56db; color: #fff; font-weight: 600; }
+.pg-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pg-ellipsis { color: #9ca3af; font-size: 13px; padding: 0 3px; }
+
+/* Action buttons in cells */
+.dg-actions { display: flex; align-items: center; gap: 4px; }
+.dg-action-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 26px;
+  border-radius: 4px; border: 1px solid transparent;
+  font-size: 13px; cursor: pointer; transition: all .1s;
+}
+.dg-action-btn.edit   { background: #eff6ff; color: #1a56db; border-color: #bfdbfe; }
+.dg-action-btn.edit:hover   { background: #dbeafe; }
+.dg-action-btn.delete { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.dg-action-btn.delete:hover { background: #fee2e2; }
+.dg-action-btn.view   { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+.dg-action-btn.view:hover   { background: #dcfce7; }
+.dg-action-btn.approve { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+.dg-action-btn.approve:hover { background: #dcfce7; }
+.dg-action-btn.reject  { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.dg-action-btn.reject:hover  { background: #fee2e2; }
+
+/* ── Right-click context menu ── */
+.dg-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.08);
+  padding: 4px 0;
+  min-width: 160px;
+  animation: ctxFadeIn .12s ease;
+}
+@keyframes ctxFadeIn {
+  from { opacity: 0; transform: scale(.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1)  translateY(0); }
+}
+.dg-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  transition: background .1s;
+}
+.dg-ctx-item:hover { background: #f3f4f6; color: #111827; }
+.dg-ctx-item.danger { color: #dc2626; }
+.dg-ctx-item.danger:hover { background: #fef2f2; }
+.dg-ctx-icon { font-size: 14px; width: 18px; text-align: center; }
+.dg-ctx-divider { height: 1px; background: #e5e7eb; margin: 4px 0; }
