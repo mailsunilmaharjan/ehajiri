@@ -1,9 +1,8 @@
 // electron/main.cjs  —  Electron main process for eHajiri desktop app
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, utilityProcess } = require('electron');
 const { VelopackApp, UpdateManager } = require('velopack');
-const { spawn } = require('child_process');
 const path  = require('path');
 const http  = require('http');
 
@@ -27,34 +26,26 @@ let serverProcess = null;
 let tray          = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Spawn the bundled Express server (server/index.js)
+// Spawn the bundled Express server using Electron's utilityProcess
+// (no external node.exe needed — uses Electron's built-in Node.js runtime)
 // ─────────────────────────────────────────────────────────────────────────────
 function startServer() {
   const serverScript = isDev
     ? path.join(__dirname, '..', 'server', 'index.js')
     : path.join(process.resourcesPath, 'server', 'index.js');
 
-  const nodeBin = isDev
-    ? process.execPath   // use same node in dev
-    : path.join(process.resourcesPath, 'node', 'node.exe');  // bundled node
-
-  serverProcess = spawn(nodeBin, ['--experimental-vm-modules', serverScript], {
+  serverProcess = utilityProcess.fork(serverScript, [], {
     env: {
       ...process.env,
-      PORT:      String(SERVER_PORT),
-      NODE_ENV:  isDev ? 'development' : 'production',
-      // DB credentials come from server/.env placed in resourcesPath
-      ELECTRON:  'true',
+      PORT:     String(SERVER_PORT),
+      NODE_ENV: isDev ? 'development' : 'production',
+      ELECTRON: 'true',
     },
-    stdio: isDev ? 'inherit' : 'pipe',
+    stdio: 'pipe',
   });
 
-  if (!isDev && serverProcess.stdout) {
-    serverProcess.stdout.on('data', (d) => console.log('[server]', d.toString().trim()));
-  }
-  if (!isDev && serverProcess.stderr) {
-    serverProcess.stderr.on('data', (d) => console.error('[server]', d.toString().trim()));
-  }
+  serverProcess.stdout?.on('data', (d) => console.log('[server]', d.toString().trim()));
+  serverProcess.stderr?.on('data', (d) => console.error('[server]', d.toString().trim()));
 
   serverProcess.on('exit', (code) => {
     console.log('[server] exited with code', code);

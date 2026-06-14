@@ -1,6 +1,6 @@
 {
   "name": "attendance-software",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "हाजिरी व्यवस्थापन प्रणाली - Attendance Management System",
   "author": "eHajiri",
   "private": true,
@@ -24,7 +24,7 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^6.22.3",
-    "velopack": "^0.0.1",
+    "velopack": "^1.2.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

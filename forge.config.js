@@ -26,11 +26,34 @@ const config = {
 
     // Ignore files we don't need in the packaged app
     ignore: [
-      /^\/src$/,
+      // Source / dev files
+      /^\/src/,
       /^\/\.github/,
       /^\/installer/,
       /^\/\.git/,
+      /^\/\.vscode/,
+      /^\/\.claude/,
+
+      // Credentials & secrets — NEVER ship these
+      /^\/\.env/,
+      /^\/\.env\.deploy/,
+
+      // Build outputs that go via extraResource instead
+      /^\/dist/,
+      /^\/dist-server/,
+      /^\/server/,
+
+      // Release artifacts — large and not needed at runtime
+      /^\/releases/,
+      /^\/out/,
+
+      // Log and temp files
+      /^\/.*\.log$/,
+      /^\/dev_/,
+
+      // Node module caches
       /node_modules\/\.cache/,
+      /node_modules\/\.vite/,
     ],
   },
 
