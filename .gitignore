@@ -46,3 +46,6 @@ Thumbs.db
 
 # Editor
 .vscode/settings.json
+
+# GitHub Actions (add manually via GitHub UI or token with workflow scope)
+.github/workflows/
