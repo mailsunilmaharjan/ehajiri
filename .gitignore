@@ -10,6 +10,7 @@ dist-server/
 dist-server-pkg/
 dist-installer/
 releases/
+.releases/
 
 # .NET build outputs (standalone-bridge)
 standalone-bridge/bin/
