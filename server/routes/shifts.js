@@ -51,6 +51,13 @@ router.post('/', async (req, res) => {
        s.exceptionalStartTime||null,s.exceptionalEndTime||null,s.exceptionalWorkHours||0,
        s.winterPolicyEnabled||false,s.winterPolicy?JSON.stringify(s.winterPolicy):null]
     );
+    // Applying "Make Default" assigns this shift to every staff member
+    if (s.makeDefault) {
+      await client.query(
+        `UPDATE users SET shift=$1 WHERE is_system IS NOT TRUE AND role NOT IN ('superAdmin')`,
+        [rows[0].code]
+      );
+    }
     await client.query('COMMIT');
     res.status(201).json(toRow(rows[0]));
   } catch (e) {
@@ -80,6 +87,13 @@ router.put('/:id', async (req, res) => {
        s.exceptionalStartTime||null,s.exceptionalEndTime||null,s.exceptionalWorkHours||0,
        s.winterPolicyEnabled||false,s.winterPolicy?JSON.stringify(s.winterPolicy):null,req.params.id]
     );
+    // Applying "Make Default" assigns this shift to every staff member
+    if (s.makeDefault) {
+      await client.query(
+        `UPDATE users SET shift=$1 WHERE is_system IS NOT TRUE AND role NOT IN ('superAdmin')`,
+        [rows[0].code]
+      );
+    }
     await client.query('COMMIT');
     res.json(toRow(rows[0]));
   } catch (e) {

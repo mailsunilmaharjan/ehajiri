@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import api from '../../api/client.js';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { useData } from '../../context/DataContext.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_EN, BS_MONTHS_NP, toNepaliDigits } from '../../utils/dateUtils.js';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -265,20 +266,14 @@ const DeptWeekView = ({ rosters, department, weekStart, settings }) => {
 /* ══════════════════════════════════════════
    Staff Picker Modal
 ══════════════════════════════════════════ */
-const StaffPickerModal = ({ open, onClose, onSelect }) => {
+const StaffPickerModal = ({ open, onClose, onSelect, employees }) => {
   const [search,   setSearch]   = useState('');
-  const [list,     setList]     = useState([]);
-  const [loading,  setLoading]  = useState(false);
   const [selected, setSelected] = useState(null);
+  const list = useMemo(() => (employees || []).filter(s => s.active !== false), [employees]);
 
   useEffect(() => {
     if (!open) return;
     setSearch(''); setSelected(null);
-    setLoading(true);
-    api.get('/employees')
-      .then(d => setList(Array.isArray(d) ? d.filter(s => s.active !== false) : []))
-      .catch(() => setList([]))
-      .finally(() => setLoading(false));
   }, [open]);
 
   const filtered = useMemo(() => {
@@ -354,11 +349,7 @@ const StaffPickerModal = ({ open, onClose, onSelect }) => {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr><td colSpan={4} style={{ textAlign: 'center', padding: '36px', color: '#9ca3af', fontSize: 13 }}>
-                  Loading staff…
-                </td></tr>
-              ) : filtered.length === 0 ? (
+              {filtered.length === 0 ? (
                 <tr><td colSpan={4} style={{ textAlign: 'center', padding: '36px', color: '#9ca3af', fontSize: 13 }}>
                   No staff found
                 </td></tr>
@@ -704,6 +695,7 @@ const RosterReport = () => {
   const navigate         = useNavigate();
   const { settings }     = useSettings();
   const { currentUser }  = useAuth();
+  const { filteredEmployees: employees } = useData();
 
   const [rosters,   setRosters]   = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -722,14 +714,10 @@ const RosterReport = () => {
 
   /* Auto-select current user on first load */
   useEffect(() => {
-    if (!currentUser) return;
-    api.get('/employees')
-      .then(list => {
-        const me = Array.isArray(list) ? list.find(e => e.id === currentUser.id) : null;
-        if (me) { setSelectedStaff(me); setCalView(true); }
-      })
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!currentUser || !employees.length) return;
+    const me = employees.find(e => e.id === currentUser.id);
+    if (me) { setSelectedStaff(me); setCalView(true); }
+  }, [currentUser, employees]);
 
   /* HOD: auto-filter to their department */
   useEffect(() => {
@@ -1000,6 +988,7 @@ const RosterReport = () => {
         open={staffModalOpen}
         onClose={() => setStaffModalOpen(false)}
         onSelect={handleStaffSelect}
+        employees={employees}
       />
 
       {/* ── Header ── */}

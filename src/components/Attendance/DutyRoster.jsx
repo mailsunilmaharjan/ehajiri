@@ -1144,16 +1144,17 @@ const InsightCard = ({ ins }) => {
 ══════════════════════════════════════════════════════════════ */
 const DutyRoster = () => {
   const navigate                   = useNavigate();
-  const { currentUser, isAdmin }   = useAuth();
+  const { currentUser, isAdmin, canEdit, canDelete } = useAuth();
+  const canEditRoster   = canEdit('dutyRoster');
+  const canDeleteRoster = canDelete('dutyRoster');
   const { settings }               = useSettings();
-  const { bumpRosterVersion }      = useData();
+  const { bumpRosterVersion, filteredEmployees: employees } = useData();
   const fd = useDateFormat();
 
   const [showModal,      setShowModal]      = useState(false);
   const [editRoster,     setEditRoster]     = useState(null);
   const [showAdvSearch,  setShowAdvSearch]  = useState(false);
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
-  const [employees,      setEmployees]      = useState([]);
   const [shifts,         setShifts]         = useState([]);
   const [rosters,        setRosters]        = useState([]);
   const [loading,        setLoading]        = useState(true);
@@ -1182,9 +1183,8 @@ const DutyRoster = () => {
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([api.get('/employees'), api.get('/shifts'), api.get('/duty-roster')])
-      .then(([emps, shfts, ros]) => {
-        setEmployees(emps);
+    Promise.all([api.get('/shifts'), api.get('/duty-roster')])
+      .then(([shfts, ros]) => {
         setShifts(shfts);
         setRosters(ros);
       })
@@ -1301,18 +1301,22 @@ const DutyRoster = () => {
     { field: '_actions', header: '', width: 115, sortable: false,
       render: (_, row) => (
         <div style={{ display:'flex', gap:5 }}>
-          <button onClick={e => { e.stopPropagation(); setEditRoster(row); }}
-            style={{ height:28, padding:'0 10px', fontSize:12, fontWeight:600,
-              background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8',
-              borderRadius:6, cursor:'pointer', whiteSpace:'nowrap' }}>
-            ✏️ Edit
-          </button>
-          <button onClick={e => { e.stopPropagation(); handleDelete(row); }}
-            style={{ height:28, padding:'0 9px', fontSize:12, fontWeight:600,
-              background:'#fff5f5', border:'1px solid #fca5a5', color:'#dc2626',
-              borderRadius:6, cursor:'pointer' }}>
-            🗑️
-          </button>
+          {canEditRoster && (
+            <button onClick={e => { e.stopPropagation(); setEditRoster(row); }}
+              style={{ height:28, padding:'0 10px', fontSize:12, fontWeight:600,
+                background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8',
+                borderRadius:6, cursor:'pointer', whiteSpace:'nowrap' }}>
+              ✏️ Edit
+            </button>
+          )}
+          {canDeleteRoster && (
+            <button onClick={e => { e.stopPropagation(); handleDelete(row); }}
+              style={{ height:28, padding:'0 9px', fontSize:12, fontWeight:600,
+                background:'#fff5f5', border:'1px solid #fca5a5', color:'#dc2626',
+                borderRadius:6, cursor:'pointer' }}>
+              🗑️
+            </button>
+          )}
         </div>
       )
     },
@@ -1392,13 +1396,15 @@ const DutyRoster = () => {
               🗑️ Clear Roster
             </button>
           )}
-          <button onClick={() => setShowModal(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 36,
-              padding: '0 16px', background: '#059669', color: 'white', border: 'none',
-              borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(5,150,105,.25)' }}>
-            + Create Roster
-          </button>
+          {canEditRoster && (
+            <button onClick={() => setShowModal(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 36,
+                padding: '0 16px', background: '#059669', color: 'white', border: 'none',
+                borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(5,150,105,.25)' }}>
+              + Create Roster
+            </button>
+          )}
         </div>
       </div>
 
@@ -1425,8 +1431,8 @@ const DutyRoster = () => {
           defaultPageSize={10}
           showSearch={true}
           searchPlaceholder="Search by name, shift, department…"
-          onRowClick={(row) => setEditRoster(row)}
-          onDeleteKey={(row) => handleDelete(row)}
+          onRowClick={canEditRoster ? (row) => setEditRoster(row) : undefined}
+          onDeleteKey={canDeleteRoster ? (row) => handleDelete(row) : undefined}
           striped={true}
         />
       )}

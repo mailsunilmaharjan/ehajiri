@@ -1,8 +1,52 @@
 ﻿import { Router } from 'express';
 import pool from '../db.js';
 import { logAudit } from '../services/auditLog.js';
+import { sendLeaveApplication, sendLeaveStatusUpdate } from '../services/emailService.js';
+import { logError } from '../utils/logError.js';
 
 const router = Router();
+
+/* Best-effort email lookup + send — never let a notification failure affect the request. */
+async function notifyLeaveApplication(leave) {
+  try {
+    const recommendedBy = Array.isArray(leave.reco) ? leave.reco[0] : (leave.recommendedBy || leave.reco || null);
+    const approvedBy    = Array.isArray(leave.approval) ? leave.approval[0] : (leave.approval || null);
+    const ids = [recommendedBy, approvedBy].filter(Boolean).map(Number);
+    if (!ids.length) return;
+
+    const [{ rows: recipients }, { rows: [requester] }, { rows: [lt] }] = await Promise.all([
+      pool.query(`SELECT email FROM users WHERE id = ANY($1::int[]) AND email IS NOT NULL AND email != ''`, [ids]),
+      pool.query('SELECT full_name FROM users WHERE id=$1', [leave.employeeId]),
+      pool.query('SELECT name FROM leave_types WHERE code=$1', [leave.leaveTypeCode]),
+    ]);
+    for (const r of recipients) {
+      await sendLeaveApplication({
+        to: r.email, fullName: requester?.full_name || '',
+        leaveType: lt?.name || leave.leaveTypeCode, fromDate: leave.fromDate, toDate: leave.toDate,
+        days: leave.days, reason: leave.reason,
+      });
+    }
+  } catch (err) {
+    logError('[leaves notifyLeaveApplication]', err);
+  }
+}
+
+async function notifyLeaveStatusUpdate(leave) {
+  try {
+    const [{ rows: [employee] }, { rows: [lt] }] = await Promise.all([
+      pool.query('SELECT email, full_name FROM users WHERE id=$1', [leave.employeeId]),
+      pool.query('SELECT name FROM leave_types WHERE code=$1', [leave.leaveTypeCode]),
+    ]);
+    if (!employee?.email) return;
+    await sendLeaveStatusUpdate({
+      to: employee.email, fullName: employee.full_name, status: leave.status,
+      leaveType: lt?.name || leave.leaveTypeCode, fromDate: leave.fromDate, toDate: leave.toDate,
+      comment: leave.comment,
+    });
+  } catch (err) {
+    logError('[leaves notifyLeaveStatusUpdate]', err);
+  }
+}
 
 const toLeave = r => ({
   id             : r.id,
@@ -51,7 +95,7 @@ router.get('/', async (_req, res) => {
 
 router.post('/', async (req, res) => {
   const { employeeId, leaveTypeCode, fromDate, toDate, days, reason, halfDay,
-          status, approvedBy, approvedDate } = req.body;
+          status, approvedBy, approvedDate, reco, approval } = req.body;
 
   const finalStatus  = ['approved','rejected','pending'].includes(status) ? status : 'pending';
   const finalAppBy   = finalStatus !== 'pending' ? (approvedBy   || null) : null;
@@ -65,7 +109,9 @@ router.post('/', async (req, res) => {
       [employeeId, leaveTypeCode, fromDate, toDate, days, reason, !!halfDay,
        finalStatus, finalAppBy, finalAppDate]
     );
-    res.status(201).json(toLeave(rows[0]));
+    const leave = toLeave(rows[0]);
+    if (finalStatus === 'pending') notifyLeaveApplication({ ...leave, reco, approval });
+    res.status(201).json(leave);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -90,8 +136,10 @@ router.patch('/:id/approve', async (req, res) => {
       [approvedBy, comment || '', req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Leave not found' });
-    logAudit({ actor: req.user, action: 'approve', entity: 'leave', entityId: req.params.id, before: null, after: toLeave(rows[0]) });
-    res.json(toLeave(rows[0]));
+    const leave = toLeave(rows[0]);
+    logAudit({ actor: req.user, action: 'approve', entity: 'leave', entityId: req.params.id, before: null, after: leave });
+    notifyLeaveStatusUpdate(leave);
+    res.json(leave);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -104,8 +152,10 @@ router.patch('/:id/reject', async (req, res) => {
       [approvedBy, comment || '', req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Leave not found' });
-    logAudit({ actor: req.user, action: 'reject', entity: 'leave', entityId: req.params.id, before: null, after: toLeave(rows[0]) });
-    res.json(toLeave(rows[0]));
+    const leave = toLeave(rows[0]);
+    logAudit({ actor: req.user, action: 'reject', entity: 'leave', entityId: req.params.id, before: null, after: leave });
+    notifyLeaveStatusUpdate(leave);
+    res.json(leave);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

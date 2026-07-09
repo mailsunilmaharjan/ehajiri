@@ -3,12 +3,15 @@
  * Base: /api/zkteco
  *
  * All device operations queue ADMS commands per the Developer Guide.
- * Command formats corrected per guide vs. previous implementation:
- *   OLD: DATA DELETE tableName=user\nUSER\tPIN=X  →  NEW: DATA DELETE USERINFO PIN=X
- *   OLD: DATA UPDATE tableName=user\nUSER\t...    →  NEW: DATA UPDATE USERINFO PIN=X\t...
- *   OLD: DATA QUERY tableName=user                →  NEW: DATA QUERY USERINFO
- *   OLD: SETTIME YYYY-MM-DD HH:MM:SS              →  NEW: SET OPTION ServerLocalTime=YYYY-MM-DD HH:MM:SS
- *   OLD: DATA UPDATE (for sync)                   →  correct: reset stamp + DATA QUERY USERINFO
+ * Command formats corrected per Java SDK (Constants.java / DevCmdUtil.java):
+ *   OLD: DATA DELETE tableName=user\nUSER\tPIN=X  →  DATA DELETE USERINFO PIN=X
+ *   OLD: DATA UPDATE tableName=user\nUSER\t...    →  DATA UPDATE USERINFO PIN=X\t...
+ *   OLD: DATA QUERY tableName=user                →  DATA QUERY USERINFO
+ *   OLD: SET OPTION ServerLocalTime=...           →  SETTIME YYYY-MM-DD HH:MM:SS  (direct RTC write)
+ *   OLD: DATA CLEAR tableName=attlog              →  CLEAR LOG
+ *   OLD: RESTART                                  →  REBOOT
+ *   OLD: ENROLL_FP PIN=X\tName=Y\tFID=Z...       →  ENROLL_FP PIN=X\tFID=Z...  (Name not in spec)
+ *   OLD: DATA QUERY USERINFO USERINFO             →  DATA QUERY USERINFO  (extra param was wrong)
  */
 
 import express from 'express';
@@ -36,6 +39,7 @@ import {
   enrollFingerprint,
   enrollCard,
   checkDevice,
+  pushBioPhotoToDevice,
 } from '../services/zktecoService.js';
 
 const router = express.Router();
@@ -70,13 +74,79 @@ function buildAccTimeZoneParams(tz) {
 
 /**
  * Build DATA UPDATE AccGroup params from a zkteco_access_levels row.
- * TZ is a 16-char bitmask: position N-1 (0-indexed) = '1' for timezone UID N.
+ *
+ * TZ here is NOT the 16-char bitmask used by USERINFO's per-user TZ field —
+ * that's a different field on a different command. Per Push Protocol
+ * §12.1.1.14, AccGroup's TZ holds up to THREE literal AccTimeZone UIDs,
+ * semicolon-separated, one per "time period" slot: "TZ=1;0;0" = time period 1
+ * uses TimeZone UID 1, periods 2 and 3 unused (0). An earlier bug here sent
+ * the USERINFO-style 16-char bitmask instead (e.g. "1000000000000000" for
+ * UID 1) — devices mis-parsed that as a single huge/garbage number (seen on
+ * a device's own menu as "Time period 1 = 4096" for Access Group), so no
+ * real time window was ever registered and punches were rejected with
+ * "Invalid time period".
+ *
+ * A person only ever holds ONE Grp per Area (zkteco_person_access is unique on
+ * employee+area), so two Shift-Group levels sharing an Area (e.g. a Morning-in
+ * window + an Evening-out window, both at the same site) can't both be
+ * assigned to the same person as separate rows — the second insert just
+ * overwrites the first. Instead, when a level belongs to a Shift Group, its
+ * AccGroup TZ slots are widened to include every timezone used by ANY level
+ * in that group (up to 3), so assigning a person to just one of them already
+ * grants every window the shift covers.
  */
-function buildAccGroupParams(level) {
-  const tzId = level.timezone_id || 1;
-  const idx  = Math.max(0, Math.min(15, tzId - 1));
-  const tzMask = '0'.repeat(idx) + '1' + '0'.repeat(15 - idx);
-  return `ID=${level.id}\tVerify=0\tValidHoliday=0\tTZ=${tzMask}`;
+async function buildAccGroupParams(level) {
+  // Disabled levels contribute no time window — a level with active=false
+  // never grants access, regardless of which sibling in its Shift Group
+  // triggered this push. Computing from the whole group's active members
+  // (not just `level` itself) keeps the result identical no matter which
+  // member's edit/save fired the push, so pushing siblings in any order
+  // can't race and overwrite each other with conflicting masks.
+  let tzIds;
+  if (level.group_id) {
+    const { rows } = await pool.query(
+      `SELECT timezone_id FROM zkteco_access_levels WHERE group_id=$1 AND timezone_id IS NOT NULL AND active=TRUE`,
+      [level.group_id]
+    );
+    tzIds = rows.map(r => r.timezone_id);
+  } else {
+    // No Time Zone explicitly picked on this level → fall back to "24-Hour
+    // Accessible" by NAME, not a hardcoded id. An earlier version hardcoded
+    // `|| 1` here, which only ever worked by coincidence (because that
+    // timezone happened to have id=1 in this install) — anywhere "24-Hour
+    // Accessible" has a different id, that would have silently granted the
+    // WRONG time window to every level left without one.
+    tzIds = level.active ? [level.timezone_id || await getDefaultTimezoneId()] : [];
+  }
+  if (tzIds.length > 3) {
+    console.warn(`[ZK] Access Level ${level.id} ("${level.name}") resolves to ${tzIds.length} timezones but AccGroup only supports 3 time periods — using the first 3, dropping UID(s) ${tzIds.slice(3).join(',')}`);
+  }
+  const tz = `${tzIds[0] || 0};${tzIds[1] || 0};${tzIds[2] || 0}`;
+  const groupId = await resolveAccGroupId(level);
+  // Verify: group verification mode (Push Protocol Appendix 7), admin-configurable per
+  // level — default 0 (automatic: any enrolled fingerprint/face/card/password).
+  // ValidHoliday: whether this group's TZ windows still apply on a configured Holiday
+  // (zkteco_acc_holidays) — default 0 (no), matching the protocol's own default, but a
+  // level can opt in (e.g. Security/IT needing access even on holidays).
+  const verify = level.verify_mode ?? 0;
+  const validHoliday = level.valid_holiday ? 1 : 0;
+  return `ID=${groupId}\tVerify=${verify}\tValidHoliday=${validHoliday}\tTZ=${tz}`;
+}
+
+/** Resolve the literal AccGroup number ("Grp" on USERINFO / "ID" on AccGroup) for an
+ * Access Level row — its own explicit override, else its Shift Group's override, else
+ * its own internal id (the original, implicit behavior). Lets an admin pin the actual
+ * device-side group number instead of it being silently whatever the DB auto-assigned. */
+async function resolveAccGroupId(level) {
+  if (!level) return null;
+  if (level.access_group_id) return level.access_group_id;
+  if (level.group_id) {
+    const { rows } = await pool.query(
+      `SELECT access_group_id FROM zkteco_access_level_groups WHERE id=$1`, [level.group_id]
+    );
+    if (rows[0]?.access_group_id) return rows[0].access_group_id;
+  }
+  return level.id;
 }
 
 /** Push AccTimeZone command for one timezone to ALL active devices. */
@@ -96,7 +166,7 @@ async function pushAccGroupToAllDevices(levelRow) {
   const { rows: devices } = await pool.query(
     `SELECT serial_number FROM zkteco_devices WHERE active=TRUE AND serial_number IS NOT NULL`
   );
-  const params = buildAccGroupParams(levelRow);
+  const params = await buildAccGroupParams(levelRow);
   for (const d of devices) {
     await queueCommand(d.serial_number, 'DATA UPDATE AccGroup', params);
   }
@@ -104,14 +174,95 @@ async function pushAccGroupToAllDevices(levelRow) {
 }
 
 // Build the standard DATA UPDATE USERINFO param string.
-// Official format: PIN\tName\tPri\tPasswd\tCard\tGrp\tTZ\tCategory
-// Extended fields Expires/StartDatetime/EndDatetime are device-firmware-dependent;
+// Official format (ZKTeco Attendance PUSH Protocol 2025-04-29, §12.1.1.1):
+// PIN\tName\tPri\tPasswd\tCard\tGrp\tTZ\tVerify\t...\tExpires\tStartDatetime\tEndDatetime
+// TZ must be a 16-char bitmask, not a plain integer — "0000000000000000" means
+// "use the group's time period" (i.e. defer to Grp's Access Group config).
+// Sending TZ=1 (an earlier bug) is not a valid bitmask and was silently
+// mishandled by stricter firmware (e.g. SenseFace) even though lenient
+// firmware (K40 Pro) tolerated it.
 // date separator MUST be space not T — devices reject ISO format.
-function buildUserInfoParams({ pin, name='', privilege=0, passwd='', card='',
-  expires=0, startDatetime='2000-01-01 00:00:00', endDatetime='2099-12-31 23:59:00' }) {
+//
+// Grp MUST reflect the person's actual assigned Access Level (zkteco_access_levels.id) —
+// hardcoding Grp=1 (an earlier bug) meant the device enforced whatever AccGroup
+// happened to be pushed under ID=1 for EVERY user regardless of what was picked
+// in the "Access Level" UI, since the per-user Grp field never actually changed.
+//
+// Expires modes (device-specific spec from ZKTeco support for our device model —
+// requires Expires/VaildCount to already be added to the device's tabledesc.xml,
+// and the main switch UserValidTimeFun=1; NOT part of the generic Push Protocol doc):
+//   0 = no expiry
+//   1 = date range only            (StartDatetime/EndDatetime)
+//   2 = use-count only             (VaildCount — device firmware's own spelling)
+//   3 = date range AND use-count   (StartDatetime/EndDatetime + VaildCount)
+function buildUserInfoParams({ pin, name='', privilege=0, passwd='', card='', grp=1,
+  expires=0, startDatetime='2000-01-01 00:00:00', endDatetime='2099-12-31 23:59:00', validCount=null }) {
   const sd = fmtDt(startDatetime) || '2000-01-01 00:00:00';
   const ed = fmtDt(endDatetime)   || '2099-12-31 23:59:00';
-  return `PIN=${pin}\tName=${name}\tPri=${privilege}\tPasswd=${passwd}\tCard=${card}\tGrp=1\tTZ=1\tVerify=0\tExpires=${expires}\tStartDatetime=${sd}\tEndDatetime=${ed}`;
+  let params = `PIN=${pin}\tName=${name}\tPri=${privilege}\tPasswd=${passwd}\tCard=${card}\tGrp=${grp}\tTZ=0000000000000000\tVerify=0\tExpires=${expires}\tStartDatetime=${sd}\tEndDatetime=${ed}`;
+  if ((expires === 2 || expires === 3) && validCount != null) params += `\tVaildCount=${validCount}`;
+  return params;
+}
+
+/** The "24-Hour Accessible" seeded timezone's id — resolved by name, not hardcoded,
+ * since the literal id depends on seed order and must never be assumed. */
+async function getDefaultTimezoneId() {
+  const { rows } = await pool.query(`SELECT id FROM zkteco_timezones WHERE name=$1 LIMIT 1`, ['24-Hour Accessible']);
+  return rows[0]?.id || null;
+}
+
+/** Lazily creates (once) a baseline "24-Hour Accessible" Access Level pointing at
+ * the seeded "24-Hour Accessible" timezone, for people with no Access Level
+ * assigned. Found by the is_system flag, not by name — an earlier version matched
+ * on the literal name 'Unrestricted (24h)', which silently created a DUPLICATE
+ * the moment an admin renamed it (since the old name would never match again).
+ * Pinned to device-side AccGroup #1, fixed and not admin-editable, so it's always
+ * a known, predictable number rather than whatever id this row happens to have. */
+async function getOrCreateUnrestrictedLevel() {
+  const { rows } = await pool.query(`SELECT * FROM zkteco_access_levels WHERE is_system=TRUE LIMIT 1`);
+  const defaultTzId = await getDefaultTimezoneId();
+  if (rows[0]) {
+    // Self-heal: this row can end up with no Time Zone or a stray AccGroup id
+    // (e.g. created before "24-Hour Accessible" existed) — without this it
+    // silently fell back to hardcoded/auto-resolved values elsewhere instead
+    // of staying pinned to 24-Hour Accessible / AccGroup #1.
+    if ((!rows[0].timezone_id && defaultTzId) || rows[0].access_group_id !== 1) {
+      const { rows: fixed } = await pool.query(
+        `UPDATE zkteco_access_levels SET timezone_id=COALESCE(timezone_id,$1), access_group_id=1 WHERE id=$2 RETURNING *`,
+        [defaultTzId, rows[0].id]
+      );
+      await pushAccGroupToAllDevices(fixed[0]);
+      return fixed[0].id;
+    }
+    return rows[0].id;
+  }
+  const { rows: created } = await pool.query(
+    `INSERT INTO zkteco_access_levels (name, timezone_id, remarks, is_system, access_group_id) VALUES ($1,$2,$3,TRUE,1) RETURNING *`,
+    ['24-Hour Accessible', defaultTzId, 'Default — assigned when no Access Level is set']
+  );
+  await pushAccGroupToAllDevices(created[0]);
+  return created[0].id;
+}
+
+/** Resolve the Access Group (Grp) a given employee should be pushed with —
+ * their assigned Access Level if any, else the default unrestricted level.
+ *
+ * A person can be tracked under several Access Levels at once (rosters/personnel
+ * counts), but the device can only ever enforce ONE Grp — so when someone holds
+ * more than one, this picks whichever was assigned MOST RECENTLY (highest row id).
+ * The others stay visible in personnel lists/counts but don't affect the device. */
+async function resolveGrpForEmployee(employeeId) {
+  let levelId;
+  if (employeeId) {
+    const { rows } = await pool.query(
+      `SELECT access_level_id FROM zkteco_person_access WHERE employee_id=$1 AND access_level_id IS NOT NULL ORDER BY id DESC LIMIT 1`,
+      [employeeId]
+    );
+    levelId = rows[0]?.access_level_id;
+  }
+  if (!levelId) levelId = await getOrCreateUnrestrictedLevel();
+  const { rows: [level] } = await pool.query('SELECT * FROM zkteco_access_levels WHERE id=$1', [levelId]);
+  return level ? resolveAccGroupId(level) : levelId;
 }
 
 async function getSnById(id) {
@@ -131,8 +282,9 @@ async function syncAreaToDevice(areaId, targetSn) {
   );
   let cmdCount = 0;
   for (const u of users) {
-    // Push user record
-    const uParams = buildUserInfoParams({ pin:u.pin, name:u.name, privilege:u.privilege||0, card:u.card_no||'' });
+    // Push user record — each person keeps their own assigned Access Level
+    const grp = await resolveGrpForEmployee(u.employee_id);
+    const uParams = buildUserInfoParams({ pin:u.pin, name:u.name, privilege:u.privilege||0, card:u.card_no||'', grp });
     await queueCommand(targetSn, 'DATA UPDATE USERINFO', uParams);
     cmdCount++;
     // Push fingerprint templates stored for this user (any device_sn)
@@ -154,7 +306,7 @@ async function syncAreaToDevice(areaId, targetSn) {
  * Push a single user (+ their FP templates) to all active devices in an area.
  * Called when: a user is uploaded to any device in the area.
  */
-async function pushUserToAreaDevices(areaId, pin, name, privilege, cardNo, excludeSn) {
+async function pushUserToAreaDevices(areaId, pin, name, privilege, cardNo, excludeSn, grp, validity = {}) {
   const { rows: devices } = await pool.query(
     `SELECT serial_number FROM zkteco_devices
      WHERE area_id=$1 AND serial_number IS NOT NULL AND active=TRUE`,
@@ -167,7 +319,11 @@ async function pushUserToAreaDevices(areaId, pin, name, privilege, cardNo, exclu
   let pushed = 0;
   for (const d of devices) {
     if (d.serial_number === excludeSn) continue; // skip the origin device (already done)
-    const uParams = buildUserInfoParams({ pin, name:name||'', privilege:privilege||0, card:cardNo||'' });
+    // Forward expires/startDatetime/endDatetime too — without this, cascading to
+    // sibling devices in the same Area silently reset them to "no expiry",
+    // racing against (and sometimes clobbering) the validity command just sent
+    // directly to those same devices when more than one was selected at once.
+    const uParams = buildUserInfoParams({ pin, name:name||'', privilege:privilege||0, card:cardNo||'', grp, ...validity });
     await queueCommand(d.serial_number, 'DATA UPDATE USERINFO', uParams);
     for (const fp of fps) {
       const fpParams = `PIN=${fp.pin}\tFID=${fp.finger_id}\tSize=${fp.template_size}\tValid=${fp.valid||1}\tTMP=${fp.template_data}`;
@@ -342,26 +498,36 @@ router.post('/devices/:id/sync', async (req, res) => {
   try {
     const sn = await getSnById(req.params.id);
     await pool.query(`DELETE FROM zkteco_commands WHERE device_sn=$1 AND status='PENDING'`, [sn]);
-    // Reset stamp → server will send ATTLOGStamp=None on next handshake → device re-pushes ALL
+    // Reset stamp → server will send ATTLOGStamp=None on next full handshake → device re-pushes
+    // ALL records going forward. This alone depends on the device re-running its options=all
+    // handshake (triggered by RELOAD OPTIONS), which some firmware delays/batches.
     await resetDeviceStamp(sn);
-    const cmd = await queueCommand(sn, 'RELOAD OPTIONS');
-    console.log(`[ZK API] Get All Logs: stamp=None + RELOAD OPTIONS queued for ${sn}`);
+    const reloadCmd = await queueCommand(sn, 'RELOAD OPTIONS');
+    // Also issue an explicit, deterministic full-range pull (DATA QUERY ATTLOG) so the
+    // complete history is requested immediately instead of waiting on the passive
+    // stamp/handshake path alone.
+    const params  = `StartTime=2000-01-01 00:00:00\tEndTime=${fmtDt(new Date().toISOString())}`;
+    const queryCmd = await queueCommand(sn, 'DATA QUERY ATTLOG', params);
+    console.log(`[ZK API] Get All Logs: stamp=None + RELOAD OPTIONS + DATA QUERY ATTLOG (full range) queued for ${sn}`);
     res.json({
       ok     : true,
       sn,
-      command: cmd.command_payload,
-      message: 'ATTLOGStamp=None + RELOAD OPTIONS queued — device will re-push all logs on next handshake (~30s)',
+      commands: [reloadCmd.command_payload, queryCmd.command_payload],
+      message: 'Full history requested — RELOAD OPTIONS + DATA QUERY ATTLOG (2000-01-01 → now) queued (~30s)',
     });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
-// ── Set device time — correct format per guide §14 ────────────────────────
-// Guide: "SET OPTION ServerLocalTime=YYYY-MM-DD HH:MM:SS" (not SETTIME)
+// ── Set device time ────────────────────────────────────────────────────────
+// SETTIME directly sets the device RTC clock and is supported by ALL ZKTeco
+// firmware versions.  "SET OPTION ServerLocalTime=" is informational only —
+// it tells the device what the server clock says but does NOT set the device
+// clock on most firmware, causing Return=-3 (CMD NOT SUPPORTED) silently.
 router.post('/devices/:id/set-time', async (req, res) => {
   try {
     const sn      = await getSnById(req.params.id);
     const timeStr = req.body.time ? formatZkTime(new Date(req.body.time)) : formatZkTime();
-    const cmd     = await queueCommand(sn, 'SET OPTION', `ServerLocalTime=${timeStr}`);
+    const cmd     = await queueCommand(sn, 'SETTIME', timeStr);
     res.json({ ok:true, sn, time:timeStr, command:cmd.command_payload });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
@@ -372,7 +538,7 @@ router.post('/devices/:id/set-time', async (req, res) => {
 // Upload user to this device AND cascade to all devices in the same area
 router.post('/devices/:id/upload-user', canManageDevices, async (req, res) => {
   const { pin, name, privilege=0, card='', passwd='', expires=0,
-          startDatetime='2000-01-01T00:00:00', endDatetime='2099-12-31T23:59:00' } = req.body;
+          startDatetime='2000-01-01T00:00:00', endDatetime='2099-12-31T23:59:00', validCount=null } = req.body;
   if (!pin || !name) return res.status(400).json({ error:'pin and name are required' });
   try {
     const devRow = await pool.query(
@@ -382,8 +548,26 @@ router.post('/devices/:id/upload-user', canManageDevices, async (req, res) => {
     const areaId = devRow.rows[0]?.area_id;
     if (!sn) throw Object.assign(new Error('Device has no serial number yet'), { status:400 });
 
-    const uParams = buildUserInfoParams({ pin, name, privilege, passwd, card, expires, startDatetime, endDatetime });
+    const { rows: [emp] } = await pool.query('SELECT id FROM users WHERE device_id=$1', [pin]);
+    const grp = await resolveGrpForEmployee(emp?.id);
+
+    const uParams = buildUserInfoParams({ pin, name, privilege, passwd, card, grp, expires, startDatetime, endDatetime, validCount });
     const cmd = await queueCommand(sn, 'DATA UPDATE USERINFO', uParams);
+
+    // Persist validity server-side too — Expires/StartDatetime/EndDatetime/VaildCount sent
+    // to the device above are firmware-dependent (some devices silently ignore them), so
+    // PostVerifyData re-checks this independently on every real-time scan as a backstop,
+    // including decrementing access_valid_count for the count-based modes (2/3).
+    const usesDate  = expires === 1 || expires === 3;
+    const usesCount = expires === 2 || expires === 3;
+    await pool.query(
+      `UPDATE users SET access_expires=$1, access_expiry_mode=$2, access_valid_from=$3, access_valid_to=$4, access_valid_count=$5 WHERE device_id=$6`,
+      [expires > 0, expires,
+       usesDate  ? String(startDatetime).slice(0,10) : null,
+       usesDate  ? String(endDatetime).slice(0,10)   : null,
+       usesCount ? validCount : null,
+       pin]
+    );
 
     // Mark this user as belonging to the area
     if (areaId) {
@@ -392,7 +576,7 @@ router.post('/devices/:id/upload-user', canManageDevices, async (req, res) => {
         [areaId, sn, pin]
       );
       // Push to all other devices in the same area
-      const cascaded = await pushUserToAreaDevices(areaId, pin, name, privilege, card, sn);
+      const cascaded = await pushUserToAreaDevices(areaId, pin, name, privilege, card, sn, grp, { expires, startDatetime, endDatetime, validCount });
       return res.json({ ok:true, sn, command:cmd.command_payload, areaCascaded:cascaded });
     }
     res.json({ ok:true, sn, command:cmd.command_payload });
@@ -438,26 +622,31 @@ router.post('/devices/:id/sync-area', async (req, res) => {
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
-// ── Enroll fingerprint — correct format per guide §5 ─────────────────────
-// Guide: ENROLL_FP PIN=X\tName=Y\tFID=Z\tRETRY=3\tOVERWRITE=1
+// ── Enroll fingerprint — protocol format: ENROLL_FP PIN=X\tFID=Y\tRETRY=3\tOVERWRITE=1
 router.post('/devices/:id/enroll-fp', canManageDevices, async (req, res) => {
-  const { pin, name='', fingerId=0, retry=3, overwrite=1 } = req.body;
+  const { pin, fingerId=0, retry=3, overwrite=1 } = req.body;
   if (!pin) return res.status(400).json({ error:'pin is required' });
   try {
     const sn     = await getSnById(req.params.id);
-    const params = `PIN=${pin}\tName=${name}\tFID=${fingerId}\tRETRY=${retry}\tOVERWRITE=${overwrite}`;
+    const params = `PIN=${pin}\tFID=${fingerId}\tRETRY=${retry}\tOVERWRITE=${overwrite}`;
     const cmd    = await queueCommand(sn, 'ENROLL_FP', params);
     res.json({ ok:true, sn, command:cmd.command_payload });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
 // ── Enroll face ───────────────────────────────────────────────────────────
+// Official format (Push Protocol 2025-04-29, §12.6.3):
+//   ENROLL_BIO TYPE=%?\tPIN=%?\tCardNo=%?\tRETRY=%?\tOVERWRITE=%?
+// TYPE=9 = "visible light face" (same Type=9 convention used by DATA UPDATE
+// BIOPHOTO restore, see zktecoService.js). There is no Name field on this
+// command — sending BioType=9/Name=... (an earlier bug) used a field name
+// the protocol doesn't define, which the device rejected with Return=-1003.
 router.post('/devices/:id/enroll-face', canManageDevices, async (req, res) => {
-  const { pin, name='', retry=3, overwrite=1 } = req.body;
+  const { pin, retry=3, overwrite=1 } = req.body;
   if (!pin) return res.status(400).json({ error:'pin is required' });
   try {
     const sn     = await getSnById(req.params.id);
-    const params = `PIN=${pin}\tName=${name}\tRETRY=${retry}\tOVERWRITE=${overwrite}`;
+    const params = `TYPE=9\tPIN=${pin}\tCardNo=\tRETRY=${retry}\tOVERWRITE=${overwrite}`;
     const cmd    = await queueCommand(sn, 'ENROLL_BIO', params);
     res.json({ ok:true, sn, command:cmd.command_payload });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
@@ -565,7 +754,7 @@ router.post('/devices/:id/clear-admin', canManageDevices, async (req, res) => {
 
     // Stage 2: sync fresh user list from device so any admin enrolled directly
     // on the device (not in our DB) gets discovered and auto-downgraded
-    await queueCommand(sn, 'DATA QUERY USERINFO', 'USERINFO');
+    await queueCommand(sn, 'DATA QUERY USERINFO');
     if (!pin) {
       // Set flag — OPERLOG handler will auto-downgrade any Pri>=6 users that arrive
       await pool.query('UPDATE zkteco_devices SET clear_admin_pending=true WHERE serial_number=$1', [sn]);
@@ -579,6 +768,40 @@ router.post('/devices/:id/clear-admin', canManageDevices, async (req, res) => {
         ? `${queued} admin(s) downgraded. Syncing device users to catch any remaining admins...`
         : 'No admins in local DB — syncing users from device. Any device-side admins will be cleared automatically (~30s).',
     });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Delete face sample from device ─────────────────────────────────────────
+// Official format (Push Protocol 2025-04-29, §12.1.2.3 / §12.1.2.7):
+//   DATA DELETE FACE PIN=<pin>                — removes the matching biometric
+//   DATA DELETE BIOPHOTO PIN=<pin> Type=9     — removes the visible-light comparison photo
+// (BIOPHOTO uses a space between PIN and Type per the spec, unlike most commands' tabs.)
+router.post('/devices/:id/delete-face', canManageDevices, async (req, res) => {
+  const { pin } = req.body;
+  if (!pin) return res.status(400).json({ error:'pin is required' });
+  try {
+    const sn   = await getSnById(req.params.id);
+    const cmd1 = await queueCommand(sn, 'DATA DELETE FACE', `PIN=${pin}`);
+    const cmd2 = await queueCommand(sn, 'DATA DELETE BIOPHOTO', `PIN=${pin} Type=9`);
+    await pool.query('UPDATE zkteco_users SET face_photo=NULL WHERE device_sn=$1 AND pin=$2', [sn, pin]);
+    console.log(`[ZK API] Delete face PIN=${pin} on ${sn}`);
+    res.json({ ok:true, sn, commands:[cmd1.command_payload, cmd2.command_payload] });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Upload a photo as a face sample ────────────────────────────────────────
+// Accepts a data-URL or raw base64 JPEG, pushes it to the device as the
+// visible-light comparison photo (Type=9) used for face matching.
+router.post('/devices/:id/upload-face-photo', canManageDevices, async (req, res) => {
+  const { pin, photo } = req.body;
+  if (!pin || !photo) return res.status(400).json({ error:'pin and photo are required' });
+  try {
+    const sn  = await getSnById(req.params.id);
+    const cmd = await pushBioPhotoToDevice(sn, pin, photo);
+    const base64 = photo.includes(',') ? photo.split(',')[1] : photo;
+    await pool.query('UPDATE zkteco_users SET face_photo=$1 WHERE device_sn=$2 AND pin=$3', [base64, sn, pin]);
+    console.log(`[ZK API] Upload face photo PIN=${pin} on ${sn}`);
+    res.json({ ok:true, sn, command:cmd.command_payload });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
@@ -706,11 +929,11 @@ router.post('/devices/:id/reload-options', async (req, res) => {
 });
 
 // ── Reboot device ─────────────────────────────────────────────────────────
-// WARNING from guide: RESTART wipes all FP templates from device RAM
+// Guide: REBOOT command — device wipes FP templates from RAM on reboot
 router.post('/devices/:id/reboot', async (req, res) => {
   try {
     const sn  = await getSnById(req.params.id);
-    const cmd = await queueCommand(sn, 'RESTART');
+    const cmd = await queueCommand(sn, 'REBOOT');
     res.json({ ok:true, sn, command:cmd.command_payload,
       warning:'Device will wipe all FP templates from RAM on reboot. Auto-restore will run on next handshake if templates are stored server-side.' });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
@@ -726,11 +949,101 @@ router.post('/devices/:id/disable', async (req, res) => {
   catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
-// ── Clear device attendance logs ─────────────────────────────────────────
+// ── Clear device attendance logs — guide: CLEAR LOG ───────────────────────
 router.post('/devices/:id/clear-attlog', async (req, res) => {
   try {
     const sn  = await getSnById(req.params.id);
-    const cmd = await queueCommand(sn, 'DATA CLEAR', 'tableName=attlog');
+    const cmd = await queueCommand(sn, 'CLEAR LOG');
+    res.json({ ok:true, sn, command:cmd.command_payload });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Clear all data on device — guide: CLEAR DATA ──────────────────────────
+router.post('/devices/:id/clear-all-data', canManageDevices, async (req, res) => {
+  try {
+    const sn  = await getSnById(req.params.id);
+    const cmd = await queueCommand(sn, 'CLEAR DATA');
+    res.json({ ok:true, sn, command:cmd.command_payload,
+      warning:'This clears ALL data (users, FP templates, attendance logs) from the device.' });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Clear all users from device — guide: CLEAR ALL USERINFO ──────────────
+router.post('/devices/:id/clear-all-users', canManageDevices, async (req, res) => {
+  try {
+    const sn  = await getSnById(req.params.id);
+    const cmd = await queueCommand(sn, 'CLEAR ALL USERINFO');
+    res.json({ ok:true, sn, command:cmd.command_payload,
+      warning:'This wipes all user records and biometric templates from the device.' });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Clear attendance photos — guide: CLEAR PHOTO ──────────────────────────
+router.post('/devices/:id/clear-photo', async (req, res) => {
+  try {
+    const sn  = await getSnById(req.params.id);
+    const cmd = await queueCommand(sn, 'CLEAR PHOTO');
+    res.json({ ok:true, sn, command:cmd.command_payload });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Clear biometric templates (FP/face) from device — guide: CLEAR BIODATA ─
+router.post('/devices/:id/clear-biodata', canManageDevices, async (req, res) => {
+  try {
+    const sn  = await getSnById(req.params.id);
+    const cmd = await queueCommand(sn, 'CLEAR BIODATA');
+    res.json({ ok:true, sn, command:cmd.command_payload,
+      warning:'This wipes all fingerprint/face templates from the device. User records (PIN/name/card) are kept.' });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Force device to check and send logs — guide: LOG ─────────────────────
+router.post('/devices/:id/send-log', async (req, res) => {
+  try {
+    const sn  = await getSnById(req.params.id);
+    const cmd = await queueCommand(sn, 'LOG');
+    res.json({ ok:true, sn, command:cmd.command_payload,
+      note:'Device will immediately push any pending attendance logs to server.' });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Query attendance logs by time range — guide: DATA QUERY ATTLOG ────────
+// Device pushes matching ATTLOG rows back via cdata POST
+router.post('/devices/:id/query-attlog', async (req, res) => {
+  const { startTime, endTime } = req.body;
+  if (!startTime || !endTime) return res.status(400).json({ error:'startTime and endTime required (YYYY-MM-DD HH:MM:SS)' });
+  try {
+    const sn     = await getSnById(req.params.id);
+    const params = `StartTime=${fmtDt(startTime)}\tEndTime=${fmtDt(endTime)}`;
+    const cmd    = await queueCommand(sn, 'DATA QUERY ATTLOG', params);
+    res.json({ ok:true, sn, command:cmd.command_payload,
+      note:'Device will push matching attendance records back to the server (~30s).' });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Query attendance photos by time range — guide: DATA QUERY ATTPHOTO ────
+// Device pushes matching photo records back via cdata POST
+router.post('/devices/:id/query-attphoto', async (req, res) => {
+  const { startTime, endTime } = req.body;
+  if (!startTime || !endTime) return res.status(400).json({ error:'startTime and endTime required (YYYY-MM-DD HH:MM:SS)' });
+  try {
+    const sn     = await getSnById(req.params.id);
+    const params = `StartTime=${fmtDt(startTime)}\tEndTime=${fmtDt(endTime)}`;
+    const cmd    = await queueCommand(sn, 'DATA QUERY ATTPHOTO', params);
+    res.json({ ok:true, sn, command:cmd.command_payload,
+      note:'Device will push matching attendance photos back to the server (~30s).' });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Verify/proofreading attendance records — guide: VERIFY SUM ATTLOG ─────
+// Device checks its local logs against server records for the given time range
+router.post('/devices/:id/verify-attlog', async (req, res) => {
+  const { startTime, endTime } = req.body;
+  if (!startTime || !endTime) return res.status(400).json({ error:'startTime and endTime required (YYYY-MM-DD HH:MM:SS)' });
+  try {
+    const sn     = await getSnById(req.params.id);
+    const params = `StartTime=${fmtDt(startTime)}\tEndTime=${fmtDt(endTime)}`;
+    const cmd    = await queueCommand(sn, 'VERIFY SUM ATTLOG', params);
     res.json({ ok:true, sn, command:cmd.command_payload });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
@@ -902,6 +1215,11 @@ router.get('/device-users', async (req, res) => {
              e.employee_id     AS staff_code,
              e.department      AS staff_dept,
              e.device_id       AS staff_device_id,
+             e.access_expires  AS access_expires,
+             e.access_expiry_mode AS access_expiry_mode,
+             e.access_valid_from AS access_valid_from,
+             e.access_valid_to   AS access_valid_to,
+             e.access_valid_count AS access_valid_count,
              COALESCE(
                json_agg(
                  json_build_object(
@@ -918,7 +1236,8 @@ router.get('/device-users', async (req, res) => {
       LEFT   JOIN zkteco_fingerprints f
                ON f.device_sn = zu.device_sn AND f.pin = zu.pin
       ${cond}
-      GROUP  BY zu.id, e.full_name, e.employee_id, e.department, e.device_id
+      GROUP  BY zu.id, e.full_name, e.employee_id, e.department, e.device_id,
+                e.access_expires, e.access_expiry_mode, e.access_valid_from, e.access_valid_to, e.access_valid_count
       ORDER  BY zu.device_sn,
                 CASE WHEN zu.pin ~ '^[0-9]+$' THEN zu.pin::int ELSE 99999 END
     `, params);
@@ -1004,9 +1323,12 @@ router.get('/fingerprints', async (req, res) => {
 router.get('/commands', async (req, res) => {
   const { sn } = req.query;
   try {
-    const cond=sn?'WHERE device_sn=$1':''; const params=sn?[sn]:[];
+    const cond=sn?'WHERE c.device_sn=$1':''; const params=sn?[sn]:[];
     const { rows }=await pool.query(
-      `SELECT * FROM zkteco_commands ${cond} ORDER BY created_at DESC LIMIT 200`,params);
+      `SELECT c.*, u.full_name AS created_by_name
+       FROM   zkteco_commands c
+       LEFT   JOIN users u ON u.id = c.created_by_user_id
+       ${cond} ORDER BY c.created_at DESC LIMIT 200`,params);
     res.json(rows);
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
@@ -1070,13 +1392,11 @@ async function getAreasOrdered() {
            p.name AS parent_name,
            (
              SELECT COUNT(*)::int FROM zkteco_devices d
-             WHERE  TRIM(LOWER(d.location)) = TRIM(LOWER(at.name))
-                 OR d.location ILIKE '%' || at.name || '%'
+             WHERE  d.area_id = at.id
            ) AS device_qty,
            (
-             SELECT COUNT(*)::int FROM users u
-             WHERE  TRIM(LOWER(u.branch)) = TRIM(LOWER(at.name))
-                 OR TRIM(LOWER(u.department)) = TRIM(LOWER(at.name))
+             SELECT COUNT(DISTINCT zu.pin)::int FROM zkteco_users zu
+             WHERE  zu.area_id = at.id
            ) AS employee_qty
     FROM   area_tree at
     LEFT   JOIN zkteco_areas p ON p.id = at.parent_id
@@ -1242,11 +1562,12 @@ router.put('/timezones/:id', async (req, res) => {
 
 router.delete('/timezones/:id', async (req, res) => {
   try {
-    // System time zones ("24-Hour Accessible", "No Access") cannot be deleted
+    // "24-Hour Accessible" is the system default (pinned to AccGroup #1 — see
+    // getOrCreateUnrestrictedLevel) and cannot be deleted.
     const { rows } = await pool.query('SELECT name FROM zkteco_timezones WHERE id=$1', [req.params.id]);
     const name = rows[0]?.name;
     if (!name) return res.status(404).json({ error:'Not found' });
-    if (name === '24-Hour Accessible' || name === 'No Access') {
+    if (name === '24-Hour Accessible') {
       return res.status(403).json({ error:`"${name}" is a system record and cannot be deleted.` });
     }
     await pool.query('DELETE FROM zkteco_timezones WHERE id=$1', [req.params.id]);
@@ -1260,30 +1581,66 @@ router.delete('/timezones/:id', async (req, res) => {
 
 router.get('/access-levels', async (_req, res) => {
   try {
+    // Being assigned to ANY level in a Shift Group covers every window the
+    // shift covers (see buildAccGroupParams), so the Personnel count for a
+    // grouped level reflects everyone in the WHOLE group, not just rows that
+    // literally point at this exact level id — otherwise sibling levels in
+    // the same shift would misleadingly show different counts.
     const { rows } = await pool.query(`
-      SELECT al.*, tz.name AS timezone_name, za.name AS area_name,
-             COUNT(pa.id)::int AS personnel_count
+      SELECT al.*, tz.name AS timezone_name, za.name AS area_name, alg.name AS group_name,
+             alg.access_group_id AS group_access_group_id,
+             COALESCE(al.access_group_id, alg.access_group_id, al.id) AS effective_access_group_id,
+             (
+               SELECT COUNT(DISTINCT pa.employee_id)::int
+               FROM   zkteco_person_access pa
+               JOIN   zkteco_access_levels al2 ON al2.id = pa.access_level_id
+               WHERE  al2.id = al.id OR (al.group_id IS NOT NULL AND al2.group_id = al.group_id)
+             ) AS personnel_count
       FROM   zkteco_access_levels al
-      LEFT   JOIN zkteco_timezones      tz ON tz.id = al.timezone_id
-      LEFT   JOIN zkteco_areas          za ON za.id = al.area_id
-      LEFT   JOIN zkteco_person_access  pa ON pa.access_level_id = al.id
-      GROUP  BY al.id, tz.name, za.name
+      LEFT   JOIN zkteco_timezones           tz  ON tz.id  = al.timezone_id
+      LEFT   JOIN zkteco_areas               za  ON za.id  = al.area_id
+      LEFT   JOIN zkteco_access_level_groups alg ON alg.id = al.group_id
       ORDER  BY al.id
     `);
     res.json(rows);
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
+/** Re-push AccGroup for every OTHER level in a Shift Group — their TZ mask is
+ * the union of the whole group's timezones, so adding/removing a level
+ * changes what mask siblings need too, not just the level being edited. */
+async function pushGroupSiblings(groupId, excludeLevelId) {
+  if (!groupId) return 0;
+  const { rows } = await pool.query(
+    `SELECT * FROM zkteco_access_levels WHERE group_id=$1 AND id<>$2`, [groupId, excludeLevelId]
+  );
+  let pushed = 0;
+  for (const lv of rows) pushed += await pushAccGroupToAllDevices(lv);
+  return pushed;
+}
+
+/** Re-push AccGroup for every level in a Shift Group — used when the group's
+ * own AccessGroup Id override changes, since that shifts every member's
+ * effective device-side group number, not just the TZ mask. */
+async function pushAccGroupForGroupId(groupId) {
+  if (!groupId) return 0;
+  const { rows } = await pool.query(`SELECT * FROM zkteco_access_levels WHERE group_id=$1`, [groupId]);
+  let pushed = 0;
+  for (const lv of rows) pushed += await pushAccGroupToAllDevices(lv);
+  return pushed;
+}
+
 router.post('/access-levels', async (req, res) => {
-  const { name, timezoneId, areaId, remarks } = req.body;
+  const { name, timezoneId, areaId, remarks, groupId, accessGroupId, active, verifyMode, validHoliday } = req.body;
   if (!name) return res.status(400).json({ error:'name required' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO zkteco_access_levels (name, timezone_id, area_id, remarks)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [name, timezoneId||null, areaId||null, remarks||null]
+      `INSERT INTO zkteco_access_levels (name, timezone_id, area_id, remarks, group_id, access_group_id, active, verify_mode, valid_holiday)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [name, timezoneId||null, areaId||null, remarks||null, groupId||null, accessGroupId||null, active!==false, verifyMode||0, !!validHoliday]
     );
     const pushed = await pushAccGroupToAllDevices(rows[0]);
+    await pushGroupSiblings(rows[0].group_id, rows[0].id);
     res.status(201).json({ ...rows[0], pushedToDevices: pushed });
   } catch (err) {
     if (err.code==='23505') return res.status(409).json({ error:'Access level name already exists' });
@@ -1292,23 +1649,123 @@ router.post('/access-levels', async (req, res) => {
 });
 
 router.put('/access-levels/:id', async (req, res) => {
-  const { name, timezoneId, areaId, remarks } = req.body;
+  // Field-presence-aware: a key absent from the body means "leave it alone"
+  // (preserve the existing value), an explicit null means "clear it" — these
+  // are NOT the same thing. The old version always overwrote every column from
+  // the body regardless of what was actually sent, so any partial update (e.g.
+  // a frontend that no longer has a field for accessGroupId/verifyMode/
+  // validHoliday) silently wiped those columns back to their defaults on every
+  // save — and the same hole existed for timezoneId/areaId too.
+  const b = req.body;
+  const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
   try {
+    const { rows: before } = await pool.query('SELECT * FROM zkteco_access_levels WHERE id=$1', [req.params.id]);
+    const cur = before[0];
+    if (!cur) return res.status(404).json({ error:'Not found' });
+
+    const name          = has('name')          ? b.name                  : cur.name;
+    const timezoneId    = has('timezoneId')    ? (b.timezoneId||null)    : cur.timezone_id;
+    const areaId        = has('areaId')        ? (b.areaId||null)        : cur.area_id;
+    const remarks       = has('remarks')       ? b.remarks               : cur.remarks;
+    const groupId       = has('groupId')       ? (b.groupId||null)       : cur.group_id;
+    // System level's AccGroup is pinned to #1 regardless of what's sent — see
+    // getOrCreateUnrestrictedLevel.
+    const accessGroupId = cur.is_system ? 1 : (has('accessGroupId') ? (b.accessGroupId||null) : cur.access_group_id);
+    const active        = has('active')        ? (b.active !== false)    : cur.active;
+    const verifyMode    = has('verifyMode')    ? (Number(b.verifyMode)||0) : cur.verify_mode;
+    const validHoliday  = has('validHoliday')  ? !!b.validHoliday        : cur.valid_holiday;
+
     const { rows } = await pool.query(
       `UPDATE zkteco_access_levels SET
-         name=COALESCE($1,name), timezone_id=$2, area_id=$3, remarks=COALESCE($4,remarks)
+         name=$1, timezone_id=$2, area_id=$3, remarks=$4, group_id=$6,
+         access_group_id=$7, active=$8, verify_mode=$9, valid_holiday=$10
        WHERE id=$5 RETURNING *`,
-      [name, timezoneId||null, areaId||null, remarks, req.params.id]
+      [name, timezoneId, areaId, remarks, req.params.id, groupId, accessGroupId, active, verifyMode, validHoliday]
     );
     if (!rows[0]) return res.status(404).json({ error:'Not found' });
     const pushed = await pushAccGroupToAllDevices(rows[0]);
+    await pushGroupSiblings(rows[0].group_id, rows[0].id);
+    // Left the previous group — its remaining members lose this level's timezone, refresh them too.
+    if (before[0]?.group_id && before[0].group_id !== rows[0].group_id) {
+      await pushGroupSiblings(before[0].group_id, rows[0].id);
+    }
     res.json({ ...rows[0], pushedToDevices: pushed });
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
 router.delete('/access-levels/:id', async (req, res) => {
   try {
+    const { rows: before } = await pool.query('SELECT group_id, is_system, name FROM zkteco_access_levels WHERE id=$1', [req.params.id]);
+    if (before[0]?.is_system) {
+      return res.status(403).json({ error:`"${before[0].name}" is a system record and cannot be deleted.` });
+    }
     await pool.query('DELETE FROM zkteco_access_levels WHERE id=$1', [req.params.id]);
+    if (before[0]?.group_id) await pushGroupSiblings(before[0].group_id, req.params.id);
+    res.json({ ok:true });
+  } catch (err) { res.status(500).json({ error:err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+//  ACCESS LEVEL GROUPS — "Shift Group": several Access Levels
+//  (e.g. a Morning-in window + an Evening-out window) bundled under one
+//  named shift so a person can be assigned the whole shift in one pick.
+// ═══════════════════════════════════════════════════════
+
+router.get('/access-level-groups', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT alg.*, COUNT(al.id)::int AS level_count
+      FROM   zkteco_access_level_groups alg
+      LEFT   JOIN zkteco_access_levels al ON al.group_id = alg.id
+      GROUP  BY alg.id
+      ORDER  BY alg.name
+    `);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error:err.message }); }
+});
+
+router.post('/access-level-groups', async (req, res) => {
+  const { name, remarks, accessGroupId } = req.body;
+  if (!name) return res.status(400).json({ error:'name required' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO zkteco_access_level_groups (name, remarks, access_group_id) VALUES ($1,$2,$3) RETURNING *`,
+      [name, remarks||null, accessGroupId||null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code==='23505') return res.status(409).json({ error:'Shift group name already exists' });
+    res.status(500).json({ error:err.message });
+  }
+});
+
+router.put('/access-level-groups/:id', async (req, res) => {
+  // accessGroupId uses COALESCE — the legacy "rename only" inline edit doesn't
+  // send it, and that must not silently wipe out a previously-set override.
+  const { name, remarks, accessGroupId } = req.body;
+  try {
+    const { rows: before } = await pool.query('SELECT access_group_id FROM zkteco_access_level_groups WHERE id=$1', [req.params.id]);
+    const { rows } = await pool.query(
+      `UPDATE zkteco_access_level_groups SET name=COALESCE($1,name), remarks=$2, access_group_id=COALESCE($3,access_group_id) WHERE id=$4 RETURNING *`,
+      [name, remarks, accessGroupId||null, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error:'Not found' });
+    // Override number itself changed — every member level's effective device
+    // group number shifted, so their AccGroup pushes need to go out again.
+    if (before[0] && before[0].access_group_id !== rows[0].access_group_id) {
+      await pushAccGroupForGroupId(rows[0].id);
+    }
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error:err.message }); }
+});
+
+router.delete('/access-level-groups/:id', async (req, res) => {
+  try {
+    // Levels in this group fall back to ungrouped (group_id FK is ON DELETE SET NULL) —
+    // not deleted, but their masks need re-pushing now that the group is gone.
+    const { rows: members } = await pool.query('SELECT * FROM zkteco_access_levels WHERE group_id=$1', [req.params.id]);
+    await pool.query('DELETE FROM zkteco_access_level_groups WHERE id=$1', [req.params.id]);
+    for (const lv of members) await pushAccGroupToAllDevices({ ...lv, group_id: null });
     res.json({ ok:true });
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
@@ -1317,6 +1774,10 @@ router.delete('/access-levels/:id', async (req, res) => {
 //  ACCESS LEVEL MEMBERS — personnel assigned to a specific level
 // ═══════════════════════════════════════════════════════
 
+// Returns everyone assigned to this level — or, if it belongs to a Shift
+// Group, everyone assigned to ANY level in that group, since membership in
+// one already covers the whole shift. Keeps the "+ Personnel" panel showing
+// the same people regardless of which sibling level you opened it from.
 router.get('/access-levels/:id/members', async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -1324,51 +1785,66 @@ router.get('/access-levels/:id/members', async (req, res) => {
              u.id, u.employee_id AS emp_code, u.full_name,
              SPLIT_PART(u.full_name,' ',1)                              AS first_name,
              SUBSTR(u.full_name, LENGTH(SPLIT_PART(u.full_name,' ',1))+2) AS last_name,
-             u.department, u.ranking_order, u.active
+             u.department, u.branch, u.ranking_order, u.active
       FROM   zkteco_person_access pa
       JOIN   users u ON u.id = pa.employee_id
+      JOIN   zkteco_access_levels al ON al.id = pa.access_level_id
       WHERE  pa.access_level_id = $1
+         OR  al.group_id = (SELECT group_id FROM zkteco_access_levels WHERE id = $1)
       ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [req.params.id]);
     res.json(rows);
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
-// Batch-add members to an access level (replaces previous entries for the same area)
+// Batch-add members to an access level. ADDITIVE — does not touch any OTHER
+// level the employee already holds (a person can be tracked under several
+// levels at once for rosters/personnel counts; see resolveGrpForEmployee for
+// what actually gets enforced on the device). Also pushes the resulting Grp to
+// the employee's devices — this table is shared with Staff → Device
+// Connectivity and Access Rules → By Person, so a change made here must reach
+// the physical device the same way a change from those screens does.
 router.post('/access-levels/:id/members', async (req, res) => {
   const { employeeIds } = req.body;
   if (!Array.isArray(employeeIds) || !employeeIds.length)
     return res.status(400).json({ error:'employeeIds array required' });
   try {
-    const lvRes = await pool.query(
-      'SELECT timezone_id, area_id FROM zkteco_access_levels WHERE id=$1', [req.params.id]
-    );
+    const lvRes = await pool.query('SELECT * FROM zkteco_access_levels WHERE id=$1', [req.params.id]);
     const lv = lvRes.rows[0];
-    let added = 0;
+    if (!lv) return res.status(404).json({ error:'Not found' });
+    let added = 0, syncedDevices = 0;
     for (const empId of employeeIds) {
       try {
         await pool.query(
           `INSERT INTO zkteco_person_access (employee_id, access_level_id, timezone_id, area_id)
            VALUES ($1,$2,$3,$4)
-           ON CONFLICT (employee_id, area_id) DO UPDATE SET
-             access_level_id=$2, timezone_id=$3`,
-          [empId, req.params.id, lv?.timezone_id||null, lv?.area_id||null]
+           ON CONFLICT (employee_id, area_id, access_level_id) DO UPDATE SET timezone_id=$3`,
+          [empId, req.params.id, lv.timezone_id||null, lv.area_id||null]
         );
         added++;
+        // Push whatever level now wins for this employee (may differ from the one
+        // just added, if they already held a more-recently-assigned level).
+        const effectiveGrp = await resolveGrpForEmployee(empId);
+        syncedDevices += await syncPersonToAreaDevices(empId, lv.area_id||null, effectiveGrp);
       } catch { /* skip duplicate */ }
     }
-    res.json({ ok:true, added });
+    res.json({ ok:true, added, syncedDevices });
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
-// Remove one member from an access level
+// Remove one member from an access level. Re-resolves and pushes whatever Grp
+// they should fall back to (another level they hold, or the default
+// Unrestricted level) so the device's actual access group never lags behind
+// what this screen shows.
 router.delete('/access-levels/:id/members/:employeeId', async (req, res) => {
   try {
     await pool.query(
       'DELETE FROM zkteco_person_access WHERE access_level_id=$1 AND employee_id=$2',
       [req.params.id, req.params.employeeId]
     );
-    res.json({ ok:true });
+    const grp = await resolveGrpForEmployee(req.params.employeeId);
+    const syncedDevices = await syncPersonToAreaDevices(req.params.employeeId, null, grp);
+    res.json({ ok:true, syncedDevices });
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
@@ -1378,39 +1854,122 @@ router.delete('/access-levels/:id/members/:employeeId', async (req, res) => {
 
 router.get('/person-access', async (_req, res) => {
   try {
+    // level_names is the single level's name, UNLESS it belongs to a Shift
+    // Group — then it's every level in that group joined together (e.g.
+    // "1 Morning 08:00-09:00 | 2 Evening 17:00-23:00"), since membership in
+    // one level already covers every window the whole group/shift grants.
     const { rows } = await pool.query(`
       SELECT pa.*, u.full_name, u.employee_id AS emp_code, u.department,
-             al.name AS level_name, tz.name AS timezone_name, za.name AS area_name
+             al.name AS level_name, tz.name AS timezone_name, za.name AS area_name,
+             alg.name AS group_name,
+             COALESCE(
+               (SELECT STRING_AGG(al2.name, ' | ' ORDER BY al2.id)
+                FROM   zkteco_access_levels al2
+                WHERE  al2.group_id = al.group_id),
+               al.name
+             ) AS level_names
       FROM   zkteco_person_access pa
       JOIN   users u ON u.id = pa.employee_id
       LEFT   JOIN zkteco_access_levels al ON al.id = pa.access_level_id
       LEFT   JOIN zkteco_timezones     tz ON tz.id = pa.timezone_id
       LEFT   JOIN zkteco_areas         za ON za.id = pa.area_id
+      LEFT   JOIN zkteco_access_level_groups alg ON alg.id = al.group_id
       ORDER  BY u.full_name
     `);
     res.json(rows);
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
+/** Push the resolved Grp to every device in a given area for one employee.
+ * If areaId is null, falls back to wherever they're already enrolled
+ * (preserves single-person/no-area callers, e.g. the Device Connectivity panel). */
+async function syncPersonToAreaDevices(employeeId, areaId, grp) {
+  const { rows: [emp] } = await pool.query('SELECT device_id AS pin, full_name FROM users WHERE id=$1', [employeeId]);
+  if (!emp?.pin) return 0;
+  const { rows: devices } = areaId
+    ? await pool.query(
+        `SELECT serial_number FROM zkteco_devices WHERE area_id=$1 AND serial_number IS NOT NULL AND active=TRUE`,
+        [areaId])
+    : await pool.query(
+        `SELECT DISTINCT device_sn AS serial_number FROM zkteco_users WHERE employee_id=$1`,
+        [employeeId]);
+  for (const d of devices) {
+    const uParams = buildUserInfoParams({ pin: emp.pin, name: emp.full_name, grp });
+    await queueCommand(d.serial_number, 'DATA UPDATE USERINFO', uParams);
+  }
+  return devices.length;
+}
+
+// Accepts either a single employeeId/areaId (back-compat, e.g. Device Connectivity's
+// quick Access Level save) or employeeIds[]/areaIds[] for bulk assignment — every
+// staff × area combination gets its own person_access row, synced to that area's
+// devices. Time Zone is no longer settable here — Access Level alone determines it.
+//
+// accessLevelIds (plural) lets a person be tracked under SEVERAL Access Levels at
+// once (e.g. shows up in both the "07-10" and "17-23:59" rosters/personnel counts).
+// This does NOT combine them into one device-side AccGroup (that approach — a
+// synthesized multi-period AccGroup — caused the device to reject scans with
+// "Invalid Combination"). The device can only ever enforce ONE Grp per person, so
+// resolveGrpForEmployee() picks whichever level was assigned most recently; the
+// rest stay purely as app-side roster/reporting data.
+//
+// Replace, don't accumulate: each call wipes this employee's existing rows for the
+// targeted area(s) first, then re-inserts exactly the levels passed in — so the
+// selection sent here always becomes the complete set for that area.
 router.post('/person-access', async (req, res) => {
-  const { employeeId, accessLevelId, timezoneId, areaId } = req.body;
-  if (!employeeId) return res.status(400).json({ error:'employeeId required' });
+  const { employeeId, employeeIds, accessLevelId, accessLevelIds, areaId, areaIds } = req.body;
+  const empIds = Array.isArray(employeeIds) && employeeIds.length ? employeeIds : (employeeId ? [employeeId] : []);
+  const arIds  = Array.isArray(areaIds) && areaIds.length ? areaIds : [areaId || null];
+  if (!empIds.length) return res.status(400).json({ error:'employeeId(s) required' });
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO zkteco_person_access (employee_id, access_level_id, timezone_id, area_id)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (employee_id, area_id) DO UPDATE SET
-         access_level_id=$2, timezone_id=$3
-       RETURNING *`,
-      [employeeId, accessLevelId||null, timezoneId||null, areaId||null]
-    );
-    res.status(201).json(rows[0]);
+    const pickedIds = Array.isArray(accessLevelIds) && accessLevelIds.length
+      ? accessLevelIds.map(Number)
+      : (accessLevelId ? [Number(accessLevelId)] : []);
+    let saved = 0, syncedDevices = 0, lastRow = null;
+    for (const empId of empIds) {
+      for (const arId of arIds) {
+        // IS NOT DISTINCT FROM (not =) so a NULL area_id matches its own kind —
+        // plain `=` never matches NULL, which would leave stale rows behind.
+        await pool.query(
+          `DELETE FROM zkteco_person_access WHERE employee_id=$1 AND area_id IS NOT DISTINCT FROM $2`,
+          [empId, arId || null]
+        );
+        if (pickedIds.length) {
+          for (const lvId of pickedIds) {
+            const { rows } = await pool.query(
+              `INSERT INTO zkteco_person_access (employee_id, access_level_id, timezone_id, area_id)
+               VALUES ($1,$2,NULL,$3) RETURNING *`,
+              [empId, lvId, arId || null]
+            );
+            saved++;
+            lastRow = rows[0];
+          }
+        } else {
+          saved++; // "no restriction" — row intentionally absent, resolveGrpForEmployee falls back to Unrestricted
+        }
+      }
+      const grp = await resolveGrpForEmployee(empId);
+      syncedDevices += await syncPersonToAreaDevices(empId, arIds[0] || null, grp);
+    }
+    res.status(201).json({ ...lastRow, saved, syncedDevices });
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
 router.delete('/person-access/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM zkteco_person_access WHERE id=$1', [req.params.id]);
+    res.json({ ok:true });
+  } catch (err) { res.status(500).json({ error:err.message }); }
+});
+
+// Wipe ALL access-level rows for one employee — used before re-saving their
+// full selection from the "Access Level" multi-select, so deselected levels
+// and stale duplicates (NULL area_id rows never collide on the UNIQUE
+// (employee_id, area_id) constraint, since NULL <> NULL in Postgres) don't
+// pile up and get picked arbitrarily by resolveGrpForEmployee().
+router.delete('/person-access/employee/:employeeId', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM zkteco_person_access WHERE employee_id=$1', [req.params.employeeId]);
     res.json({ ok:true });
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
@@ -1609,7 +2168,7 @@ router.post('/devices/:id/push-access-rules', async (req, res) => {
     // Push all AccGroup records
     const { rows: lvRows } = await pool.query('SELECT * FROM zkteco_access_levels ORDER BY id');
     for (const lv of lvRows) {
-      await queueCommand(sn, 'DATA UPDATE AccGroup', buildAccGroupParams(lv));
+      await queueCommand(sn, 'DATA UPDATE AccGroup', await buildAccGroupParams(lv));
     }
 
     // Push all AccHoliday records
@@ -1621,19 +2180,11 @@ router.post('/devices/:id/push-access-rules', async (req, res) => {
       );
     }
 
-    // Push all AccUnLockComb records
-    const { rows: ucRows } = await pool.query('SELECT * FROM zkteco_unlock_comb ORDER BY uid');
-    for (const uc of ucRows) {
-      await queueCommand(sn, 'DATA UPDATE AccUnLockComb',
-        `UID=${uc.uid}\tGroup1=${uc.group1||0}\tGroup2=${uc.group2||0}\tGroup3=${uc.group3||0}\tGroup4=${uc.group4||0}\tGroup5=${uc.group5||0}`
-      );
-    }
-
-    console.log(`[ZK API] Push Access Rules: ${sn} — ${tzRows.length} TZ + ${lvRows.length} Groups + ${hRows.length} Holidays + ${ucRows.length} UnlockComb`);
+    console.log(`[ZK API] Push Access Rules: ${sn} — ${tzRows.length} TZ + ${lvRows.length} Groups + ${hRows.length} Holidays`);
     res.json({
       ok: true, sn,
       timezones: tzRows.length, groups: lvRows.length,
-      holidays: hRows.length, unlockCombos: ucRows.length,
+      holidays: hRows.length,
     });
   } catch (err) { res.status(err.status||500).json({ error: err.message }); }
 });
@@ -1705,75 +2256,6 @@ router.put('/acc-holidays/:id', async (req, res) => {
 router.delete('/acc-holidays/:id', async (req, res) => {
   try {
     const { rowCount } = await pool.query('DELETE FROM zkteco_acc_holidays WHERE id=$1', [req.params.id]);
-    if (!rowCount) return res.status(404).json({ error:'Not found' });
-    res.json({ ok:true });
-  } catch (err) { res.status(500).json({ error:err.message }); }
-});
-
-// ═══════════════════════════════════════════════════════
-//  ACC UNLOCK COMBINATIONS — DATA UPDATE AccUnLockComb
-// ═══════════════════════════════════════════════════════
-
-router.get('/unlock-combos', async (_req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM zkteco_unlock_comb ORDER BY uid');
-    res.json(rows);
-  } catch (err) { res.status(500).json({ error:err.message }); }
-});
-
-router.post('/unlock-combos', async (req, res) => {
-  const { uid, group1=0, group2=0, group3=0, group4=0, group5=0, remarks } = req.body;
-  if (uid == null) return res.status(400).json({ error:'uid required' });
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO zkteco_unlock_comb (uid,group1,group2,group3,group4,group5,remarks)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [uid, group1, group2, group3, group4, group5, remarks||null]
-    );
-    const uc = rows[0];
-    const { rows: devices } = await pool.query(
-      `SELECT serial_number FROM zkteco_devices WHERE active=TRUE AND serial_number IS NOT NULL`
-    );
-    for (const d of devices) {
-      await queueCommand(d.serial_number, 'DATA UPDATE AccUnLockComb',
-        `UID=${uc.uid}\tGroup1=${uc.group1}\tGroup2=${uc.group2}\tGroup3=${uc.group3}\tGroup4=${uc.group4}\tGroup5=${uc.group5}`
-      );
-    }
-    res.status(201).json({ ...uc, pushedToDevices: devices.length });
-  } catch (err) {
-    if (err.code==='23505') return res.status(409).json({ error:'UID already exists' });
-    res.status(500).json({ error:err.message });
-  }
-});
-
-router.put('/unlock-combos/:id', async (req, res) => {
-  const { uid, group1, group2, group3, group4, group5, remarks } = req.body;
-  try {
-    const { rows } = await pool.query(
-      `UPDATE zkteco_unlock_comb SET
-         uid=COALESCE($1,uid), group1=COALESCE($2,group1), group2=COALESCE($3,group2),
-         group3=COALESCE($4,group3), group4=COALESCE($5,group4), group5=COALESCE($6,group5),
-         remarks=COALESCE($7,remarks)
-       WHERE id=$8 RETURNING *`,
-      [uid, group1, group2, group3, group4, group5, remarks, req.params.id]
-    );
-    if (!rows[0]) return res.status(404).json({ error:'Not found' });
-    const uc = rows[0];
-    const { rows: devices } = await pool.query(
-      `SELECT serial_number FROM zkteco_devices WHERE active=TRUE AND serial_number IS NOT NULL`
-    );
-    for (const d of devices) {
-      await queueCommand(d.serial_number, 'DATA UPDATE AccUnLockComb',
-        `UID=${uc.uid}\tGroup1=${uc.group1}\tGroup2=${uc.group2}\tGroup3=${uc.group3}\tGroup4=${uc.group4}\tGroup5=${uc.group5}`
-      );
-    }
-    res.json({ ...uc, pushedToDevices: devices.length });
-  } catch (err) { res.status(500).json({ error:err.message }); }
-});
-
-router.delete('/unlock-combos/:id', async (req, res) => {
-  try {
-    const { rowCount } = await pool.query('DELETE FROM zkteco_unlock_comb WHERE id=$1', [req.params.id]);
     if (!rowCount) return res.status(404).json({ error:'Not found' });
     res.json({ ok:true });
   } catch (err) { res.status(500).json({ error:err.message }); }

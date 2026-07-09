@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import { useAuth } from '../../context/AuthContext.jsx';
 import api             from '../../api/client.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
@@ -147,6 +148,7 @@ const StatPill = ({ label, value, color, bg }) => (
 const HalfMonthlyReport = () => {
   const { language } = useLanguage();
   const { settings } = useSettings();
+  const { currentUser, isEmployee } = useAuth();
   const fd = useDateFormat();
   const L = (np,en) => language==='np' ? np : en;
 
@@ -158,6 +160,8 @@ const HalfMonthlyReport = () => {
   // When AD calendar:     state holds AD year/month
   const initYear  = useNP ? (todayBS?.year  || now.getFullYear())  : now.getFullYear();
   const initMonth = useNP ? (todayBS?.month || now.getMonth()+1)   : now.getMonth()+1;
+
+  const myEmpId = isEmployee ? String(currentUser?.id || '') : '';
 
   const [year,  setYear]  = useState(initYear);
   const [month, setMonth] = useState(initMonth);
@@ -177,7 +181,8 @@ const HalfMonthlyReport = () => {
         const adDate = bsToAD(year, month, 15);
         if (adDate) { apiYear = adDate.getFullYear(); apiMonth = adDate.getMonth() + 1; }
       }
-      setData(await api.get(`/attendance/half-monthly?year=${apiYear}&month=${apiMonth}&half=${half}`));
+      const query = `/attendance/half-monthly?year=${apiYear}&month=${apiMonth}&half=${half}${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
+      setData(await api.get(query));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
   }, [year, month, half]);

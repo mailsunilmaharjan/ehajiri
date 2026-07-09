@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import pool       from '../db.js';
 import { logError } from '../utils/logError.js';
+import { resolveOrgScope } from './orgScope.js';
 
 const router  = Router();
 const pad2    = (n) => String(Math.round(n)).padStart(2, '0');
@@ -26,6 +27,13 @@ const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 router.get('/', async (req, res) => {
   const { startDate, endDate, status } = req.query;
   if (!startDate || !endDate) return res.status(400).json({ error: 'startDate and endDate are required' });
+
+  const scope = resolveOrgScope(req);
+  const scopeParams = [];
+  let scopeCond = '';
+  if (scope.level === 'department') { scopeParams.push(scope.value); scopeCond = `AND u.department = $${scopeParams.length + 3}`; }
+  else if (scope.level === 'branch') { scopeParams.push(scope.value); scopeCond = `AND u.branch = $${scopeParams.length + 3}`; }
+  else if (scope.level === 'self')   { scopeParams.push(scope.value); scopeCond = `AND u.id = $${scopeParams.length + 3}`; }
 
   try {
     // 1. Load default shift (start, end, grace, name)
@@ -72,12 +80,13 @@ router.get('/', async (req, res) => {
         AND z.employee_id IS NOT NULL
         AND u.active = TRUE
         AND u.eligible_for_ot = TRUE
+        ${scopeCond}
       GROUP BY z.employee_id, z.check_time::date,
                u.full_name, u.department, u.position, u.employee_id,
                br.short_name, p.short_name, d.short_name, s.name_en, s.name,
                u.grade, u.gender, u.mode, u.timing_type
       HAVING COUNT(*) >= 2
-    `, [startDate, endDate, shiftName]);
+    `, [startDate, endDate, shiftName, ...scopeParams]);
 
     // 3. Existing approval records
     const { rows: approvals } = await pool.query(`

@@ -1,8 +1,9 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate }  from 'react-router-dom';
 import { useAuth }      from '../../context/AuthContext.jsx';
 import { useLanguage }  from '../../context/LanguageContext.jsx';
 import { useData }      from '../../context/DataContext.jsx';
+import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import { useSettings }  from '../../context/SettingsContext.jsx';
 import { makeDateFormatter } from '../../utils/dateUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
@@ -62,12 +63,18 @@ const LeavePanel = () => {
   const [editLeave,    setEditLeave]    = useState(null); // leave being edited
   const [editForm,     setEditForm]     = useState({});
   const [editErrors,   setEditErrors]   = useState({});
+  const editFormRef = useRef(null);
+  /* Ctrl+S submits the Edit Leave form — same action as the Save Changes button */
+  useSaveShortcut(!!editLeave, () => editFormRef.current?.requestSubmit());
+  const manualFormRef = useRef(null);
   const [delConfirm,   setDelConfirm]   = useState(null);
   const [showApply,    setShowApply]    = useState(false);
   const [showManual,   setShowManual]   = useState(false);
   const [manualForm,   setManualForm]   = useState({ employeeId:'', leaveTypeCode:'', fromDate:'', toDate:'', halfDay:false, reason:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualErrors, setManualErrors] = useState({});
   const [manualToast,  setManualToast]  = useState(null);
+  /* Ctrl+S submits the Manual Entry form — same action as the Save button */
+  useSaveShortcut(showManual, () => manualFormRef.current?.requestSubmit());
   /* ── Inline approve/reject modal ── */
   const [actionModal, setActionModal]   = useState(null); // { id, type:'approve'|'reject', leave }
   const [comment,     setComment]       = useState('');
@@ -795,7 +802,7 @@ const LeavePanel = () => {
                 <button className="modal-close" onClick={() => setEditLeave(null)}>✕</button>
               </div>
               <div className="modal-body">
-                <form onSubmit={handleEditSubmit}>
+                <form ref={editFormRef} onSubmit={handleEditSubmit}>
                   {/* Staff */}
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
@@ -902,7 +909,7 @@ const LeavePanel = () => {
                     </button>
                     <div style={{ display:'flex', gap:8 }}>
                       <button type="button" className="btn btn-outline" onClick={() => setEditLeave(null)}>Cancel</button>
-                      <button type="submit" className="btn btn-primary">💾 Save Changes</button>
+                      <button type="submit" className="btn btn-primary" title="Ctrl+S">💾 <u>S</u>ave Changes</button>
                     </div>
                   </div>
                 </form>
@@ -1046,7 +1053,7 @@ const LeavePanel = () => {
                 <div style={{ background:'#fef3c7', border:'1px solid #fde68a', borderRadius:8, padding:'8px 12px', marginBottom:14, fontSize:12, color:'#92400e' }}>
                   ⚠️ Manual posting bypasses the normal workflow. Use for correcting records or back-dated entries.
                 </div>
-                <form onSubmit={handleManualSubmit}>
+                <form ref={manualFormRef} onSubmit={handleManualSubmit}>
 
                   {/* Staff */}
                   <div className="form-group">
@@ -1141,8 +1148,8 @@ const LeavePanel = () => {
 
                   <div className="modal-footer" style={{ padding:'14px 0 0', borderTop:'1px solid #e5e7eb', marginTop:4, display:'flex', justifyContent:'flex-end', gap:8 }}>
                     <button type="button" className="btn btn-outline" onClick={() => setShowManual(false)}>Cancel</button>
-                    <button type="submit" className="btn btn-primary" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
-                      ✍️ Post Manual Entry
+                    <button type="submit" className="btn btn-primary" title="Ctrl+S" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
+                      💾 <u>S</u>ave
                     </button>
                   </div>
                 </form>
@@ -1518,6 +1525,9 @@ const VisitPanel = () => {
   const [manualVForm,    setManualVForm]   = useState({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:'', toDate:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualVErrors,  setManualVErrors] = useState({});
   const [manualVToast,   setManualVToast]  = useState(null);
+  const manualVFormRef = useRef(null);
+  /* Ctrl+S submits the Manual Entry form — same action as the Save button */
+  useSaveShortcut(showManualV, () => manualVFormRef.current?.requestSubmit());
   /* ── Inline approve/reject modal ── */
   const [visitActionModal, setVisitActionModal] = useState(null);
   const [visitComment,     setVisitComment]     = useState('');
@@ -1952,7 +1962,7 @@ const VisitPanel = () => {
                 <div style={{ background:'#fef3c7', border:'1px solid #fde68a', borderRadius:8, padding:'8px 12px', marginBottom:14, fontSize:12, color:'#92400e' }}>
                   ⚠️ Manual posting bypasses the normal workflow. Use for correcting records or back-dated entries.
                 </div>
-                <form onSubmit={handleMVSubmit}>
+                <form ref={manualVFormRef} onSubmit={handleMVSubmit}>
                   {/* Staff */}
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
@@ -2080,8 +2090,8 @@ const VisitPanel = () => {
 
                   <div className="modal-footer" style={{ padding:'14px 0 0', borderTop:'1px solid #e5e7eb', marginTop:4, display:'flex', justifyContent:'flex-end', gap:8 }}>
                     <button type="button" className="btn btn-outline" onClick={() => setShowManualV(false)}>Cancel</button>
-                    <button type="submit" className="btn btn-primary" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
-                      ✍️ Post Manual Entry
+                    <button type="submit" className="btn btn-primary" title="Ctrl+S" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
+                      💾 <u>S</u>ave
                     </button>
                   </div>
                 </form>
@@ -2443,37 +2453,22 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
         <p className="page-subtitle" style={{ marginTop:3 }}>{t('Leave Applications')} &amp; {t('Visit Applications')}</p>
       </div>
 
-      {/* ── Compact Tab Bar ── */}
-      <div style={{
-        display: 'inline-flex',
-        background: '#f1f5f9',
-        borderRadius: 8,
-        padding: 3,
-        marginBottom: 0,
-        gap: 2,
-        borderBottom: '1px solid #e2e8f0',
-      }}>
+      {/* ── Tab Bar ── */}
+      <div className="tabs" style={{ marginBottom: 0 }}>
         {tabs.map(tab => {
           const isActive = activeTab === tab.key;
           return (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              style={{
-                display:'flex', alignItems:'center', gap:5,
-                padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 13, fontWeight: isActive ? 700 : 500,
-                transition: 'all .15s ease',
-                background: isActive ? '#fff' : 'transparent',
-                color: isActive ? tab.color : '#6b7280',
-                boxShadow: isActive ? '0 1px 3px rgba(0,0,0,.1)' : 'none',
-                whiteSpace: 'nowrap',
-              }}>
-              <span style={{ fontSize:13 }}>{tab.icon}</span>
-              <span>{tab.label}</span>
+            <button key={tab.key}
+              className={`tab-btn${isActive ? ' active' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+              style={isActive ? { color: tab.color, borderBottomColor: tab.color } : {}}>
+              <span style={{ marginRight: 5 }}>{tab.icon}</span>
+              {tab.label}
               {tab.badge > 0 && (
                 <span style={{
-                  background:'#ef4444', color:'white',
+                  marginLeft: 6, background:'#ef4444', color:'white',
                   borderRadius:10, fontSize:10, fontWeight:700,
-                  padding:'1px 6px', minWidth:18, textAlign:'center',
+                  padding:'1px 6px', minWidth:18, display:'inline-block', textAlign:'center',
                 }}>
                   {tab.badge}
                 </span>
@@ -2483,8 +2478,8 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
         })}
       </div>
 
-      {/* ── Tab Content (no gap) ── */}
-      <div className="card" style={{ padding:'16px 20px', borderTopLeftRadius: 0 }}>
+      {/* ── Tab Content ── */}
+      <div className="card" style={{ padding:'16px 20px', borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
         {activeTab === 'leave' && <LeavePanel />}
         {activeTab === 'visit' && <VisitPanel />}
       </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext.jsx';
 import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
@@ -192,6 +193,7 @@ const ViewReportsBtn = ({ year, month, useNP }) => {
 const MonthlyReport = () => {
   const { language } = useLanguage();
   const { settings } = useSettings();
+  const { currentUser, isEmployee } = useAuth();
   const L = (np,en) => language==='np' ? np : en;
 
   const now     = new Date();
@@ -200,6 +202,8 @@ const MonthlyReport = () => {
 
   const initYear  = useNP ? (todayBS?.year  || now.getFullYear())  : now.getFullYear();
   const initMonth = useNP ? (todayBS?.month || now.getMonth()+1)   : now.getMonth()+1;
+
+  const myEmpId = isEmployee ? String(currentUser?.id || '') : '';
 
   const [year,    setYear]    = useState(initYear);
   const [month,   setMonth]   = useState(initMonth);
@@ -217,7 +221,8 @@ const MonthlyReport = () => {
         const adDate = bsToAD(year, month, 15);
         if (adDate) { apiYear = adDate.getFullYear(); apiMonth = adDate.getMonth() + 1; }
       }
-      setData(await api.get(`/attendance/monthly?year=${apiYear}&month=${apiMonth}`));
+      const query = `/attendance/monthly?year=${apiYear}&month=${apiMonth}${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
+      setData(await api.get(query));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
   }, [year, month, useNP]);

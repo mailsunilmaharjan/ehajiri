@@ -3,9 +3,13 @@ import TopMenu from './TopMenu.jsx';
 import GlobalFAB from './GlobalFAB.jsx';
 import LeaveApplyModal from '../Leave/LeaveApplyModal.jsx';
 import OfficeVisitApplyModal from '../OfficeVisit/OfficeVisitApplyModal.jsx';
+import MissingAttendanceApplyModal from '../Attendance/MissingAttendanceApplyModal.jsx';
 import { LeaveApplyProvider } from '../../context/LeaveApplyContext.jsx';
 import { OfficeVisitApplyProvider } from '../../context/OfficeVisitApplyContext.jsx';
+import { MissingAttendanceApplyProvider } from '../../context/MissingAttendanceApplyContext.jsx';
 import { AttendanceNotificationProvider } from '../Notifications/AttendanceToasts.jsx';
+import { ChatProvider } from '../../context/ChatContext.jsx';
+import ChatDock from '../Chat/ChatDock.jsx';
 
 /**
  * Global modal keyboard behaviour (applies to every modal in the app):
@@ -105,15 +109,21 @@ const Layout = ({ children }) => {
   return (
     <LeaveApplyProvider>
       <OfficeVisitApplyProvider>
-        <AttendanceNotificationProvider>
-          <TopMenu />
-          <main className="main-layout">
-            {children}
-          </main>
-          <GlobalFAB />
-          <LeaveApplyModal />
-          <OfficeVisitApplyModal />
-        </AttendanceNotificationProvider>
+        <MissingAttendanceApplyProvider>
+          <AttendanceNotificationProvider>
+            <ChatProvider>
+              <TopMenu />
+              <main className="main-layout">
+                {children}
+              </main>
+              <GlobalFAB />
+              <LeaveApplyModal />
+              <OfficeVisitApplyModal />
+              <MissingAttendanceApplyModal />
+              <ChatDock />
+            </ChatProvider>
+          </AttendanceNotificationProvider>
+        </MissingAttendanceApplyProvider>
       </OfficeVisitApplyProvider>
     </LeaveApplyProvider>
   );

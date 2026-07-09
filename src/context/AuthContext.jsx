@@ -16,7 +16,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: false, edit: false, delete: false },
     myNotes:               { view: true,  edit: true,  delete: true  },
-    staffContact:          { view: false, edit: false, delete: false },
+    staffContact:          { view: true,  edit: true,  delete: false },
     leave:                 { view: true,  edit: false, delete: false },
     leaveApply:            { view: true,  edit: true,  delete: false },
     officeVisitApply:      { view: true,  edit: true,  delete: false },
@@ -30,35 +30,15 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     attendanceHalfMonthly: { view: true,  edit: false, delete: false },
     attendanceMonthly:     { view: true,  edit: false, delete: false },
     attendanceYearly:      { view: true,  edit: false, delete: false },
-    dutyRoster:            { view: false, edit: false, delete: false },
+    dutyRoster:            { view: true,  edit: false, delete: false },
     shift:                 { view: false, edit: false, delete: false },
     settings:              { view: false, edit: false, delete: false },
+    attendanceDevice:      { view: false, edit: false, delete: false },
+    standaloneDevice:      { view: false, edit: false, delete: false },
   },
   departmentHead: {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: false, edit: false, delete: false },
-    myNotes:               { view: true,  edit: true,  delete: true  },
-    staffContact:          { view: false, edit: false, delete: false },
-    leave:                 { view: true,  edit: false, delete: false },
-    leaveApply:            { view: true,  edit: true,  delete: false },
-    officeVisitApply:      { view: true,  edit: true,  delete: false },
-    leaveApproval:         { view: true,  edit: true,  delete: false },
-    officeVisitApproval:   { view: true,  edit: true,  delete: false },
-    leaveCalculation:      { view: true,  edit: false, delete: false },
-    leaveReports:          { view: true,  edit: false, delete: false },
-    officeVisitReports:    { view: true,  edit: false, delete: false },
-    attendanceDaily:       { view: true,  edit: false, delete: false },
-    attendanceLedger:      { view: true,  edit: false, delete: false },
-    attendanceHalfMonthly: { view: true,  edit: false, delete: false },
-    attendanceMonthly:     { view: true,  edit: false, delete: false },
-    attendanceYearly:      { view: true,  edit: false, delete: false },
-    dutyRoster:            { view: false, edit: false, delete: false },
-    shift:                 { view: false, edit: false, delete: false },
-    settings:              { view: false, edit: false, delete: false },
-  },
-  branchManager: {
-    dashboard:             { view: true,  edit: false, delete: false },
-    staffDetail:           { view: true,  edit: true,  delete: true  },
     myNotes:               { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: false },
     leave:                 { view: true,  edit: false, delete: false },
@@ -74,9 +54,35 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     attendanceHalfMonthly: { view: true,  edit: false, delete: false },
     attendanceMonthly:     { view: true,  edit: false, delete: false },
     attendanceYearly:      { view: true,  edit: false, delete: false },
-    dutyRoster:            { view: false, edit: false, delete: false },
+    dutyRoster:            { view: true,  edit: true,  delete: true  },
     shift:                 { view: false, edit: false, delete: false },
     settings:              { view: false, edit: false, delete: false },
+    attendanceDevice:      { view: false, edit: false, delete: false },
+    standaloneDevice:      { view: false, edit: false, delete: false },
+  },
+  branchManager: {
+    dashboard:             { view: true,  edit: false, delete: false },
+    staffDetail:           { view: true,  edit: true,  delete: true  },
+    myNotes:               { view: true,  edit: true,  delete: true  },
+    staffContact:          { view: true,  edit: true,  delete: false },
+    leave:                 { view: true,  edit: false, delete: false },
+    leaveApply:            { view: true,  edit: true,  delete: false },
+    officeVisitApply:      { view: true,  edit: true,  delete: false },
+    leaveApproval:         { view: true,  edit: true,  delete: false },
+    officeVisitApproval:   { view: true,  edit: true,  delete: false },
+    leaveCalculation:      { view: true,  edit: true,  delete: false },
+    leaveReports:          { view: true,  edit: false, delete: false },
+    officeVisitReports:    { view: true,  edit: false, delete: false },
+    attendanceDaily:       { view: true,  edit: false, delete: false },
+    attendanceLedger:      { view: true,  edit: false, delete: false },
+    attendanceHalfMonthly: { view: true,  edit: false, delete: false },
+    attendanceMonthly:     { view: true,  edit: false, delete: false },
+    attendanceYearly:      { view: true,  edit: false, delete: false },
+    dutyRoster:            { view: true,  edit: true,  delete: true  },
+    shift:                 { view: false, edit: false, delete: false },
+    settings:              { view: false, edit: false, delete: false },
+    attendanceDevice:      { view: false, edit: false, delete: false },
+    standaloneDevice:      { view: false, edit: false, delete: false },
   },
   admin: {
     dashboard:             { view: true,  edit: true,  delete: true  },
@@ -99,6 +105,8 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     dutyRoster:            { view: true,  edit: true,  delete: true  },
     shift:                 { view: true,  edit: true,  delete: true  },
     settings:              { view: true,  edit: true,  delete: true  },
+    attendanceDevice:      { view: true,  edit: true,  delete: true  },
+    standaloneDevice:      { view: true,  edit: true,  delete: true  },
   },
 };
 
@@ -219,6 +227,9 @@ export const AuthProvider = ({ children }) => {
   const getPagePerm = useCallback((pageKey) => {
     if (!currentUser) return { view: false, edit: false };
     if (isAdmin) return { view: true, edit: true };
+    // Contact directory is shared, low-risk info (names/phone numbers) — always
+    // fully open for every role regardless of any Role Management override.
+    if (pageKey === 'staffContact') return { view: true, edit: true, delete: false };
 
     const role = currentUser.role || 'employee';
     const uid  = String(currentUser.id);

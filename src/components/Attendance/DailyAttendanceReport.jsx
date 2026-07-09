@@ -6,6 +6,7 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLeaveApply }      from '../../context/LeaveApplyContext.jsx';
 import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
+import { useMissingAttendanceApply } from '../../context/MissingAttendanceApplyContext.jsx';
 import api             from '../../api/client.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
@@ -209,6 +210,7 @@ const DailyAttendanceReport = () => {
   const navigate           = useNavigate();
   const { open: openLeave }       = useLeaveApply();
   const { open: openOfficeVisit } = useOfficeVisitApply();
+  const { open: openMissingAttendance } = useMissingAttendanceApply();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
   const { filteredEmployees: employees, shifts, getApprovedLeaveForDate, getLeaveTypeName, getEmployeeName, leaveTypes, rosterVersion } = useData();
@@ -778,7 +780,13 @@ const DailyAttendanceReport = () => {
         searchPlaceholder={L('कर्मचारी खोज्नुस...','Search staff...')}
         compact={false}
         loading={loading}
-        contextMenu={[
+        contextMenu={isEmployee ? [
+          {
+            label: 'Request for Missing Attendance',
+            icon: '📩',
+            onClick: (row) => openMissingAttendance(row.id, date),
+          },
+        ] : [
           {
             label: 'Add Manual Attendance',
             icon: '✍️',

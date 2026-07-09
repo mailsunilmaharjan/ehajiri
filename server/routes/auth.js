@@ -190,6 +190,7 @@ function camelUser(r) {
     gender      : r.gender,
     avatar      : r.avatar,
     active      : r.active,
+    eligibleForOt: r.eligible_for_ot,
   };
 }
 

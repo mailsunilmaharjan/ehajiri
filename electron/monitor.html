@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eHajiri Monitor</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --bg:#0f172a; --card:#1e293b; --border:#334155;
+  --text:#f1f5f9; --muted:#94a3b8;
+  --green:#22c55e; --yellow:#eab308; --red:#ef4444; --blue:#3b82f6;
+  --radius:8px;
+}
+html,body { height:100%; background:var(--bg); color:var(--text);
+  font-family:'Segoe UI',system-ui,sans-serif; font-size:13px;
+  overflow:hidden; user-select:none; }
+
+.header { display:flex; align-items:center; gap:8px; padding:10px 14px 8px;
+  background:#0a1628; border-bottom:1px solid var(--border);
+  -webkit-app-region:drag; }
+.header-logo { font-size:18px; }
+.header-title { font-weight:700; font-size:14px; flex:1; }
+.header-right { display:flex; align-items:center; gap:8px; -webkit-app-region:no-drag; }
+.hdr-status { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); }
+.dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; transition:background .3s; }
+.dot.running  { background:var(--green); box-shadow:0 0 6px var(--green); }
+.dot.starting { background:var(--yellow); animation:blink .8s infinite alternate; }
+.dot.stopped,.dot.error { background:var(--red); }
+@keyframes blink { from{opacity:.4} to{opacity:1} }
+.btn-close { background:none; border:none; color:var(--muted); cursor:pointer;
+  font-size:16px; padding:2px 5px; border-radius:4px; }
+.btn-close:hover { background:#334155; color:var(--text); }
+
+.body { padding:10px 12px; display:flex; flex-direction:column; gap:8px;
+  overflow-y:auto; height:calc(100% - 43px - 56px); }
+
+.card { background:var(--card); border:1px solid var(--border);
+  border-radius:var(--radius); padding:10px 12px; }
+.card-title { font-size:10px; font-weight:700; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.6px; margin-bottom:8px; }
+
+.status-row { display:flex; align-items:center; gap:8px; }
+.big-dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+.big-dot.running  { background:var(--green); box-shadow:0 0 8px var(--green); }
+.big-dot.starting { background:var(--yellow); }
+.big-dot.stopped,.big-dot.error { background:var(--red); }
+.status-lbl { font-size:18px; font-weight:800; text-transform:uppercase; letter-spacing:1px; }
+.status-lbl.running  { color:var(--green); }
+.status-lbl.starting { color:var(--yellow); }
+.status-lbl.stopped,.status-lbl.error { color:var(--red); }
+.status-meta { margin-left:auto; text-align:right; font-size:11px; color:var(--muted); line-height:1.6; }
+
+.info-grid { display:grid; grid-template-columns:auto 1fr; gap:5px 12px; align-items:center; }
+.ikey  { color:var(--muted); font-size:11px; white-space:nowrap; }
+.ival  { font-family:'Consolas',monospace; font-size:12px; display:flex; align-items:center; gap:5px; overflow:hidden; }
+.ival span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.icopy { background:none; border:none; color:var(--muted); cursor:pointer; font-size:11px;
+  padding:1px 4px; border-radius:3px; flex-shrink:0; }
+.icopy:hover { background:var(--border); color:var(--text); }
+.ilink { background:none; border:none; color:var(--blue); cursor:pointer; font-size:11px;
+  text-decoration:underline; padding:0; flex-shrink:0; }
+.ilink:hover { color:#60a5fa; }
+
+.devices-list { display:flex; flex-direction:column; gap:5px; max-height:160px; overflow-y:auto; }
+.device-row { display:flex; align-items:center; gap:8px; background:#0a1628;
+  border:1px solid var(--border); border-radius:6px; padding:7px 10px; }
+.dev-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.dev-dot.online  { background:var(--green); box-shadow:0 0 5px var(--green); }
+.dev-dot.offline { background:#475569; }
+.dev-info { flex:1; overflow:hidden; }
+.dev-name { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dev-sn   { font-size:10px; color:var(--muted); font-family:monospace; }
+.dev-right { text-align:right; flex-shrink:0; }
+.dev-ip   { font-family:monospace; font-size:11px; color:var(--muted); }
+.dev-st   { font-size:10px; font-weight:700; }
+.dev-st.online  { color:var(--green); }
+.dev-st.offline { color:#475569; }
+.no-dev { color:var(--muted); font-size:12px; text-align:center; padding:10px 0; }
+
+.log-box { background:#020617; border:1px solid var(--border); border-radius:6px;
+  padding:6px 8px; font-family:monospace; font-size:10px; color:#94a3b8;
+  max-height:65px; overflow-y:auto; line-height:1.5; }
+.log-ok  { color:#4ade80; }
+.log-err { color:#f87171; }
+
+.footer { padding:8px 12px; border-top:1px solid var(--border); background:#0a1628;
+  display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.btn { display:flex; align-items:center; gap:4px; padding:6px 12px;
+  border:none; border-radius:6px; font-size:12px; font-weight:600;
+  cursor:pointer; transition:opacity .15s; white-space:nowrap; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.btn:not(:disabled):hover { opacity:.85; }
+.btn-restart { background:#d97706; color:#fff; }
+.btn-open    { background:#1d4ed8; color:#fff; }
+.btn-auto    { background:#1e293b; border:1px solid var(--border); color:var(--muted); font-size:11px; padding:5px 8px; }
+.btn-auto.on { border-color:var(--green); color:var(--green); }
+
+.update-banner { background:linear-gradient(135deg,#1e3a8a,#312e81); border:1px solid var(--blue);
+  display:flex; align-items:center; gap:10px; }
+.update-banner .u-icon { font-size:20px; flex-shrink:0; }
+.update-banner .u-text { flex:1; }
+.update-banner .u-title { font-weight:700; font-size:13px; }
+.update-banner .u-sub   { font-size:11px; color:#c7d2fe; margin-top:1px; }
+.btn-update { background:var(--blue); color:#fff; flex-shrink:0; }
+
+.info-banner { background:#1e293b; border:1px solid var(--border);
+  display:flex; align-items:center; gap:10px; }
+.info-banner .u-icon { font-size:18px; flex-shrink:0; }
+.info-banner .u-text { flex:1; }
+.info-banner .u-title { font-weight:700; font-size:12px; }
+.info-banner .u-sub   { font-size:11px; color:var(--muted); margin-top:1px; }
+
+::-webkit-scrollbar { width:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#334155; border-radius:2px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="header-logo">📡</span>
+  <span class="header-title">eHajiri Monitor</span>
+  <div class="header-right">
+    <div class="hdr-status">
+      <span class="dot stopped" id="hdrDot"></span>
+      <span id="hdrStatus">stopped</span>
+    </div>
+    <button class="btn-close" onclick="hide()">✕</button>
+  </div>
+</div>
+
+<div class="body">
+  <!-- Update available -->
+  <div class="card update-banner" id="updateBanner" style="display:none">
+    <span class="u-icon">⬆️</span>
+    <div class="u-text">
+      <div class="u-title">Update <span id="updVersion">—</span> available</div>
+      <div class="u-sub" id="updSub">Click to install and restart</div>
+    </div>
+    <button class="btn btn-update" id="btnUpdate" onclick="ipc('apply-update')">Update Now</button>
+  </div>
+
+  <!-- System PostgreSQL detected (informational only, never acted on) -->
+  <div class="card info-banner" id="pgNotice" style="display:none">
+    <span class="u-icon">ℹ️</span>
+    <div class="u-text">
+      <div class="u-title">System PostgreSQL detected</div>
+      <div class="u-sub" id="pgNoticeSub">—</div>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div class="card">
+    <div class="card-title">Server Status</div>
+    <div class="status-row">
+      <span class="big-dot stopped" id="bigDot"></span>
+      <span class="status-lbl stopped" id="bigStatus">STOPPED</span>
+      <div class="status-meta" id="statusMeta">—</div>
+    </div>
+  </div>
+
+  <!-- Connection Info -->
+  <div class="card">
+    <div class="card-title">Connection Info</div>
+    <div class="info-grid">
+      <span class="ikey">Local IP</span>
+      <div class="ival"><span id="localIp">—</span>
+        <button class="icopy" onclick="cp('localIp')">📋</button></div>
+
+      <span class="ikey">API Port</span>
+      <div class="ival"><span id="apiPort">5001</span></div>
+
+      <span class="ikey">ADMS URL</span>
+      <div class="ival"><span id="admsUrl">—</span>
+        <button class="icopy" onclick="cp('admsUrl')">📋</button></div>
+
+      <span class="ikey">Dashboard</span>
+      <div class="ival"><span id="dashUrl">—</span>
+        <button class="ilink" onclick="openUrl('dashUrl')">↗</button></div>
+
+      <span class="ikey">ZKTeco Port</span>
+      <div class="ival"><span id="zkPort">5001</span></div>
+
+      <span class="ikey">Process ID</span>
+      <div class="ival"><span id="pidVal">—</span></div>
+    </div>
+  </div>
+
+  <!-- Version -->
+  <div class="card">
+    <div class="card-title">Version</div>
+    <div class="info-grid">
+      <span class="ikey">App Version</span>
+      <div class="ival"><span id="appVer">—</span></div>
+
+      <span class="ikey">DB Schema</span>
+      <div class="ival"><span id="dbVer">—</span></div>
+
+      <span class="ikey">Last Updated</span>
+      <div class="ival"><span id="dbUpdatedAt">—</span></div>
+    </div>
+  </div>
+
+  <!-- Devices -->
+  <div class="card">
+    <div class="card-title">ZKTeco Devices <span id="devCount" style="color:#64748b;font-weight:400"></span></div>
+    <div class="devices-list" id="devList">
+      <div class="no-dev">Starting server…</div>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <div class="card-title">Server Log</div>
+    <div class="log-box" id="logBox"><span style="color:#475569">— waiting —</span></div>
+  </div>
+</div>
+
+<div class="footer">
+  <button class="btn btn-restart" id="btnRestart" onclick="ipc('restart-server')">↺ Restart Server</button>
+  <button class="btn btn-open"    onclick="ipc('open-main-window')">🖥 Open eHajiri</button>
+  <button class="btn btn-auto"    id="btnAuto" onclick="ipc('toggle-autostart')">🚀 Auto-start</button>
+  <button class="btn btn-auto"    onclick="ipc('open-log-file')">📄 View Log</button>
+</div>
+
+<script>
+const { ipcRenderer } = require('electron');
+
+function ipc(ch) { ipcRenderer.send(ch); }
+function hide()  { ipcRenderer.send('hide-monitor'); }
+
+ipcRenderer.on('status-update', (_, d) => render(d));
+ipcRenderer.on('server-log',    (_, m) => appendLog(m));
+ipcRenderer.send('get-monitor-status');
+
+function render(d) {
+  const s = d.status || 'stopped';
+
+  // header
+  setDot('hdrDot', s); setText('hdrStatus', s);
+  setDot('bigDot', s);
+  const lbl = document.getElementById('bigStatus');
+  lbl.className = 'status-lbl ' + s;
+  lbl.textContent = s.toUpperCase();
+
+  // meta
+  let meta = '';
+  if (d.pid)      meta += 'PID: ' + d.pid;
+  if (d.uptimeMs) meta += (meta?'\n':'') + 'Up: ' + fmtUp(d.uptimeMs);
+  setText('statusMeta', meta || '—');
+
+  // info
+  setText('localIp', d.localIp || '—');
+  setText('apiPort',  d.serverPort || 5001);
+  setText('admsUrl', d.admsUrl || '—');
+  setText('dashUrl', d.dashUrl || '—');
+  setText('zkPort',  d.serverPort || 5001);
+  setText('pidVal',  d.pid || '—');
+
+  // version
+  setText('appVer', d.appVersion ? 'v' + d.appVersion : '—');
+  setText('dbVer',  d.dbApplied != null ? 'v' + d.dbApplied : '—');
+  setText('dbUpdatedAt', fmtDate(d.dbAppliedAt));
+
+  // buttons
+  document.getElementById('btnRestart').disabled = s === 'stopped';
+
+  // auto-start toggle
+  const ab = document.getElementById('btnAuto');
+  if (d.autoStart) { ab.classList.add('on'); ab.textContent = '🚀 Auto-start ✔'; }
+  else             { ab.classList.remove('on'); ab.textContent = '🚀 Auto-start'; }
+
+  // devices
+  renderDevices(d.devices || []);
+
+  // update banner
+  renderUpdateBanner(d.updateAvailable);
+
+  // system Postgres notice (informational only)
+  renderPgNotice(d.externalPostgres);
+}
+
+function renderPgNotice(services) {
+  const el = document.getElementById('pgNotice');
+  if (!services || !services.length) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  setText('pgNoticeSub', `Found: ${services.join(', ')} — eHajiri uses its own private database and does not use this service.`);
+}
+
+function renderUpdateBanner(upd) {
+  const banner = document.getElementById('updateBanner');
+  if (!upd) { banner.style.display = 'none'; return; }
+  banner.style.display = 'flex';
+  setText('updVersion', 'v' + upd.version);
+  const btn = document.getElementById('btnUpdate');
+  if (upd.updating) {
+    btn.disabled = true;
+    btn.textContent = 'Installing…';
+    setText('updSub', 'Downloading and installing — the app will restart automatically');
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Update Now';
+    setText('updSub', 'Click to install and restart');
+  }
+}
+
+function renderDevices(devs) {
+  const el  = document.getElementById('devList');
+  const cnt = document.getElementById('devCount');
+  cnt.textContent = devs.length ? `(${devs.length})` : '';
+  if (!devs.length) {
+    el.innerHTML = '<div class="no-dev">No devices registered</div>';
+    return;
+  }
+  const isOnline = d => d.last_seen &&
+    (Date.now() - new Date(d.last_seen).getTime()) < 15 * 60 * 1000;
+  el.innerHTML = devs.map(d => {
+    const on = isOnline(d);
+    const ip = (d.last_ip||'—').replace(/^::ffff:/i,'').replace(/^::1$/,'localhost');
+    return `<div class="device-row">
+      <span class="dev-dot ${on?'online':'offline'}"></span>
+      <div class="dev-info">
+        <div class="dev-name">${esc(d.name||'Unnamed')}</div>
+        <div class="dev-sn">${esc(d.serial_number||'—')}</div>
+      </div>
+      <div class="dev-right">
+        <div class="dev-ip">${esc(ip)}</div>
+        <div class="dev-st ${on?'online':'offline'}">${on?'ONLINE':'OFFLINE'}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+const LOG_MAX = 50;
+let logLines = [];
+function appendLog(msg) {
+  (msg||'').split('\n').filter(l=>l.trim()).forEach(line => {
+    const cls = line.startsWith('⚠')||line.startsWith('ERR') ? 'log-err' : 'log-ok';
+    logLines.push(`<div class="${cls}">${esc(line)}</div>`);
+  });
+  if (logLines.length > LOG_MAX) logLines = logLines.slice(-LOG_MAX);
+  const b = document.getElementById('logBox');
+  b.innerHTML = logLines.join('');
+  b.scrollTop = b.scrollHeight;
+}
+
+function setText(id, v) { const e=document.getElementById(id); if(e) e.textContent=v??'—'; }
+function setDot(id, s)  { const e=document.getElementById(id); if(e) e.className='dot '+s; }
+function cp(id) {
+  const e=document.getElementById(id); if(!e) return;
+  navigator.clipboard.writeText(e.textContent).catch(()=>{});
+}
+function openUrl(id) {
+  const e=document.getElementById(id); if(!e) return;
+  ipcRenderer.send('open-url', e.textContent.trim());
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function fmtUp(ms) {
+  const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60);
+  if(h) return `${h}h ${m%60}m`;
+  if(m) return `${m}m ${s%60}s`;
+  return `${s}s`;
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
+}
+</script>
+</body>
+</html>

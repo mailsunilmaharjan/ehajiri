@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useAuth, DEFAULT_PAGE_PERMISSIONS, savePagePermissions } from '../../context/AuthContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Role metadata
@@ -27,7 +28,7 @@ const MATRIX_GROUPS = [
     pages: [
       { key: 'staffDetail',  label: 'Staff Details', icon: '👥' },
       { key: 'myNotes',      label: 'My Notes',      icon: '📝' },
-      { key: 'staffContact', label: 'Contact',        icon: '📞' },
+      { key: 'staffContact', label: 'Contact',        icon: '📞', alwaysOn: true },
     ],
   },
   {
@@ -38,7 +39,7 @@ const MATRIX_GROUPS = [
       { key: 'officeVisitApply',    label: 'Apply for Office Visit',    icon: '🚗' },
       { key: 'leaveApproval',       label: 'Leave Approval',            icon: '✅' },
       { key: 'officeVisitApproval', label: 'Office Visit Approval',     icon: '✅' },
-      { key: 'leaveCalculation',    label: 'Leave Calculation',         icon: '🧮', viewOnly: true },
+      { key: 'leaveCalculation',    label: 'Leave Calculation',         icon: '🧮', noDelete: true },
       { key: 'leaveReports',        label: 'Leave Reports',             icon: '📊' },
       { key: 'officeVisitReports',  label: 'Office Visit Reports',      icon: '📊' },
     ],
@@ -59,6 +60,8 @@ const MATRIX_GROUPS = [
     pages: [
       { key: 'shift',    label: 'Shift Management', icon: '⏰', adminOnly: true },
       { key: 'settings', label: 'Settings',          icon: '⚙️', adminOnly: true },
+      { key: 'attendanceDevice', label: 'Attendance Device',  icon: '📡', adminOnly: true },
+      { key: 'standaloneDevice', label: 'StandAlone Device',  icon: '🖥️', adminOnly: true },
     ],
   },
 ];
@@ -86,7 +89,7 @@ const OVERRIDE_GROUPS = [
     desc: 'Staff section pages',
     pages: [
       { key: 'myNotes',      label: 'My Notes', icon: '📝' },
-      { key: 'staffContact', label: 'Contact',  icon: '📞' },
+      { key: 'staffContact', label: 'Contact',  icon: '📞', alwaysOn: true },
     ],
   },
   {
@@ -99,7 +102,7 @@ const OVERRIDE_GROUPS = [
       { key: 'officeVisitApply',    label: 'Apply Office Visit',   icon: '🚗' },
       { key: 'leaveApproval',       label: 'Leave Approval',       icon: '✅' },
       { key: 'officeVisitApproval', label: 'OV Approval',          icon: '✅' },
-      { key: 'leaveCalculation',    label: 'Leave Calculation',    icon: '🧮', viewOnly: true },
+      { key: 'leaveCalculation',    label: 'Leave Calculation',    icon: '🧮', noDelete: true },
     ],
   },
   {
@@ -143,11 +146,11 @@ const loadSaved = () => {
 /* ─────────────────────────────────────────────────────────────────────────
    PermCell  —  View | Edit | Delete checkboxes
 ───────────────────────────────────────────────────────────────────────── */
-const PermCell = ({ perm, onChange, disabled, viewOnly }) => {
+const PermCell = ({ perm, onChange, disabled, noDelete, disabledLabel = 'Admin only' }) => {
   if (disabled) {
     return (
       <div style={{ textAlign: 'center' }}>
-        <span style={{ fontSize: 12, color: '#9ca3af' }}>Admin only</span>
+        <span style={{ fontSize: 12, color: '#9ca3af' }}>{disabledLabel}</span>
       </div>
     );
   }
@@ -166,8 +169,11 @@ const PermCell = ({ perm, onChange, disabled, viewOnly }) => {
     onChange(next);
   };
 
-  const fields = viewOnly
-    ? [{ key: 'view', label: 'View', color: '#1a56db' }]
+  const fields = noDelete
+    ? [
+        { key: 'view', label: 'View', color: '#1a56db' },
+        { key: 'edit', label: 'Edit', color: '#059669' },
+      ]
     : [
         { key: 'view',   label: 'View',   color: '#1a56db' },
         { key: 'edit',   label: 'Edit',   color: '#059669' },
@@ -188,8 +194,8 @@ const PermCell = ({ perm, onChange, disabled, viewOnly }) => {
           <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{label}</span>
         </label>
       ))}
-      {viewOnly && (
-        <span style={{ fontSize: 11, color: '#9ca3af', fontStyle: 'italic' }}>view only</span>
+      {noDelete && (
+        <span style={{ fontSize: 11, color: '#9ca3af', fontStyle: 'italic' }}>no delete</span>
       )}
     </div>
   );
@@ -233,6 +239,9 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
     setToast('Staff override saved!');
     setTimeout(() => setToast(''), 2500);
   };
+
+  /* Ctrl+S saves — this section only exists while its tab is active */
+  useSaveShortcut(true, handleSave);
 
   const handleClearAll = () => {
     setOverrides({});
@@ -345,13 +354,15 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
                             )}
                           </td>
                           <td style={{ padding: '8px 14px', textAlign: 'center', borderBottom: '1px solid #eef0f4' }}>
-                            {hasOverride
-                              ? <PermCell perm={currPerm} onChange={p => setPerm(page.key, p)} disabled={false} viewOnly={!!page.viewOnly} />
-                              : <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>inherits role default</span>
+                            {page.alwaysOn
+                              ? <PermCell perm={{ view: true, edit: true, delete: false }} onChange={() => {}} disabled disabledLabel="Always on — every role" noDelete={!!page.noDelete} />
+                              : hasOverride
+                                ? <PermCell perm={currPerm} onChange={p => setPerm(page.key, p)} disabled={false} noDelete={!!page.noDelete} />
+                                : <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>inherits role default</span>
                             }
                           </td>
                           <td style={{ padding: '8px 14px', textAlign: 'center', borderBottom: '1px solid #eef0f4' }}>
-                            {hasOverride
+                            {page.alwaysOn ? null : hasOverride
                               ? <button onClick={() => clearPerm(page.key)}
                                   style={{ fontSize: 12, padding: '4px 10px', border: '1px solid #f87171',
                                     borderRadius: 6, background: 'white', color: '#dc2626', cursor: 'pointer' }}>
@@ -374,10 +385,10 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
           ))}
 
           <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-            <button onClick={handleSave}
+            <button onClick={handleSave} title="Ctrl+S"
               style={{ padding: '9px 26px', border: 'none', borderRadius: 8, background: '#1a56db',
                 color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              💾 Save Overrides
+              💾 <u>S</u>ave Overrides
             </button>
             <button onClick={handleClearAll}
               style={{ padding: '9px 18px', border: '1.5px solid #f87171', borderRadius: 8,
@@ -587,6 +598,9 @@ const RoleManagement = () => {
     setTimeout(() => setSaveMsg(''), 2500);
   };
 
+  /* Ctrl+S saves the Permission Matrix — only while that tab is active */
+  useSaveShortcut(activeTab === 'matrix', handleSaveMatrix);
+
   const handleStaffSave = (next) => {
     setSaved(next);
     refreshPagePerms();
@@ -707,10 +721,11 @@ const RoleManagement = () => {
                             <td key={r.key} style={{ padding: '8px 12px', textAlign: 'center',
                               borderBottom: '1px solid #eef0f4', borderLeft: '1px solid #f3f4f6' }}>
                               <PermCell
-                                perm={rolePerms[r.key]?.[page.key] || { view: false, edit: false, delete: false }}
+                                perm={page.alwaysOn ? { view: true, edit: true, delete: false } : (rolePerms[r.key]?.[page.key] || { view: false, edit: false, delete: false })}
                                 onChange={p => setPerm(r.key, page.key, p)}
-                                disabled={!!page.adminOnly}
-                                viewOnly={!!page.viewOnly}
+                                disabled={!!page.adminOnly || !!page.alwaysOn}
+                                disabledLabel={page.alwaysOn ? 'Always on — every role' : 'Admin only'}
+                                noDelete={!!page.noDelete}
                               />
                             </td>
                           ))}
@@ -719,7 +734,7 @@ const RoleManagement = () => {
                             borderBottom: '1px solid #eef0f4', borderLeft: '1px solid #f3f4f6',
                             background: '#faf5ff' }}>
                             <span style={{ fontSize: 13, color: '#7e3af2', fontWeight: 600 }}>
-                              {page.viewOnly ? '✓ View only' : '✓ View + Edit + Delete'}
+                              {page.noDelete ? '✓ View + Edit' : '✓ View + Edit + Delete'}
                             </span>
                           </td>
                         </tr>
@@ -731,11 +746,11 @@ const RoleManagement = () => {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 18 }}>
-              <button onClick={handleSaveMatrix}
+              <button onClick={handleSaveMatrix} title="Ctrl+S"
                 style={{ padding: '10px 28px', border: 'none', borderRadius: 8, background: '#1a56db',
                   color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer',
                   boxShadow: '0 2px 8px rgba(26,86,219,.3)' }}>
-                💾 Save Permission Matrix
+                💾 <u>S</u>ave Permission Matrix
               </button>
               {saveMsg && <span style={{ fontSize: 13, color: '#059669', fontWeight: 700 }}>✅ {saveMsg}</span>}
               <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 'auto' }}>

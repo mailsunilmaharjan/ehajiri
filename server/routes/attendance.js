@@ -8,6 +8,9 @@ import pool    from '../db.js';
 import { registerClient, broadcastNotification } from '../services/liveNotifications.js';
 import { buildPunchNotification }                from '../services/punchNotification.js';
 import { logError } from '../utils/logError.js';
+import { resolveEmployeeScope, isEmployeeScopedUser } from './attendanceScope.js';
+import { notifyUsers } from '../services/internalMessages.js';
+import { sendMissingAttendanceApplication } from '../services/emailService.js';
 
 const router = express.Router();
 
@@ -136,11 +139,10 @@ const getEffectiveRoster = (rosterMap, empId, dateStr) => {
          null;
 };
 
-// â”€â”€ GET /daily â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-router.get('/daily', async (req, res) => {
-  const date = (req.query.date || new Date().toISOString().split('T')[0]).trim();
-
-  try {
+// ── Core per-day attendance computation (shared by the /daily route and the
+//    daily notification scheduler — single source of truth for
+//    Present/Absent/Late/Early classification) ───────────────────────────────────────
+export async function computeDailyAttendance(date) {
     // â”€â”€ 1. Effective weekends + public holidays for the date â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [wkRes, publicHolidays] = await Promise.all([
       pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [date]),
@@ -318,8 +320,7 @@ router.get('/daily', async (req, res) => {
           : manualStr;
       });
     } catch (_) {}
-
-    // â”€â”€ 4. Compute derived fields (Late In, Early Out, OT, Status) per row â”€â”€
+    // ── 4. Compute derived fields (Late In, Early Out, OT, Status) per row ──
     const computed = rows.map(r => {
       const {
         time_in, time_out, shift_start, shift_end,
@@ -448,7 +449,19 @@ router.get('/daily', async (req, res) => {
       };
     });
 
-    res.json({ date, dayKey, isWeekend, weekends, rows: computed });
+    return { dayKey, isWeekend, weekends, rows: computed };
+}
+
+// ── GET /daily ──────────────────────────────────────────────────────
+router.get('/daily', async (req, res) => {
+  const date = (req.query.date || new Date().toISOString().split('T')[0]).trim();
+  const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
+  try {
+    const { dayKey, isWeekend, weekends, rows: computed } = await computeDailyAttendance(date);
+    const scopedRows = isScoped
+      ? computed.filter(r => String(r.id) === String(scopeEmployeeId))
+      : computed;
+    res.json({ date, dayKey, isWeekend, weekends, rows: scopedRows });
   } catch (err) {
     logError('[Attendance/daily]', err);
     res.status(500).json({ error: err.message });
@@ -457,7 +470,8 @@ router.get('/daily', async (req, res) => {
 
 // â”€â”€ GET /staff-ledger — individual staff attendance ledger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 router.get('/staff-ledger', async (req, res) => {
-  const employeeId = parseInt(req.query.employeeId);
+  const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req, req.query.employeeId);
+  const employeeId = isScoped ? scopeEmployeeId : parseInt(req.query.employeeId);
 
   // Accept EITHER explicit startDate/endDate (preferred — exact BS month boundaries)
   // OR legacy year/month/half approach
@@ -924,6 +938,7 @@ router.get('/half-monthly', async (req, res) => {
     // â”€â”€ Default shift â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const shiftRes = await pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`);
     const defShift = shiftRes.rows[0];
+    const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
 
     // â”€â”€ All active employees (with per-employee shift info) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const empRes = await pool.query(`
@@ -936,7 +951,9 @@ router.get('/half-monthly', async (req, res) => {
       WHERE  u.active=TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
       ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
     `);
-    const employees = empRes.rows;
+    const employees = isScoped
+      ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
+      : empRes.rows;
 
     // â”€â”€ Duty roster map for the period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const rosterMapHalf = await loadRosterMap(startDate, endDate);
@@ -1176,26 +1193,26 @@ router.get('/half-monthly', async (req, res) => {
     // â”€â”€ AI Insights â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const insights = [];
     if (avgAttRate >= 90)
-      insights.push({ type:'positive', icon:'ðŸŒŸ', text:`Excellent half-month! Average attendance rate is ${avgAttRate}% — above target.` });
+      insights.push({ type:'positive', icon:'🌟', text:`Excellent half-month! Average attendance rate is ${avgAttRate}% — above target.` });
     else if (avgAttRate >= 75)
-      insights.push({ type:'neutral', icon:'ðŸ“Š', text:`Average attendance rate is ${avgAttRate}%. ${Math.ceil((90-avgAttRate)/100*totalEmp)} more staff needed for 90%+ target.` });
+      insights.push({ type:'neutral', icon:'📊', text:`Average attendance rate is ${avgAttRate}%. ${Math.ceil((90-avgAttRate)/100*totalEmp)} more staff needed for 90%+ target.` });
     else
-      insights.push({ type:'warning', icon:'âš ï¸', text:`Attendance rate is ${avgAttRate}% — significantly below 90% target. Immediate action needed.` });
+      insights.push({ type:'warning', icon:'⚠️', text:`Attendance rate is ${avgAttRate}% — significantly below 90% target. Immediate action needed.` });
 
     if (perfectAtt > 0)
-      insights.push({ type:'positive', icon:'ðŸ†', text:`${perfectAtt} staff member${perfectAtt>1?'s':''} achieved perfect attendance with zero absences or late arrivals!` });
+      insights.push({ type:'positive', icon:'🏆', text:`${perfectAtt} staff member${perfectAtt>1?'s':''} achieved perfect attendance with zero absences or late arrivals!` });
 
     if (totalLate > 0) {
       const pct = Math.round((stats.filter(s=>s.lateCount>0).length/totalEmp)*100);
-      insights.push({ type: pct>50?'warning':'neutral', icon:'â°', text:`${pct}% of staff had at least one late arrival. Top offender: ${mostLate[0]?.fullName||'—'} (${mostLate[0]?.lateCount||0} times).` });
+      insights.push({ type: pct>50?'warning':'neutral', icon:'⏰', text:`${pct}% of staff had at least one late arrival. Top offender: ${mostLate[0]?.fullName||'—'} (${mostLate[0]?.lateCount||0} times).` });
     }
 
     if (mostAbsent[0]?.absentDays >= 5)
-      insights.push({ type:'warning', icon:'ðŸ“…', text:`${stats.filter(s=>s.absentDays>=3).length} staff with 3+ absences. ${mostAbsent[0]?.fullName} has the most at ${mostAbsent[0]?.absentDays} days.` });
+      insights.push({ type:'warning', icon:'📅', text:`${stats.filter(s=>s.absentDays>=3).length} staff with 3+ absences. ${mostAbsent[0]?.fullName} has the most at ${mostAbsent[0]?.absentDays} days.` });
 
     if (totalOTMins > 0) {
       const otHrs = Math.round(totalOTMins/60);
-      insights.push({ type:'positive', icon:'ðŸ’ª', text:`Total team overtime: ${otHrs} hours. ${mostOT[0]?.fullName||'—'} contributed the most (${mostOT[0]?.otFormatted||'—'}).` });
+      insights.push({ type:'positive', icon:'💪', text:`Total team overtime: ${otHrs} hours. ${mostOT[0]?.fullName||'—'} contributed the most (${mostOT[0]?.otFormatted||'—'}).` });
     }
 
     res.json({
@@ -1255,6 +1272,12 @@ router.get('/monthly', async (req, res) => {
       WHERE  u.active=$1
       ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [hmActiveParam]);
+    const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
+    // Stats are computed over EVERY active employee regardless of scope — a scoped
+    // (employee-role) caller's `stats` array is narrowed back down to just their own
+    // row further below, only after using the full array to compute their rank.
+    // This keeps the existing single-employee response shape (and MonthlyReport.jsx's
+    // rendering) unchanged, while allowing a privacy-safe rank number to be derived.
     const employees = empRes.rows;
 
     // â”€â”€ Duty roster map for the month â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1319,7 +1342,7 @@ router.get('/monthly', async (req, res) => {
     // Only approved OT counts in monthly report — use manager-set value
     const monthlyApprovedOTSet = await loadApprovedOTMap(startDate, endDate);
 
-    const stats = employees.map(emp => {
+    let stats = employees.map(emp => {
       const empLogs  = logsMap[emp.id] || {};
       const empLeave = new Set(leaveMap[emp.id] || []);
 
@@ -1401,6 +1424,27 @@ router.get('/monthly', async (req, res) => {
       };
     });
 
+    // A scoped (employee-role) caller only ever gets their OWN row back below — but
+    // their rank is computed here, over everyone, before narrowing. Only the rank
+    // number/total is returned to them, never any other employee's data.
+    let myRanks = null;
+    if (isScoped) {
+      const rankOf = (key) => {
+        const sorted = [...stats].sort((a, b) => b[key] - a[key]);
+        const idx = sorted.findIndex(s => String(s.id) === String(scopeEmployeeId));
+        return idx === -1 ? null : idx + 1;
+      };
+      myRanks = {
+        total       : stats.length,
+        punctuality : rankOf('punctualityScore'),
+        lateArrivals: rankOf('lateCount'),
+        earlyOut    : rankOf('earlyCount'),
+        absences    : rankOf('absentDays'),
+        attendance  : rankOf('presentDays'),
+      };
+      stats = stats.filter(s => String(s.id) === String(scopeEmployeeId));
+    }
+
     const sortBy = (key, asc=false) => [...stats].sort((a,b)=>asc?a[key]-b[key]:b[key]-a[key]);
     const topPunctual  = sortBy('punctualityScore').filter(s=>s.presentDays>0).slice(0,5);
     const mostLate     = sortBy('lateCount').filter(s=>s.lateCount>0).slice(0,5);
@@ -1419,22 +1463,23 @@ router.get('/monthly', async (req, res) => {
     const perfectAtt  = stats.filter(s=>s.absentDays===0&&s.lateCount===0&&s.presentDays===totalWorkingDays).length;
 
     const insights = [];
-    if (avgAttRate>=90) insights.push({ type:'positive', icon:'ðŸŒŸ', text:`Excellent month! Average attendance is ${avgAttRate}% — above target.` });
-    else if (avgAttRate>=75) insights.push({ type:'neutral', icon:'ðŸ“Š', text:`Monthly attendance is ${avgAttRate}%. ${Math.ceil((90-avgAttRate)/100*totalEmp)} more staff needed for 90%+ target.` });
-    else insights.push({ type:'warning', icon:'âš ï¸', text:`Monthly attendance is ${avgAttRate}% — below 90% target.` });
-    if (perfectAtt>0) insights.push({ type:'positive', icon:'ðŸ†', text:`${perfectAtt} staff achieved perfect attendance for the full month!` });
+    if (avgAttRate>=90) insights.push({ type:'positive', icon:'🌟', text:`Excellent month! Average attendance is ${avgAttRate}% — above target.` });
+    else if (avgAttRate>=75) insights.push({ type:'neutral', icon:'📊', text:`Monthly attendance is ${avgAttRate}%. ${Math.ceil((90-avgAttRate)/100*totalEmp)} more staff needed for 90%+ target.` });
+    else insights.push({ type:'warning', icon:'⚠️', text:`Monthly attendance is ${avgAttRate}% — below 90% target.` });
+    if (perfectAtt>0) insights.push({ type:'positive', icon:'🏆', text:`${perfectAtt} staff achieved perfect attendance for the full month!` });
     if (totalLate>0) {
       const pct=Math.round((stats.filter(s=>s.lateCount>0).length/totalEmp)*100);
-      insights.push({ type:pct>50?'warning':'neutral', icon:'â°', text:`${pct}% of staff had at least one late arrival. Most: ${mostLate[0]?.fullName||'—'} (${mostLate[0]?.lateCount||0} times).` });
+      insights.push({ type:pct>50?'warning':'neutral', icon:'⏰', text:`${pct}% of staff had at least one late arrival. Most: ${mostLate[0]?.fullName||'—'} (${mostLate[0]?.lateCount||0} times).` });
     }
-    if (mostAbsent[0]?.absentDays>=5) insights.push({ type:'warning', icon:'ðŸ“…', text:`${stats.filter(s=>s.absentDays>=3).length} staff with 3+ absences. Most: ${mostAbsent[0]?.fullName} (${mostAbsent[0]?.absentDays} days).` });
-    if (totalOTMins>0) insights.push({ type:'positive', icon:'ðŸ’ª', text:`Total monthly OT: ${Math.round(totalOTMins/60)} hours. Top: ${mostOT[0]?.fullName||'—'} (${mostOT[0]?.otFormatted||'—'}).` });
+    if (mostAbsent[0]?.absentDays>=5) insights.push({ type:'warning', icon:'📅', text:`${stats.filter(s=>s.absentDays>=3).length} staff with 3+ absences. Most: ${mostAbsent[0]?.fullName} (${mostAbsent[0]?.absentDays} days).` });
+    if (totalOTMins>0) insights.push({ type:'positive', icon:'💪', text:`Total monthly OT: ${Math.round(totalOTMins/60)} hours. Top: ${mostOT[0]?.fullName||'—'} (${mostOT[0]?.otFormatted||'—'}).` });
 
     res.json({
       period: { year, month, startDate, endDate, totalWorkingDays },
       summary: { totalEmp, totalPresent, totalAbsent, totalLeave, totalLate, totalOTMins, avgAttRate, perfectAtt },
       rankings: { topPunctual, mostLate, mostEarlyOut, mostAbsent, mostOT, mostPresent },
       insights, allStats: stats,
+      myRanks,
     });
   } catch (err) {
     logError('[attendance/monthly]', err);
@@ -1486,6 +1531,7 @@ router.get('/half-in-out', async (req, res) => {
       cur.setDate(cur.getDate() + 1);
     }
 
+    const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
     const [empRes, leavesRes, visitRes] = await Promise.all([
       pool.query(`
         SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
@@ -1576,7 +1622,9 @@ router.get('/half-in-out', async (req, res) => {
 
     const [seH, seM] = shiftEnd.split(':').map(Number);
 
-    const employees = empRes.rows.map(emp => {
+    const employees = (isScoped
+      ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
+      : empRes.rows).map(emp => {
       const empLogs  = logsMap[emp.id]     || {};
       const empLeave = leaveMap[emp.id]    || {};
       const empVisit = visitMapIO[emp.id]  || {};
@@ -1672,6 +1720,7 @@ router.get('/half-late-early', async (req, res) => {
     }
 
     // Employees with per-employee shift fallback to default
+    const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
     const empRes = await pool.query(`
       SELECT u.id, u.full_name AS "fullName", u.position, u.department, u.branch,
              u.shift AS "shiftCode", u.grade, u.mode, u.timing_type AS "timingType",
@@ -1740,8 +1789,11 @@ router.get('/half-late-early', async (req, res) => {
     }
 
     // Build flat records — one row per late/early occurrence
+    const employees = isScoped
+      ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
+      : empRes.rows;
     const records = [];
-    for (const emp of empRes.rows) {
+    for (const emp of employees) {
       const empLogs = logsMap[emp.id] || {};
       const empRosterEntriesLE = rosterMapLE[emp.id] || [];
       const getEmpRosterLE = (ds) =>
@@ -1861,6 +1913,7 @@ router.get('/present-absent', async (req, res) => {
 
     // Employees — active=true by default; pass ?active=false for not-working staff
     const activeParam = req.query.active !== 'false';
+    const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
              u.branch, u.department, u.position, u.grade, u.mode,
@@ -1875,7 +1928,9 @@ router.get('/present-absent', async (req, res) => {
       WHERE  u.active = $1 AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
       ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [activeParam]);
-    const employees = empRes.rows;
+    const employees = isScoped
+      ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
+      : empRes.rows;
 
     // Attendance logs
     const logsRes = await pool.query(`
@@ -2028,6 +2083,7 @@ router.get('/yearly-analytics', async (req, res) => {
   const endDate   = `${adYear}-12-31`;
 
   try {
+    const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
     const [wkRows, publicHolidays, empRows, shiftRow] = await Promise.all([
       pool.query(`SELECT weekends, effective_date FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date ASC`, [endDate]),
       loadPublicHolidays(),
@@ -2035,7 +2091,9 @@ router.get('/yearly-analytics', async (req, res) => {
       pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
 
-    const employees = empRows.rows;
+    const employees = isScoped
+      ? empRows.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
+      : empRows.rows;
     const defShift  = shiftRow.rows[0];
     const getHoliday = makeHolidayChecker(publicHolidays);
     const DOW_KEYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -2402,6 +2460,195 @@ router.delete('/manual-postings/:id', async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     logError('[manual-postings DELETE]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Missing Attendance Requests ──────────────────────────────────────────────
+// Employee-initiated "I was actually present but attendance wasn't recorded"
+// requests. Notifies the assigned recommender/approver by email + in-app
+// message; approval upserts a real attendance_manual_postings row.
+
+const toMissingRequest = r => ({
+  id: r.id, employeeId: r.employee_id, employeeName: r.employee_name,
+  date: r.date, checkIn: r.check_in, checkOut: r.check_out, reason: r.reason,
+  recommendedBy: r.recommended_by, recommendedByName: r.recommended_by_name,
+  approvedBy: r.approved_by, approvedByName: r.approved_by_name,
+  status: r.status, comment: r.comment,
+  createdAt: r.created_at, decidedAt: r.decided_at,
+});
+
+router.get('/missing-requests', async (req, res) => {
+  const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
+  try {
+    const { rows } = await pool.query(`
+      SELECT mr.*, u.full_name AS employee_name,
+             rb.full_name AS recommended_by_name, ab.full_name AS approved_by_name
+      FROM   attendance_missing_requests mr
+      JOIN   users u  ON u.id = mr.employee_id
+      LEFT   JOIN users rb ON rb.id = mr.recommended_by
+      LEFT   JOIN users ab ON ab.id = mr.approved_by
+      WHERE  ($1::boolean IS FALSE) OR (mr.employee_id = $2 OR mr.recommended_by = $2 OR mr.approved_by = $2)
+      ORDER  BY mr.created_at DESC
+    `, [isScoped, scopeEmployeeId]);
+    res.json(rows.map(toMissingRequest));
+  } catch (e) {
+    logError('[missing-requests GET]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/missing-requests', async (req, res) => {
+  const { date, checkIn, checkOut, reason, recommendedBy, approvedBy } = req.body;
+  const employeeId = req.user.id;
+  if (!date || !reason?.trim()) {
+    return res.status(400).json({ error: 'Date and reason are required' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      INSERT INTO attendance_missing_requests
+        (employee_id, date, check_in, check_out, reason, recommended_by, approved_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING *
+    `, [employeeId, date, checkIn || null, checkOut || null, reason.trim(),
+        recommendedBy || null, approvedBy || null]);
+    const request = rows[0];
+
+    // Best-effort notification — never fail the request over email/message issues.
+    try {
+      const requester = (await pool.query('SELECT full_name FROM users WHERE id=$1', [employeeId])).rows[0];
+      const notifyIds = [recommendedBy, approvedBy].filter(Boolean).map(Number);
+      if (notifyIds.length) {
+        const { rows: recipients } = await pool.query(
+          `SELECT id, email, full_name FROM users WHERE id = ANY($1::int[])`, [notifyIds]
+        );
+        for (const r of recipients) {
+          if (r.email) {
+            await sendMissingAttendanceApplication({
+              to: r.email, fullName: requester?.full_name || '',
+              date, checkIn, checkOut, reason: reason.trim(),
+            });
+          }
+        }
+        await notifyUsers({
+          senderId: employeeId,
+          recipientIds: notifyIds,
+          subject: `Missing Attendance Request: ${requester?.full_name || ''}`,
+          body: `${requester?.full_name || 'A staff member'} requested missing attendance for ${date}. Reason: ${reason.trim()}`,
+        });
+      }
+    } catch (notifyErr) {
+      logError('[missing-requests POST notify]', notifyErr);
+    }
+
+    res.status(201).json(toMissingRequest(request));
+  } catch (e) {
+    logError('[missing-requests POST]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/missing-requests/:id/recommend', async (req, res) => {
+  const { comment } = req.body;
+  try {
+    const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
+    const existing = rows[0];
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const isAssigned = String(existing.recommended_by) === String(req.user.id);
+    if (!isAssigned && isEmployeeScopedUser(req.user)) {
+      return res.status(403).json({ error: 'Not authorized to recommend this request' });
+    }
+    if (existing.status !== 'pending') {
+      return res.status(400).json({ error: `Cannot recommend a request that is already ${existing.status}` });
+    }
+    const { rows: updated } = await pool.query(`
+      UPDATE attendance_missing_requests SET status='recommended', comment=$1 WHERE id=$2 RETURNING *
+    `, [comment || null, req.params.id]);
+    res.json(toMissingRequest(updated[0]));
+  } catch (e) {
+    logError('[missing-requests recommend]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/missing-requests/:id/approve', async (req, res) => {
+  const { comment } = req.body;
+  try {
+    const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
+    const existing = rows[0];
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const isAssigned = String(existing.approved_by) === String(req.user.id);
+    if (!isAssigned && isEmployeeScopedUser(req.user)) {
+      return res.status(403).json({ error: 'Not authorized to approve this request' });
+    }
+    if (!['pending', 'recommended'].includes(existing.status)) {
+      return res.status(400).json({ error: `Cannot approve a request that is already ${existing.status}` });
+    }
+    const { rows: updated } = await pool.query(`
+      UPDATE attendance_missing_requests
+      SET status='approved', comment=$1, decided_at=NOW()
+      WHERE id=$2 RETURNING *
+    `, [comment || null, req.params.id]);
+
+    await pool.query(`
+      INSERT INTO attendance_manual_postings
+        (employee_id, date, check_in, check_out, remark, recommended_by, approved_by, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (employee_id, date) DO UPDATE SET
+        check_in = EXCLUDED.check_in, check_out = EXCLUDED.check_out,
+        remark = EXCLUDED.remark, recommended_by = EXCLUDED.recommended_by,
+        approved_by = EXCLUDED.approved_by, updated_at = NOW()
+    `, [existing.employee_id, existing.date, existing.check_in, existing.check_out,
+        `Missing attendance request: ${existing.reason}`,
+        existing.recommended_by, req.user.id, existing.employee_id]);
+
+    res.json(toMissingRequest(updated[0]));
+  } catch (e) {
+    logError('[missing-requests approve]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/missing-requests/:id/reject', async (req, res) => {
+  const { comment } = req.body;
+  try {
+    const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
+    const existing = rows[0];
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const isAssigned = String(existing.approved_by) === String(req.user.id) || String(existing.recommended_by) === String(req.user.id);
+    if (!isAssigned && isEmployeeScopedUser(req.user)) {
+      return res.status(403).json({ error: 'Not authorized to reject this request' });
+    }
+    if (!['pending', 'recommended'].includes(existing.status)) {
+      return res.status(400).json({ error: `Cannot reject a request that is already ${existing.status}` });
+    }
+    const { rows: updated } = await pool.query(`
+      UPDATE attendance_missing_requests
+      SET status='rejected', comment=$1, decided_at=NOW()
+      WHERE id=$2 RETURNING *
+    `, [comment || null, req.params.id]);
+    res.json(toMissingRequest(updated[0]));
+  } catch (e) {
+    logError('[missing-requests reject]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/missing-requests/:id', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
+    const existing = rows[0];
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (String(existing.employee_id) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'You can only cancel your own request' });
+    }
+    if (existing.status !== 'pending') {
+      return res.status(400).json({ error: `Cannot cancel a request that is already ${existing.status}` });
+    }
+    await pool.query('DELETE FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) {
+    logError('[missing-requests DELETE]', e);
     res.status(500).json({ error: e.message });
   }
 });

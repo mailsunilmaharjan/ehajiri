@@ -7,6 +7,7 @@ import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 
 const pad2   = (n) => String(Math.round(Math.abs(n))).padStart(2, '0');
 const toHHMM = (m) => `${pad2(Math.floor(Math.abs(m) / 60))}:${pad2(Math.abs(m) % 60)}`;
@@ -143,6 +144,9 @@ const OvertimePage = () => {
     } catch (e) { showToast(e.message || 'Save failed', 'error'); }
     finally { setOtSettingsSaving(false); }
   };
+
+  /* Ctrl+S saves the OT Settings modal — same action as the Save Settings button */
+  useSaveShortcut(showOTSettings, saveOTSettings);
 
   const showToast = (msg, type='success') => {
     setToast({ msg, type });
@@ -968,8 +972,8 @@ const OvertimePage = () => {
             {/* Footer */}
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setShowOTSettings(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={saveOTSettings} disabled={otSettingsSaving}>
-                {otSettingsSaving ? 'Saving…' : '💾 Save Settings'}
+              <button className="btn btn-primary" onClick={saveOTSettings} disabled={otSettingsSaving} title="Ctrl+S">
+                {otSettingsSaving ? 'Saving…' : <>💾 <u>S</u>ave Settings</>}
               </button>
             </div>
           </div>

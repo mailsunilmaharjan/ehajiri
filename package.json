@@ -1,6 +1,6 @@
 {
   "name": "attendance-software",
-  "version": "1.0.2",
+  "version": "1.0.12",
   "description": "हाजिरी व्यवस्थापन प्रणाली - Attendance Management System",
   "author": "eHajiri",
   "private": true,
@@ -13,13 +13,16 @@
     "dev:electron": "concurrently -n \"vite,server,electron\" -c \"blue,green,yellow\" \"vite\" \"node --watch server/index.js\" \"wait-on http://localhost:4000 && electron .\"",
     "build": "vite build",
     "build:prod": "node installer/scripts/obfuscate-build.js",
+    "build:bridge": "dotnet publish standalone-bridge -c Release -r win-x86 --self-contained true -o standalone-bridge/publish",
+    "prepackage": "npm run build:bridge",
+    "premake": "npm run build:bridge",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "preview": "vite preview",
     "seed": "node server/seed.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.104.1",
+    "embedded-postgres": "^18.4.0-beta.17",
     "qrcode": "^1.5.4",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

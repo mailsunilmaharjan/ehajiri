@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useLocation } from 'react-router-dom';
+import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useAuth }     from '../../context/AuthContext.jsx';
+import { useLeaveApply }      from '../../context/LeaveApplyContext.jsx';
+import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
+import { useMissingAttendanceApply } from '../../context/MissingAttendanceApplyContext.jsx';
 import api             from '../../api/client.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
@@ -162,6 +165,10 @@ const StaffSelect = ({ employees, value, onChange }) => {
 const StaffLedger = () => {
   const [searchParams] = useSearchParams();
   const location       = useLocation();
+  const navigate        = useNavigate();
+  const { open: openLeave }       = useLeaveApply();
+  const { open: openOfficeVisit } = useOfficeVisitApply();
+  const { open: openMissingAttendance } = useMissingAttendanceApply();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
   const { filteredEmployees: employees, getApprovedLeaveForDate, getLeaveTypeName, getEmployeeName, leaveTypes, rosterVersion } = useData();
@@ -807,7 +814,8 @@ const StaffLedger = () => {
         </div>
 
         {/* Navigation panel — right of the staff card, single horizontal line */}
-        {sortedEmps.length > 1 && (
+        {/* Hidden for staff-role users — they're locked to their own record */}
+        {!isStaffLogin && sortedEmps.length > 1 && (
           <div style={{ display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'center',
             gap:8, background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10,
             padding:'10px 16px', flexShrink:0 }}>
@@ -863,6 +871,30 @@ const StaffLedger = () => {
           showCheckbox={false}
           autoWidth={true}
           showFilterButton={false}
+          contextMenu={!emp ? null : isStaffLogin ? [
+            {
+              label: 'Request for Missing Attendance',
+              icon: '📩',
+              onClick: (row) => openMissingAttendance(emp.id, row.dateStr),
+            },
+          ] : [
+            {
+              label: 'Add Manual Attendance',
+              icon: '✍️',
+              onClick: (row) => navigate('/attendance/manual-postings', { state: { employeeId: emp.id, employeeName: emp.fullName, date: row.dateStr } }),
+            },
+            'divider',
+            {
+              label: 'Leave Posting',
+              icon: '🌴',
+              onClick: () => openLeave(emp.id),
+            },
+            {
+              label: 'Office Visit Posting',
+              icon: '🚗',
+              onClick: () => openOfficeVisit(emp.id),
+            },
+          ]}
           toolbarLeft={
             <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
               <span style={{ fontSize:12, fontWeight:700, color:'#374151', whiteSpace:'nowrap' }}>

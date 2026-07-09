@@ -3,6 +3,9 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import SaveButton from '../Common/SaveButton.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import useNewShortcut from '../../hooks/useNewShortcut.js';
 
 const DAYS = [
   { key: 'Sun', label: 'आ' }, { key: 'Mon', label: 'सो' }, { key: 'Tue', label: 'मं' },
@@ -79,6 +82,11 @@ const ShiftManagement = () => {
     else        { addShift(form);            showToast(t('Record saved successfully')); }
     setModal(null);
   };
+
+  /* Ctrl+S saves the Shift modal — same action as the Save button */
+  useSaveShortcut(modal === 'edit', handleSave);
+  /* Ctrl+N opens the Add Shift modal when not currently editing/adding */
+  useNewShortcut(!modal, openAdd);
 
   const handleDelete = async (id) => {
     try {
@@ -307,7 +315,7 @@ const ShiftManagement = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(null)}>{t('Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 {t('Save')}</button>
+              <SaveButton onClick={handleSave} label={t('Save')} />
             </div>
           </div>
         </div>

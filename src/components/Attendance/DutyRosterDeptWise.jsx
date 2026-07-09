@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client.js';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import { useAuth }     from '../../context/AuthContext.jsx';
+import { useData }     from '../../context/DataContext.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_EN } from '../../utils/dateUtils.js';
 import { adToISO } from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
@@ -404,12 +406,14 @@ const RosterMenuBtn = ({ active, onSelect }) => {
 const DutyRosterDeptWise = () => {
   const navigate     = useNavigate();
   const { settings } = useSettings();
+  const { canEdit }  = useAuth();
+  const canEditRoster = canEdit('dutyRoster');
+  const { filteredEmployees: employees } = useData();
 
   const currentFY    = getCurrentFY(settings.fiscalYears || []);
   const currentFYId  = currentFY?.id ?? null;
   const todayBS      = adToBS(new Date()) || { year: 2083, month: 2, day: 1 };
 
-  const [employees,  setEmployees]  = useState([]);
   const [shifts,     setShifts]     = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [saving,     setSaving]     = useState(false);
@@ -537,9 +541,8 @@ const DutyRosterDeptWise = () => {
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([api.get('/employees'), api.get('/shifts'), api.get('/duty-roster')])
-      .then(([emps, shfts, ros]) => {
-        setEmployees(emps || []);
+    Promise.all([api.get('/shifts'), api.get('/duty-roster')])
+      .then(([shfts, ros]) => {
         setShifts(shfts || []);
         setRosters(ros || []);
       })
@@ -870,7 +873,7 @@ const DutyRosterDeptWise = () => {
               {gridVisible ? 'Change Period' : 'Create Roster'}
             </button>
           )}
-          {pageMode === 'create' && gridVisible && (
+          {pageMode === 'create' && gridVisible && canEditRoster && (
             <button onClick={handleSave} disabled={saving}
               style={{ height:36, padding:'0 18px', fontSize:13, fontWeight:700,
                 background: saving ? '#9ca3af' : '#1a56db', color:'white', border:'none',
@@ -1091,7 +1094,7 @@ const DutyRosterDeptWise = () => {
               </div>
               <div style={{ display:'flex', gap:8 }}>
                 {!viewEditMode ? (
-                  <button
+                  canEditRoster && <button
                     onClick={() => { setViewEditMode(true); setViewColShifts({}); setViewEditOverrides({}); }}
                     style={{ height:32, padding:'0 14px', fontSize:12, fontWeight:700,
                       background:'#f59e0b', color:'white', border:'none', borderRadius:7, cursor:'pointer',
@@ -1275,12 +1278,14 @@ const DutyRosterDeptWise = () => {
                 </span>
               </div>
               <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                <button onClick={handleSave} disabled={saving}
-                  style={{ height:34, padding:'0 18px', fontSize:13, fontWeight:700,
-                    background: saving ? 'rgba(255,255,255,.4)' : 'white', color: saving ? 'white' : '#059669',
-                    border:'none', borderRadius:7, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                  {saving ? 'Saving...' : 'Save Roster'}
-                </button>
+                {canEditRoster && (
+                  <button onClick={handleSave} disabled={saving}
+                    style={{ height:34, padding:'0 18px', fontSize:13, fontWeight:700,
+                      background: saving ? 'rgba(255,255,255,.4)' : 'white', color: saving ? 'white' : '#059669',
+                      border:'none', borderRadius:7, cursor: saving ? 'not-allowed' : 'pointer' }}>
+                    {saving ? 'Saving...' : 'Save Roster'}
+                  </button>
+                )}
                 <button onClick={() => { setShowCreateModal(false); setGridVisible(false); }}
                   style={{ background:'rgba(255,255,255,.2)', border:'none', borderRadius:6,
                     width:30, height:30, cursor:'pointer', color:'white', fontSize:18 }}>x</button>

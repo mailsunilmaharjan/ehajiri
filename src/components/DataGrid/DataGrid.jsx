@@ -16,6 +16,7 @@ const DataGrid = ({
   onDeleteKey = null,
   striped = true,
   compact = false,
+  ultraCompact = false,       // set true for ~half-height rows (e.g. dense command/log tables)
   rowKey = 'id',
   onDeleteSelected = null,
   onSelectionChange = null,   // (selectedKeys: any[]) => void  — called whenever selection changes
@@ -237,7 +238,7 @@ const DataGrid = ({
         onClick={() => scrollRef.current?.focus()}
         style={{ outline: 'none', cursor: 'default' }}
       >
-        <table className={`dg-table ${striped ? 'striped' : ''} ${compact ? 'compact' : ''} ${autoWidth ? 'auto-width' : ''}`}
+        <table className={`dg-table ${striped ? 'striped' : ''} ${compact ? 'compact' : ''} ${ultraCompact ? 'ultra-compact' : ''} ${autoWidth ? 'auto-width' : ''}`}
           style={ autoWidth ? { tableLayout:'auto' } : {} }>
           <thead>
             <tr className="dg-header-row">

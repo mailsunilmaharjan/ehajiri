@@ -7,6 +7,8 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker  from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect  from '../Common/SearchableSelect.jsx';
+import SaveButton        from '../Common/SaveButton.jsx';
+import useSaveShortcut   from '../../hooks/useSaveShortcut.js';
 
 const empty = { employeeId: '', date: '', checkIn: '', checkOut: '', remark: '', recommendedBy: '', approvedBy: '' };
 
@@ -167,6 +169,9 @@ const ManualPostings = () => {
       setSaving(false);
     }
   };
+
+  /* Ctrl+S saves the Add/Edit Manual Entry modal — same action as the Save button */
+  useSaveShortcut(modal, save);
 
   const remove = async (id) => {
     try {
@@ -396,9 +401,7 @@ const ManualPostings = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : editId ? '💾 Update' : '✔ Post Entry'}
-              </button>
+              <SaveButton onClick={save} disabled={saving} icon={saving ? '⏳' : '💾'} label={saving ? 'Saving…' : 'Save'} />
             </div>
           </div>
         </div>

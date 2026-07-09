@@ -1146,6 +1146,436 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 44,
+    description: 'Standalone ZKTeco devices (legacy SDK, pull model) — devices, logs, users, fingerprints',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS standalone_devices (
+          id                SERIAL       PRIMARY KEY,
+          name              VARCHAR(100) NOT NULL,
+          serial_number     VARCHAR(100) UNIQUE,
+          ip_address        VARCHAR(50)  NOT NULL,
+          port              INTEGER      DEFAULT 4370,
+          comm_password     VARCHAR(100) DEFAULT '',
+          model             VARCHAR(80)  DEFAULT 'Unknown',
+          location          VARCHAR(200),
+          active            BOOLEAN      DEFAULT TRUE,
+          connection_status VARCHAR(20)  DEFAULT 'disconnected',
+          last_connected_at TIMESTAMPTZ,
+          last_error        TEXT,
+          firmware_ver      VARCHAR(80),
+          platform          VARCHAR(80),
+          vendor            VARCHAR(80),
+          product_code      VARCHAR(80),
+          mac_address       VARCHAR(50),
+          created_at        TIMESTAMPTZ  DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS standalone_attendance_logs (
+          id            SERIAL       PRIMARY KEY,
+          device_id     INTEGER      REFERENCES standalone_devices(id) ON DELETE CASCADE,
+          enroll_number VARCHAR(50)  NOT NULL,
+          check_time    TIMESTAMPTZ  NOT NULL,
+          verify_mode   SMALLINT     DEFAULT 0,
+          in_out_mode   SMALLINT     DEFAULT 0,
+          work_code     INTEGER      DEFAULT 0,
+          employee_id   INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          synced        BOOLEAN      DEFAULT FALSE,
+          created_at    TIMESTAMPTZ  DEFAULT NOW()
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_standalone_logs_unique
+          ON standalone_attendance_logs(device_id, enroll_number, check_time);
+        CREATE INDEX IF NOT EXISTS idx_standalone_logs_enroll
+          ON standalone_attendance_logs(enroll_number);
+        CREATE INDEX IF NOT EXISTS idx_standalone_logs_check_time
+          ON standalone_attendance_logs(check_time DESC);
+
+        CREATE TABLE IF NOT EXISTS standalone_users (
+          id            SERIAL       PRIMARY KEY,
+          device_id     INTEGER      REFERENCES standalone_devices(id) ON DELETE CASCADE,
+          enroll_number VARCHAR(50)  NOT NULL,
+          name          VARCHAR(200),
+          privilege     SMALLINT     DEFAULT 0,
+          password      VARCHAR(100) DEFAULT '',
+          card_no       VARCHAR(50)  DEFAULT '0',
+          enabled       BOOLEAN      DEFAULT TRUE,
+          employee_id   INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          last_sync     TIMESTAMPTZ  DEFAULT NOW(),
+          created_at    TIMESTAMPTZ  DEFAULT NOW(),
+          UNIQUE(device_id, enroll_number)
+        );
+
+        CREATE TABLE IF NOT EXISTS standalone_fingerprints (
+          id            SERIAL       PRIMARY KEY,
+          device_id     INTEGER      REFERENCES standalone_devices(id) ON DELETE CASCADE,
+          enroll_number VARCHAR(50)  NOT NULL,
+          finger_index  SMALLINT     DEFAULT 0,
+          template_data TEXT,
+          template_size INTEGER,
+          enrolled_at   TIMESTAMPTZ  DEFAULT NOW(),
+          UNIQUE(device_id, enroll_number, finger_index)
+        );
+      `);
+    },
+  },
+  {
+    version    : 45,
+    description: 'Standalone devices — attendance logs now feed zkteco_attendance_logs directly; add face templates + backup tracking',
+    up: async (client) => {
+      await client.query(`
+        -- Standalone-pulled punches now land in zkteco_attendance_logs (keyed by
+        -- device_sn, same as ADMS-push devices) so they show up in the existing
+        -- Attendance reports without any report-side changes. This table is no
+        -- longer written to.
+        DROP TABLE IF EXISTS standalone_attendance_logs;
+
+        -- standalone_fingerprints now also stores face templates (GetUserFaceStr),
+        -- distinguished by template_type; finger_index doubles as face_index for 'face' rows.
+        ALTER TABLE standalone_fingerprints
+          ADD COLUMN IF NOT EXISTS template_type VARCHAR(10) NOT NULL DEFAULT 'fp';
+
+        -- Drop whatever Postgres auto-named the old 3-column UNIQUE constraint
+        -- (its generated name may have been truncated to 63 bytes) so the new
+        -- 4-column unique index below can take over without a duplicate.
+        DO $$
+        DECLARE c RECORD;
+        BEGIN
+          FOR c IN
+            SELECT conname FROM pg_constraint
+            WHERE conrelid = 'standalone_fingerprints'::regclass
+              AND contype = 'u'
+              AND (SELECT array_agg(x ORDER BY x) FROM unnest(conkey) x) = (
+                SELECT array_agg(attnum ORDER BY attnum) FROM pg_attribute
+                WHERE attrelid = 'standalone_fingerprints'::regclass
+                  AND attname IN ('device_id','enroll_number','finger_index')
+              )
+          LOOP
+            EXECUTE format('ALTER TABLE standalone_fingerprints DROP CONSTRAINT %I', c.conname);
+          END LOOP;
+        END $$;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_standalone_fp_unique
+          ON standalone_fingerprints(device_id, enroll_number, finger_index, template_type);
+
+        CREATE TABLE IF NOT EXISTS standalone_backups (
+          id          SERIAL       PRIMARY KEY,
+          device_id   INTEGER      REFERENCES standalone_devices(id) ON DELETE CASCADE,
+          file_path   TEXT         NOT NULL,
+          taken_by    INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          created_at  TIMESTAMPTZ  DEFAULT NOW()
+        );
+      `);
+    },
+  },
+  {
+    version    : 46,
+    description: 'standalone_fingerprints — actually drop the old 3-column UNIQUE (v45\'s dynamic lookup left it in place)',
+    up: async (client) => {
+      // v45 tried to find-and-drop this by inspecting pg_constraint, but the
+      // lookup didn't fire as expected within that migration's transaction;
+      // confirmed via direct query that this exact (Postgres-truncated) name
+      // is what v44's inline UNIQUE(device_id, enroll_number, finger_index)
+      // actually created. Drop it directly now that idx_standalone_fp_unique
+      // (the 4-column index including template_type) is already in place.
+      await client.query(`
+        ALTER TABLE standalone_fingerprints
+          DROP CONSTRAINT IF EXISTS standalone_fingerprints_device_id_enroll_number_finger_inde_key;
+      `);
+    },
+  },
+  {
+    version    : 47,
+    description: 'Device-integration module toggles (Attendance Device / StandAlone Device) — both default OFF until an admin/superAdmin enables them',
+    up: async (client) => {
+      await client.query(`
+        INSERT INTO app_settings (key, value) VALUES
+          ('module_attendance_device_enabled', 'false'),
+          ('module_standalone_device_enabled', 'false')
+        ON CONFLICT (key) DO NOTHING;
+      `);
+    },
+  },
+  {
+    version    : 48,
+    description: 'Staff access validity/expiry — persisted server-side so PostVerifyData can enforce it independently of device firmware honoring Expires/StartDatetime/EndDatetime',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS access_expires   BOOLEAN DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS access_valid_from DATE,
+          ADD COLUMN IF NOT EXISTS access_valid_to   DATE;
+      `);
+    },
+  },
+  {
+    version    : 49,
+    description: 'Widen zkteco_device_info text columns — face devices (e.g. SenseFace) report longer device_name/firmware_ver/platform strings than VARCHAR(100), which was throwing on every saveDeviceInfo() call',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_device_info
+          ALTER COLUMN device_name  TYPE VARCHAR(255),
+          ALTER COLUMN firmware_ver TYPE VARCHAR(255),
+          ALTER COLUMN platform     TYPE VARCHAR(255);
+      `);
+    },
+  },
+  {
+    version    : 50,
+    description: 'zkteco_device_info text columns still overflowed VARCHAR(255) for some face devices — switch to unbounded TEXT since these are purely informational fields',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_device_info
+          ALTER COLUMN device_name  TYPE TEXT,
+          ALTER COLUMN firmware_ver TYPE TEXT,
+          ALTER COLUMN platform     TYPE TEXT;
+      `);
+    },
+  },
+  {
+    version    : 51,
+    description: 'Add zkteco_access_level_groups ("Shift Group") — lets several Access Levels (e.g. a Morning-in window + an Evening-out window) be grouped under one named shift, so a person can be assigned the whole shift in one pick instead of selecting each level individually',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS zkteco_access_level_groups (
+          id         SERIAL PRIMARY KEY,
+          name       VARCHAR(150) NOT NULL UNIQUE,
+          remarks    TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+      await client.query(`
+        ALTER TABLE zkteco_access_levels
+          ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES zkteco_access_level_groups(id) ON DELETE SET NULL
+      `);
+    },
+  },
+  {
+    version    : 52,
+    description: 'Track which logged-in user queued each zkteco_commands row ("Sent by User") — NULL for device/system-initiated commands',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_commands
+          ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+      `);
+    },
+  },
+
+  {
+    version    : 53,
+    description: 'Access Levels / Shift Groups — add access_group_id so admins can pin the physical device AccGroup number instead of it silently defaulting to the internal row id',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_access_levels       ADD COLUMN IF NOT EXISTS access_group_id INTEGER;
+        ALTER TABLE zkteco_access_level_groups ADD COLUMN IF NOT EXISTS access_group_id INTEGER;
+      `);
+    },
+  },
+
+  {
+    version    : 54,
+    description: 'zkteco_door_settings — per-device Door 1 hardware parameters (lock driver time, sensor type, anti-passback, duress/emergency password, punch interval) pushed via ADMS SET OPTIONS, per PUSH SDK Security Push Communication Protocol §9.5.1',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS zkteco_door_settings (
+          id                  SERIAL       PRIMARY KEY,
+          device_id           INTEGER      NOT NULL UNIQUE REFERENCES zkteco_devices(id) ON DELETE CASCADE,
+          drivertime          INTEGER      DEFAULT 5,
+          sensor_type         SMALLINT     DEFAULT 0,
+          detectortime        INTEGER      DEFAULT 15,
+          intertime           INTEGER      DEFAULT 2,
+          close_and_lock      BOOLEAN      DEFAULT TRUE,
+          verify_type         SMALLINT     DEFAULT 0,
+          keep_open_timezone  INTEGER      DEFAULT 0,
+          valid_tz            INTEGER      DEFAULT 1,
+          supper_password     VARCHAR(20)  DEFAULT '',
+          force_password      VARCHAR(20)  DEFAULT '',
+          anti_passback       SMALLINT     DEFAULT 0,
+          created_at          TIMESTAMPTZ  DEFAULT NOW(),
+          updated_at          TIMESTAMPTZ  DEFAULT NOW()
+        );
+      `);
+    },
+  },
+
+  {
+    version    : 55,
+    description: 'zkteco_access_levels — add active flag so a level can be disabled without deleting it; disabling zeroes its device-side AccGroup time window instead of granting it',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_access_levels ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+      `);
+    },
+  },
+  {
+    version    : 56,
+    description: 'Count-based access validity (Expires=2 use-count-only / Expires=3 date-range+count, per ZKTeco support spec for our device model — device tabledesc.xml already updated to accept Expires/VaildCount) — adds access_expiry_mode (mirrors the device Expires value 0-3) and access_valid_count (remaining uses) alongside the existing date-range columns; backfills mode=1 for rows that already had access_expires=TRUE under the old date-only scheme',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS access_expiry_mode SMALLINT NOT NULL DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS access_valid_count  INTEGER;
+      `);
+      await client.query(`
+        UPDATE users SET access_expiry_mode = 1 WHERE access_expires = TRUE AND access_expiry_mode = 0;
+      `);
+    },
+  },
+  {
+    version    : 57,
+    description: 'Access Level Verify/ValidHoliday — DATA UPDATE AccGroup (Push Protocol §12.1.1.14) was always sent with Verify=0 and ValidHoliday=0 hardcoded, so no level could ever require non-default verification or stay valid on a configured Holiday even though a full Holiday subsystem (zkteco_acc_holidays) already exists. Adds per-level verify_mode and valid_holiday so these are admin-configurable.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_access_levels
+          ADD COLUMN IF NOT EXISTS verify_mode   SMALLINT NOT NULL DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS valid_holiday BOOLEAN  NOT NULL DEFAULT FALSE;
+      `);
+    },
+  },
+  {
+    version    : 58,
+    description: 'Auto-generated combo Shift Groups — picking 2+ standalone (ungrouped) Access Levels for one person used to push them to the device one at a time, so only the last one actually survived (silently dropping the rest), since a person can only hold one Grp per Area. Adds combo_signature so the server can synthesize (or reuse) a dedicated Shift Group for that exact combination of timezones without touching the original levels, which other staff may still use individually.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_access_level_groups
+          ADD COLUMN IF NOT EXISTS combo_signature VARCHAR(255) UNIQUE;
+      `);
+    },
+  },
+  {
+    version    : 59,
+    description: 'is_system flag on zkteco_access_levels — getOrCreateUnrestrictedLevel() used to match the default level by literal name (\'Unrestricted (24h)\'), which broke the moment an admin renamed it (the next lookup would silently create a duplicate). Adds a stable is_system marker so the default level is found by flag, not name, and can be renamed safely.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_access_levels ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;
+      `);
+    },
+  },
+  {
+    version    : 60,
+    description: 'Allow a person to be tracked under multiple Access Levels for the same Area (e.g. someone genuinely belongs on both the "07-10" and "17-23:59" rosters) — widens the zkteco_person_access unique constraint from (employee_id, area_id) to (employee_id, area_id, access_level_id). Device enforcement is unaffected: a person can still only hold ONE Grp on the physical device (resolveGrpForEmployee picks the most-recently-assigned level), this only changes what the app tracks/counts for personnel rosters and reporting.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_person_access DROP CONSTRAINT IF EXISTS zkteco_person_access_employee_id_area_id_key;
+      `);
+      await client.query(`
+        ALTER TABLE zkteco_person_access ADD CONSTRAINT zkteco_person_access_employee_area_level_key UNIQUE (employee_id, area_id, access_level_id);
+      `);
+    },
+  },
+  {
+    version    : 61,
+    description: 'attendance_missing_requests — employee-initiated "missing attendance" requests with recommend/approve workflow, notified to the assigned recommender/approver by email + in-app message.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS attendance_missing_requests (
+          id              SERIAL       PRIMARY KEY,
+          employee_id     INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          date            DATE         NOT NULL,
+          check_in        TIME,
+          check_out       TIME,
+          reason          TEXT         NOT NULL,
+          recommended_by  INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          approved_by     INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          status          VARCHAR(20)  NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending','recommended','approved','rejected')),
+          comment         TEXT,
+          created_at      TIMESTAMPTZ  DEFAULT NOW(),
+          decided_at      TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS idx_amr_employee_date ON attendance_missing_requests(employee_id, date);
+      `);
+      // De-duplicate (employee_id, date) before enforcing uniqueness — older rows may
+      // predate this constraint. Keep the most recently updated row per pair.
+      await client.query(`
+        DELETE FROM attendance_manual_postings a USING attendance_manual_postings b
+        WHERE a.employee_id = b.employee_id AND a.date = b.date
+          AND (a.updated_at, a.id) < (b.updated_at, b.id);
+      `);
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_amp_emp_date_unique ON attendance_manual_postings(employee_id, date);
+      `);
+    },
+  },
+  {
+    version    : 62,
+    description: 'Internal Chat — chat_conversations/participants/messages tables, plus users.last_seen_at (touched on every authenticated request) so online/offline presence can be derived without a dedicated heartbeat endpoint.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+
+        CREATE TABLE IF NOT EXISTS chat_conversations (
+          id           SERIAL       PRIMARY KEY,
+          type         VARCHAR(10)  NOT NULL CHECK (type IN ('direct','group')),
+          name         VARCHAR(150),
+          created_by   INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          created_at   TIMESTAMPTZ  DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_participants (
+          id              SERIAL      PRIMARY KEY,
+          conversation_id INTEGER     NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+          user_id         INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          last_read_at    TIMESTAMPTZ,
+          joined_at       TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE (conversation_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_messages (
+          id              SERIAL      PRIMARY KEY,
+          conversation_id INTEGER     NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+          sender_id       INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          body            TEXT        NOT NULL,
+          created_at      TIMESTAMPTZ DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_participants_user  ON chat_participants(user_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_participants_conv  ON chat_participants(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_conv      ON chat_messages(conversation_id, created_at);
+
+        -- Exactly one direct conversation per unordered pair of users — enforced via
+        -- a canonical "lowId-highId" key stored alongside the pair for a fast lookup.
+        CREATE TABLE IF NOT EXISTS chat_direct_pairs (
+          conversation_id INTEGER     NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+          pair_key        VARCHAR(30) NOT NULL UNIQUE,
+          PRIMARY KEY (conversation_id)
+        );
+      `);
+    },
+  },
+  {
+    version    : 63,
+    description: 'Chat — per-message quote-reply (chat_messages.reply_to_id)',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE chat_messages
+          ADD COLUMN IF NOT EXISTS reply_to_id INTEGER REFERENCES chat_messages(id) ON DELETE SET NULL;
+      `);
+    },
+  },
+  {
+    version    : 64,
+    description: 'Bug Finder — auto-logged frontend/backend error reports (Settings → Database tab)',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS bug_reports (
+          id          SERIAL      PRIMARY KEY,
+          source      VARCHAR(20) NOT NULL,          -- 'frontend' | 'backend'
+          page        VARCHAR(255),                  -- route path (frontend) or API endpoint (backend)
+          method      VARCHAR(10),                   -- HTTP method — backend only
+          status_code INTEGER,                       -- HTTP status — backend only
+          message     TEXT        NOT NULL,
+          stack       TEXT,
+          user_id     INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+          solution    TEXT,                           -- admin-entered fix notes
+          resolved    BOOLEAN     DEFAULT FALSE,
+          created_at  TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_bug_reports_created_at ON bug_reports(created_at DESC);
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

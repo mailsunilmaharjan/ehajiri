@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import pool from '../db.js';
 
-async function getEmailConfig() {
+export async function getEmailConfig() {
   const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='emailConfig'");
   if (!rows.length) return null;
   try { return typeof rows[0].value === 'string' ? JSON.parse(rows[0].value) : rows[0].value; }
@@ -118,6 +118,109 @@ export async function sendOfficeVisitApplication({ to, fullName, destination, fr
         ${purpose ? `<tr><td style="padding:6px 0;color:#6b7280">Purpose</td><td>${purpose}</td></tr>` : ''}
       </table>
       <p style="color:#6b7280;font-size:12px;margin-top:16px">Please log in to eHajiri TMS to approve or reject this application.</p>
+    </div>`,
+  });
+}
+
+export async function sendMissingAttendanceApplication({ to, fullName, date, checkIn, checkOut, reason }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.missingAttendance) return { skipped: true };
+  return sendEmail({
+    to, subject: `eHajiri TMS — Missing Attendance Request: ${fullName}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:480px">
+      <h2 style="color:#1a56db">Missing Attendance Request</h2>
+      <p><strong>${fullName}</strong> has submitted a request to record missing attendance.</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><td style="padding:6px 0;color:#6b7280">Date</td><td><strong>${date}</strong></td></tr>
+        ${checkIn  ? `<tr><td style="padding:6px 0;color:#6b7280">Check In</td><td><strong>${checkIn}</strong></td></tr>`  : ''}
+        ${checkOut ? `<tr><td style="padding:6px 0;color:#6b7280">Check Out</td><td><strong>${checkOut}</strong></td></tr>` : ''}
+        <tr><td style="padding:6px 0;color:#6b7280">Reason</td><td>${reason}</td></tr>
+      </table>
+      <p style="color:#6b7280;font-size:12px;margin-top:16px">Please log in to eHajiri TMS to recommend or approve this request.</p>
+    </div>`,
+  });
+}
+
+/* ── Daily digest row list → HTML table rows ── */
+const digestRows = (rows) => rows.map(r => `
+  <tr>
+    <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9">${r.name}</td>
+    <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#374151">${r.detail || '—'}</td>
+  </tr>`).join('');
+
+export async function sendLateEarlyDigest({ to, fullName, isSelf, scopeLabel, date, rows }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.lateEarlyNotification) return { skipped: true };
+  const intro = isSelf
+    ? `<p>Hello <strong>${fullName}</strong>, this is a record of your Late In / Early Out on <strong>${date}</strong>:</p>`
+    : `<p>The following staff in <strong>${scopeLabel}</strong> were Late In / Early Out on <strong>${date}</strong>:</p>`;
+  return sendEmail({
+    to, subject: `eHajiri TMS — Late In / Early Out Report: ${date}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:520px">
+      <h2 style="color:#d97706">⏰ Late In / Early Out Report</h2>
+      ${intro}
+      <table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><th style="text-align:left;padding:5px 8px;background:#fffbeb;color:#92400e">Name</th>
+            <th style="text-align:left;padding:5px 8px;background:#fffbeb;color:#92400e">Detail</th></tr>
+        ${digestRows(rows)}
+      </table>
+    </div>`,
+  });
+}
+
+export async function sendAbsentDigest({ to, fullName, isSelf, scopeLabel, date, rows }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.absentNotification) return { skipped: true };
+  const intro = isSelf
+    ? `<p>Hello <strong>${fullName}</strong>, you were marked <strong>Absent</strong> on <strong>${date}</strong>. If this is incorrect, please submit a Missing Attendance request in eHajiri TMS.</p>`
+    : `<p>The following staff in <strong>${scopeLabel}</strong> were <strong>Absent</strong> on <strong>${date}</strong>:</p>`;
+  return sendEmail({
+    to, subject: `eHajiri TMS — Absence Report: ${date}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:520px">
+      <h2 style="color:#dc2626">❌ Absence Report</h2>
+      ${intro}
+      ${!isSelf ? `<table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><th style="text-align:left;padding:5px 8px;background:#fef2f2;color:#991b1b">Name</th>
+            <th style="text-align:left;padding:5px 8px;background:#fef2f2;color:#991b1b">Detail</th></tr>
+        ${digestRows(rows)}
+      </table>` : ''}
+    </div>`,
+  });
+}
+
+export async function sendLeaveStatusUpdate({ to, fullName, status, leaveType, fromDate, toDate, comment }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.leaveStatusUpdate) return { skipped: true };
+  const isApproved = status === 'approved';
+  return sendEmail({
+    to, subject: `eHajiri TMS — Leave Application ${isApproved ? 'Approved' : 'Rejected'}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:480px">
+      <h2 style="color:${isApproved ? '#059669' : '#dc2626'}">Leave Application ${isApproved ? 'Approved ✅' : 'Rejected ✕'}</h2>
+      <p>Hello <strong>${fullName}</strong>, your leave application has been <strong>${status}</strong>.</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><td style="padding:6px 0;color:#6b7280">Leave Type</td><td><strong>${leaveType}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">From</td><td><strong>${fromDate}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">To</td><td><strong>${toDate}</strong></td></tr>
+        ${comment ? `<tr><td style="padding:6px 0;color:#6b7280">Comment</td><td>${comment}</td></tr>` : ''}
+      </table>
+    </div>`,
+  });
+}
+
+export async function sendOfficeVisitStatusUpdate({ to, fullName, status, fromDate, toDate, comment }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.officeVisitStatusUpdate) return { skipped: true };
+  const isApproved = status === 'approved';
+  return sendEmail({
+    to, subject: `eHajiri TMS — Office Visit Application ${isApproved ? 'Approved' : 'Rejected'}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:480px">
+      <h2 style="color:${isApproved ? '#059669' : '#dc2626'}">Office Visit Application ${isApproved ? 'Approved ✅' : 'Rejected ✕'}</h2>
+      <p>Hello <strong>${fullName}</strong>, your office visit application has been <strong>${status}</strong>.</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><td style="padding:6px 0;color:#6b7280">From</td><td><strong>${fromDate}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">To</td><td><strong>${toDate}</strong></td></tr>
+        ${comment ? `<tr><td style="padding:6px 0;color:#6b7280">Comment</td><td>${comment}</td></tr>` : ''}
+      </table>
     </div>`,
   });
 }

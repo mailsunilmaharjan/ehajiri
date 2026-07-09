@@ -9,6 +9,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import SaveButton from '../Common/SaveButton.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 
 /* ═════════════════════════════════════════════════════════════
    NameComboBox — searchable dropdown + free-text input combined.
@@ -364,6 +366,9 @@ const ZKTecoAreaTab = ({ areas, loading, onRefresh, L, language, showToast }) =>
     } catch (err) { showToast(err.message, 'danger'); }
   };
 
+  /* Ctrl+S saves the Area modal — same action as the Save button */
+  useSaveShortcut(modal, handleSave);
+
   const handleDelete = async (id) => {
     if (areas.some(a => a.parent_id === id)) {
       showToast('Cannot delete — this area has sub-areas. Delete children first.', 'danger');
@@ -560,7 +565,7 @@ const ZKTecoAreaTab = ({ areas, loading, onRefresh, L, language, showToast }) =>
 
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 Save</button>
+              <SaveButton onClick={handleSave} />
             </div>
           </div>
         </div>

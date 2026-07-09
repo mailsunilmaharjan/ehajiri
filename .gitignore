@@ -11,6 +11,11 @@ dist-server-pkg/
 dist-installer/
 releases/
 
+# .NET build outputs (standalone-bridge)
+standalone-bridge/bin/
+standalone-bridge/obj/
+standalone-bridge/publish/
+
 # Environment / secrets — NEVER commit these
 .env
 .env.deploy

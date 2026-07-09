@@ -4,7 +4,9 @@ import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import ImportDeviceUsersModal from '../Common/ImportDeviceUsersModal.jsx';
 import ZKTecoAreaTab          from './ZKTecoAreaTab.jsx';
-import ZKTecoAccessTab        from './ZKTecoAccessTab.jsx';
+import SaveButton             from '../Common/SaveButton.jsx';
+import KeyboardMultiSelect    from '../Common/KeyboardMultiSelect.jsx';
+import useSaveShortcut        from '../../hooks/useSaveShortcut.js';
 
 /* ═══ constants ══════════════════════════════════════════════ */
 const DEVICE_MODELS = ['M2F','SenseFace','ZKTeco K40 Pro','MB2000','SenseFace 4A','SenseFace 7A','Other'];
@@ -15,7 +17,10 @@ const DEVICE_TYPES  = [
   { value:'card',        label:'Card + Fingerprint'                   },
 ];
 const CHECK_LABELS   = { 0:'Check In',1:'Check Out',2:'Break Out',3:'Break In',4:'OT In',5:'OT Out' };
-const VERIFY_LABELS  = { 1:'Fingerprint',2:'Password',3:'Card',15:'Face' };
+// 255 is ZKTeco's own sentinel for "not recorded" — the legacy standalone-SDK
+// General Log API doesn't reliably track verify method per record (unlike the
+// ADMS push protocol), so it reports this instead of a real code.
+const VERIFY_LABELS  = { 1:'Fingerprint',2:'Password',3:'Card',15:'Face',255:'Unknown' };
 const PRIV_LABELS    = { 0:'User',1:'Enroller',2:'Manager',6:'Admin',14:'Super Admin' };
 const FINGER_LABELS  = ['Right Pinky','Right Ring','Right Middle','Right Index','Right Thumb',
                         'Left Thumb','Left Index','Left Middle','Left Ring','Left Pinky'];
@@ -137,16 +142,63 @@ const emptyDevice = { name:'',serialNumber:'',ipAddress:'',port:4370,model:'Sens
 const emptyUpload = { pin:'',name:'',privilege:0,card:'0' };
 const emptyEnroll = { pin:'',name:'',fingerId:0 };
 
+/* Module-level so these keep a stable identity across DeviceControlModal
+   re-renders (e.g. every keystroke in a form input) — defining them inside
+   the modal's body would recreate the function on every render, which makes
+   React remount the subtree and drop focus/state on each input. */
+
+/* Horizontal tab container — replaces accordion */
+const Group = ({ gKey, openGroup, children }) => {
+  if (openGroup !== gKey) return null; // only render active tab's content
+  return <div style={{ padding:'12px 0 4px' }}>{children}</div>;
+};
+
+/* Horizontal card button — replaces vertical row Item */
+const Item = ({ iKey, icon, label, onClick, danger=false, disabled=false, desc, activeItem, busy, isOffline }) => {
+  const isActive  = activeItem === iKey;
+  const isBusy    = !!busy[iKey];
+  const isDisabled = disabled || isBusy || isOffline;
+  return (
+    <button
+      disabled={isDisabled}
+      onClick={() => { if (!isOffline) onClick?.(); }}
+      title={isOffline ? 'Device is offline — commands disabled' : undefined}
+      style={{
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+        gap:6, padding:'12px 10px', minWidth:100, flex:'1 1 100px', maxWidth:140,
+        background: isOffline ? '#f9fafb' : isActive ? '#eff6ff' : danger ? '#fff5f5' : 'white',
+        border: `1.5px solid ${isOffline ? '#e5e7eb' : isActive ? '#93c5fd' : danger ? '#fca5a5' : '#e5e7eb'}`,
+        borderRadius:10, cursor: isDisabled ? 'not-allowed' : 'pointer',
+        textAlign:'center', opacity: isOffline ? 0.4 : isDisabled ? 0.5 : 1, transition:'background .1s',
+        boxShadow: isActive && !isOffline ? '0 0 0 2px #bfdbfe' : 'none',
+      }}
+      onMouseEnter={e=>{ if (!isDisabled) e.currentTarget.style.background = isActive?'#dbeafe': danger?'#fee2e2':'#f0f9ff'; }}
+      onMouseLeave={e=>{ if (!isOffline) e.currentTarget.style.background = isActive?'#eff6ff': danger?'#fff5f5':'white'; }}>
+      <span style={{ fontSize:20 }}>{isBusy ? '⏳' : isOffline ? '🚫' : icon}</span>
+      <div style={{ fontSize:11, fontWeight:700, color: isOffline?'#9ca3af': danger?'#dc2626': isActive?'#1e40af':'#374151',
+        lineHeight:1.3, maxWidth:110, wordBreak:'break-word' }}>{label}</div>
+    </button>
+  );
+};
+
+/* Inline form panel that slides in below an item */
+const FormPanel = ({ children }) => (
+  <div style={{ margin:'4px 12px 8px', background:'#f9fafb', borderRadius:8,
+    border:'1px solid #e5e7eb', padding:'14px 16px' }}>
+    {children}
+  </div>
+);
+
 /* ═══════════════════════════════════════════════════════════
    Device Control Modal — 3-group accordion layout
 ═══════════════════════════════════════════════════════════ */
-const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSwitchTab }) => {
+const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSwitchTab, initialGroup='device-info', initialItem=null }) => {
   const { language } = useLanguage();
   const L = (np,en) => language==='np' ? np : en;
 
   const [busy,         setBusy]         = useState({});
-  const [openGroup,    setOpenGroup]    = useState('device-info'); // active horizontal tab
-  const [activeItem,   setActiveItem]   = useState(null);  // which sub-item form is open
+  const [openGroup,    setOpenGroup]    = useState(initialGroup); // active horizontal tab
+  const [activeItem,   setActiveItem]   = useState(initialItem);  // which sub-item form is open
   const [formData,     setFormData]     = useState({});
   // Enroll
   const [enrollType,   setEnrollType]   = useState(null);  // null | 'fp' | 'face'
@@ -167,6 +219,18 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
   const isOffline = !device.last_seen ||
     Math.floor((Date.now() - new Date(device.last_seen).getTime()) / 60000) >= 15;
 
+  /* The capacity bar (Users/FP Slots/Platform) only reflects reality after the
+     device replies to a CHECK command — queue one as soon as the modal opens so
+     it doesn't sit on whatever was last fetched (often 0/0/— for a device that
+     was never manually "Get Info"'d). */
+  useEffect(() => {
+    if (isOffline) return;
+    api.post(`/zkteco/devices/${id}/get-info`, {}).catch(() => {});
+    const t = setTimeout(() => onRefreshDevices(), 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   /* Generic command runner */
   const run = async (key, apiFn, successMsg) => {
     setBusy(p=>({...p,[key]:true}));
@@ -179,48 +243,6 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
     } catch(err) { showToast(err.message||'Error','danger'); }
     finally { setBusy(p=>({...p,[key]:false})); }
   };
-
-  /* Horizontal tab container — replaces accordion */
-  const Group = ({ gKey, icon, title, children }) => {
-    if (openGroup !== gKey) return null; // only render active tab's content
-    return <div style={{ padding:'12px 0 4px' }}>{children}</div>;
-  };
-
-  /* Horizontal card button — replaces vertical row Item */
-  const Item = ({ iKey, icon, label, onClick, danger=false, disabled=false, desc }) => {
-    const isActive  = activeItem === iKey;
-    const isBusy    = !!busy[iKey];
-    const isDisabled = disabled || isBusy || isOffline;
-    return (
-      <button
-        disabled={isDisabled}
-        onClick={() => { if (!isOffline) onClick?.(); }}
-        title={isOffline ? 'Device is offline — commands disabled' : undefined}
-        style={{
-          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-          gap:6, padding:'12px 10px', minWidth:100, flex:'1 1 100px', maxWidth:140,
-          background: isOffline ? '#f9fafb' : isActive ? '#eff6ff' : danger ? '#fff5f5' : 'white',
-          border: `1.5px solid ${isOffline ? '#e5e7eb' : isActive ? '#93c5fd' : danger ? '#fca5a5' : '#e5e7eb'}`,
-          borderRadius:10, cursor: isDisabled ? 'not-allowed' : 'pointer',
-          textAlign:'center', opacity: isOffline ? 0.4 : isDisabled ? 0.5 : 1, transition:'background .1s',
-          boxShadow: isActive && !isOffline ? '0 0 0 2px #bfdbfe' : 'none',
-        }}
-        onMouseEnter={e=>{ if (!isDisabled) e.currentTarget.style.background = isActive?'#dbeafe': danger?'#fee2e2':'#f0f9ff'; }}
-        onMouseLeave={e=>{ if (!isOffline) e.currentTarget.style.background = isActive?'#eff6ff': danger?'#fff5f5':'white'; }}>
-        <span style={{ fontSize:20 }}>{isBusy ? '⏳' : isOffline ? '🚫' : icon}</span>
-        <div style={{ fontSize:11, fontWeight:700, color: isOffline?'#9ca3af': danger?'#dc2626': isActive?'#1e40af':'#374151',
-          lineHeight:1.3, maxWidth:110, wordBreak:'break-word' }}>{label}</div>
-      </button>
-    );
-  };
-
-  /* Inline form panel that slides in below an item */
-  const FormPanel = ({ children }) => (
-    <div style={{ margin:'4px 12px 8px', background:'#f9fafb', borderRadius:8,
-      border:'1px solid #e5e7eb', padding:'14px 16px' }}>
-      {children}
-    </div>
-  );
 
   return (
     <div className="modal-overlay">
@@ -305,7 +327,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
           </div>
 
           {/* ━━━ 1. DEVICE INFO ━━━ */}
-          <Group gKey="device-info" icon="📊" title="Device Info">
+          <Group openGroup={openGroup} gKey="device-info" icon="📊" title="Device Info">
 
             {/* Inline capacity display — populated from getrequest?INFO= (no command needed) */}
             {device.user_count != null && (
@@ -333,16 +355,16 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 
             {/* Card grid — horizontal */}
             <div style={{ display:'flex', flexWrap:'wrap', gap:10 }}>
-              <Item iKey="time" icon="⏰" label="Sync Time to Now"
+              <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="time" icon="⏰" label="Sync Time to Now"
                 desc={`SET OPTION ServerLocalTime=${new Date().toLocaleString()} (guide §14)`}
                 onClick={()=>run('time',()=>api.post(`/zkteco/devices/${id}/set-time`,{}),'✅ Time sync queued — SET OPTION ServerLocalTime=...')} />
-              <Item iKey="set-tz" icon="🌐" label="Set Timezone"
+              <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="set-tz" icon="🌐" label="Set Timezone"
                 desc="MachineTZFunOn=0 · MachineTZ=+0545 · RELOAD OPTIONS (Nepal UTC+5:45)"
                 onClick={()=>run('set-tz',()=>api.post(`/zkteco/devices/${id}/set-timezone`,{}),'✅ MachineTZFunOn=0 + MachineTZ=+0545 queued')} />
-              <Item iKey="reload" icon="🔃" label="Reload Options"
+              <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="reload" icon="🔃" label="Reload Options"
                 desc="RELOAD OPTIONS — re-handshake, timezone + stamp (guide §13)"
                 onClick={()=>run('reload',()=>api.post(`/zkteco/devices/${id}/reload-options`,{}),'✅ RELOAD OPTIONS queued')} />
-              <Item iKey="reboot" icon="🔁" label="Restart Device ⚠️" danger
+              <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="reboot" icon="🔁" label="Restart Device ⚠️" danger
                 desc="RESTART — wipes FP templates from RAM (guide §17)"
                 onClick={()=>{
                   if(!window.confirm(
@@ -358,53 +380,74 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
           </Group>
 
           {/* ━━━ 2. DATA OPERATIONS ━━━ */}
-          <Group gKey="data-ops" icon="📋" title="Data Operations">
+          <Group openGroup={openGroup} gKey="data-ops" icon="📋" title="Data Operations">
             <div style={{ display:'flex', flexWrap:'wrap', gap:10 }}>
-            <Item iKey="get-logs" icon="📋" label="Get All Logs"
-              desc="ATTLOGStamp=None + RELOAD OPTIONS → device re-pushes all attendance history (guide §1)"
-              onClick={()=>run('get-logs',()=>api.post(`/zkteco/devices/${id}/sync`,{}),'✅ Stamp=None + RELOAD OPTIONS queued')} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="get-logs" icon="📋" label="Get All Logs"
+              desc="ATTLOGStamp=None + RELOAD OPTIONS + DATA QUERY ATTLOG (full range) → device re-pushes all attendance history"
+              onClick={()=>run('get-logs',()=>api.post(`/zkteco/devices/${id}/sync`,{}),'✅ Full history requested — device will re-push all attendance logs')} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="send-log" icon="🚀" label="Force Send Logs"
+              desc="LOG — device immediately pushes any pending attendance records to server"
+              onClick={()=>run('send-log',()=>api.post(`/zkteco/devices/${id}/send-log`,{}),'✅ LOG queued — device will push pending records immediately')} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="query-attlog" icon="🔍" label="Query Logs by Date"
+              desc="DATA QUERY ATTLOG — fetch logs for a specific date range from device"
+              onClick={()=>setActiveItem(activeItem==='query-attlog'?null:'query-attlog')} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="verify-attlog" icon="✔️" label="Verify Att Records"
+              desc="VERIFY SUM ATTLOG — device re-pushes any missing records in the given range"
+              onClick={()=>setActiveItem(activeItem==='verify-attlog'?null:'verify-attlog')} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="query-attphoto" icon="🖼️" label="Query Att Photos by Date"
+              desc="DATA QUERY ATTPHOTO — fetch attendance photos for a specific date range from device"
+              onClick={()=>setActiveItem(activeItem==='query-attphoto'?null:'query-attphoto')} />
             {/* Guide §8: DATA QUERY USERINFO */}
-            <Item iKey="get-users" icon="👥" label="Get All Users"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="get-users" icon="👥" label="Get All Users"
               desc="DATA QUERY USERINFO → USER rows pushed via OPERLOG (guide §8)"
               onClick={()=>run('get-users',()=>api.post(`/zkteco/devices/${id}/get-users`,{}),'✅ DATA QUERY USERINFO queued')} />
             {/* Guide §6: DATA UPDATE FINGERTMP — also runs automatically on every handshake */}
-            <Item iKey="restore" icon="🔄" label="Restore FP Templates"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="restore" icon="🔄" label="Restore FP Templates"
               desc="DATA UPDATE FINGERTMP per slot — guide §6 says run on every handshake after reboot"
               disabled={fpMinus1}
               onClick={()=>run('restore',()=>api.post(`/zkteco/devices/${id}/restore-templates`,{}),'✅ DATA UPDATE FINGERTMP queued')} />
             {device.area_id && (
-              <Item iKey="syncArea" icon="🗺️" label={`Sync Area: ${device.area_name||'Area'}`}
+              <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="syncArea" icon="🗺️" label={`Sync Area: ${device.area_name||'Area'}`}
                 desc="Push all area users + FP templates to this device"
                 onClick={()=>run('syncArea',()=>api.post(`/zkteco/devices/${id}/sync-area`,{}),'✅ Area sync queued')} />
             )}
-            <Item iKey="clear-admin" icon="🚫" label="Clear Admin"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="clear-admin" icon="🚫" label="Clear Admin"
               desc="Downgrade all admin users (Pri≥6) to regular user (Pri=0)"
               onClick={()=>{ setActiveItem(activeItem==='clear-admin'?null:'clear-admin'); }} />
-            <Item iKey="clear-attlog" icon="🗑️" label="Clear Att Logs" danger
-              desc="DATA CLEAR tableName=attlog — wipe all attendance records from device memory"
-              onClick={()=>{ if(!window.confirm('Delete ALL attendance logs from device?\nThis removes records from the device only — eHajiri logs are unaffected.')) return; run('clear-attlog',()=>api.post(`/zkteco/devices/${id}/clear-attlog`,{}),'✅ Clear attlog queued'); }} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="clear-attlog" icon="🗑️" label="Clear Att Logs" danger
+              desc="CLEAR LOG — wipe all attendance records from device memory"
+              onClick={()=>{ if(!window.confirm('Delete ALL attendance logs from device?\nThis removes records from the device only — eHajiri logs are unaffected.')) return; run('clear-attlog',()=>api.post(`/zkteco/devices/${id}/clear-attlog`,{}),'✅ CLEAR LOG queued'); }} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="clear-photo" icon="🖼️" label="Clear Att Photos" danger
+              desc="CLEAR PHOTO — remove all attendance photos stored on device"
+              onClick={()=>{ if(!window.confirm('Delete ALL attendance photos from device?')) return; run('clear-photo',()=>api.post(`/zkteco/devices/${id}/clear-photo`,{}),'✅ CLEAR PHOTO queued'); }} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="clear-all-data" icon="💣" label="Clear All Data" danger
+              desc="CLEAR DATA — wipe ALL data (users, FP templates, logs) from device"
+              onClick={()=>{ if(!window.confirm('⚠️ DANGER: This wipes ALL data from the device — users, FP templates, attendance logs.\nThis cannot be undone.\n\nContinue?')) return; run('clear-all-data',()=>api.post(`/zkteco/devices/${id}/clear-all-data`,{}),'✅ CLEAR DATA queued'); }} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="clear-biodata" icon="🖐️" label="Clear Bio Data" danger
+              desc="CLEAR BIODATA — wipe fingerprint/face templates only; user records (PIN/name/card) are kept"
+              onClick={()=>{ if(!window.confirm('Delete ALL fingerprint/face templates from device?\nUser records (PIN/name/card) are kept — only biometric templates are wiped.')) return; run('clear-biodata',()=>api.post(`/zkteco/devices/${id}/clear-biodata`,{}),'✅ CLEAR BIODATA queued'); }} />
             {/* Guide §12: AC_UNLOCK — fires door relay */}
-            <Item iKey="unlock" icon="🚪" label="Unlock Door"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="unlock" icon="🚪" label="Unlock Door"
               desc="AC_UNLOCK — fires the door relay once (guide §12)"
               onClick={()=>run('unlock',()=>api.post(`/zkteco/devices/${id}/unlock`,{}),'✅ AC_UNLOCK queued')} />
             {/* Java: cancelAlarm(deviceSN) */}
-            <Item iKey="cancel-alarm" icon="🔔" label="Cancel Alarm"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="cancel-alarm" icon="🔔" label="Cancel Alarm"
               desc="AC_ALARM_CANCEL — cancels active alarm on device"
               onClick={()=>run('cancel-alarm',()=>api.post(`/zkteco/devices/${id}/cancel-alarm`,{}),'✅ AC_ALARM_CANCEL queued')} />
-            <Item iKey="usb-upload" icon="💾" label="USB Upload"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="usb-upload" icon="💾" label="USB Upload"
               desc="Import attlog.dat / user.dat exported from device USB"
               onClick={()=>setActiveItem(activeItem==='usb-upload'?null:'usb-upload')} />
             {/* Export stored users + FP templates as JSON for migration */}
-            <Item iKey="export-users" icon="⬇️" label="Export Users (JSON)"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="export-users" icon="⬇️" label="Export Users (JSON)"
               desc="Download all users + FP templates stored in DB for this device as a JSON file"
               onClick={()=>window.open(`/api/zkteco/export-users?sn=${encodeURIComponent(sn)}`, '_blank')} />
             {/* Push all users already stored in DB back to this device */}
-            <Item iKey="push-stored" icon="📤" label="Push Stored Users"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="push-stored" icon="📤" label="Push Stored Users"
               desc="Re-push all users + FP templates already in eHajiri DB to this device (after device reset / new device)"
               onClick={()=>run('push-stored',()=>api.post(`/zkteco/devices/${id}/push-stored-users`,{}),
                 '✅ Stored users + FP templates queued for push')} />
             {/* Import users from JSON file (exported from another device/server) */}
-            <Item iKey="import-json" icon="📥" label="Import Users (JSON)"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="import-json" icon="📥" label="Import Users (JSON)"
               desc="Import users + FP templates from a JSON file exported from another device or server"
               onClick={()=>setActiveItem(activeItem==='import-json'?null:'import-json')} />
             </div>{/* end card grid */}
@@ -431,6 +474,84 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                     {busy['clear-admin']?'⏳':'🚫'} Clear
                   </button>
                   <button className="btn btn-outline btn-sm" onClick={()=>setActiveItem(null)}>✕</button>
+                </div>
+              </FormPanel>
+            )}
+            {activeItem==='query-attlog' && (
+              <FormPanel>
+                <div style={{ fontSize:12,fontWeight:700,color:'#374151',marginBottom:8 }}>🔍 Query Attendance Logs by Date Range</div>
+                <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10 }}>
+                  <ADDatePicker label="From Date" value={formData.queryStart||''} onChange={v=>setFormData(p=>({...p,queryStart:v}))} />
+                  <ADDatePicker label="To Date"   value={formData.queryEnd||''}   onChange={v=>setFormData(p=>({...p,queryEnd:v}))} />
+                </div>
+                <div style={{ fontSize:11,color:'#6b7280',marginBottom:10 }}>
+                  Device will push matching attendance records back to the server within ~30s.
+                </div>
+                <div style={{ display:'flex',gap:6 }}>
+                  <button className="btn btn-primary btn-sm"
+                    disabled={!formData.queryStart||!formData.queryEnd||!!busy['query-attlog']}
+                    onClick={async()=>{
+                      await run('query-attlog',()=>api.post(`/zkteco/devices/${id}/query-attlog`,{
+                        startTime:`${formData.queryStart} 00:00:00`,
+                        endTime:`${formData.queryEnd} 23:59:59`,
+                      }),'✅ DATA QUERY ATTLOG queued');
+                      setFormData(p=>({...p,queryStart:'',queryEnd:''})); setActiveItem(null);
+                    }}>
+                    {busy['query-attlog']?'⏳':'🔍'} Query
+                  </button>
+                  <button className="btn btn-outline btn-sm" onClick={()=>setActiveItem(null)}>Cancel</button>
+                </div>
+              </FormPanel>
+            )}
+            {activeItem==='query-attphoto' && (
+              <FormPanel>
+                <div style={{ fontSize:12,fontWeight:700,color:'#374151',marginBottom:8 }}>🖼️ Query Attendance Photos by Date Range</div>
+                <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10 }}>
+                  <ADDatePicker label="From Date" value={formData.photoQueryStart||''} onChange={v=>setFormData(p=>({...p,photoQueryStart:v}))} />
+                  <ADDatePicker label="To Date"   value={formData.photoQueryEnd||''}   onChange={v=>setFormData(p=>({...p,photoQueryEnd:v}))} />
+                </div>
+                <div style={{ fontSize:11,color:'#6b7280',marginBottom:10 }}>
+                  Device will push matching attendance photos back to the server within ~30s.
+                </div>
+                <div style={{ display:'flex',gap:6 }}>
+                  <button className="btn btn-primary btn-sm"
+                    disabled={!formData.photoQueryStart||!formData.photoQueryEnd||!!busy['query-attphoto']}
+                    onClick={async()=>{
+                      await run('query-attphoto',()=>api.post(`/zkteco/devices/${id}/query-attphoto`,{
+                        startTime:`${formData.photoQueryStart} 00:00:00`,
+                        endTime:`${formData.photoQueryEnd} 23:59:59`,
+                      }),'✅ DATA QUERY ATTPHOTO queued');
+                      setFormData(p=>({...p,photoQueryStart:'',photoQueryEnd:''})); setActiveItem(null);
+                    }}>
+                    {busy['query-attphoto']?'⏳':'🖼️'} Query
+                  </button>
+                  <button className="btn btn-outline btn-sm" onClick={()=>setActiveItem(null)}>Cancel</button>
+                </div>
+              </FormPanel>
+            )}
+            {activeItem==='verify-attlog' && (
+              <FormPanel>
+                <div style={{ fontSize:12,fontWeight:700,color:'#374151',marginBottom:8 }}>✔️ Verify Attendance Records</div>
+                <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10 }}>
+                  <ADDatePicker label="From Date" value={formData.verifyStart||''} onChange={v=>setFormData(p=>({...p,verifyStart:v}))} />
+                  <ADDatePicker label="To Date"   value={formData.verifyEnd||''}   onChange={v=>setFormData(p=>({...p,verifyEnd:v}))} />
+                </div>
+                <div style={{ fontSize:11,color:'#6b7280',marginBottom:10 }}>
+                  Device compares its local records against the server and re-pushes any missing logs.
+                </div>
+                <div style={{ display:'flex',gap:6 }}>
+                  <button className="btn btn-primary btn-sm"
+                    disabled={!formData.verifyStart||!formData.verifyEnd||!!busy['verify-attlog']}
+                    onClick={async()=>{
+                      await run('verify-attlog',()=>api.post(`/zkteco/devices/${id}/verify-attlog`,{
+                        startTime:`${formData.verifyStart} 00:00:00`,
+                        endTime:`${formData.verifyEnd} 23:59:59`,
+                      }),'✅ VERIFY SUM ATTLOG queued');
+                      setFormData(p=>({...p,verifyStart:'',verifyEnd:''})); setActiveItem(null);
+                    }}>
+                    {busy['verify-attlog']?'⏳':'✔️'} Verify
+                  </button>
+                  <button className="btn btn-outline btn-sm" onClick={()=>setActiveItem(null)}>Cancel</button>
                 </div>
               </FormPanel>
             )}
@@ -553,9 +674,9 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
           </Group>
 
           {/* ━━━ 3. DEVICE COMMAND ━━━ */}
-          <Group gKey="device-cmd" icon="⚡" title="Device Command">
+          <Group openGroup={openGroup} gKey="device-cmd" icon="⚡" title="Device Command">
             <div style={{ display:'flex', flexWrap:'wrap', gap:10 }}>
-            <Item iKey="upload-user" icon="📤" label="Upload User to Device"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="upload-user" icon="📤" label="Upload User to Device"
               desc="DATA UPDATE USERINFO (guide §3)"
               onClick={()=>setActiveItem(activeItem==='upload-user'?null:'upload-user')} />
             </div>{/* end card grid */}
@@ -603,27 +724,30 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 
             {/* Secondary items in a card grid */}
             <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginTop: activeItem==='upload-user'?10:0 }}>
-            <Item iKey="delete-user" icon="🗑" label="Delete User" danger
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="delete-user" icon="🗑" label="Delete User" danger
               desc="DATA DELETE USERINFO (guide §4)"
               onClick={()=>setActiveItem(activeItem==='delete-user'?null:'delete-user')} />
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="clear-all-users" icon="👥" label="Clear All Users" danger
+              desc="CLEAR ALL USERINFO — remove every enrolled user + biometric template from device"
+              onClick={()=>{ if(!window.confirm('⚠️ DANGER: Remove ALL users and biometric templates from this device?\nThis cannot be undone.\n\nContinue?')) return; run('clear-all-users',()=>api.post(`/zkteco/devices/${id}/clear-all-users`,{}),'✅ CLEAR ALL USERINFO queued'); }} />
             {/* Java: enrollCard(deviceSN, userPin, retry) → ENROLL_ID */}
-            <Item iKey="enroll-card" icon="💳" label="Enroll Card (RFID)"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="enroll-card" icon="💳" label="Enroll Card (RFID)"
               desc="ENROLL_ID PIN=X\tRETRY=3 — prompts user to scan RFID card on device"
               onClick={()=>setActiveItem(activeItem==='enroll-card'?null:'enroll-card')} />
-            <Item iKey="enable-device" icon="✅" label="Enable Device"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="enable-device" icon="✅" label="Enable Device"
               desc="ENABLE — re-enable device input (allow punches) after disabling"
               onClick={()=>run('enable-device',()=>api.post(`/zkteco/devices/${id}/enable`,{}),'✅ ENABLE queued')} />
-            <Item iKey="disable-device" icon="⛔" label="Disable Device" danger
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="disable-device" icon="⛔" label="Disable Device" danger
               desc="DISABLE — block all punches until re-enabled"
               onClick={()=>{ if(!window.confirm('Disable all input on device? Users will not be able to punch until re-enabled.')) return; run('disable-device',()=>api.post(`/zkteco/devices/${id}/disable`,{}),'✅ DISABLE queued'); }} />
-            <Item iKey="delete-fp-slot" icon="🖐️" label="Delete FP Slot"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="delete-fp-slot" icon="🖐️" label="Delete FP Slot"
               desc="DATA DELETE FINGERTMP PIN=X FID=X — remove one fingerprint slot from device"
               onClick={()=>setActiveItem(activeItem==='delete-fp-slot'?null:'delete-fp-slot')} />
             {/* Guide §5: ENROLL_FP PIN\tName\tFID\tRETRY=3\tOVERWRITE=1 */}
-            <Item iKey="enroll" icon="👆" label="Remote Enrollment (Finger/Face)"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="enroll" icon="👆" label="Remote Enrollment (Finger/Face)"
               desc="ENROLL_FP PIN\tFID\tRETRY=3\tOVERWRITE=1 — device prompts user to scan (guide §5)"
               onClick={()=>{ setActiveItem(activeItem==='enroll'?null:'enroll'); setEnrollType(null); }} />
-            <Item iKey="custom-cmd" icon="⌨️" label="Custom Command"
+            <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="custom-cmd" icon="⌨️" label="Custom Command"
               desc="Send any raw ADMS command to this device"
               onClick={()=>setActiveItem(activeItem==='custom-cmd'?null:'custom-cmd')} />
             </div>{/* end secondary card grid */}
@@ -810,7 +934,10 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                   { label:'⚙️ General', color:'#374151', bg:'#f3f4f6', border:'#d1d5db', cmds:[
                     'CHECK',
                     'DATA QUERY USERINFO',
-                    'DATA CLEAR tableName=attlog',
+                    'CLEAR LOG',
+                    'CLEAR PHOTO',
+                    'CLEAR DATA',
+                    'LOG',
                     'ENABLE',
                     'DISABLE',
                   ]},
@@ -906,11 +1033,43 @@ const ZKTecoDeviceSettings = () => {
   const [areaErrors,    setAreaErrors]    = useState({});
   const [areaDelConfirm,setAreaDelConfirm]= useState(null);
   const [commands,   setCommands]   = useState([]);
+  const [cmdFilterOpen, setCmdFilterOpen] = useState(false);
+  const [cmdFilters, setCmdFilters] = useState({ deviceSns:[], statuses:[], sentBy:[] });
+  const cmdFilterBoxRef = useRef(null);
   const [stats,      setStats]      = useState(null);
   const [loading,    setLoading]    = useState(false);
   const [toast,      setToast]      = useState(null);
   const [syncingId,      setSyncingId]      = useState(null);
   const [controlDevice,  setControlDevice]  = useState(null);
+  const [controlInitial, setControlInitial] = useState({ group:'device-info', item:null });
+
+  /* Open the Device Control modal pre-focused on a specific group/item — used by the
+     Devices grid's right-click "USB Upload" action so it doesn't need its own UI. */
+  const openControlAt = (row, group, item) => {
+    setControlInitial({ group, item });
+    setControlDevice(row);
+  };
+
+  /* controlDevice is a snapshot taken when the modal opens — without this, background
+     refreshes (loadDevices polling, or the modal's own "get-info" queue) would never
+     reach the open modal, leaving its capacity bar (Users/FP Slots/Platform) stuck at
+     whatever it showed at open time. */
+  useEffect(() => {
+    setControlDevice(prev => {
+      if (!prev) return prev;
+      return devices.find(d => d.id === prev.id) || prev;
+    });
+  }, [devices]);
+
+  /* Direct, fire-and-forget device commands — same pattern as the toolbar's CMDS list,
+     reused by the Devices grid's right-click context menu. */
+  const runDeviceCmd = async (row, label, fn) => {
+    if (!row?.serial_number) { showToast('Device has no serial number yet — wait for it to connect', 'danger'); return; }
+    try {
+      const r = await fn();
+      showToast(`✅ ${label} queued → ${r?.command || r?.commands?.[0] || ''}`, 'success');
+    } catch (err) { showToast(err.message, 'danger'); }
+  };
   const [selectedDeviceIds, setSelectedDeviceIds] = useState([]);  // checked device IDs
   const [cmdMenuOpen,    setCmdMenuOpen]    = useState(false);      // command dropdown open
   const cmdMenuRef = useRef(null);
@@ -952,6 +1111,16 @@ const ZKTecoDeviceSettings = () => {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Close command-history filter popover on outside click
+  useEffect(() => {
+    if (!cmdFilterOpen) return;
+    const handler = (e) => {
+      if (cmdFilterBoxRef.current && !cmdFilterBoxRef.current.contains(e.target)) setCmdFilterOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [cmdFilterOpen]);
 
   const showToast = (msg,type='success') => { setToast({ msg,type }); setTimeout(()=>setToast(null),4000); };
 
@@ -1083,6 +1252,10 @@ const ZKTecoDeviceSettings = () => {
       loadDevices();
     } catch (err) { showToast(err.message,'danger'); }
   };
+
+  /* Ctrl+S saves the Add/Edit Device modal — same action as the Save button */
+  useSaveShortcut(modal, handleSave);
+
   const handleDelete = async (id) => {
     try {
       await api.delete(`/zkteco/devices/${id}`);
@@ -1234,7 +1407,6 @@ const ZKTecoDeviceSettings = () => {
     { key:'fingerprints', icon:'👆', label:L('बायोमेट्रिक','Biometrics'),
       count: devUsers.filter(u=>(u.fp_count||0)+(u.face_count||0)>0).length || null },
     { key:'areas',        icon:'🗺️', label:L('Area','Area'),                      count: areas.length||null },
-    { key:'access',       icon:'🔐', label:L('Access Rule','Access Rule'),          count: null },
     { key:'commands',     icon:'⚡', label:L('कमान्डहरू','Commands'),            count: null },
     { key:'setup',        icon:'📖', label:L('गाइड','Setup Guide'),              count: null },
   ];
@@ -1563,14 +1735,20 @@ const ZKTecoDeviceSettings = () => {
   /* ── command columns ── */
   const cmdColumns = [
     { field:'device_sn',       header:'Device SN',  width:130, render:v=><span style={{ fontFamily:'monospace',fontSize:11 }}>{v}</span> },
-    { field:'command_payload', header:L('कमान्ड','Command'),
-      render:v=><code style={{ fontSize:11,wordBreak:'break-all' }}>{v}</code>
+    { field:'command_payload', header:L('कमान्ड','Command'), width:480,
+      render:v=>(
+        <code title={v} style={{ fontSize:11, display:'block', overflow:'hidden',
+          textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+          {v?.length > 100 ? v.slice(0, 100) + '…' : v}
+        </code>
+      )
     },
     { field:'status', header:'Status', width:90,
       render:v=>{ const m={PENDING:['#92400e','#fef3c7','#fcd34d'],SENT:['#1e40af','#dbeafe','#93c5fd'],DONE:['#065f46','#d1fae5','#6ee7b7']};
         const [c,bg,b]=m[v]||['#374151','#f3f4f6','#e5e7eb'];
         return <Badge color={c} bg={bg} border={b}>{v}</Badge>; }
     },
+    { field:'created_by_name', header:L('प्रयोगकर्ता','Sent by User'), width:140, render:v=>v||<span style={{color:'#9ca3af'}}>System</span> },
     { field:'created_at', header:L('सिर्जित','Created'), width:140, render:v=>v?new Date(v).toLocaleString():'—' },
     { field:'sent_at',    header:L('पठाइयो','Sent'),    width:140, render:v=>v?new Date(v).toLocaleString():'—' },
   ];
@@ -1609,11 +1787,18 @@ const ZKTecoDeviceSettings = () => {
           showSearch
           compact
           loading={loading}
-          onRowDoubleClick={row => setControlDevice(row)}
+          onRowDoubleClick={row => openControlAt(row, 'device-info', null)}
           onSelectionChange={ids => {
             setSelectedDeviceIds(ids);
             if (ids.length === 0) setCmdMenuOpen(false);
           }}
+          contextMenu={[
+            { label:'Edit',                       icon:'✏️', onClick: row => openEdit(row) },
+            { label:'Download Logs',              icon:'📋', onClick: row => runDeviceCmd(row, 'Download Logs', () => api.post(`/zkteco/devices/${row.id}/sync`,{})) },
+            { label:'USB Upload',                 icon:'💾', onClick: row => openControlAt(row, 'data-ops', 'usb-upload') },
+            { label:'Set Timezone Nepal (+5:45)', icon:'🌐', onClick: row => runDeviceCmd(row, 'Set Timezone', () => api.post(`/zkteco/devices/${row.id}/set-timezone`,{})) },
+            { label:'Clear Admin',                icon:'🚫', onClick: row => runDeviceCmd(row, 'Clear Admin', () => api.post(`/zkteco/devices/${row.id}/clear-admin`,{})) },
+          ]}
           toolbar={(() => {
             // Resolve the selected device object
             const selDev = selectedDeviceIds.length === 1
@@ -1642,7 +1827,7 @@ const ZKTecoDeviceSettings = () => {
               { icon:'🚫', label:'Clear Admin',       fn: () => api.post(`/zkteco/devices/${selDev?.id}/clear-admin`,{}) },
               ...(selDev?.area_id ? [{ icon:'🗺️', label:`Sync Area: ${selDev?.area_name||'Area'}`, fn: () => api.post(`/zkteco/devices/${selDev?.id}/sync-area`,{}) }] : []),
               { sep:true },
-              { icon:'⚙️', label:'Open Full Control', fn: () => { setCmdMenuOpen(false); setControlDevice(selDev); return Promise.resolve({}); } },
+              { icon:'⚙️', label:'Open Full Control', fn: () => { setCmdMenuOpen(false); openControlAt(selDev, 'device-info', null); return Promise.resolve({}); } },
               { icon:'✏️', label:'Edit Device',       fn: () => { setCmdMenuOpen(false); openEdit(selDev); return Promise.resolve({}); } },
             ];
 
@@ -2181,23 +2366,32 @@ const ZKTecoDeviceSettings = () => {
         />
       )}
 
-      {/* ══════ ACCESS RULE ══════ */}
-      {subTab==='access'&&(
-        <ZKTecoAccessTab
-          L={L}
-          language={language}
-          showToast={showToast}
-          areas={areas}
-        />
-      )}
-
       {/* ══════ COMMANDS ══════ */}
-      {subTab==='commands'&&(
-        <div>
-          {/* Status + action bar — matches Att. Logs header row style */}
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ fontSize:13, fontWeight:700, color:'#1f2937' }}>⚡ {L('कमान्ड इतिहास','Command History')}</span>
+      {subTab==='commands'&&(() => {
+        const cmdDeviceSnOpts = [...new Set(commands.map(c=>c.device_sn).filter(Boolean))].sort();
+        const cmdStatusOpts   = [...new Set(commands.map(c=>c.status).filter(Boolean))].sort();
+        const cmdSentByOpts   = [...new Set(commands.map(c=>c.created_by_name || 'System'))].sort();
+        const cmdActiveFilterCount = cmdFilters.deviceSns.length + cmdFilters.statuses.length + cmdFilters.sentBy.length;
+        const filteredCommands = commands.filter(c => {
+          if (cmdFilters.deviceSns.length && !cmdFilters.deviceSns.includes(c.device_sn)) return false;
+          if (cmdFilters.statuses.length  && !cmdFilters.statuses.includes(c.status))     return false;
+          if (cmdFilters.sentBy.length    && !cmdFilters.sentBy.includes(c.created_by_name || 'System')) return false;
+          return true;
+        });
+        return (
+        <DataGrid
+          columns={cmdColumns}
+          data={filteredCommands}
+          defaultPageSize={20}
+          showSearch
+          showFilterButton={false}
+          compact
+          ultraCompact
+          loading={loading}
+          showCheckbox={false}
+          title={<span>⚡ {L('कमान्ड इतिहास','Command History')}</span>}
+          toolbarLeft={
+            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
               {['PENDING','SENT','DONE','ERROR'].map(s=>{
                 const count = commands.filter(c=>c.status===s).length;
                 const colors = { PENDING:['#92400e','#fef3c7'], SENT:['#1e40af','#dbeafe'], DONE:['#065f46','#d1fae5'], ERROR:['#991b1b','#fee2e2'] };
@@ -2209,7 +2403,39 @@ const ZKTecoDeviceSettings = () => {
                 ) : null;
               })}
             </div>
+          }
+          toolbar={
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ position:'relative' }} ref={cmdFilterBoxRef}>
+                <button className={`btn btn-outline btn-sm ${cmdActiveFilterCount?'active':''}`}
+                  onClick={()=>setCmdFilterOpen(o=>!o)}
+                  style={{ display:'flex', alignItems:'center', gap:5,
+                    ...(cmdActiveFilterCount ? { background:'#eff6ff', color:'#1a56db', borderColor:'#bfdbfe' } : {}) }}>
+                  🔽 {L('फिल्टर','Filter')}{cmdActiveFilterCount>0 && (
+                    <span style={{ background:'#1a56db', color:'white', borderRadius:10, padding:'0 6px', fontSize:10, fontWeight:700 }}>
+                      {cmdActiveFilterCount}
+                    </span>
+                  )}
+                </button>
+                {cmdFilterOpen && (
+                  <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:40, width:520,
+                    background:'white', border:'1px solid #d1d5db', borderRadius:8,
+                    boxShadow:'0 8px 24px rgba(0,0,0,.15)', padding:12 }}>
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+                      <KeyboardMultiSelect label={L('डिभाइस सिरियल नं.','Device Serial No.')} options={cmdDeviceSnOpts} values={cmdFilters.deviceSns} onChange={v=>setCmdFilters(p=>({...p,deviceSns:v}))} />
+                      <KeyboardMultiSelect label={L('स्थिति','Status')} options={cmdStatusOpts} values={cmdFilters.statuses} onChange={v=>setCmdFilters(p=>({...p,statuses:v}))} />
+                      <KeyboardMultiSelect label={L('पठाउने प्रयोगकर्ता','Sent by User')} options={cmdSentByOpts} values={cmdFilters.sentBy} onChange={v=>setCmdFilters(p=>({...p,sentBy:v}))} />
+                    </div>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginTop:10, paddingTop:10, borderTop:'1px solid #f1f5f9' }}>
+                      <button className="btn btn-outline btn-sm"
+                        onClick={()=>setCmdFilters({ deviceSns:[], statuses:[], sentBy:[] })}>
+                        ✕ {L('सबै हटाउनुस','Clear All')}
+                      </button>
+                      <button className="btn btn-primary btn-sm" onClick={()=>setCmdFilterOpen(false)}>{L('भयो','Done')}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
               <button className="btn btn-outline btn-sm" onClick={loadCommands}>🔃 {L('रिफ्रेस','Refresh')}</button>
               <button
                 className="btn btn-outline btn-sm"
@@ -2242,18 +2468,10 @@ const ZKTecoDeviceSettings = () => {
                 + {L('कमान्ड पठाउनुस','Send Command')}
               </button>
             </div>
-          </div>
-          <DataGrid
-            columns={cmdColumns}
-            data={commands}
-            defaultPageSize={20}
-            showSearch
-            compact
-            loading={loading}
-            showCheckbox={false}
-          />
-        </div>
-      )}
+          }
+        />
+        );
+      })()}
 
       {/* ══════ SETUP GUIDE ══════ */}
       {subTab==='setup'&&(
@@ -2262,7 +2480,7 @@ const ZKTecoDeviceSettings = () => {
             <div className="card-header"><h3>⚙️ {L('कन्फिगरेसन','Configuration')}</h3></div>
             <div className="card-body">
               {[
-                {step:'1',title:'Device ADMS Server',desc:'Menu → Communication → ADMS / Cloud / Push Server',code:`Server Address : <your server IP>\nServer Port    : 5000\nHTTPS          : Disabled`},
+                {step:'1',title:'Device ADMS Server',desc:'Menu → Communication → ADMS / Cloud / Push Server',code:`Server Address : <your server IP>\nServer Port    : 5001\nHTTPS          : Disabled`},
                 {step:'2',title:'Employee Device ID',desc:'Set each employee\'s "Device ID" field in eHajiri to match their PIN on the device'},
                 {step:'3',title:'Get All Data',desc:'Click ⚙️ Control → Get All Logs + Get All Users to pull device data into eHajiri'},
               ].map(s=>(
@@ -2472,6 +2690,8 @@ const ZKTecoDeviceSettings = () => {
       {controlDevice && (
         <DeviceControlModal
           device={controlDevice}
+          initialGroup={controlInitial.group}
+          initialItem={controlInitial.item}
           onClose={()=>setControlDevice(null)}
           showToast={showToast}
           onRefreshDevices={()=>{ loadDevices(true); setTimeout(()=>loadDevices(false),3000); }}
@@ -2620,7 +2840,7 @@ const ZKTecoDeviceSettings = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 Save</button>
+              <SaveButton onClick={handleSave} />
             </div>
           </div>
         </div>

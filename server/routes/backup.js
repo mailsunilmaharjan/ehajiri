@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { spawn } from 'child_process';
 import pool from '../db.js';
 import { APP_VERSION, DB_VERSION } from '../version.js';
 import { migrateBackupData } from '../migrations/runner.js';
@@ -73,17 +74,69 @@ router.get('/', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════
+//  GET /api/backup/sql — export a native PostgreSQL SQL dump via pg_dump,
+//  restorable with standard psql/pg_restore tooling outside the app. This
+//  is a plain logical dump (schema + data) for external/disaster-recovery
+//  use — it is NOT used by /restore above, which stays JSON-based since
+//  only that format carries meta.dbVersion for automatic schema migration.
+// ══════════════════════════════════════════════════════════
+router.get('/sql', (_req, res) => {
+  const pgDumpPath = process.env.PG_DUMP_PATH || 'pg_dump';
+
+  const child = spawn(pgDumpPath, [
+    '--host', process.env.DB_HOST || 'localhost',
+    '--port', process.env.DB_PORT || '5432',
+    '--username', process.env.DB_USER || 'postgres',
+    '--no-owner',
+    '--no-privileges',
+    '--format=plain',
+    process.env.DB_NAME || 'ehajiri_db',
+  ], {
+    env: { ...process.env, PGPASSWORD: process.env.DB_PASS || 'postgres' },
+  });
+
+  let stderr = '';
+  child.stderr.on('data', (d) => { stderr += d.toString(); });
+
+  // Only commit to a 200 + attachment response once pg_dump has actually
+  // launched — an ENOENT (binary not bundled/found) fires 'error' instead
+  // of 'spawn', so it can still be reported as a normal JSON error below.
+  child.once('spawn', () => {
+    const filename = `ehajiri-backup-${new Date().toISOString().split('T')[0]}.sql`;
+    res.setHeader('Content-Type', 'application/sql');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    child.stdout.pipe(res);
+  });
+
+  child.on('error', (err) => {
+    if (res.headersSent) return res.destroy();
+    const hint = err.code === 'ENOENT'
+      ? 'pg_dump not found — native SQL export is not bundled in this build. Use the JSON backup instead.'
+      : err.message;
+    res.status(500).json({ error: hint });
+  });
+
+  child.on('close', (code) => {
+    if (code === 0) return;
+    console.error('[backup/sql] pg_dump exited with code', code, stderr);
+    if (!res.headersSent) res.status(500).json({ error: stderr || `pg_dump exited with code ${code}` });
+    else res.end();
+  });
+});
+
+// ══════════════════════════════════════════════════════════
 //  GET /api/backup/version  — current version info
 // ══════════════════════════════════════════════════════════
 router.get('/version', async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT COALESCE(MAX(version),0)::int AS v FROM app_schema_version'
+      'SELECT version, applied_at FROM app_schema_version ORDER BY version DESC LIMIT 1'
     );
     res.json({
-      appVersion: APP_VERSION,
-      dbVersion : DB_VERSION,
-      dbApplied : rows[0].v,
+      appVersion : APP_VERSION,
+      dbVersion  : DB_VERSION,
+      dbApplied  : rows[0]?.version ?? 0,
+      dbAppliedAt: rows[0]?.applied_at ?? null,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

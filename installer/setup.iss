@@ -280,6 +280,8 @@ begin
     'PostgreSQL and the eHajiri server are both registered to start ' +
     'automatically with Windows and will be running once setup finishes — ' +
     'no manual steps needed.' + #13#10 + #13#10 +
+    'On the next screen you can choose the install drive and folder ' +
+    '(for example C:\Program Files\eHajiri or D:\Apps\eHajiri).' + #13#10 + #13#10 +
     'Please close all other applications before continuing.';
 
   if IsPostgresInstalled() then
@@ -300,5 +302,15 @@ begin
       'Note: eHajiri could not automatically set up its database on your existing ' +
       'PostgreSQL server (its superuser password likely differs from the default ' +
       'eHajiri tried). Please edit "' + ExpandConstant('{app}') + '\server\.env" ' +
-      'with working connection details, then restart the "eHajiriServer" service.';
+      'with working connection details, then restart the "eHajiriServer" service.' + #13#10 + #13#10 +
+      'Default database settings are:' + #13#10 +
+      '  DB_HOST=localhost' + #13#10 +
+      '  DB_PORT=5432' + #13#10 +
+      '  DB_NAME=ehajiriPlanetInfosys_db' + #13#10 +
+      '  DB_USER=ehajiri' + #13#10 +
+      '  DB_PASS=Eh@jiri2026!@Pl@nE!iNfOsYS' + #13#10 + #13#10 +
+      'This usually means your existing PostgreSQL uses a different superuser password ' +
+      'from the default installer password (ehajiri2024). If so, create the database ' +
+      'and user manually or update server\.env with a working connection and restart the service.' + #13#10 + #13#10 +
+      'If the service still does not start, check "' + ExpandConstant('{app}') + '\logs\server-error.log" for the exact error.';
 end;

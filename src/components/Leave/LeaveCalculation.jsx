@@ -2,8 +2,11 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import { useAuth }     from '../../context/AuthContext.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
+import SaveButton      from '../Common/SaveButton.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import { branchAbbr }  from '../../utils/branchUtils.js';
 
 /* ─────────────────────────────────────────── */
@@ -374,6 +377,9 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
     showToast(L('बिदा प्रारम्भिक सुरक्षित भयो', 'Current Year Leave Opening saved successfully'));
   };
 
+  /* Ctrl+S saves — this tab only exists while it's the active tab */
+  useSaveShortcut(true, handleSave);
+
   /* reset all cells to daysPerYear default */
   const handleSetDefault = () => {
     const init = {};
@@ -527,9 +533,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
           <button className="btn btn-outline" onClick={handleSetDefault}>
             ✨ {L('सबैलाई डिफल्ट','Set All to Default')}
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
-            💾 {L('सबै सुरक्षित','Save All')}
-          </button>
+          <SaveButton onClick={handleSave} label={L('सबै सुरक्षित','Save All')} />
         </div>
       </div>
 
@@ -690,6 +694,8 @@ const DEFAULT_TRANSFER_FILTERS = {
 };
 
 const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpening }) => {
+  const { canEdit } = useAuth();
+  const canEditTransfer = canEdit('leaveCalculation');
   const ltConfigs  = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
   const defaultFY  = (settings.fiscalYears||[]).find(f => f.isDefault) || (settings.fiscalYears||[])[0];
   const [fyId,        setFyId]       = useState(defaultFY?.id || '');
@@ -939,10 +945,10 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
 
         {/* edit/save/cancel */}
         {!editMode
-          ? <button className="btn btn-outline" onClick={startEdit} style={{ display:'flex', alignItems:'center', gap:6 }}>
+          ? (canEditTransfer && <button className="btn btn-outline" onClick={startEdit} style={{ display:'flex', alignItems:'center', gap:6 }}>
               <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
               {L('सम्पादन','Edit')}
-            </button>
+            </button>)
           : <>
               <button className="btn btn-primary" onClick={saveEdit} style={{ display:'flex', alignItems:'center', gap:6 }}>
                 <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path d="M17 3H5a2 2 0 00-2 2v14l7-3 7 3V5a2 2 0 00-2-2z"/></svg>

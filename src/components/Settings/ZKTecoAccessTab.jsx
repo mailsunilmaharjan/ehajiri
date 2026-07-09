@@ -7,10 +7,14 @@
  *   Cols = 3 intervals × (Start, End)
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import SaveButton from '../Common/SaveButton.jsx';
+import KeyboardMultiSelect from '../Common/KeyboardMultiSelect.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 
 /* ── Constants ──────────────────────────────────────────────── */
 const DAYS = [
@@ -131,6 +135,9 @@ const TimeZoneModal = ({ tz, onSave, onClose }) => {
     if (!name.trim()) { setError('Time Period Name is required'); return; }
     onSave({ name: name.trim(), remarks: remarks.trim(), schedule });
   };
+
+  /* Ctrl+S saves — this component only exists while its modal is open */
+  useSaveShortcut(true, handleSave);
 
   /* ── Per-interval colour palette (3 distinct colours) ── */
   const INTERVAL_COLORS = [
@@ -289,7 +296,7 @@ const TimeZoneModal = ({ tz, onSave, onClose }) => {
         {/* ── App-standard footer ── */}
         <div className="modal-footer" style={{ position:'sticky', bottom:0, background:'white', borderTop:'1px solid #e5e7eb' }}>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave}>💾 Save</button>
+          <SaveButton onClick={handleSave} />
         </div>
       </div>
     </div>
@@ -301,25 +308,50 @@ const TimeZoneModal = ({ tz, onSave, onClose }) => {
 ═════════════════════════════════════════════════════════════ */
 
 /** Dual-panel "Add Personnel" modal matching ZKBio CVAccess layout */
-const PersonnelModal = ({ level, timezones, onClose, toast2 }) => {
-  const [members,       setMembers]       = useState([]);     // right panel — already in level
+// `level` (single) and `group` ({ id, name, levelIds, levelNames }) are mutually
+// exclusive. In group mode, adds/removes apply to ONE canonical level (the
+// first in the group) — its device-side AccGroup mask already unions every
+// timezone in the group (see buildAccGroupParams server-side), so membership
+// in just that one level already grants every window the shift covers. The
+// member LIST shown is still the union across all levels in the group, since
+// someone may have been added to a sibling level individually before.
+const PersonnelModal = ({ level, group, timezones, onClose, toast2 }) => {
+  const { settings } = useSettings();
+  const deptShort   = (name) => settings.departments?.find(d=>d.name===name)?.shortName || name || '—';
+  const branchShort = (name) => settings.branches?.find(b=>b.name===name)?.shortName || name || '—';
+  const levelIds = group ? group.levelIds : [level.id];
+  const levelIdsKey = levelIds.join(',');
+  const canonicalLevelId = levelIds[0];
+  const [members,       setMembers]       = useState([]);     // right panel — already in level(s)
   const [leftSelected,  setLeftSelected]  = useState([]);     // checked in left panel
   const [rightSelected, setRightSelected] = useState([]);     // checked in right panel
-  const [searchTab,     setSearchTab]     = useState('query');
-  const [filterEmpId,   setFilterEmpId]   = useState('');
-  const [filterName,    setFilterName]    = useState('');
-  const [filterDept,    setFilterDept]    = useState('');
   const [allEmps,       setAllEmps]       = useState([]);
+  const [personAccessAll, setPersonAccessAll] = useState([]); // every employee's current level/group, for the "Level" filter
   const [loading,       setLoading]       = useState(false);
+  const [filterOpen,    setFilterOpen]    = useState(false);
+  const [filters,       setFilters]       = useState({
+    branches:[], departments:[], posts:[], grades:[], levels:[], modes:[],
+  });
+  const filterBoxRef = useRef(null);
 
-  // Load all employees (ranked) and existing members
+  useEffect(() => {
+    if (!filterOpen) return;
+    const close = (e) => { if (!filterBoxRef.current?.contains(e.target)) setFilterOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [filterOpen]);
+
+  // Load all employees (ranked), existing members, and everyone's current
+  // level/group assignment (for the "Level" filter) — in group mode, members
+  // are the union across every level in the group (deduped by employee id).
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       try {
-        const [emps, mems] = await Promise.all([
+        const [emps, pa, ...memberLists] = await Promise.all([
           api.get('/employees'),
-          api.get(`/zkteco/access-levels/${level.id}/members`),
+          api.get('/zkteco/person-access'),
+          ...levelIds.map(id => api.get(`/zkteco/access-levels/${id}/members`)),
         ]);
         // Sort by ranking_order then full_name
         setAllEmps((emps||[]).filter(e=>e.active!==false).sort((a,b)=>{
@@ -328,21 +360,50 @@ const PersonnelModal = ({ level, timezones, onClose, toast2 }) => {
           if (ra !== rb) return ra - rb;
           return (a.fullName||'').localeCompare(b.fullName||'');
         }));
-        setMembers(mems||[]);
+        setPersonAccessAll(pa||[]);
+        const merged = new Map();
+        memberLists.flat().forEach(m => { if (m) merged.set(m.id, m); });
+        setMembers([...merged.values()]);
       } catch {}
       finally { setLoading(false); }
     };
     init();
-  }, [level.id]);
+  }, [levelIdsKey]);
 
   const memberIds = new Set(members.map(m => m.id));
 
-  // Left panel — employees NOT yet in the level, filtered by search
+  // Each employee's current Level/Shift Group label, for the "Level" filter —
+  // group_name when their level belongs to one, else the level name itself,
+  // else "Unassigned".
+  const levelLabelByEmp = new Map(
+    personAccessAll.filter(p => p.access_level_id).map(p => [p.employee_id, p.group_name || p.level_name])
+  );
+  const levelOf = (empId) => levelLabelByEmp.get(empId) || 'Unassigned';
+
+  const uniq = (field) => [...new Set(allEmps.map(e => e[field]).filter(Boolean))].sort();
+  // Prefer the canonical lists configured in Settings → Setup (so every
+  // configured Branch/Department/etc. is selectable even if no one's been
+  // assigned it yet); fall back to whatever's actually on employee records.
+  const sNames = (key) => (settings[key] || []).map(x => x.name || x).filter(Boolean).sort();
+  const branchOpts = sNames('branches').length    ? sNames('branches')    : uniq('branch');
+  const deptOpts    = sNames('departments').length ? sNames('departments') : uniq('department');
+  const postOpts    = sNames('posts').length       ? sNames('posts')       : uniq('position');
+  const gradeOpts   = sNames('grades').length      ? sNames('grades')      : uniq('grade');
+  const modeOpts    = sNames('modes').length       ? sNames('modes')       : uniq('mode');
+  const shiftOpts   = [...new Set(allEmps.map(e => levelOf(e.id)))].sort();
+  const activeFilterCount = filters.branches.length + filters.departments.length + filters.posts.length
+    + filters.grades.length + filters.levels.length + filters.modes.length;
+
+  // Left panel — employees NOT yet in the level(s), narrowed by the Filter
+  // popover; the DataGrid's own search box handles free-text name/ID search.
   const leftFiltered = allEmps.filter(e => {
     if (memberIds.has(e.id)) return false;
-    if (filterEmpId && !String(e.employeeId||'').toLowerCase().includes(filterEmpId.toLowerCase())) return false;
-    if (filterName  && !(e.fullName||'').toLowerCase().includes(filterName.toLowerCase()))   return false;
-    if (filterDept  && !(e.department||'').toLowerCase().includes(filterDept.toLowerCase())) return false;
+    if (filters.branches.length    && !filters.branches.includes(e.branch||''))       return false;
+    if (filters.departments.length && !filters.departments.includes(e.department||'')) return false;
+    if (filters.posts.length       && !filters.posts.includes(e.position||''))         return false;
+    if (filters.grades.length      && !filters.grades.includes(e.grade||''))           return false;
+    if (filters.modes.length       && !filters.modes.includes(e.mode||''))             return false;
+    if (filters.levels.length      && !filters.levels.includes(levelOf(e.id)))         return false;
     return true;
   });
 
@@ -350,117 +411,81 @@ const PersonnelModal = ({ level, timezones, onClose, toast2 }) => {
     if (!empIds.length) return;
     try {
       if (add) {
-        await api.post(`/zkteco/access-levels/${level.id}/members`, { employeeIds:empIds });
+        const r = await api.post(`/zkteco/access-levels/${canonicalLevelId}/members`, { employeeIds:empIds });
         const newMembers = allEmps.filter(e=>empIds.includes(e.id)).map(e=>({
           id:e.id, emp_code:e.employeeId, full_name:e.fullName,
-          first_name:e.fullName?.split(' ')[0]||'',
-          last_name:e.fullName?.split(' ').slice(1).join(' ')||'',
-          department:e.department||'',
+          branch:e.branch||'', department:e.department||'',
         }));
         setMembers(p=>[...p,...newMembers]);
         setLeftSelected([]);
+        setGridVersion(v=>v+1);
+        toast2(`Added ${r.added} — synced to ${r.syncedDevices} device(s)`);
       } else {
+        let syncedDevices = 0;
+        // Remove from every level in the group, in case they were individually
+        // added to a sibling level before group-mode assignment existed.
         for (const id of empIds) {
-          await api.delete(`/zkteco/access-levels/${level.id}/members/${id}`);
+          for (const lvId of levelIds) {
+            const r = await api.delete(`/zkteco/access-levels/${lvId}/members/${id}`);
+            syncedDevices += r.syncedDevices||0;
+          }
         }
         setMembers(p=>p.filter(m=>!empIds.includes(m.id)));
         setRightSelected([]);
+        setGridVersion(v=>v+1);
+        toast2(`Removed ${empIds.length} — synced to ${syncedDevices} device(s)`);
       }
     } catch (err) { toast2(err.message,'danger'); }
   };
 
-  const PersonRow = ({ emp, checked, onToggle, isRight }) => (
-    <tr style={{ background:checked?'#eff6ff':'white', cursor:'pointer' }}
-      onClick={()=>onToggle(emp.id)}>
-      <td style={{ padding:'5px 8px', textAlign:'center', width:32 }}>
-        <div style={{ width:15,height:15,borderRadius:3,border:`2px solid ${checked?'#1a56db':'#d1d5db'}`,
-          background:checked?'#1a56db':'white',display:'flex',alignItems:'center',justifyContent:'center',margin:'auto' }}>
-          {checked&&<svg viewBox="0 0 12 12" width="9" height="9" fill="none">
-            <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>}
-        </div>
-      </td>
-      <td style={{ padding:'5px 8px', fontSize:12, fontFamily:'monospace', color:'#1a56db', fontWeight:600 }}>
-        {isRight ? emp.emp_code : emp.employeeId}
-      </td>
-      <td style={{ padding:'5px 8px', fontSize:12, fontWeight:600 }}>
-        {isRight ? emp.first_name : (emp.fullName?.split(' ')[0]||'')}
-      </td>
-      <td style={{ padding:'5px 8px', fontSize:12 }}>
-        {isRight ? emp.last_name : (emp.fullName?.split(' ').slice(1).join(' ')||'')}
-      </td>
-      <td style={{ padding:'5px 8px', fontSize:11, color:'#6b7280' }}>
-        {isRight ? emp.department : (emp.department||'')}
-      </td>
-    </tr>
-  );
+  // Shared column shape for both panels — left-side employees are pre-mapped
+  // to the same emp_code/full_name fields the members API already returns,
+  // so one column set covers both standard DataGrids.
+  const personColumns = [
+    { field:'emp_code', header:'P.ID', width:70,
+      render:v=><span style={{ fontFamily:'monospace', color:'#1a56db', fontWeight:700, fontSize:12 }}>{v}</span> },
+    { field:'full_name', header:'Full Name' },
+    { field:'branch', header:'Branch', width:70,
+      render:v=><span style={{ fontSize:12 }}>{branchShort(v)}</span> },
+    { field:'department', header:'Dept.', width:70,
+      render:v=><span style={{ fontSize:12 }}>{deptShort(v)}</span> },
+  ];
+  const leftRows = leftFiltered.map(e => ({
+    id: e.id, emp_code: e.employeeId,
+    full_name: e.fullName||'',
+    branch: e.branch||'',
+    department: e.department||'',
+  }));
 
-  const PanelHeader = () => (
-    <thead>
-      <tr style={{ background:'#efefef' }}>
-        <th style={{ width:32, padding:'6px 8px', border:'1px solid #dedede' }}></th>
-        {['Personnel ID','First Name','Last Name','Department'].map(h=>(
-          <th key={h} style={{ padding:'6px 8px',fontSize:11,fontWeight:700,color:'#374151',
-            border:'1px solid #dedede',textTransform:'uppercase',letterSpacing:'.3px',whiteSpace:'nowrap' }}>{h}</th>
-        ))}
-      </tr>
-    </thead>
-  );
+  // DataGrid manages selection internally (uncontrolled) — bump this after
+  // every successful move() to remount both grids and clear stale checkboxes.
+  const [gridVersion, setGridVersion] = useState(0);
 
-  const tz = timezones.find(t=>t.id===level.timezone_id);
+  const tz = level ? timezones.find(t=>t.id===level.timezone_id) : null;
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth:980,width:'98%',maxHeight:'94vh',overflowY:'auto' }}
+      <div className="modal" style={{ maxWidth:1320,width:'98%',maxHeight:'94vh',overflowY:'auto' }}
            onClick={e=>e.stopPropagation()}>
 
         {/* Header */}
         <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)',position:'sticky',top:0,zIndex:10 }}>
           <div>
-            <h2>👥 Add Personnel — {level.name}</h2>
+            <h2>👥 Add Personnel — {group ? `📦 ${group.name}` : level.name}</h2>
             <div style={{ fontSize:12,color:'#6b7280',marginTop:2 }}>
-              {tz&&<span>Time Zone: <strong>{tz.name}</strong> &nbsp;·&nbsp;</span>}
-              {level.area_name&&<span>Area: <strong>{level.area_name}</strong></span>}
+              {group
+                ? <span>Shift Group · {group.levelNames.length} levels: <strong>{group.levelNames.join(', ')}</strong></span>
+                : <>
+                    {tz&&<span>Time Zone: <strong>{tz.name}</strong> &nbsp;·&nbsp;</span>}
+                    {level.area_name&&<span>Area: <strong>{level.area_name}</strong></span>}
+                  </>}
             </div>
           </div>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         <div className="modal-body" style={{ padding:'14px 18px' }}>
-          {/* Query/Department tabs */}
-          <div style={{ display:'flex',gap:16,marginBottom:12 }}>
-            {['query','dept'].map(t=>(
-              <label key={t} style={{ display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13 }}>
-                <input type="radio" value={t} checked={searchTab===t} onChange={()=>setSearchTab(t)}
-                  style={{ accentColor:'#1a56db',width:15,height:15 }} />
-                {t==='query'?'Query':'Department'}
-              </label>
-            ))}
-          </div>
-
-          {/* Search bar */}
-          <div style={{ display:'flex',gap:10,marginBottom:12,alignItems:'flex-end',
-            background:'#f9fafb',padding:'8px 12px',borderRadius:8,border:'1px solid #e5e7eb',flexWrap:'wrap' }}>
-            <div className="form-group" style={{ marginBottom:0 }}>
-              <label className="form-label" style={{ fontSize:11 }}>Personnel ID</label>
-              <input className="form-control" style={{ width:130 }} value={filterEmpId}
-                onChange={e=>setFilterEmpId(e.target.value)} />
-            </div>
-            <div className="form-group" style={{ marginBottom:0 }}>
-              <label className="form-label" style={{ fontSize:11 }}>Name</label>
-              <input className="form-control" style={{ width:150 }} value={filterName}
-                onChange={e=>setFilterName(e.target.value)} />
-            </div>
-            <div className="form-group" style={{ marginBottom:0 }}>
-              <label className="form-label" style={{ fontSize:11 }}>Department Name</label>
-              <input className="form-control" style={{ width:150 }} value={filterDept}
-                onChange={e=>setFilterDept(e.target.value)} />
-            </div>
-            <button className="btn btn-primary btn-sm" onClick={()=>{}}>🔍 Search</button>
-            <button className="btn btn-outline btn-sm" onClick={()=>{setFilterEmpId('');setFilterName('');setFilterDept('');}}>✕ Clear</button>
-          </div>
-
-          {/* Dual panel */}
+          {/* Dual panel — standard DataGrid on both sides */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr auto 1fr', gap:10, alignItems:'start' }}>
 
             {/* LEFT — Alternative (not yet in level) */}
@@ -471,25 +496,55 @@ const PersonnelModal = ({ level, timezones, onClose, toast2 }) => {
                   ({leftFiltered.length} staff, ordered by ranking)
                 </span>
               </div>
-              <div style={{ border:'1px solid #dedede', borderRadius:6, overflow:'hidden', maxHeight:340, overflowY:'auto' }}>
-                <table style={{ borderCollapse:'collapse', width:'100%' }}>
-                  <PanelHeader />
-                  <tbody>
-                    {leftFiltered.length===0&&(
-                      <tr><td colSpan={5} style={{ padding:'20px',textAlign:'center',color:'#9ca3af',fontSize:13 }}>
-                        {loading ? 'Loading...' : 'All staff already assigned or no matches'}
-                      </td></tr>
+              <div className="dg-fixed-height" style={{ height:540 }}>
+              <DataGrid
+                key={`left-${gridVersion}`}
+                columns={personColumns}
+                data={leftRows}
+                rowKey="id"
+                showCheckbox
+                onSelectionChange={setLeftSelected}
+                defaultPageSize={10}
+                showSearch
+                showFilterButton={false}
+                compact
+                loading={loading}
+                toolbar={
+                  <div style={{ position:'relative' }} ref={filterBoxRef}>
+                    <button className={`btn btn-outline btn-sm ${activeFilterCount?'active':''}`}
+                      onClick={()=>setFilterOpen(o=>!o)}
+                      style={{ display:'flex', alignItems:'center', gap:5,
+                        ...(activeFilterCount ? { background:'#eff6ff', color:'#1a56db', borderColor:'#bfdbfe' } : {}) }}>
+                      🔽 Filter{activeFilterCount>0 && (
+                        <span style={{ background:'#1a56db', color:'white', borderRadius:10, padding:'0 6px', fontSize:10, fontWeight:700 }}>
+                          {activeFilterCount}
+                        </span>
+                      )}
+                    </button>
+                    {filterOpen && (
+                      <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:40, width:560,
+                        background:'white', border:'1px solid #d1d5db', borderRadius:8,
+                        boxShadow:'0 8px 24px rgba(0,0,0,.15)', padding:12 }}>
+                        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+                          <KeyboardMultiSelect label="Branch"     options={branchOpts} values={filters.branches}    onChange={v=>setFilters(p=>({...p,branches:v}))} />
+                          <KeyboardMultiSelect label="Department" options={deptOpts}   values={filters.departments} onChange={v=>setFilters(p=>({...p,departments:v}))} />
+                          <KeyboardMultiSelect label="Post"       options={postOpts}   values={filters.posts}       onChange={v=>setFilters(p=>({...p,posts:v}))} />
+                          <KeyboardMultiSelect label="Grade"      options={gradeOpts}  values={filters.grades}      onChange={v=>setFilters(p=>({...p,grades:v}))} />
+                          <KeyboardMultiSelect label="Shift"      options={shiftOpts}  values={filters.levels}      onChange={v=>setFilters(p=>({...p,levels:v}))} />
+                          <KeyboardMultiSelect label="Mode"       options={modeOpts}   values={filters.modes}       onChange={v=>setFilters(p=>({...p,modes:v}))} />
+                        </div>
+                        <div style={{ display:'flex', justifyContent:'space-between', marginTop:10, paddingTop:10, borderTop:'1px solid #f1f5f9' }}>
+                          <button className="btn btn-outline btn-sm"
+                            onClick={()=>setFilters({ branches:[], departments:[], posts:[], grades:[], levels:[], modes:[] })}>
+                            ✕ Clear All
+                          </button>
+                          <button className="btn btn-primary btn-sm" onClick={()=>setFilterOpen(false)}>Done</button>
+                        </div>
+                      </div>
                     )}
-                    {leftFiltered.map(e=>(
-                      <PersonRow key={e.id} emp={e} isRight={false}
-                        checked={leftSelected.includes(e.id)}
-                        onToggle={id=>setLeftSelected(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id])} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ fontSize:11,color:'#9ca3af',marginTop:4 }}>
-                Total {leftFiltered.length} records
+                  </div>
+                }
+              />
               </div>
             </div>
 
@@ -521,25 +576,19 @@ const PersonnelModal = ({ level, timezones, onClose, toast2 }) => {
                   {members.length}
                 </span>
               </div>
-              <div style={{ border:'1px solid #dedede',borderRadius:6,overflow:'hidden',maxHeight:340,overflowY:'auto' }}>
-                <table style={{ borderCollapse:'collapse',width:'100%' }}>
-                  <PanelHeader />
-                  <tbody>
-                    {members.length===0&&(
-                      <tr><td colSpan={5} style={{ padding:'20px',textAlign:'center',color:'#9ca3af',fontSize:13 }}>
-                        No personnel assigned yet
-                      </td></tr>
-                    )}
-                    {members.map(m=>(
-                      <PersonRow key={m.id} emp={m} isRight={true}
-                        checked={rightSelected.includes(m.id)}
-                        onToggle={id=>setRightSelected(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id])} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ fontSize:11,color:'#9ca3af',marginTop:4 }}>
-                Total {members.length} records
+              <div className="dg-fixed-height" style={{ height:540 }}>
+              <DataGrid
+                key={`right-${gridVersion}`}
+                columns={personColumns}
+                data={members}
+                rowKey="id"
+                showCheckbox
+                onSelectionChange={setRightSelected}
+                defaultPageSize={10}
+                showSearch
+                compact
+                loading={loading}
+              />
               </div>
             </div>
           </div>
@@ -634,6 +683,7 @@ const SetByLevelTab = ({ levels, employees, areas, timezones, toast2, L, onRefre
 const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
   const { settings }   = useSettings();
   const { employees }  = useData();
+  const navigate = useNavigate();
 
   const [subTab,     setSubTab]     = useState('timezones');
   const [timezones,  setTimezones]  = useState([]);
@@ -641,7 +691,6 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
   const [personAccess, setPersonAccess] = useState([]);
   const [deptAccess,   setDeptAccess]   = useState([]);
   const [holidays,   setHolidays]   = useState([]);
-  const [unlockCombos, setUnlockCombos] = useState([]);
   const [devices,    setDevices]    = useState([]);
   const [loading,    setLoading]    = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
@@ -654,12 +703,6 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
   const [hlForm,   setHlForm]   = useState({ holidayName:'', startDate:'', endDate:'', timezoneId:'', remarks:'' });
   const [hlDelConf,setHlDelConf]= useState(null);
 
-  /* ── Unlock Combo modal ── */
-  const [ucModal,  setUcModal]  = useState(false);
-  const [ucEdit,   setUcEdit]   = useState(null);
-  const [ucForm,   setUcForm]   = useState({ uid:'', group1:0, group2:0, group3:0, group4:0, group5:0, remarks:'' });
-  const [ucDelConf,setUcDelConf]= useState(null);
-
   /* ── Time Zone modal ── */
   const [tzModal,  setTzModal]  = useState(false);
   const [tzEdit,   setTzEdit]   = useState(null);
@@ -668,12 +711,12 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
   /* ── Access Level modal ── */
   const [lvModal,  setLvModal]  = useState(false);
   const [lvEdit,   setLvEdit]   = useState(null);
-  const [lvForm,   setLvForm]   = useState({ name:'', timezoneId:'', areaId:'', remarks:'' });
+  const [lvForm,   setLvForm]   = useState({ name:'', timezoneId:'', areaId:'', groupId:'', remarks:'', active:true });
   const [lvDelConf,setLvDelConf]= useState(null);
 
   /* ── By Person modal ── */
   const [pModal,   setPModal]   = useState(false);
-  const [pForm,    setPForm]    = useState({ employeeId:'', accessLevelId:'', timezoneId:'', areaId:'' });
+  const [pForm,    setPForm]    = useState({ employeeIds:[], accessLevelIds:[], areaIds:[] });
   const [pDelConf, setPDelConf] = useState(null);
 
   /* ── By Dept modal ── */
@@ -685,16 +728,24 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
 
   const depts = [...new Set(employees.filter(e=>e.active!==false&&e.department).map(e=>e.department))].sort();
 
+  // Cluster Access Levels by Shift Group (alphabetically), ungrouped levels last —
+  // so the two (or more) levels under e.g. "09-17 Shift" sit next to each other
+  // instead of being interleaved with levels from other shifts.
+  const levelsByGroup = [...levels].sort((a, b) => {
+    const ga = a.group_name || '￿', gb = b.group_name || '￿';
+    if (ga !== gb) return ga.localeCompare(gb);
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [tz,lv,pa,da,hl,uc,devs] = await Promise.all([
+      const [tz,lv,pa,da,hl,devs] = await Promise.all([
         api.get('/zkteco/timezones'),
         api.get('/zkteco/access-levels'),
         api.get('/zkteco/person-access'),
         api.get('/zkteco/dept-access'),
         api.get('/zkteco/acc-holidays'),
-        api.get('/zkteco/unlock-combos'),
         api.get('/zkteco/devices'),
       ]);
       setTimezones(tz||[]);
@@ -702,7 +753,6 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
       setPersonAccess(pa||[]);
       setDeptAccess(da||[]);
       setHolidays(hl||[]);
-      setUnlockCombos(uc||[]);
       setDevices((devs||[]).filter(d=>d.serial_number));
     } catch (err) { toast2(err.message,'danger'); }
     finally { setLoading(false); }
@@ -734,6 +784,46 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
     </div>
   );
 
+  // Checkbox-dropdown multi-select — same visual footprint as Sel above.
+  const MultiSel = ({ label, values, onChange, options, allLabel, required }) => {
+    const [open, setOpen] = useState(false);
+    const boxRef = useRef(null);
+    useEffect(() => {
+      if (!open) return;
+      const close = (e) => { if (!boxRef.current?.contains(e.target)) setOpen(false); };
+      document.addEventListener('mousedown', close);
+      return () => document.removeEventListener('mousedown', close);
+    }, [open]);
+    const toggle = (v) => onChange(values.includes(v) ? values.filter(x=>x!==v) : [...values, v]);
+    const labelText = values.length
+      ? options.filter(o=>values.includes(o.value)).map(o=>o.label).join(', ')
+      : (allLabel || '—');
+    return (
+      <div className="form-group" style={{ marginBottom:12, position:'relative' }} ref={boxRef}>
+        <label className="form-label" style={{ fontSize:12 }}>
+          {label}{required&&<span style={{ color:'#ef4444' }}> *</span>}
+        </label>
+        <div className="form-control" onClick={()=>setOpen(o=>!o)}
+          style={{ cursor:'pointer', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color: values.length?'inherit':'#9ca3af' }}>{labelText}</span>
+          <span style={{ marginLeft:6, color:'#9ca3af' }}>▾</span>
+        </div>
+        {open && (
+          <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:20, background:'white',
+            border:'1px solid #d1d5db', borderRadius:6, maxHeight:220, overflowY:'auto', boxShadow:'0 4px 12px rgba(0,0,0,.1)' }}>
+            {options.map(o => (
+              <label key={o.value} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', fontSize:13, cursor:'pointer' }}
+                onMouseDown={e=>e.preventDefault()} onClick={()=>toggle(o.value)}>
+                <input type="checkbox" checked={values.includes(o.value)} readOnly style={{ accentColor:'#1a56db' }} />
+                {o.label}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   /* Sub-tabs */
   const subTabs = [
     { key:'timezones',   label:'🕐 Time Zones',        count: timezones.length },
@@ -742,7 +832,6 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
     { key:'by-person',   label:'👤 By Person',          count: personAccess.length||null },
     { key:'by-dept',     label:'🏗️ By Dept',           count: deptAccess.length||null },
     { key:'holidays',    label:'🎌 Holidays',           count: holidays.length||null },
-    { key:'unlock-comb', label:'🔓 Unlock Combos',      count: unlockCombos.length||null },
   ];
 
   const handlePushAccessRules = async () => {
@@ -750,10 +839,110 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
     setPushLoading(true);
     try {
       const r = await api.post(`/zkteco/devices/${pushDeviceId}/push-access-rules`);
-      toast2(`Queued: ${r.timezones} TimeZones + ${r.groups} Groups + ${r.holidays} Holidays + ${r.unlockCombos} UnlockCombos → device`);
+      toast2(`Queued: ${r.timezones} TimeZones + ${r.groups} Groups + ${r.holidays} Holidays → device`);
     } catch (err) { toast2(err.message,'danger'); }
     finally { setPushLoading(false); }
   };
+
+  /* ── Save handlers for the small Access-tab modals — extracted so Ctrl+S can call them too ── */
+  const handleSaveLevel = async () => {
+    if(!lvForm.name.trim()){toast2('Name required','danger');return;}
+    try {
+      const body={
+        name:lvForm.name, timezoneId:lvForm.timezoneId||null, areaId:lvForm.areaId||null, groupId:null, remarks:lvForm.remarks,
+        active: lvForm.active,
+      };
+      if(lvEdit) await api.put(`/zkteco/access-levels/${lvEdit.id}`,body);
+      else       await api.post('/zkteco/access-levels',body);
+      toast2(lvEdit?'Updated':'Created');setLvModal(false);load();
+    } catch(err){toast2(err.message,'danger');}
+  };
+  // Opens the Set Access By Person modal. Pass a By-Person grid row to
+  // pre-select that staff member (double-click / right-click "Set Access");
+  // omit it to open blank (toolbar "+ Set Access By Person"). Pre-fills ALL
+  // access levels currently held by this employee (across every area), not
+  // just the one row clicked — matches the multi-select shown in the Staff →
+  // Device Connectivity panel, so both screens reflect the same assignments.
+  const openPersonModal = (row) => {
+    if (row) {
+      const mine = personAccess.filter(p => p.employee_id === row.employee_id && p.access_level_id);
+      setPForm({
+        employeeIds: [String(row.employee_id)],
+        accessLevelIds: mine.map(p => String(p.access_level_id)),
+        areaIds: [],
+      });
+    } else {
+      setPForm({ employeeIds:[], accessLevelIds:[], areaIds:[] });
+    }
+    setPModal(true);
+  };
+
+  // Replace, don't accumulate: each save wipes the selected staff's existing
+  // access-level rows first, then re-inserts exactly the current selection. A
+  // person can be tracked under several levels at once (rosters/personnel
+  // counts), but the device only ever enforces ONE Grp — whichever was
+  // (re)assigned most recently wins there; see resolveGrpForEmployee on the
+  // server. Mirrors the Device Connectivity panel's Save behavior so the two
+  // stay consistent.
+  const handleSavePerson = async () => {
+    if(!pForm.employeeIds.length){toast2('Select at least one staff member','danger');return;}
+    try{
+      let saved = 0, syncedDevices = 0;
+      for (const empId of pForm.employeeIds) {
+        await api.delete(`/zkteco/person-access/employee/${empId}`);
+        if (pForm.accessLevelIds.length) {
+          // Group by area — levels in the same area are sent together in one
+          // call; levels pointed at different areas get their own separate call.
+          // An explicit Area override applies the whole selection to every
+          // chosen area instead.
+          const byArea = new Map();
+          if (pForm.areaIds.length) {
+            for (const areaId of pForm.areaIds) byArea.set(areaId, pForm.accessLevelIds.map(id => parseInt(id)));
+          } else {
+            for (const lvId of pForm.accessLevelIds) {
+              const lv = levels.find(l => String(l.id) === lvId);
+              const areaKey = lv?.area_id ? String(lv.area_id) : '';
+              if (!byArea.has(areaKey)) byArea.set(areaKey, []);
+              byArea.get(areaKey).push(parseInt(lvId));
+            }
+          }
+          for (const [areaKey, ids] of byArea) {
+            const r = await api.post('/zkteco/person-access', {
+              employeeId: parseInt(empId), accessLevelIds: ids, areaIds:[areaKey || null],
+            });
+            saved += r.saved||0; syncedDevices += r.syncedDevices||0;
+          }
+        } else {
+          const r = await api.post('/zkteco/person-access', { employeeId: parseInt(empId), accessLevelId: null, areaIds:[null] });
+          saved += r.saved||0; syncedDevices += r.syncedDevices||0;
+        }
+      }
+      toast2(`Access rule saved — ${saved} assignment(s), synced to ${syncedDevices} device(s)`);
+      setPModal(false);load();
+    } catch(err){toast2(err.message,'danger');}
+  };
+  const handleSaveDept = async () => {
+    if(!dForm.department){toast2('Select a department','danger');return;}
+    try{
+      await api.post('/zkteco/dept-access',{department:dForm.department,accessLevelId:dForm.accessLevelId||null,timezoneId:dForm.timezoneId||null,areaId:dForm.areaId||null});
+      toast2('Access rule saved');setDModal(false);load();
+    } catch(err){toast2(err.message,'danger');}
+  };
+  const handleSaveHoliday = async () => {
+    if(!hlForm.holidayName.trim()||!hlForm.startDate||!hlForm.endDate){toast2('Name and dates required','danger');return;}
+    try{
+      const body={holidayName:hlForm.holidayName,startDate:hlForm.startDate,endDate:hlForm.endDate,
+        timezoneId:hlForm.timezoneId||null,remarks:hlForm.remarks};
+      if(hlEdit) await api.put(`/zkteco/acc-holidays/${hlEdit.id}`,body);
+      else       await api.post('/zkteco/acc-holidays',body);
+      toast2(hlEdit?'Holiday updated':'Holiday created');setHlModal(false);load();
+    } catch(err){toast2(err.message,'danger');}
+  };
+  /* Ctrl+S saves whichever of these small modals is currently open */
+  useSaveShortcut(lvModal, handleSaveLevel);
+  useSaveShortcut(pModal,  handleSavePerson);
+  useSaveShortcut(dModal,  handleSaveDept);
+  useSaveShortcut(hlModal, handleSaveHoliday);
 
   return (
     <div>
@@ -776,7 +965,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
           {pushLoading ? '⏳ Pushing…' : '📤 Push All Access Rules'}
         </button>
         <span style={{ fontSize:11, color:'#6b7280' }}>
-          Sends AccTimeZone + AccGroup + AccHoliday + AccUnLockComb commands to device
+          Sends AccTimeZone + AccGroup + AccHoliday commands to device
         </span>
       </div>
 
@@ -858,7 +1047,13 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
       {subTab==='levels'&&(
         <DataGrid
           columns={[
-            { field:'name',          header:'Access Level Name', render:v=><strong>{v}</strong> },
+            { field:'name',          header:'Access Level Name', render:(v,row)=><strong style={row?.active===false?{ color:'#9ca3af', textDecoration:'line-through' }:undefined}>{v}</strong> },
+            { field:'effective_access_group_id', header:'AccGroup #', width:90, render:v=>v!=null
+              ?<span style={{ background:'#dbeafe',color:'#1e40af',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>#{v}</span>
+              :'—' },
+            { field:'active',         header:'Status',     width:90, render:v=>v!==false
+              ?<span style={{ background:'#dcfce7',color:'#166534',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>Active</span>
+              :<span style={{ background:'#fee2e2',color:'#991b1b',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>Disabled</span> },
             { field:'timezone_name', header:'Time Zone',  width:160, render:v=>v||'—' },
             { field:'area_name',     header:'Area',       width:130, render:v=>v
               ?<span style={{ background:'#fef3c7',color:'#92400e',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>🗺️ {v}</span>
@@ -867,13 +1062,15 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
             { field:'actions',       header:'',           width:75, sortable:false, filterable:false,
               render:(_,row)=>(
                 <div style={{ display:'flex',gap:4 }}>
-                  <button className="dg-action-btn edit"   onClick={e=>{e.stopPropagation();setLvEdit(row);setLvForm({name:row.name,timezoneId:row.timezone_id?String(row.timezone_id):'',areaId:row.area_id?String(row.area_id):'',remarks:row.remarks||''});setLvModal(true);}}>✏</button>
-                  <button className="dg-action-btn delete" onClick={e=>{e.stopPropagation();setLvDelConf(row.id);}}>🗑</button>
+                  <button className="dg-action-btn edit"   onClick={e=>{e.stopPropagation();setLvEdit(row);setLvForm({name:row.name,timezoneId:row.timezone_id?String(row.timezone_id):'',areaId:row.area_id?String(row.area_id):'',groupId:'',remarks:row.remarks||'',active:row.active!==false});setLvModal(true);}}>✏</button>
+                  {!row.is_system && (
+                    <button className="dg-action-btn delete" onClick={e=>{e.stopPropagation();setLvDelConf(row.id);}}>🗑</button>
+                  )}
                 </div>
               ),
             },
           ]}
-          data={levels}
+          data={levelsByGroup}
           defaultPageSize={15}
           showSearch
           compact
@@ -881,7 +1078,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
           showCheckbox={false}
           toolbar={
             <button className="btn btn-primary btn-sm"
-              onClick={()=>{setLvEdit(null);setLvForm({name:'',timezoneId:'',areaId:'',remarks:''});setLvModal(true);}}>
+              onClick={()=>{setLvEdit(null);setLvForm({name:'',timezoneId:'',areaId:'',groupId:'',remarks:'',active:true});setLvModal(true);}}>
               + Add Access Level
             </button>
           }
@@ -891,7 +1088,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
       {/* ══════ SET ACCESS BY LEVEL ══════ */}
       {subTab==='by-level'&&(
         <SetByLevelTab
-          levels={levels}
+          levels={levelsByGroup}
           employees={employees}
           areas={areas}
           timezones={timezones}
@@ -908,8 +1105,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
             { field:'full_name',     header:'Staff',       render:v=><strong>{v}</strong> },
             { field:'emp_code',      header:'ID',          width:90 },
             { field:'department',    header:'Dept.',       width:130 },
-            { field:'level_name',    header:'Access Level',width:150, render:v=>v||'—' },
-            { field:'timezone_name', header:'Time Zone',   width:140, render:v=>v||'—' },
+            { field:'level_names',   header:'Access Level',width:220, render:v=>v||'—' },
             { field:'area_name',     header:'Area',        width:120, render:v=>v
               ?<span style={{ background:'#fef3c7',color:'#92400e',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>🗺️ {v}</span>:'—' },
             { field:'actions',       header:'',            width:60,  sortable:false, filterable:false,
@@ -925,9 +1121,14 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
           compact
           loading={loading}
           showCheckbox={false}
+          onRowDoubleClick={(row)=>navigate(`/users?editEmployee=${row.employee_id}`)}
+          contextMenu={[
+            { label:'Set Access', icon:'👤', onClick:(row)=>openPersonModal(row) },
+            'divider',
+            { label:'Delete',     icon:'🗑', className:'danger', onClick:(row)=>setPDelConf(row.id) },
+          ]}
           toolbar={
-            <button className="btn btn-primary btn-sm"
-              onClick={()=>{setPForm({employeeId:'',accessLevelId:'',timezoneId:'',areaId:''});setPModal(true);}}>
+            <button className="btn btn-primary btn-sm" onClick={()=>openPersonModal()}>
               + Set Access By Person
             </button>
           }
@@ -1004,51 +1205,6 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
         />
       )}
 
-      {/* ══════ UNLOCK COMBOS ══════ */}
-      {subTab==='unlock-comb'&&(
-        <>
-          <div style={{ marginBottom:10, padding:'8px 12px', background:'#fef3c7', borderRadius:8, border:'1px solid #fcd34d', fontSize:12, color:'#92400e' }}>
-            <strong>AccUnLockComb</strong> — Multi-person unlock: define groups (1-5) that must all verify simultaneously to open the door.
-            Group number references an Access Group (Access Level) ID. Set group to <strong>0</strong> to disable that slot.
-          </div>
-          <DataGrid
-            columns={[
-              { field:'uid',    header:'UID',     width:70,  render:v=><span style={{ fontFamily:'monospace',fontWeight:700 }}>{v}</span> },
-              { field:'group1', header:'Group 1', width:80,  align:'center', render:v=><span style={{ color:v>0?'#1a56db':'#d1d5db',fontWeight:700 }}>{v}</span> },
-              { field:'group2', header:'Group 2', width:80,  align:'center', render:v=><span style={{ color:v>0?'#1a56db':'#d1d5db',fontWeight:700 }}>{v}</span> },
-              { field:'group3', header:'Group 3', width:80,  align:'center', render:v=><span style={{ color:v>0?'#059669':'#d1d5db',fontWeight:700 }}>{v}</span> },
-              { field:'group4', header:'Group 4', width:80,  align:'center', render:v=><span style={{ color:v>0?'#059669':'#d1d5db',fontWeight:700 }}>{v}</span> },
-              { field:'group5', header:'Group 5', width:80,  align:'center', render:v=><span style={{ color:v>0?'#059669':'#d1d5db',fontWeight:700 }}>{v}</span> },
-              { field:'remarks',header:'Remarks', render:v=>v||'—' },
-              { field:'actions',header:'',        width:75,  sortable:false, filterable:false,
-                render:(_,row)=>(
-                  <div style={{ display:'flex',gap:4 }}>
-                    <button className="dg-action-btn edit" onClick={e=>{e.stopPropagation();
-                      setUcEdit(row);
-                      setUcForm({ uid:String(row.uid), group1:row.group1||0, group2:row.group2||0,
-                        group3:row.group3||0, group4:row.group4||0, group5:row.group5||0, remarks:row.remarks||'' });
-                      setUcModal(true);}}>✏</button>
-                    <button className="dg-action-btn delete" onClick={e=>{e.stopPropagation();setUcDelConf(row.id);}}>🗑</button>
-                  </div>
-                ),
-              },
-            ]}
-            data={unlockCombos}
-            defaultPageSize={20}
-            showSearch
-            compact
-            loading={loading}
-            showCheckbox={false}
-            toolbar={
-              <button className="btn btn-primary btn-sm"
-                onClick={()=>{setUcEdit(null);setUcForm({ uid:'', group1:0, group2:0, group3:0, group4:0, group5:0, remarks:'' });setUcModal(true);}}>
-                + Add Unlock Combo
-              </button>
-            }
-          />
-        </>
-      )}
-
       {/* ══ TIME ZONE MODAL ══ */}
       {tzModal&&(
         <TimeZoneModal
@@ -1086,23 +1242,27 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
               <Sel label="Area" value={lvForm.areaId} allLabel="— All Areas —"
                 onChange={v=>setLvForm(p=>({...p,areaId:v}))}
                 options={areas.map(a=>({value:String(a.id),label:'  '.repeat(a.depth||0)+a.name}))} />
-              <div className="form-group" style={{ marginBottom:0 }}>
+
+              <div className="form-group" style={{ marginBottom:12 }}>
                 <label className="form-label" style={{ fontSize:12 }}>Remarks</label>
                 <input className="form-control" value={lvForm.remarks}
                   onChange={e=>setLvForm(p=>({...p,remarks:e.target.value}))} />
               </div>
+
+              <div className="form-group" style={{ marginBottom:0, display:'flex', alignItems:'center', gap:8,
+                background: lvForm.active?'#f0fdf4':'#fef2f2', border:`1px solid ${lvForm.active?'#bbf7d0':'#fecaca'}`,
+                borderRadius:8, padding:'8px 12px' }}>
+                <input type="checkbox" id="lvActive" checked={lvForm.active}
+                  onChange={e=>setLvForm(p=>({...p,active:e.target.checked}))} />
+                <label htmlFor="lvActive" style={{ fontSize:12, fontWeight:600, marginBottom:0,
+                  color: lvForm.active?'#166534':'#991b1b' }}>
+                  {lvForm.active ? 'Active — grants access on the device' : 'Disabled — revokes access on the device (time window zeroed)'}
+                </label>
+              </div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setLvModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={async()=>{
-                if(!lvForm.name.trim()){toast2('Name required','danger');return;}
-                try {
-                  const body={name:lvForm.name,timezoneId:lvForm.timezoneId||null,areaId:lvForm.areaId||null,remarks:lvForm.remarks};
-                  if(lvEdit) await api.put(`/zkteco/access-levels/${lvEdit.id}`,body);
-                  else       await api.post('/zkteco/access-levels',body);
-                  toast2(lvEdit?'Updated':'Created');setLvModal(false);load();
-                }catch(err){toast2(err.message,'danger');}
-              }}>💾 Save</button>
+              <SaveButton onClick={handleSaveLevel} />
             </div>
           </div>
         </div>
@@ -1117,28 +1277,19 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
               <button className="modal-close" onClick={()=>setPModal(false)}>✕</button>
             </div>
             <div className="modal-body">
-              <Sel label="Staff *" value={pForm.employeeId} allLabel="— Select Staff —"
-                onChange={v=>setPForm(p=>({...p,employeeId:v}))} required
+              <MultiSel label="Staff *" values={pForm.employeeIds} allLabel="— Select Staff —" required
+                onChange={v=>setPForm(p=>({...p,employeeIds:v}))}
                 options={employees.filter(e=>e.active!==false).sort((a,b)=>(a.fullName||'').localeCompare(b.fullName||'')).map(e=>({value:String(e.id),label:e.fullName+' ('+e.employeeId+')'}))} />
-              <Sel label="Access Level" value={pForm.accessLevelId} allLabel="— Custom (use below) —"
-                onChange={v=>{setPForm(p=>({...p,accessLevelId:v,...(v?{timezoneId:levels.find(l=>l.id===parseInt(v))?.timezone_id||'',areaId:levels.find(l=>l.id===parseInt(v))?.area_id||''}:{})}))} }
-                options={levels.map(l=>({value:String(l.id),label:l.name}))} />
-              <Sel label="Time Zone (override)" value={pForm.timezoneId} allLabel="— From Level —"
-                onChange={v=>setPForm(p=>({...p,timezoneId:v}))}
-                options={timezones.map(t=>({value:String(t.id),label:t.name}))} />
-              <Sel label="Area" value={pForm.areaId} allLabel="— All Areas —"
-                onChange={v=>setPForm(p=>({...p,areaId:v}))}
+              <MultiSel label="Access Level" values={pForm.accessLevelIds} allLabel="— None (no restriction) —"
+                onChange={v=>setPForm(p=>({...p, accessLevelIds:v}))}
+                options={levels.filter(l=>l.active!==false).map(l=>({value:String(l.id),label:l.name}))} />
+              <MultiSel label="Area" values={pForm.areaIds} allLabel="— All Areas —"
+                onChange={v=>setPForm(p=>({...p,areaIds:v}))}
                 options={areas.map(a=>({value:String(a.id),label:'  '.repeat(a.depth||0)+a.name}))} />
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setPModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={async()=>{
-                if(!pForm.employeeId){toast2('Select a staff member','danger');return;}
-                try{
-                  await api.post('/zkteco/person-access',{employeeId:parseInt(pForm.employeeId),accessLevelId:pForm.accessLevelId||null,timezoneId:pForm.timezoneId||null,areaId:pForm.areaId||null});
-                  toast2('Access rule saved');setPModal(false);load();
-                }catch(err){toast2(err.message,'danger');}
-              }}>💾 Save</button>
+              <SaveButton onClick={handleSavePerson} />
             </div>
           </div>
         </div>
@@ -1158,7 +1309,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
                 options={depts.map(d=>({value:d,label:d}))} />
               <Sel label="Access Level" value={dForm.accessLevelId} allLabel="— Custom —"
                 onChange={v=>setDForm(p=>({...p,accessLevelId:v}))}
-                options={levels.map(l=>({value:String(l.id),label:l.name}))} />
+                options={levels.filter(l=>l.active!==false).map(l=>({value:String(l.id),label:l.name}))} />
               <Sel label="Time Zone" value={dForm.timezoneId} allLabel="— None —"
                 onChange={v=>setDForm(p=>({...p,timezoneId:v}))}
                 options={timezones.map(t=>({value:String(t.id),label:t.name}))} />
@@ -1168,13 +1319,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setDModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={async()=>{
-                if(!dForm.department){toast2('Select a department','danger');return;}
-                try{
-                  await api.post('/zkteco/dept-access',{department:dForm.department,accessLevelId:dForm.accessLevelId||null,timezoneId:dForm.timezoneId||null,areaId:dForm.areaId||null});
-                  toast2('Access rule saved');setDModal(false);load();
-                }catch(err){toast2(err.message,'danger');}
-              }}>💾 Save</button>
+              <SaveButton onClick={handleSaveDept} />
             </div>
           </div>
         </div>
@@ -1218,68 +1363,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setHlModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={async()=>{
-                if(!hlForm.holidayName.trim()||!hlForm.startDate||!hlForm.endDate){toast2('Name and dates required','danger');return;}
-                try{
-                  const body={holidayName:hlForm.holidayName,startDate:hlForm.startDate,endDate:hlForm.endDate,
-                    timezoneId:hlForm.timezoneId||null,remarks:hlForm.remarks};
-                  if(hlEdit) await api.put(`/zkteco/acc-holidays/${hlEdit.id}`,body);
-                  else       await api.post('/zkteco/acc-holidays',body);
-                  toast2(hlEdit?'Holiday updated':'Holiday created');setHlModal(false);load();
-                }catch(err){toast2(err.message,'danger');}
-              }}>💾 Save</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══ UNLOCK COMBO MODAL ══ */}
-      {ucModal&&(
-        <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth:460 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fef3c7,#fffbeb)' }}>
-              <h2>{ucEdit?'✏️ Edit':'+'} Unlock Combination</h2>
-              <button className="modal-close" onClick={()=>setUcModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group" style={{ marginBottom:12 }}>
-                <label className="form-label" style={{ fontSize:12 }}>UID (Combination ID) *</label>
-                <input type="number" className="form-control" value={ucForm.uid}
-                  onChange={e=>setUcForm(p=>({...p,uid:e.target.value}))} placeholder="1" min="1" />
-              </div>
-              <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:12, marginBottom:12 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>
-                  Access Groups (set to 0 to disable slot)
-                </div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr', gap:8 }}>
-                  {[1,2,3,4,5].map(n=>(
-                    <div key={n} className="form-group" style={{ marginBottom:0 }}>
-                      <label className="form-label" style={{ fontSize:11 }}>Group {n}</label>
-                      <input type="number" className="form-control" style={{ textAlign:'center' }}
-                        value={ucForm[`group${n}`]} min="0"
-                        onChange={e=>setUcForm(p=>({...p,[`group${n}`]:parseInt(e.target.value)||0}))} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="form-group" style={{ marginBottom:0 }}>
-                <label className="form-label" style={{ fontSize:12 }}>Remarks</label>
-                <input className="form-control" value={ucForm.remarks}
-                  onChange={e=>setUcForm(p=>({...p,remarks:e.target.value}))} />
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-outline" onClick={()=>setUcModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={async()=>{
-                if(!ucForm.uid){toast2('UID required','danger');return;}
-                try{
-                  const body={uid:parseInt(ucForm.uid),group1:ucForm.group1,group2:ucForm.group2,
-                    group3:ucForm.group3,group4:ucForm.group4,group5:ucForm.group5,remarks:ucForm.remarks};
-                  if(ucEdit) await api.put(`/zkteco/unlock-combos/${ucEdit.id}`,body);
-                  else       await api.post('/zkteco/unlock-combos',body);
-                  toast2(ucEdit?'Updated':'Created');setUcModal(false);load();
-                }catch(err){toast2(err.message,'danger');}
-              }}>💾 Save</button>
+              <SaveButton onClick={handleSaveHoliday} />
             </div>
           </div>
         </div>
@@ -1292,7 +1376,6 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
         { cond:pDelConf,   msg:'Remove this person access?',onConfirm:async()=>{ await api.delete(`/zkteco/person-access/${pDelConf}`); toast2('Removed');setPDelConf(null); load(); }, onClose:()=>setPDelConf(null) },
         { cond:dDelConf,   msg:'Remove this dept access?',  onConfirm:async()=>{ await api.delete(`/zkteco/dept-access/${dDelConf}`);   toast2('Removed');setDDelConf(null); load(); }, onClose:()=>setDDelConf(null) },
         { cond:hlDelConf,  msg:'Delete this holiday?',      onConfirm:async()=>{ await api.delete(`/zkteco/acc-holidays/${hlDelConf}`); toast2('Deleted');setHlDelConf(null);load(); }, onClose:()=>setHlDelConf(null) },
-        { cond:ucDelConf,  msg:'Delete this unlock combo?', onConfirm:async()=>{ await api.delete(`/zkteco/unlock-combos/${ucDelConf}`);toast2('Deleted');setUcDelConf(null);load(); }, onClose:()=>setUcDelConf(null) },
       ].filter(c=>c.cond).map((c,i)=>(
         <div key={i} className="modal-overlay">
           <div className="modal modal-sm" onClick={e=>e.stopPropagation()}>

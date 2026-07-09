@@ -5,19 +5,21 @@ import { useLanguage }     from '../../context/LanguageContext.jsx';
 import { useData }         from '../../context/DataContext.jsx';
 import { useSettings }     from '../../context/SettingsContext.jsx';
 import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
+import { useChat } from '../../context/ChatContext.jsx';
 import './TopMenu.css';
 
 const TopMenu = () => {
   const {
     currentUser, logout,
     isAdmin, isBranchManager, isDeptHead, isEmployee,
-    isManager, canManageStaff, canManageSystem, canViewReports,
+    isManager, canManageSystem, canViewReports,
     canView,
   } = useAuth();
   const { t, language, changeLanguage } = useLanguage();
   const { stats } = useData();
   const { settings, getCompanyName } = useSettings();
   const { msgCount } = useNotifications();
+  const { totalUnread: chatUnread } = useChat();
   const navigate  = useNavigate();
   const location  = useLocation();
 
@@ -132,7 +134,7 @@ const TopMenu = () => {
   const scopeChip = isBranchManager
     ? { label: `🏢 ${currentUser?.branch || 'Branch'}`, color: '#1a56db', bg: '#dbeafe' }
     : isDeptHead
-    ? { label: `🏛️ ${currentUser?.department || 'Dept'}`, color: '#0e9f6e', bg: '#d1fae5' }
+    ? { label: `${currentUser?.department || 'Dept'}`, color: '#0e9f6e', bg: '#d1fae5' }
     : null;
 
   return (
@@ -172,7 +174,7 @@ const TopMenu = () => {
 
         {/* 1. Staff dropdown — all authenticated users */}
         <div
-          className={`tm-item ${isActive('/users') || isActive('/staff/') ? 'active' : ''} ${openDropdown === 'staff' ? 'open' : ''}`}
+          className={`tm-item ${isActive('/users') || isActive('/staff/') || isActive('/chat') ? 'active' : ''} ${openDropdown === 'staff' ? 'open' : ''}`}
           onClick={() => toggleDropdown('staff')}
         >
           <span>{t('Staff')}</span>
@@ -182,7 +184,7 @@ const TopMenu = () => {
             className={`tm-dropdown ${openDropdown === 'staff' ? 'show' : ''}`}
             onClick={e => e.stopPropagation()}
           >
-            {canManageStaff && (
+            {canView('staffDetail') && (
               <div className="tm-dropdown-item" onClick={() => navTo('/users')}>
                 <span>👥</span> {t('Staff Details')}
               </div>
@@ -190,7 +192,7 @@ const TopMenu = () => {
             <div className="tm-dropdown-item" onClick={() => navTo('/staff/notes')}>
               <span>📝</span> {t('My Notes')}
             </div>
-            {canManageStaff && (
+            {canView('staffContact') && (
               <div className="tm-dropdown-item" onClick={() => navTo('/staff/contact')}>
                 <span>📞</span> {t('Contact')}
               </div>
@@ -202,6 +204,16 @@ const TopMenu = () => {
                 <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
                   fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
                   {msgCount}
+                </span>
+              )}
+            </div>
+            <div className="tm-dropdown-item" onClick={() => navTo('/chat')}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span><span>🗨️</span> {t('Chat')}</span>
+              {chatUnread > 0 && (
+                <span style={{ background: '#22c55e', color: '#fff', borderRadius: 10,
+                  fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
+                  {chatUnread}
                 </span>
               )}
             </div>
@@ -228,8 +240,8 @@ const TopMenu = () => {
               <span>📅</span> {t('Leave')} | 🏢 {t('Office Visit')}
             </div>
 
-            {/* Leave Calculation — admin + branchManager */}
-            {canManageStaff && (
+            {/* Leave Calculation — anyone with leaveCalculation view permission */}
+            {canView('leaveCalculation') && (
               <div className="tm-dropdown-item" onClick={() => navTo('/leave/calculation')}>
                 <span>🧮</span> {t('Leave Calculation')}
               </div>
@@ -288,8 +300,8 @@ const TopMenu = () => {
               </>
             )}
 
-            {/* OT Approval — managers / admins */}
-            {(isManager || isAdmin) && (
+            {/* OT Approval — managers/admins (approve), Dept Heads (their dept), OT-eligible employees (own records, read-only) */}
+            {(isManager || isDeptHead || (isEmployee && currentUser?.eligibleForOt)) && (
               <div className="tm-dropdown-item" onClick={() => navTo('/attendance/overtime')}
                 style={{ color: location.pathname === '/attendance/overtime' ? '#1a56db' : undefined }}>
                 <span>⏱️</span> {t('Overtime (OT) Approval')}
@@ -302,13 +314,23 @@ const TopMenu = () => {
               </div>
             )}
 
-            {/* Duty Roster / Manual Postings — admin only */}
+            {/* Missing Attendance Requests — everyone (submit own / act on assigned) */}
+            <div className="tm-dropdown-item" onClick={() => navTo('/attendance/missing-requests')}
+              style={{ color: location.pathname === '/attendance/missing-requests' ? '#1a56db' : undefined }}>
+              <span>📩</span> {t('Missing Attendance Requests')}
+            </div>
+
+            {/* Duty Roster — anyone with dutyRoster view permission */}
+            {canView('dutyRoster') && (
+              <div className="tm-dropdown-item" onClick={() => navTo('/attendance/roster-dashboard')}
+                style={{ color: location.pathname.startsWith('/attendance/roster-dashboard') || location.pathname.startsWith('/attendance/duty-roster') ? '#1a56db' : undefined }}>
+                <span>🗓️</span> {t('Duty Roster')}
+              </div>
+            )}
+
+            {/* Manual Postings — admin only */}
             {canManageSystem && (
               <>
-                <div className="tm-dropdown-item" onClick={() => navTo('/attendance/roster-dashboard')}
-                  style={{ color: location.pathname.startsWith('/attendance/roster-dashboard') || location.pathname.startsWith('/attendance/duty-roster') ? '#1a56db' : undefined }}>
-                  <span>🗓️</span> {t('Duty Roster')}
-                </div>
                 <div className="tm-dropdown-item" onClick={() => navTo('/attendance/manual-postings')}>
                   <span>✍️</span> {t('Manual Postings')}
                 </div>
@@ -381,6 +403,10 @@ const TopMenu = () => {
                   {currentUser.department}
                 </span>
               )}
+            </div>
+
+            <div className="tm-dropdown-item" onClick={() => navigate('/profile')}>
+              <span>👤</span> {t('Profile')}
             </div>
 
             {/* Settings, License, Backup, Role Management — admin only */}

@@ -67,6 +67,8 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -251,13 +253,31 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   box-shadow: var(--shadow-xl);
   width: 100%;
   max-height: 90vh;
+  max-height: 90dvh;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   animation: slideUp 0.2s ease;
 }
 .modal-sm { max-width: 420px; }
 .modal-md { max-width: 560px; }
 .modal-lg { max-width: 720px; }
 .modal-xl { max-width: 900px; }
+
+/* Right-side slide-in drawer variant — same modal-header/body/footer markup,
+   anchored to the right edge instead of centered, full viewport height. */
+.modal-drawer-overlay { justify-content: flex-end; padding: 0; }
+.modal-drawer {
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  border-radius: 0;
+  animation: slideInRight 0.22s ease;
+}
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
 @keyframes headerShift {
   0%   { background-position: 0% 50%; }
   50%  { background-position: 100% 50%; }
@@ -553,11 +573,131 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 .toast-info { border-left: 3px solid var(--info); }
 
 /* ========== Responsive ========== */
+@media (max-width: 1024px) {
+  .stats-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+}
+
 @media (max-width: 768px) {
+  /* ── Layout ── */
   .form-row, .form-row-3 { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .page-container { padding: 12px 16px; }
+
+  /* ── Page header: stack on mobile ── */
+  .page-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .page-header > .btn { width: 100%; justify-content: center; }
+
+  /* ── Cards ── */
+  .card-body { padding: 14px 16px; }
+  .card-header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+  .card-footer { padding: 10px 16px; }
+
+  /* ── Buttons: touch-friendly minimum height ── */
+  .btn { min-height: 38px; }
+  .btn-sm { min-height: 34px; }
+
+  /* ── Forms: font-size 16px prevents iOS auto-zoom on tap ── */
+  .form-control { font-size: 16px; padding: 10px 12px; }
+  select.form-control { font-size: 16px; }
+
+  /* ── Tabs: horizontal scroll so all tabs are reachable ── */
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; padding-bottom: 2px; }
+  .tabs::-webkit-scrollbar { height: 2px; }
+  .tab-btn { white-space: nowrap; padding: 10px 14px; }
+
+  /* ── Modal → bottom sheet on mobile ── */
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal { border-radius: var(--radius-xl) var(--radius-xl) 0 0; max-height: 92vh; max-height: 92dvh; }
+  .modal-sm, .modal-md, .modal-lg, .modal-xl { max-width: 100%; }
+  .modal-header { border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+  .modal-body { padding: 16px; }
+  .modal-footer { padding: 12px 16px; gap: 8px; }
+  .modal-footer .btn { flex: 1; justify-content: center; }
+
+  /* ── Alert ── */
+  .alert { font-size: var(--font-size-xs); }
+
+  /* ── Dashboard db-p padding (overrides inline) ── */
+  .db-p { padding: 12px 14px !important; }
+
+  /* ── Safe area: bottom padding for iOS home bar ── */
+  .main-layout { padding-bottom: env(safe-area-inset-bottom, 0px); }
 }
+
 @media (max-width: 480px) {
+  /* ── Stats ── */
   .stats-grid { grid-template-columns: 1fr; }
+  .stat-card { padding: 12px 14px; }
+  .stat-value { font-size: var(--font-size-xl); }
+
+  /* ── Page padding ── */
+  .page-container { padding: 10px 12px; }
+  .page-title { font-size: var(--font-size-md); }
+
+  /* ── Toast: bottom-center is more reachable one-handed ── */
+  .toast-container { top: auto; bottom: 16px; right: 12px; left: 12px; align-items: center; }
+  .toast { min-width: unset; max-width: 100%; width: 100%; }
+
+  /* ── Dashboard grids ── */
+  .db-p { padding: 10px 10px !important; }
+  .db-stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .db-bottom-grid { grid-template-columns: 1fr !important; }
+
+  /* ── Leave balance cards ── */
+  .leave-balance-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* ── iOS notch: top nav safe area ── */
+  .topmenu { padding-top: env(safe-area-inset-top, 0px); }
+}
+
+@media (max-width: 375px) {
+  .page-container { padding: 8px 10px; }
+  .modal-body { padding: 12px; }
+  .card-body { padding: 12px; }
+}
+
+/* ── Inline-style grid overrides ────────────────────────────────────────────
+   React inline styles have higher specificity than class rules, so we target
+   them via attribute selectors + !important. Covers every report filter bar,
+   Settings sidebar, UserManagement modals, and DutyRoster grids without
+   editing individual component files.
+────────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* 3-col grids → 1 column (handles repeat(3,…) and 1fr 1fr 1fr variants) */
+  [style*="grid-template-columns: repeat(3"],
+  [style*="grid-template-columns:repeat(3"],
+  [style*="grid-template-columns: 1fr 1fr 1fr"],
+  [style*="grid-template-columns:1fr 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+  /* 4-col grids → 2 columns */
+  [style*="grid-template-columns: repeat(4"],
+  [style*="grid-template-columns:repeat(4"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* Settings sidebar layouts: 230px/175px fixed + 1fr content → stack */
+  [style*="grid-template-columns: 230px"],
+  [style*="grid-template-columns:230px"],
+  [style*="grid-template-columns: 175px"],
+  [style*="grid-template-columns:175px"] {
+    grid-template-columns: 1fr !important;
+  }
+  /* 1fr 1fr auto (label-input-action rows) → single column */
+  [style*="grid-template-columns: 1fr 1fr auto"],
+  [style*="grid-template-columns:1fr 1fr auto"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* 2-col inline grids → single column */
+  [style*="grid-template-columns: 1fr 1fr"],
+  [style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+  /* 4-col → single column on phones */
+  [style*="grid-template-columns: repeat(4"],
+  [style*="grid-template-columns:repeat(4"] {
+    grid-template-columns: 1fr !important;
+  }
 }

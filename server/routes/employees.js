@@ -6,6 +6,17 @@ import { requireRole } from '../middleware/roleGuard.js';
 import { logAudit } from '../services/auditLog.js';
 import { sendStaffCreated, sendPasswordReset } from '../services/emailService.js';
 
+// Postgres unique-violation (23505) on users_username_key means the email/username
+// is already taken by another account — including hidden system/superAdmin accounts
+// that don't appear in the Staff grid — so give a clear message instead of the raw
+// constraint name.
+function friendlyDbError(e) {
+  if (e.code === '23505' && e.constraint === 'users_username_key') {
+    return 'Duplicate Email Address';
+  }
+  return e.message;
+}
+
 function getLocalIp() {
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {
@@ -166,7 +177,7 @@ router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => 
         loginUrl,
       }).catch(() => {});
     }
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: friendlyDbError(e) }); }
 });
 
 /* POST /api/employees/import — bulk create (skip duplicates by employeeId) */
@@ -212,7 +223,7 @@ router.post('/import', async (req, res) => {
       ]);
       created.push(String(employeeId));
     } catch (e) {
-      errors.push({ employeeId: String(employeeId), error: e.message });
+      errors.push({ employeeId: String(employeeId), error: friendlyDbError(e) });
     }
   }
   res.json({ created: created.length, skipped: skipped.length, errors });
@@ -255,7 +266,7 @@ router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) =
     ]);
     logAudit({ actor: req.user, action: 'update', entity: 'employee', entityId: req.params.id, before, after: rows[0] });
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: friendlyDbError(e) }); }
 });
 
 /* GET /:id/bio-photo — returns only the bio_photo field (avoids bloating the list query) */

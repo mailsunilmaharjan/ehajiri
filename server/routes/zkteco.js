@@ -30,7 +30,25 @@ import {
   markCommandDoneByCmdId,
   buildInitResponse,
   queueCommand,
+  pushBioPhotoToDevice,
+  checkTimezoneAccess,
 } from '../services/zktecoService.js';
+
+/** Push a freshly-captured fingerprint/face template to every other active
+ * device sharing the same area, so a sample enrolled on one device doesn't
+ * need a manual re-push to reach its siblings. */
+async function pushTemplateToAreaSiblings(originSn, fn) {
+  const { rows: [origin] } = await pool.query(
+    'SELECT area_id FROM zkteco_devices WHERE serial_number=$1', [originSn]
+  );
+  if (!origin?.area_id) return;
+  const { rows: siblings } = await pool.query(
+    `SELECT serial_number FROM zkteco_devices
+     WHERE area_id=$1 AND serial_number<>$2 AND active=TRUE`,
+    [origin.area_id, originSn]
+  );
+  for (const { serial_number } of siblings) await fn(serial_number);
+}
 
 const router = express.Router();
 
@@ -72,7 +90,7 @@ async function deduplicatePending(sn) {
         WHERE device_sn=$1 AND status='PENDING'
         GROUP BY command_payload
       )
-  `, [sn, sn]);
+  `, [sn]);
 }
 
 /** Queue UserValidTimeFun=1 once per device (guide §16 checklist) */
@@ -135,62 +153,6 @@ async function autoRestoreTemplates(sn) {
     );
   }
   console.log(`[ZK] Post-restart: queued ${templates.length} FINGERTMP restore for ${sn} (guide §6)`);
-}
-
-// ── Timezone access check ─────────────────────────────────────────────────
-// Returns true if the employee is allowed at the given time per access rules.
-// Checks person-level first, then department-level. If no rule exists → allow.
-const DOW_KEYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-async function checkTimezoneAccess(employeeId, department, now) {
-  // 1. Person-level rule — timezone resolved via access level (primary) or direct override
-  let res = await pool.query(
-    `SELECT tz.schedule
-     FROM   zkteco_person_access pa
-     LEFT   JOIN zkteco_access_levels al ON al.id = pa.access_level_id
-     JOIN   zkteco_timezones tz
-               ON tz.id = COALESCE(pa.timezone_id, al.timezone_id)
-     WHERE  pa.employee_id = $1
-     ORDER  BY pa.timezone_id NULLS LAST
-     LIMIT  1`,
-    [employeeId]
-  );
-
-  // 2. Department-level fallback — same dual lookup
-  if (!res.rows[0] && department) {
-    res = await pool.query(
-      `SELECT tz.schedule
-       FROM   zkteco_dept_access da
-       LEFT   JOIN zkteco_access_levels al ON al.id = da.access_level_id
-       JOIN   zkteco_timezones tz
-                 ON tz.id = COALESCE(da.timezone_id, al.timezone_id)
-       WHERE  LOWER(TRIM(da.department)) = LOWER(TRIM($1))
-       LIMIT  1`,
-      [department]
-    );
-  }
-
-  if (!res.rows[0]) return true; // no rule → always allow
-
-  const schedule = typeof res.rows[0].schedule === 'string'
-    ? JSON.parse(res.rows[0].schedule)
-    : res.rows[0].schedule;
-
-  const dayKey  = DOW_KEYS[now.getDay()];
-  const current = now.getHours() * 60 + now.getMinutes();
-  const intervals = schedule[dayKey] || [];
-
-  for (const iv of intervals) {
-    if (!iv?.s || !iv?.e) continue;
-    const [sh, sm] = iv.s.split(':').map(Number);
-    const [eh, em] = iv.e.split(':').map(Number);
-    const start = sh * 60 + sm;
-    const end   = eh * 60 + em;
-    if (start === 0 && end === 0) continue; // 00:00–00:00 means no access
-    if (current >= start && current <= end) return true;
-  }
-
-  return false; // outside all allowed windows
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -289,8 +251,12 @@ async function handleZkteco(req, res) {
           if (match) {
             const cmdId = match[1] ?? match[2];
             await markCommandDoneByCmdId(cmdId);
-            if (retCode === -3) {
-              console.warn(`[ZK] CMD NOT SUPPORTED on ${sn} (Return=-3) CmdID=${cmdId}`);
+            // Any negative Return is a failure, not just -3 ("not supported") —
+            // e.g. SenseFace enrollment failures (no face presented, camera busy,
+            // duplicate, timeout) come back as other negative codes and were
+            // previously logged as if they'd succeeded.
+            if (retCode != null && retCode < 0) {
+              console.warn(`[ZK] CMD FAILED on ${sn} (Return=${retCode}) CmdID=${cmdId}`);
               await pool.query(
                 `UPDATE zkteco_commands SET status='ERROR' WHERE id=$1`,
                 [parseInt(cmdId)]
@@ -317,7 +283,9 @@ async function handleZkteco(req, res) {
         try {
           const pin    = body.trim().split('\t')[0];
           const empRes = await pool.query(
-            'SELECT id, active, department FROM users WHERE device_id=$1 LIMIT 1', [pin]
+            `SELECT id, active, department, access_expires, access_expiry_mode,
+                    access_valid_from, access_valid_to, access_valid_count
+             FROM users WHERE device_id=$1 LIMIT 1`, [pin]
           );
           const emp = empRes.rows[0];
 
@@ -328,9 +296,45 @@ async function handleZkteco(req, res) {
             return res.json({ result: 0 });
           }
 
-          // 2. Check timezone access rule (person-level first, then department)
+          // 2. Validity/expiry — re-checked here independently of the device's own
+          // Expires/StartDatetime/EndDatetime/VaildCount fields (firmware-dependent, not
+          // guaranteed to be enforced on-device), so this is the authoritative gate.
+          // Modes mirror the device's own Expires value: 0 none | 1 date range |
+          // 2 use-count | 3 date range AND use-count.
+          const mode = emp.access_expiry_mode ?? (emp.access_expires ? 1 : 0);
+          if (mode > 0) {
+            let dateOk = true;
+            if (mode === 1 || mode === 3) {
+              // Nepal local date (UTC+5:45) — using plain UTC here would read as
+              // "yesterday" for ~6 hours every night, rejecting/admitting people
+              // a day early/late right at the edges of their validity window.
+              const today = new Date(Date.now() + 345 * 60000).toISOString().slice(0, 10);
+              const validFrom = emp.access_valid_from ? String(emp.access_valid_from).slice(0, 10) : null;
+              const validTo   = emp.access_valid_to   ? String(emp.access_valid_to).slice(0, 10)   : null;
+              dateOk = (!validFrom || today >= validFrom) && (!validTo || today <= validTo);
+            }
+            const countOk = (mode === 2 || mode === 3) ? (emp.access_valid_count ?? 0) > 0 : true;
+            if (!dateOk || !countOk) {
+              console.log(`[ZK] PostVerifyData PIN=${pin} → DENY (validity mode=${mode}, dateOk=${dateOk}, countOk=${countOk}, remaining=${emp.access_valid_count})`);
+              res.set('Content-Type', 'application/json');
+              return res.json({ result: 0 });
+            }
+          }
+
+          // 3. Check timezone access rule (person-level first, then department)
           const tzAllowed = await checkTimezoneAccess(emp.id, emp.department, new Date());
           const allow = tzAllowed ? 1 : 0;
+
+          // Consume one use now that access is actually being granted — mirrors the
+          // device's own VaildCount decrement, atomically guarded so concurrent scans
+          // can't drive it negative.
+          if (allow && (mode === 2 || mode === 3)) {
+            await pool.query(
+              `UPDATE users SET access_valid_count = access_valid_count - 1 WHERE id=$1 AND access_valid_count > 0`,
+              [emp.id]
+            );
+          }
+
           console.log(`[ZK] PostVerifyData PIN=${pin} → ${allow ? 'ALLOW' : 'DENY (timezone rule)'}`);
           res.set('Content-Type', 'application/json');
           return res.json({ result: allow });
@@ -395,7 +399,7 @@ async function handleZkteco(req, res) {
                 'SELECT clear_admin_pending FROM zkteco_devices WHERE serial_number=$1', [sn]
               );
               if (devRows[0]?.clear_admin_pending) {
-                const cmdP = `PIN=${kv.PIN}\tName=${kv.Name||''}\tPri=0\tPasswd=\tCard=${kv.Card||''}\tGrp=1\tTZ=1\tVerify=0\tExpires=0\tStartDatetime=2000-01-01 00:00:00\tEndDatetime=2099-12-31 23:59:00`;
+                const cmdP = `PIN=${kv.PIN}\tName=${kv.Name||''}\tPri=0\tPasswd=\tCard=${kv.Card||''}\tGrp=1\tTZ=0000000000000000\tVerify=0\tExpires=0\tStartDatetime=2000-01-01 00:00:00\tEndDatetime=2099-12-31 23:59:00`;
                 await queueCommand(sn, 'DATA UPDATE USERINFO', cmdP);
                 await pool.query('UPDATE zkteco_users SET privilege=0 WHERE device_sn=$1 AND pin=$2', [sn, kv.PIN]);
                 autoCleared++;
@@ -421,6 +425,10 @@ async function handleZkteco(req, res) {
           if (pin) {
             await saveFingerprintRecord(sn, kv);
             console.log(`[ZK] FP enrolled SN=${sn} PIN=${pin} FID=${kv.FID} Size=${kv.Size}`);
+            if (kv.TMP) {
+              const fpParams = `PIN=${pin}\tFID=${kv.FID||0}\tSize=${kv.Size||0}\tValid=${kv.Valid??1}\tTMP=${kv.TMP}`;
+              await pushTemplateToAreaSiblings(sn, (siblingSn) => queueCommand(siblingSn, 'DATA UPDATE FINGERTMP', fpParams));
+            }
           } else {
             console.warn(`[ZK] FP row missing PIN: ${line.substring(0, 80)}`);
           }
@@ -453,6 +461,7 @@ async function handleZkteco(req, res) {
               [content, sn, pin]
             );
             console.log(`[ZK] Face photo saved SN=${sn} PIN=${pin} Size=${kv.Size||'?'}`);
+            await pushTemplateToAreaSiblings(sn, (siblingSn) => pushBioPhotoToDevice(siblingSn, pin, content));
           }
         }
 

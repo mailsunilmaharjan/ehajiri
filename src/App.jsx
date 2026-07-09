@@ -18,6 +18,7 @@ import UserManagement         from './components/Users/UserManagement.jsx';
 import StaffNotes             from './components/Staff/StaffNotes.jsx';
 import StaffContact           from './components/Staff/StaffContact.jsx';
 import StaffMessage           from './components/Staff/StaffMessage.jsx';
+import ChatPage                from './components/Chat/ChatPage.jsx';
 import Settings               from './components/Settings/Settings.jsx';
 import LicensePage            from './components/Settings/LicensePage.jsx';
 import RoleManagement         from './components/Settings/RoleManagement.jsx';
@@ -46,6 +47,8 @@ import DutyRosterDeptWise             from './components/Attendance/DutyRosterDe
 import RosterDashboard                from './components/Attendance/RosterDashboard.jsx';
 import RosterReport                   from './components/Attendance/RosterReport.jsx';
 import ManualPostings                 from './components/Attendance/ManualPostings.jsx';
+import MissingAttendanceRequests      from './components/Attendance/MissingAttendanceRequests.jsx';
+import ProfilePage                    from './components/Profile/ProfilePage.jsx';
 
 /*
   Role access matrix
@@ -197,19 +200,25 @@ const App = () => {
       } />
 
       <Route path="/attendance/roster-dashboard" element={
-        <Protected requireAdmin><RosterDashboard /></Protected>
+        <Protected pageKey="dutyRoster"><RosterDashboard /></Protected>
       } />
       <Route path="/attendance/roster-report" element={
-        <Protected requireAdmin><RosterReport /></Protected>
+        <Protected pageKey="dutyRoster"><RosterReport /></Protected>
       } />
       <Route path="/attendance/duty-roster" element={
-        <Protected requireAdmin><DutyRoster /></Protected>
+        <Protected pageKey="dutyRoster"><DutyRoster /></Protected>
       } />
       <Route path="/attendance/duty-roster/dept" element={
-        <Protected requireAdmin><DutyRosterDeptWise /></Protected>
+        <Protected pageKey="dutyRoster"><DutyRosterDeptWise /></Protected>
       } />
       <Route path="/attendance/manual-postings" element={
         <Protected requireAdmin><ManualPostings /></Protected>
+      } />
+      <Route path="/attendance/missing-requests" element={
+        <Protected><MissingAttendanceRequests /></Protected>
+      } />
+      <Route path="/profile" element={
+        <Protected><ProfilePage /></Protected>
       } />
 
       <Route path="/shift" element={
@@ -226,6 +235,9 @@ const App = () => {
       } />
       <Route path="/staff/message" element={
         <Protected><StaffMessage /></Protected>
+      } />
+      <Route path="/chat" element={
+        <Protected><ChatPage /></Protected>
       } />
       <Route path="/settings" element={
         <Protected requireAdmin><Settings /></Protected>

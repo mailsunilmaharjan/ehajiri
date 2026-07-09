@@ -51,12 +51,12 @@
 .dg-searchbox:focus-within { border-color: #1a56db; box-shadow: 0 0 0 2px rgba(26,86,219,.1); }
 .dg-search-icon { width: 14px; height: 14px; color: #9ca3af; flex-shrink: 0; }
 .dg-search-input {
-  border: none; outline: none; font-size: 13px;
+  border: none; outline: none; font-size: 14px;
   width: 100%; background: transparent; color: #111827;
 }
 .dg-search-input::placeholder { color: #9ca3af; }
 .dg-search-clear {
-  background: none; border: none; color: #9ca3af; font-size: 12px;
+  background: none; border: none; color: #9ca3af; font-size: 14px;
   cursor: pointer; padding: 0; line-height: 1;
 }
 .dg-search-clear:hover { color: #374151; }
@@ -66,7 +66,7 @@
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 10px; height: 32px;
   background: #fff; border: 1px solid #dedede; border-radius: 6px;
-  font-size: 13px; color: #374151; cursor: pointer;
+  font-size: 14px; color: #374151; cursor: pointer;
   transition: all .15s;
 }
 .dg-filter-btn:hover { background: #f3f4f6; }
@@ -78,11 +78,11 @@
   border-bottom: 1px solid #dedede;
   padding: 7px 14px;
   display: flex; align-items: center; gap: 12px;
-  font-size: 13px; color: #1e40af;
+  font-size: 14px; color: #1e40af;
 }
 .dg-selection-bar button {
   background: none; border: 1px solid #1a56db; border-radius: 4px;
-  color: #1a56db; font-size: 12px; padding: 2px 8px; cursor: pointer;
+  color: #1a56db; font-size: 14px; padding: 2px 8px; cursor: pointer;
 }
 .dg-selection-bar button:hover { background: #dbeafe; }
 .dg-delete-all-btn {
@@ -90,7 +90,7 @@
   border: 1px solid #fca5a5 !important;
   color: #dc2626 !important;
   border-radius: 5px !important;
-  font-size: 12px !important;
+  font-size: 14px !important;
   font-weight: 600 !important;
   padding: 3px 10px !important;
   cursor: pointer !important;
@@ -106,7 +106,16 @@
   flex: 1;
   min-height: 0;
   max-height: 520px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
+
+/* Opt-in fixed-height wrapper — e.g. side-by-side grids (like the dual-panel
+   "Add Personnel" picker) that should stay the same height regardless of how
+   many rows either side currently has. Wrap a DataGrid in
+   <div className="dg-fixed-height" style={{ height }}> to use it. */
+.dg-fixed-height { display: flex; flex-direction: column; }
+.dg-fixed-height .dg-container { height: 100%; }
 
 /* Table */
 .dg-table {
@@ -126,6 +135,14 @@
 .dg-table.compact .dg-action-btn { width: 24px; height: 22px; font-size: 12px; }
 .dg-table.compact td.dg-checkbox-col,
 .dg-table.compact td.dg-sn-col { font-size: 14px; }
+
+/* ── Ultra-compact — roughly half the row height of .compact, for dense
+   tables like command/log history where many rows need to fit at once ── */
+.dg-table.ultra-compact .dg-th { padding: 2px 8px; font-size: 12px; }
+.dg-table.ultra-compact .dg-td { padding: 1px 8px; font-size: 12px; line-height: 1.3; }
+.dg-table.ultra-compact .dg-action-btn { width: 20px; height: 18px; font-size: 11px; }
+.dg-table.ultra-compact td.dg-checkbox-col,
+.dg-table.ultra-compact td.dg-sn-col { font-size: 12px; }
 
 /* ── Header row ── */
 .dg-header-row { position: sticky; top: 0; z-index: 2; }
@@ -181,7 +198,7 @@ th.dg-sn-col {
 .dg-filter-input {
   width: 100%; padding: 4px 7px;
   border: 1px solid #dedede; border-radius: 4px;
-  font-size: 12px; color: #374151; background: #fff;
+  font-size: 14px; color: #374151; background: #fff;
 }
 .dg-filter-input:focus { outline: none; border-color: #1a56db; }
 
@@ -231,7 +248,7 @@ th.dg-sn-col {
 .dg-empty { padding: 48px 20px; }
 .dg-empty-content { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .dg-empty-icon { font-size: 40px; opacity: .3; }
-.dg-empty-text { color: #9ca3af; font-size: 13px; }
+.dg-empty-text { color: #9ca3af; font-size: 14px; }
 
 /* Footer */
 .dg-footer {
@@ -244,25 +261,25 @@ th.dg-sn-col {
   flex-wrap: wrap;
   gap: 8px;
 }
-.dg-info { font-size: 12px; color: #6b7280; white-space: nowrap; }
+.dg-info { font-size: 14px; color: #6b7280; white-space: nowrap; }
 .dg-paging { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.dg-pagesize { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7280; }
+.dg-pagesize { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #6b7280; }
 .dg-pagesize select {
   padding: 3px 6px; border: 1px solid #dedede; border-radius: 4px;
-  font-size: 12px; background: #fff; cursor: pointer;
+  font-size: 14px; background: #fff; cursor: pointer;
 }
 .dg-page-btns { display: flex; align-items: center; gap: 2px; }
 .pg-btn {
   min-width: 28px; height: 28px;
   display: inline-flex; align-items: center; justify-content: center;
   background: #fff; border: 1px solid #dedede; border-radius: 4px;
-  font-size: 12px; color: #374151; cursor: pointer;
+  font-size: 14px; color: #374151; cursor: pointer;
   transition: all .1s; padding: 0 5px;
 }
 .pg-btn:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; }
 .pg-btn.active { background: #1a56db; border-color: #1a56db; color: #fff; font-weight: 600; }
 .pg-btn:disabled { opacity: .4; cursor: not-allowed; }
-.pg-ellipsis { color: #9ca3af; font-size: 13px; padding: 0 3px; }
+.pg-ellipsis { color: #9ca3af; font-size: 14px; padding: 0 3px; }
 
 /* Action buttons in cells */
 .dg-actions { display: flex; align-items: center; gap: 4px; }
@@ -270,7 +287,7 @@ th.dg-sn-col {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 26px;
   border-radius: 4px; border: 1px solid transparent;
-  font-size: 13px; cursor: pointer; transition: all .1s;
+  font-size: 14px; cursor: pointer; transition: all .1s;
 }
 .dg-action-btn.edit   { background: #eff6ff; color: #1a56db; border-color: #bfdbfe; }
 .dg-action-btn.edit:hover   { background: #dbeafe; }
@@ -308,7 +325,7 @@ th.dg-sn-col {
   border: none;
   background: none;
   text-align: left;
-  font-size: 13px;
+  font-size: 14px;
   color: #374151;
   cursor: pointer;
   transition: background .1s;
@@ -318,3 +335,33 @@ th.dg-sn-col {
 .dg-ctx-item.danger:hover { background: #fef2f2; }
 .dg-ctx-icon { font-size: 14px; width: 18px; text-align: center; }
 .dg-ctx-divider { height: 1px; background: #e5e7eb; margin: 4px 0; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  /* Toolbar: stack search + buttons on mobile */
+  .dg-toolbar { padding: 8px 12px; flex-direction: column; align-items: stretch; gap: 8px; }
+  .dg-toolbar-right { width: 100%; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .dg-searchbox { min-width: unset; width: 100%; }
+  .dg-title { font-size: 13px; }
+
+  /* Footer: stack info + paging */
+  .dg-footer { flex-direction: column; align-items: center; gap: 6px; padding: 8px 12px; }
+  .dg-info { font-size: 12px; }
+  .dg-paging { flex-wrap: wrap; justify-content: center; }
+  .dg-pagesize { font-size: 12px; }
+
+  /* Action buttons: slightly larger tap target */
+  .dg-action-btn { width: 32px; height: 30px; font-size: 15px; }
+
+  /* Table cells: reduce padding slightly */
+  .dg-td { padding: 6px 8px; }
+  .dg-th { padding: 5px 8px; }
+}
+
+@media (max-width: 480px) {
+  /* Smaller page size select on phones */
+  .dg-pagesize select { font-size: 13px; }
+  /* Larger pagination buttons for touch */
+  .pg-btn { min-width: 32px; height: 32px; font-size: 13px; }
+  .dg-filter-btn { font-size: 12px; }
+}

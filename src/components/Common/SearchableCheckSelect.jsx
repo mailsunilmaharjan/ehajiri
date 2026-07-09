@@ -14,17 +14,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 /* ── Checkbox row item ─────────────────────────────────────── */
-const OptionRow = ({ label, checked, onClick }) => {
-  const [hov, setHov] = useState(false);
+const OptionRow = ({ label, checked, highlighted, onClick, onMouseEnter, itemRef }) => {
   return (
     <div
+      ref={itemRef}
       onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
+      onMouseEnter={onMouseEnter}
       style={{
         display:'flex', alignItems:'center', gap:8, padding:'5px 10px',
         cursor:'pointer', userSelect:'none',
-        background: checked ? '#eff6ff' : hov ? '#f5f8ff' : 'white',
+        background: checked ? '#eff6ff' : highlighted ? '#f5f8ff' : 'white',
         borderBottom:'1px solid #e9ecef',
         transition:'background .1s',
       }}>
@@ -64,9 +63,11 @@ const SearchableCheckSelect = ({
 }) => {
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
-  const ref     = useRef();
-  const inpRef  = useRef();
-  const trigRef = useRef();
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const ref      = useRef();
+  const inpRef   = useRef();
+  const trigRef  = useRef();
+  const itemRefs = useRef([]);
 
   // Close on outside click
   useEffect(() => {
@@ -80,14 +81,22 @@ const SearchableCheckSelect = ({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Focus search input when opened
+  // Focus search input when opened, and highlight the current selection
   useEffect(() => {
-    if (open && inpRef.current) inpRef.current.focus();
+    if (open) {
+      inpRef.current?.focus();
+      const idx = value ? options.findIndex(o => o.value === value) + 1 : 0; // +1 for "All" row
+      setActiveIndex(idx);
+    }
   }, [open]);
 
-  const filtered     = options.filter(o =>
+  const filtered = options.filter(o =>
     o.label.toLowerCase().includes(search.toLowerCase())
   );
+  // "All" is always row 0 in the navigable list, followed by the filtered options
+  const navItems = [{ value: '', label: allLabel }, ...filtered];
+  itemRefs.current = [];
+
   const selectedLabel = value
     ? (options.find(o => o.value === value)?.label ?? value)
     : (allLabel);
@@ -96,29 +105,44 @@ const SearchableCheckSelect = ({
     onChange(v);
     setOpen(false);
     setSearch('');
+    setActiveIndex(-1);
     setTimeout(() => trigRef.current?.focus(), 0);
   };
 
   const handleTriggerKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(p => !p); }
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); setOpen(p => !p);
+    }
     if (e.key === 'Escape') { setOpen(false); setSearch(''); }
   };
 
   const handleSearchKeyDown = (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (filtered.length > 0) select(filtered[0].value);
-      else { setOpen(false); setSearch(''); setTimeout(() => trigRef.current?.focus(), 0); }
-    }
-    if (e.key === 'Escape') {
+      setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && navItems[activeIndex]) select(navItems[activeIndex].value);
+      else if (navItems.length > 0) select(navItems[0].value);
+    } else if (e.key === 'Escape') {
       e.preventDefault();
       setOpen(false); setSearch('');
       setTimeout(() => trigRef.current?.focus(), 0);
-    }
-    if (e.key === 'Tab') {
+    } else if (e.key === 'Tab') {
       setOpen(false); setSearch('');
     }
   };
+
+  // keep the highlighted row scrolled into view while navigating
+  useEffect(() => {
+    if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+
+  // re-anchor the highlight to the first match whenever the search text changes
+  useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [search]);
 
   return (
     <div ref={ref} style={{ position:'relative' }}>
@@ -183,8 +207,11 @@ const SearchableCheckSelect = ({
           {/* Options list */}
           <div style={{ maxHeight:200, overflowY:'auto' }}>
             <OptionRow
+              itemRef={el => itemRefs.current[0] = el}
               label={allLabel}
               checked={!value}
+              highlighted={activeIndex === 0}
+              onMouseEnter={() => setActiveIndex(0)}
               onClick={() => select('')}
             />
             {filtered.length === 0 && (
@@ -192,11 +219,14 @@ const SearchableCheckSelect = ({
                 No results for "{search}"
               </div>
             )}
-            {filtered.map(o => (
+            {filtered.map((o, i) => (
               <OptionRow
                 key={o.value}
+                itemRef={el => itemRefs.current[i + 1] = el}
                 label={o.label}
                 checked={value === o.value}
+                highlighted={activeIndex === i + 1}
+                onMouseEnter={() => setActiveIndex(i + 1)}
                 onClick={() => select(o.value)}
               />
             ))}

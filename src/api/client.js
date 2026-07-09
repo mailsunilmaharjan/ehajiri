@@ -49,6 +49,7 @@ async function request(method, path, body) {
     if (res.status === 401 && data.authError && onUnauthorized) onUnauthorized();
     const err = new Error(msg);
     err.data = data;   // attach full response so callers can read licenseError etc.
+    err.status = res.status;
     throw err;
   }
   return res.json();

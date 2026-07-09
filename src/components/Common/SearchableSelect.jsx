@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 /**
  * Searchable select with optional multi-select + checkboxes.
  * Portal-based dropdown — always above overflow:hidden / modals.
+ * Keyboard: ArrowDown/ArrowUp to highlight, Enter to select, Escape to close.
  *
  * Props:
  *   value        — string (single) | string[] (multiple)
@@ -26,9 +27,11 @@ const SearchableSelect = ({
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
   const [rect,   setRect]   = useState(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const triggerRef = useRef(null);
   const searchRef  = useRef(null);
   const dropRef    = useRef(null);
+  const itemRefs   = useRef([]);
 
   /* normalise value to array for multi mode */
   const selectedArr = multiple
@@ -50,16 +53,30 @@ const SearchableSelect = ({
   const filtered = options.filter(o =>
     !search || o.label.toLowerCase().includes(search.toLowerCase())
   );
+  itemRefs.current = [];
+
+  /* close — and by default return focus to the trigger so Tab/Shift+Tab
+     continues to the next field instead of resetting to document.body
+     (which happens once the portal holding the focused search input unmounts) */
+  const closeDrop = (refocus = true) => {
+    setOpen(false);
+    setSearch('');
+    setActiveIndex(-1);
+    if (refocus) triggerRef.current?.focus();
+  };
 
   /* open: measure trigger position */
   const openDrop = () => {
     if (disabled || !triggerRef.current) return;
+    if (open) { closeDrop(false); return; }
     const r = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - r.bottom;
     const dropH = Math.min(280, filtered.length * 38 + 68);
     const above = spaceBelow < dropH + 8 && r.top > dropH + 8;
     setRect({ left: r.left, top: above ? r.top - dropH - 4 : r.bottom + 4, width: r.width, above });
-    setOpen(o => !o);
+    const idx = filtered.findIndex(o => isSelected(o.value));
+    setActiveIndex(idx >= 0 ? idx : (filtered.length ? 0 : -1));
+    setOpen(true);
   };
 
   /* close on outside click / scroll (but NOT when scrolling inside the dropdown) */
@@ -67,11 +84,11 @@ const SearchableSelect = ({
     if (!open) return;
     const close = (e) => {
       if (triggerRef.current?.contains(e.target) || dropRef.current?.contains(e.target)) return;
-      setOpen(false); setSearch('');
+      setOpen(false); setSearch(''); setActiveIndex(-1);
     };
     const scroll = (e) => {
       if (dropRef.current?.contains(e.target)) return;
-      setOpen(false); setSearch('');
+      setOpen(false); setSearch(''); setActiveIndex(-1);
     };
     document.addEventListener('mousedown', close);
     window.addEventListener('scroll', scroll, true);
@@ -80,8 +97,16 @@ const SearchableSelect = ({
 
   useEffect(() => { if (open) setTimeout(() => searchRef.current?.focus(), 20); }, [open]);
 
+  /* keep the highlighted option scrolled into view while navigating with arrow keys */
+  useEffect(() => {
+    if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+
+  /* re-anchor the highlight to the first match whenever the search text changes */
+  useEffect(() => { setActiveIndex(filtered.length ? 0 : -1); }, [search]);
+
   /* selection logic */
-  const handleSelect = (optValue) => {
+  const handleSelect = (optValue, refocus = true) => {
     if (multiple) {
       const arr = selectedArr.includes(String(optValue))
         ? selectedArr.filter(v => v !== String(optValue))
@@ -90,16 +115,42 @@ const SearchableSelect = ({
       /* stay open for multi */
     } else {
       onChange(optValue);
-      setOpen(false);
-      setSearch('');
+      closeDrop(refocus);
     }
   };
 
   const clearAll = (e) => { e.stopPropagation(); onChange(multiple ? [] : ''); };
 
+  /* keyboard navigation — handled on the wrapping div so it also catches keys
+     typed inside the portaled search input (React bubbles synthetic events
+     along the component tree, not the DOM tree, so this still works) */
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') { if (open) closeDrop(); return; }
+
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openDrop();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (filtered.length ? (i + 1) % filtered.length : -1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (filtered.length ? (i - 1 + filtered.length) % filtered.length : -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && filtered[activeIndex]) handleSelect(filtered[activeIndex].value);
+    } else if (e.key === 'Tab') {
+      closeDrop(false); // let the browser's own Tab handling move focus on
+    }
+  };
+
   return (
-    <div style={{ position: 'relative', ...style }}
-      onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); setSearch(''); } }}>
+    <div style={{ position: 'relative', ...style }} onKeyDown={handleKeyDown}>
 
       {/* Trigger */}
       <button ref={triggerRef} type="button" disabled={disabled} className={className}
@@ -165,20 +216,21 @@ const SearchableSelect = ({
           <div style={{ overflowY:'auto', flex:1 }} onWheel={e => e.stopPropagation()}>
             {filtered.length === 0
               ? <div style={{ padding:'10px 12px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results found</div>
-              : filtered.map(opt => {
-                  const active = isSelected(opt.value);
+              : filtered.map((opt, i) => {
+                  const active      = isSelected(opt.value);
+                  const highlighted = i === activeIndex;
                   return (
                     <div key={opt.value}
+                      ref={el => itemRefs.current[i] = el}
+                      onMouseEnter={() => setActiveIndex(i)}
                       onMouseDown={e => { e.preventDefault(); handleSelect(opt.value); }}
                       style={{
                         padding: '8px 10px', fontSize:13, cursor:'pointer',
                         display:'flex', alignItems:'center', gap:8,
-                        background: active ? '#eff6ff' : 'transparent',
+                        background: highlighted ? '#eff6ff' : (active ? '#f8fafc' : 'transparent'),
                         color:      active ? '#1a56db' : '#374151',
-                        borderLeft: active ? '3px solid #1a56db' : '3px solid transparent',
-                      }}
-                      onMouseEnter={e => { if (!active) e.currentTarget.style.background='#f8fafc'; }}
-                      onMouseLeave={e => { if (!active) e.currentTarget.style.background='transparent'; }}>
+                        borderLeft: active ? '3px solid #1a56db' : (highlighted ? '3px solid #93c5fd' : '3px solid transparent'),
+                      }}>
                       {/* checkbox for multiple mode */}
                       {multiple && (
                         <span style={{
@@ -206,7 +258,7 @@ const SearchableSelect = ({
             <div style={{ padding:'6px 10px', borderTop:'1px solid #f1f5f9', display:'flex',
               justifyContent:'space-between', alignItems:'center', flexShrink:0, background:'#fafafa' }}>
               <span style={{ fontSize:11, color:'#6b7280' }}>{selectedArr.length} selected</span>
-              <button type="button" onMouseDown={e => { e.preventDefault(); setOpen(false); setSearch(''); }}
+              <button type="button" onMouseDown={e => { e.preventDefault(); closeDrop(); }}
                 style={{ padding:'3px 12px', background:'#1a56db', color:'#fff', border:'none',
                   borderRadius:5, fontSize:12, fontWeight:600, cursor:'pointer' }}>Done</button>
             </div>

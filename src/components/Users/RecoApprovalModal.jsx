@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 
 const STORAGE_KEY = 'ehajiri_reco_approval';
 const loadSaved  = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } };
@@ -359,6 +360,9 @@ const RecoApprovalModal = ({ employees, onClose }) => {
     setTimeout(() => { setSaved(false); onClose(); }, 1200);
   };
 
+  /* Ctrl+S saves — this component only exists while its modal is open */
+  useSaveShortcut(true, handleSave);
+
   const configured = Object.values(assignments).filter(a => {
     const r = Array.isArray(a?.reco)     ? a.reco.length     : (a?.reco     ? 1 : 0);
     const p = Array.isArray(a?.approval) ? a.approval.length : (a?.approval ? 1 : 0);
@@ -483,10 +487,10 @@ const RecoApprovalModal = ({ employees, onClose }) => {
               borderRadius:8, background:'#fff', fontSize:13, fontWeight:600, color:'#374151', cursor:'pointer' }}>
               Cancel
             </button>
-            <button onClick={handleSave} style={{ padding:'8px 24px', border:'none', borderRadius:8,
+            <button onClick={handleSave} title="Ctrl+S" style={{ padding:'8px 24px', border:'none', borderRadius:8,
               background: saved ? '#059669' : '#1a56db', color:'#fff',
               fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
-              {saved ? '✅ Saved!' : '💾 Save Configuration'}
+              {saved ? '✅ Saved!' : <>💾 <u>S</u>ave Configuration</>}
             </button>
           </div>
         </div>

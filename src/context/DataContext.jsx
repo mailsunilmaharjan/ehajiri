@@ -14,26 +14,28 @@ const FB_LEAVE_TYPES = [
 ];
 const FB_SHIFTS = [
   // isSystem:true  → protected system record, cannot be deleted
-  { id:1, name:'साधारण सिफ्ट', nameEn:'Standard Shift', code:'standard', startTime:'10:00', endTime:'17:00', workHours:7, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:true, active:true, color:'#1a56db', isSystem:true, days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
+  { id:1, name:'साझा सिफ्ट', nameEn:'Default Shift', code:'default_shift', startTime:'10:00', endTime:'17:00', workHours:7, gracePeriodStart:15, gracePeriodEnd:0, makeDefault:true, active:true, color:'#1a56db', isSystem:true, days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
   { id:2, name:'बिहान सिफ्ट',  nameEn:'Morning Shift',  code:'morning',  startTime:'06:00', endTime:'14:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#e3a008', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
   { id:3, name:'बेलुकी सिफ्ट', nameEn:'Evening Shift',  code:'evening',  startTime:'14:00', endTime:'22:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#7e3af2', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
 ];
-const FB_EMPLOYEES = [
-  { id:1,employeeId:'EMP001',fullName:'राम प्रसाद श्रेष्ठ',role:'admin',   department:'IT',        position:'System Administrator',shift:'day',   email:'ram@company.com', phone:'9841234567',joinDate:'2020-01-01',gender:'male',  avatar:'R',active:true },
-  { id:2,employeeId:'EMP002',fullName:'सीता देवी पाण्डे',  role:'manager', department:'HR',        position:'HR Manager',          shift:'day',   email:'sita@company.com',phone:'9841234568',joinDate:'2019-06-15',gender:'female',avatar:'S',active:true },
-  { id:3,employeeId:'EMP003',fullName:'हरि बहादुर थापा',   role:'employee',department:'Finance',   position:'Accountant',          shift:'morning',email:'hari@company.com',phone:'9841234569',joinDate:'2021-03-01',gender:'male',  avatar:'H',active:true },
-];
-
 /* ── localStorage helpers ── */
 const lsGet = (key, fallback) => {
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 };
 const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
 
+// One-time cleanup: a since-removed fallback used to seed these 3 fake
+// employees into ls_employees whenever the initial API fetch failed. Strip
+// them out of whatever's already cached so browsers that hit that fallback
+// before it was removed don't keep resurfacing them.
+const RETIRED_DEMO_EMPLOYEE_IDS = new Set(['EMP001', 'EMP002', 'EMP003']);
+const stripRetiredDemoEmployees = (emps) =>
+  Array.isArray(emps) ? emps.filter(e => !RETIRED_DEMO_EMPLOYEE_IDS.has(e.employeeId)) : emps;
+
 export const DataProvider = ({ children }) => {
   const { filterByRole, isAdmin, currentUser } = useAuth();
 
-  const [employees,    setEmployees]    = useState(() => lsGet('ls_employees', []));
+  const [employees,    setEmployees]    = useState(() => stripRetiredDemoEmployees(lsGet('ls_employees', [])));
   const [shifts,       setShifts]       = useState(() => lsGet('ls_shifts', []));
   const [leaveTypes,   setLeaveTypes]   = useState(() => lsGet('ls_leaveTypes', FB_LEAVE_TYPES));
   const [leaveBalances,setLeaveBalances]= useState(() => lsGet('ls_leaveBalances', []));
@@ -113,25 +115,34 @@ export const DataProvider = ({ children }) => {
         });
         setApiOk(true);
       } catch {
-        // API unavailable — use localStorage data, seed fallbacks if empty
-        if (!lsGet('ls_employees', null)) setEmployees(FB_EMPLOYEES);
-        if (!lsGet('ls_shifts',    null)) setShifts(FB_SHIFTS);
+        // API unavailable — use localStorage data. Staff is real org data, so
+        // unlike shifts there's no seeded fallback here: if there's nothing
+        // cached, the UI shows an empty state rather than fake people.
+        const localShifts = lsGet('ls_shifts', null);
+        if (!localShifts || (Array.isArray(localShifts) && localShifts.length === 0)) setShifts(FB_SHIFTS);
         setApiOk(false);
       }
     })();
   }, []);
 
-  /* ── Employees ── */
+  /* ── Employees ──
+     Always write through to the API — staff records must persist to the
+     database. A local-only fallback here would silently "succeed" (and
+     bump counts/toasts) without ever reaching the server whenever apiOk
+     was stuck false from an unrelated startup hiccup, then vanish the
+     next time the list is refetched from the server. */
   const addEmployee = async (emp) => {
-    if (apiOk) { const e = await api.post('/employees', emp); setEmployees(p => [...p, e]); return e; }
-    const e = { ...emp, id: Date.now() }; setEmployees(p => [...p, e]); return e;
+    const e = await api.post('/employees', emp);
+    setEmployees(p => [...p, e]);
+    return e;
   };
   const updateEmployee = async (id, data) => {
-    if (apiOk) { const e = await api.put(`/employees/${id}`, data); setEmployees(p => p.map(x => x.id===id ? e : x)); return e; }
-    setEmployees(p => p.map(x => x.id===id ? { ...x, ...data } : x));
+    const e = await api.put(`/employees/${id}`, data);
+    setEmployees(p => p.map(x => x.id===id ? e : x));
+    return e;
   };
   const deleteEmployee = async (id) => {
-    if (apiOk) await api.delete(`/employees/${id}`);
+    await api.delete(`/employees/${id}`);
     setEmployees(p => p.filter(x => x.id !== id));
   };
   const getEmployeeById   = (id) => employees.find(e => String(e.id) === String(id));
@@ -157,7 +168,6 @@ export const DataProvider = ({ children }) => {
     if (apiOk) await api.delete(`/shifts/${id}`);
     setShifts(p => p.filter(x => x.id !== id));
   };
-  const setDefaultShift  = (shiftCode) => setEmployees(p => p.map(e => ({ ...e, shift: shiftCode })));
   const refreshShifts    = async () => { try { setShifts(await api.get('/shifts')); } catch {} };
   const getShiftByCode   = (code) => shifts.find(s => s.code === code);
   const getShiftById     = (id)   => shifts.find(s => s.id   === id);
@@ -356,7 +366,7 @@ export const DataProvider = ({ children }) => {
     <DataContext.Provider value={{
       employees, addEmployee, updateEmployee, deleteEmployee, getEmployeeById, getEmployeeName, refreshEmployees,
       filteredEmployees,
-      shifts, addShift, updateShift, deleteShift, setDefaultShift, refreshShifts, getShiftByCode, getShiftById,
+      shifts, addShift, updateShift, deleteShift, refreshShifts, getShiftByCode, getShiftById,
       leaveTypes, leaveBalances, getLeaveBalance,
       leaves, addLeave, updateLeave, deleteLeave, approveLeave, rejectLeave, recommendLeave, getLeaveTypeName, getLeaveTypeColor, getApprovedLeaveForDate,
       filteredLeaves,

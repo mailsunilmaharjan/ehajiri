@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { useBeepAlert } from '../../hooks/useBeepAlert.js';
 
 /* ── Notification Context ──────────────────────────────────── */
 const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {} });
@@ -106,6 +107,50 @@ const MessageToast = ({ noti, onClose }) => (
   </div>
 );
 
+/* ── Chat Toast Card — pops up on the recipient's screen for a new chat message ── */
+const ChatToast = ({ noti, onClose }) => (
+  <div style={{
+    width: 320, background: 'white',
+    borderRadius: 12, overflow: 'hidden',
+    boxShadow: '0 8px 32px rgba(0,0,0,.20)',
+    border: '1px solid #e5e7eb',
+    borderLeft: '4px solid #22c55e',
+    animation: 'slideIn .25s ease-out',
+  }}>
+    <div style={{ display:'flex', alignItems:'center', gap:8,
+      padding:'8px 10px 6px', background:'#f0fdf4', borderBottom:'1px solid #dcfce7' }}>
+      <span style={{ fontSize:14 }}>💬</span>
+      <span style={{ fontSize:11, fontWeight:700, color:'#16a34a', flex:1 }}>
+        {noti.conversationName && noti.conversationName !== noti.senderName ? noti.conversationName : 'New Chat Message'}
+      </span>
+      <button onClick={() => onClose(noti.id)}
+        style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 4px',
+          color:'#9ca3af', fontSize:16, lineHeight:1 }}>✕</button>
+    </div>
+    <div style={{ padding:'12px 14px 14px' }}>
+      <div style={{ fontSize:13, fontWeight:700, color:'#1f2937', marginBottom:4 }}>{noti.senderName}</div>
+      {noti.preview && (
+        <div style={{ fontSize:12.5, color:'#4b5563', lineHeight:1.4,
+          overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
+          {noti.preview}
+        </div>
+      )}
+    </div>
+    <div style={{ padding:'0 14px 12px', display:'flex', gap:8 }}>
+      <button onClick={() => onClose(noti.id)}
+        style={{ flex:1, padding:'6px 0', border:'1px solid #e5e7eb',
+          borderRadius:7, background:'white', color:'#374151', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+        Dismiss
+      </button>
+      <button onClick={() => { noti.onView?.(); onClose(noti.id); }}
+        style={{ flex:1, padding:'6px 0', border:'none',
+          borderRadius:7, background:'#16a34a', color:'white', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+        Reply
+      </button>
+    </div>
+  </div>
+);
+
 /* ── Toast Container ───────────────────────────────────────── */
 const ToastContainer = ({ notifications, onClose }) => {
   if (!notifications.length) return null;
@@ -121,8 +166,8 @@ const ToastContainer = ({ notifications, onClose }) => {
         display:'flex', flexDirection:'column', gap:10, pointerEvents:'none' }}>
         {notifications.map(n => (
           <div key={n.id} style={{ pointerEvents:'all' }}>
-            {n.type === 'new_message'
-              ? <MessageToast noti={n} onClose={onClose} />
+            {n.type === 'new_message' ? <MessageToast noti={n} onClose={onClose} />
+              : n.type === 'chat_message' ? <ChatToast noti={n} onClose={onClose} />
               : <AttendanceToast noti={n} onClose={onClose} />
             }
           </div>
@@ -156,9 +201,17 @@ export function AttendanceNotificationProvider({ children }) {
 
   const clearMsgCount = useCallback(() => setMsgCount(0), []);
 
+  // Keeps beeping every few seconds while there's at least one unseen broadcast
+  // message — stops the instant msgCount is cleared (user opens the inbox).
+  useBeepAlert(msgCount > 0);
+
   useEffect(() => {
     const connect = () => {
-      const es = new EventSource('/api/attendance/live');
+      // EventSource can't set an Authorization header, so the token rides along
+      // as a query param — authGuard accepts either.
+      const token = localStorage.getItem('auth_token');
+      if (!token) return;
+      const es = new EventSource(`/api/attendance/live?token=${encodeURIComponent(token)}`);
       esRef.current = es;
       es.onmessage = (e) => {
         try {

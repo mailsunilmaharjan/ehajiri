@@ -1,8 +1,15 @@
 ﻿import { Router } from 'express';
 import pool from '../db.js';
 import { logAudit } from '../services/auditLog.js';
+import { startStandaloneBridge, stopStandaloneBridge } from '../services/standaloneBridgeLauncher.js';
+import { startStandaloneScheduler, stopStandaloneScheduler } from '../services/standaloneScheduler.js';
+import { invalidateModuleFlagsCache, FLAG_KEYS } from '../utils/moduleFlags.js';
+import { requireRole } from '../middleware/roleGuard.js';
 
 const router = Router();
+// GET routes are readable by any authenticated role (employees need these to
+// render their own dashboard); only writes are restricted to admin/superAdmin.
+const canManageSettings = requireRole('admin', 'superAdmin');
 
 /* ─── Generic key-value settings ─── */
 router.get('/', async (_req, res) => {
@@ -33,7 +40,7 @@ router.get('/', async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/', async (req, res) => {
+router.put('/', canManageSettings, async (req, res) => {
   const settings = req.body; // { key: value, ... }
   const client = await pool.connect();
   try {
@@ -47,6 +54,20 @@ router.put('/', async (req, res) => {
     }
     await client.query('COMMIT');
     logAudit({ actor: req.user, action: 'update', entity: 'settings', entityId: null, before: null, after: settings });
+
+    if (FLAG_KEYS.standaloneDevice in settings) {
+      invalidateModuleFlagsCache();
+      if (settings[FLAG_KEYS.standaloneDevice]) {
+        await startStandaloneBridge();
+        startStandaloneScheduler();
+      } else {
+        stopStandaloneScheduler();
+        stopStandaloneBridge();
+      }
+    } else if (FLAG_KEYS.attendanceDevice in settings) {
+      invalidateModuleFlagsCache();
+    }
+
     res.json({ success: true });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -77,7 +98,7 @@ router.get('/:list', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/:list', async (req, res) => {
+router.post('/:list', canManageSettings, async (req, res) => {
   const cfg = SETUP_TABLES[req.params.list];
   if (!cfg) return res.status(404).json({ error: 'Unknown list' });
   const vals = cfg.cols.map(c => camelVal(req.body, c));
@@ -91,7 +112,7 @@ router.post('/:list', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/:list/:id', async (req, res) => {
+router.put('/:list/:id', canManageSettings, async (req, res) => {
   const cfg = SETUP_TABLES[req.params.list];
   if (!cfg) return res.status(404).json({ error: 'Unknown list' });
   const sets = cfg.cols.map((c, i) => `${c}=$${i + 1}`).join(',');
@@ -104,7 +125,7 @@ router.put('/:list/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/:list/:id', async (req, res) => {
+router.delete('/:list/:id', canManageSettings, async (req, res) => {
   const cfg = SETUP_TABLES[req.params.list];
   if (!cfg) return res.status(404).json({ error: 'Unknown list' });
   try {

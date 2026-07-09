@@ -5,8 +5,11 @@ import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { APP_VERSION, DB_VERSION } from '../../version.js';
-import api from '../../api/client.js';
+import api, { getToken } from '../../api/client.js';
 import ZKTecoDeviceSettings from './ZKTecoDeviceSettings.jsx';
+import StandAloneDeviceSettings from './StandAloneDeviceSettings.jsx';
+import ProfileTab from '../Common/ProfileTab.jsx';
+import BugFinder from './BugFinder.jsx';
 import {
   FORMAT_OPTIONS, formatDate,
   adToBS, bsToAD,
@@ -16,6 +19,9 @@ import {
 import useDateFormat from '../../hooks/useDateFormat.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import SaveButton from '../Common/SaveButton.jsx';
+import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import useNewShortcut from '../../hooks/useNewShortcut.js';
 
 /* ─────────────── constants ─────────────── */
 const ALL_DAYS = [
@@ -339,6 +345,11 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete }) => {
     setModal(false);
   };
 
+  /* Ctrl+S saves the Add/Edit modal — same action as the Save button */
+  useSaveShortcut(modal, handleSave);
+  /* Ctrl+N opens the Add modal when not already open */
+  useNewShortcut(!modal, openAdd);
+
   /* Build DataGrid columns from field definitions */
   const visibleFields = fields.filter(f => f.column !== false);
   const columns = [
@@ -420,7 +431,7 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete }) => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(false)}>{t('Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 {t('Save')}</button>
+              <SaveButton onClick={handleSave} label={t('Save')} />
             </div>
           </div>
         </div>
@@ -468,7 +479,7 @@ const defaultShiftForm = {
 const ShiftInlineSection = () => {
   const { t, language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
-  const { shifts, addShift, updateShift, deleteShift, setDefaultShift, refreshShifts, employees } = useData();
+  const { shifts, addShift, updateShift, deleteShift, refreshShifts, refreshEmployees, employees } = useData();
   const { isAdmin, isManager } = useAuth();
 
   const [modal,             setModal]             = useState(false);
@@ -522,18 +533,21 @@ const ShiftInlineSection = () => {
     }
     const savePromise = editId ? updateShift(editId, savedForm) : addShift(savedForm);
     Promise.resolve(savePromise).then(() => {
-      // Re-fetch all shifts so the list reflects the server's single-default enforcement
-      if (savedForm.makeDefault) refreshShifts();
+      // Re-fetch shifts/employees so the list reflects the server's single-default
+      // enforcement and the bulk shift assignment it performs when makeDefault is set
+      if (savedForm.makeDefault) { refreshShifts(); refreshEmployees(); }
     });
 
     if (savedForm.makeDefault) {
-      setDefaultShift(savedForm.code);
       showToast(L('डिफल्ट सिफ्ट अपडेट भयो — सबै कर्मचारीमा लागू भयो','Default shift updated — applied to all employees'), 'success');
     } else {
       showToast(t('Record saved successfully'));
     }
     setModal(false);
   };
+
+  /* Ctrl+S saves the Shift Add/Edit modal — same action as the Save button */
+  useSaveShortcut(modal, handleSave);
 
   const toggleExcDay = (key) => setForm(p => ({
     ...p,
@@ -565,6 +579,12 @@ const ShiftInlineSection = () => {
     setForm(p => ({ ...p, winterPolicy: { ...winterTemp } }));
     setWinterModal(false);
   };
+
+  /* Ctrl+S saves the Winter Policy modal — same action as the Save Policy button */
+  useSaveShortcut(winterModal, saveWinter);
+
+  // Ctrl+N opens the Add Shift modal when not already open (ShiftInlineSection)
+  useNewShortcut(!modal, openAdd);
 
   const Toggle = ({ value, onChange, color='#1a56db' }) => (
     <div style={{ width:44, height:24, background:value?color:'#d1d5db', borderRadius:12, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
@@ -822,7 +842,7 @@ const ShiftInlineSection = () => {
             </div>
             <div className="modal-footer" style={{ position:'sticky', bottom:0, background:'white', borderTop:'1px solid #e5e7eb' }}>
               <button className="btn btn-outline" onClick={() => setModal(false)}>{t('Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 {t('Save')}</button>
+              <SaveButton onClick={handleSave} label={t('Save')} />
             </div>
           </div>
         </div>
@@ -942,7 +962,7 @@ const ShiftInlineSection = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setWinterModal(false)}>{t('Cancel')}</button>
-              <button className="btn btn-primary" onClick={saveWinter}>💾 {L('नीति सुरक्षित','Save Policy')}</button>
+              <SaveButton onClick={saveWinter} label={L('नीति सुरक्षित','Save Policy')} />
             </div>
           </div>
         </div>
@@ -1961,95 +1981,6 @@ const LanguageSection = () => {
 
 
 /* ═══════════════════════════════════════════════════════════
-   ProfileTab — extracted so hooks are at component top-level
-════════════════════════════════════════════════════════════ */
-const ProfileTab = ({ currentUser, showToast }) => {
-  const { language } = useLanguage();
-  const L = (np, en) => language === 'np' ? np : en;
-  const { t } = useLanguage();
-
-  const [pwForm,   setPwForm]   = useState({ old:'', new1:'', new2:'' });
-  const [pwSaving, setPwSaving] = useState(false);
-
-  const handleChangePw = async () => {
-    if (!pwForm.old)  return showToast(L('पुरानो पासवर्ड आवश्यक छ','Old password is required'), 'error');
-    if (!pwForm.new1) return showToast(L('नयाँ पासवर्ड आवश्यक छ','New password is required'), 'error');
-    if (pwForm.new1 !== pwForm.new2) return showToast(L('नयाँ पासवर्ड मेल खाएन','New passwords do not match'), 'error');
-    setPwSaving(true);
-    try {
-      await api.post('/auth/change-password', { oldPassword: pwForm.old, newPassword: pwForm.new1 });
-      showToast(L('पासवर्ड सफलतापूर्वक परिवर्तन भयो','Password changed successfully'));
-      setPwForm({ old:'', new1:'', new2:'' });
-    } catch (e) {
-      showToast(e.message || L('पासवर्ड परिवर्तन भएन','Password change failed'), 'error');
-    } finally { setPwSaving(false); }
-  };
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-      <div className="card">
-        <div className="card-header"><h3>👤 {t('Profile')}</h3></div>
-        <div className="card-body">
-          <div style={{ display:'flex', alignItems:'center', gap:20, marginBottom:24, background:'#f8fafc', borderRadius:12, padding:20 }}>
-            <div style={{ width:72, height:72, borderRadius:'50%', background:'#dbeafe', color:'#1a56db', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:800 }}>{currentUser?.avatar}</div>
-            <div>
-              <div style={{ fontSize:20, fontWeight:700 }}>{currentUser?.fullName}</div>
-              <div style={{ fontSize:13, color:'#6b7280' }}>{currentUser?.email}</div>
-              <div style={{ fontSize:12, color:'#9ca3af' }}>{currentUser?.employeeId} · {currentUser?.department}</div>
-            </div>
-          </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-            {[
-              [L('पूरा नाम','Full Name'),    currentUser?.fullName],
-              [L('इमेल','Email'),             currentUser?.email],
-              [L('फोन','Phone'),              currentUser?.phone],
-              [L('विभाग','Department'),       currentUser?.department],
-              [L('पद','Position'),            currentUser?.position],
-              [L('प्रवेश मिति','Join Date'), currentUser?.joinDate],
-            ].map(([label, value], i) => (
-              <div key={i}>
-                <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{label}</div>
-                <div style={{ fontSize:14, fontWeight:500, color:'#1f2937', padding:'8px 12px', background:'#f9fafb', borderRadius:6, border:'1px solid #e5e7eb', minHeight:38 }}>
-                  {value || <span style={{ color:'#9ca3af' }}>—</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header"><h3>🔑 {L('पासवर्ड परिवर्तन','Change Password')}</h3></div>
-        <div className="card-body">
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14, maxWidth:720 }}>
-            <div>
-              <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{L('पुरानो पासवर्ड','Old Password')}</div>
-              <input type="password" className="form-control" placeholder="••••••••"
-                value={pwForm.old} onChange={e => setPwForm(f => ({ ...f, old: e.target.value }))} />
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{L('नयाँ पासवर्ड','New Password')}</div>
-              <input type="password" className="form-control" placeholder="••••••••"
-                value={pwForm.new1} onChange={e => setPwForm(f => ({ ...f, new1: e.target.value }))} />
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{L('नयाँ पासवर्ड पुष्टि','Verify New Password')}</div>
-              <input type="password" className="form-control" placeholder="••••••••"
-                value={pwForm.new2} onChange={e => setPwForm(f => ({ ...f, new2: e.target.value }))} />
-            </div>
-          </div>
-          <div style={{ marginTop:16 }}>
-            <button className="btn btn-primary" onClick={handleChangePw} disabled={pwSaving}>
-              {pwSaving ? L('परिवर्तन हुँदैछ...','Updating...') : `🔑 ${L('पासवर्ड परिवर्तन गर्नुहोस्','Change Password')}`}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ═══════════════════════════════════════════════════════════
    EmailSetupTab — extracted so hooks are at component top-level
 ════════════════════════════════════════════════════════════ */
 const EmailSetupTab = ({ showToast }) => {
@@ -2067,9 +1998,13 @@ const EmailSetupTab = ({ showToast }) => {
       setEmailCfg(d || {
         smtpHost: '', smtpPort: '587', smtpUser: '', smtpPass: '',
         fromName: 'eHajiri TMS', fromEmail: '', secure: false, enabled: true,
+        dailyDigestTime: '18:00',
         notifications: {
           forgotPassword: true, resetPassword: true,
           leaveApplication: true, officeVisitApplication: true, staffCreated: true,
+          missingAttendance: true,
+          lateEarlyNotification: true, absentNotification: true,
+          leaveStatusUpdate: true, officeVisitStatusUpdate: true,
         },
       });
       setEmailLoaded(true);
@@ -2088,6 +2023,9 @@ const EmailSetupTab = ({ showToast }) => {
     finally { setEmailSaving(false); }
   };
 
+  /* Ctrl+S saves — this tab only exists while it's the active tab */
+  useSaveShortcut(true, saveConfig);
+
   const sendTest = async () => {
     if (!testTo) return showToast(L('परीक्षण इमेल ठेगाना आवश्यक छ','Test recipient email is required'), 'error');
     setTestLoading(true);
@@ -2105,6 +2043,11 @@ const EmailSetupTab = ({ showToast }) => {
     { key: 'resetPassword',          label: L('पासवर्ड रिसेट','Reset Password'),                             desc: L('जब व्यवस्थापकले पासवर्ड रिसेट गर्छ','When an admin resets a staff password') },
     { key: 'leaveApplication',       label: L('बिदा आवेदन','Leave Application'),                             desc: L('जब कर्मचारीले बिदाको आवेदन दिन्छ','When a staff member submits a leave application') },
     { key: 'officeVisitApplication', label: L('कार्यालय भ्रमण आवेदन','Office Visit Application'),           desc: L('जब कर्मचारीले कार्यालय भ्रमण आवेदन दिन्छ','When a staff member submits an office visit application') },
+    { key: 'missingAttendance',      label: L('छुटेको हाजिरी अनुरोध','Missing Attendance Request'),         desc: L('जब कर्मचारीले छुटेको हाजिरीको अनुरोध गर्छ','When a staff member requests missing attendance be recorded') },
+    { key: 'leaveStatusUpdate',       label: L('बिदा स्वीकृति/अस्वीकृति','Leave Status Update'),              desc: L('जब बिदा आवेदन स्वीकृत वा अस्वीकृत हुन्छ — कर्मचारीलाई सूचित गरिन्छ','When a leave application is approved or rejected — notifies the employee') },
+    { key: 'officeVisitStatusUpdate', label: L('भ्रमण स्वीकृति/अस्वीकृति','Office Visit Status Update'),      desc: L('जब कार्यालय भ्रमण आवेदन स्वीकृत वा अस्वीकृत हुन्छ — कर्मचारीलाई सूचित गरिन्छ','When an office visit application is approved or rejected — notifies the employee') },
+    { key: 'lateEarlyNotification',   label: L('ढिलो/चाँडो सूचना','Late In / Early Out Notification'),       desc: L('दैनिक — कर्मचारी, विभाग प्रमुख, शाखा प्रबन्धक र एडमिनलाई सूचित गर्छ','Daily digest — notifies the staff member, their Dept. Head, Branch Manager, and Admins') },
+    { key: 'absentNotification',      label: L('अनुपस्थिति सूचना','Absent Notification'),                    desc: L('दैनिक — कर्मचारी, विभाग प्रमुख र एडमिनलाई सूचित गर्छ','Daily digest — notifies the staff member, their Dept. Head, and Admins') },
     { key: 'staffCreated',           label: L('कर्मचारी खाता सिर्जना','Staff Account Created'),             desc: L('जब नयाँ कर्मचारीको खाता सिर्जना गरिन्छ','When a new staff account is created — sends login credentials') },
   ];
 
@@ -2157,10 +2100,15 @@ const EmailSetupTab = ({ showToast }) => {
               <label style={labelStyle}>{L('प्रेषक इमेल','From Email')}</label>
               <input style={fieldStyle} placeholder="noreply@yourcompany.com" value={emailCfg.fromEmail||''} onChange={e => set('fromEmail', e.target.value)} />
             </div>
+            <div>
+              <label style={labelStyle}>{L('दैनिक सूचना समय','Daily Digest Time')}</label>
+              <input type="time" style={fieldStyle} value={emailCfg.dailyDigestTime || '18:00'} onChange={e => set('dailyDigestTime', e.target.value)} />
+              <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('ढिलो/चाँडो र अनुपस्थिति सूचना यो समयमा पठाइन्छ','Late In/Early Out and Absent digests are sent once per day, after this time')}</div>
+            </div>
           </div>
           <div style={{ marginTop:16, display:'flex', gap:10 }}>
-            <button className="btn btn-primary" onClick={saveConfig} disabled={emailSaving}>
-              {emailSaving ? L('सुरक्षित हुँदैछ...','Saving...') : `💾 ${L('सेटिङ सुरक्षित','Save Settings')}`}
+            <button className="btn btn-primary" onClick={saveConfig} disabled={emailSaving} title="Ctrl+S">
+              {emailSaving ? L('सुरक्षित हुँदैछ...','Saving...') : <>💾 {language === 'np' ? L('सेटिङ सुरक्षित','Save Settings') : <><u>S</u>ave Settings</>}</>}
             </button>
           </div>
         </div>
@@ -2208,10 +2156,60 @@ const EmailSetupTab = ({ showToast }) => {
 };
 
 /* ═══════════════════════════════════════════════════════════
+   Module enable/disable banner — shown above the Attendance Device /
+   StandAlone Device tabs. Only admin/superAdmin gets the toggle; everyone
+   else (who can even see the tab, per the role permission matrix) just
+   sees the disabled notice with no control.
+════════════════════════════════════════════════════════════ */
+const ModuleToggleBanner = ({ enabled, isAdmin, onToggle, label, L }) => (
+  <div style={{
+    display:'flex', alignItems:'center', justifyContent:'space-between', gap:12,
+    background: enabled ? '#f0fdf4' : '#fff7ed',
+    border:`1px solid ${enabled ? '#bbf7d0' : '#fed7aa'}`,
+    borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:13,
+  }}>
+    <span style={{ color: enabled ? '#065f46' : '#9a3412', fontWeight:600 }}>
+      {enabled
+        ? `✅ ${label} ${L('सक्षम छ','is enabled')}`
+        : `⛔ ${label} ${L('अक्षम छ','is disabled')} — ${L('कुनै पनि डिभाइस जडान वा डाटा सिंक हुनेछैन','no device connections or data sync will run')}`}
+    </span>
+    {isAdmin && (
+      <button className={`btn btn-sm ${enabled ? 'btn-outline' : 'btn-primary'}`} onClick={onToggle}>
+        {enabled ? L('अक्षम गर्नुहोस्','Disable') : L('सक्षम गर्नुहोस्','Enable')}
+      </button>
+    )}
+  </div>
+);
+
+/* ═══════════════════════════════════════════════════════════
    Main Settings component
 ════════════════════════════════════════════════════════════ */
 const Settings = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin, canView } = useAuth();
+  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false });
+  const [moduleFlagsLoading, setModuleFlagsLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/module-flags')
+      .then(f => setModuleFlags(f))
+      .catch(() => {})
+      .finally(() => setModuleFlagsLoading(false));
+  }, []);
+
+  const toggleModule = async (flagKey) => {
+    const next = !moduleFlags[flagKey === 'module_attendance_device_enabled' ? 'attendanceDeviceEnabled' : 'standaloneDeviceEnabled'];
+    try {
+      await api.put('/settings', { [flagKey]: next });
+      setModuleFlags(f => ({
+        ...f,
+        ...(flagKey === 'module_attendance_device_enabled'
+          ? { attendanceDeviceEnabled: next }
+          : { standaloneDeviceEnabled: next }),
+      }));
+    } catch (err) {
+      alert(`Failed to update: ${err.message}`);
+    }
+  };
   const { t, language, changeLanguage, autoTranslate, toggleAutoTranslate } = useLanguage();
   const { settings, updateSettings, addWeekendHistory, updateSetupList, apiOk: settingsApiOk } = useSettings();
   const { apiOk: dataApiOk, employees, updateEmployee } = useData();
@@ -2247,6 +2245,7 @@ const Settings = () => {
   /* ── Database / Backup state ── */
   const [dbVersionInfo,  setDbVersionInfo]  = useState(null);
   const [backupLoading,  setBackupLoading]  = useState(false);
+  const [sqlBackupLoading, setSqlBackupLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [restorePreview, setRestorePreview] = useState(null); // parsed backup meta
   const [restoreData,    setRestoreData]    = useState(null); // full backup object
@@ -2259,6 +2258,10 @@ const Settings = () => {
   const [assignModal,  setAssignModal]  = useState(null); // { roleKey, name, color, border, bg }
   const [changeModal,  setChangeModal]  = useState(null); // { emp, newRole }
   const [assignSearch, setAssignSearch] = useState('');
+  /* Holds the latest Change-Role save closure (assigned each render below, inside the
+     activeTab==='userRole' block) so Ctrl+S can call it without violating hook ordering rules */
+  const changeRoleActionRef = useRef(null);
+  useSaveShortcut(activeTab === 'userRole' && !!changeModal, () => changeRoleActionRef.current?.());
 
   // Fetch version info when database tab opens
   useEffect(() => {
@@ -2320,6 +2323,17 @@ const Settings = () => {
     showToast(t('Record saved successfully'));
   };
 
+  /* Ctrl+S saves the Company Settings modal — same action as the Save button */
+  useSaveShortcut(companyModal, handleCompanySave);
+
+  const handleSaveCalendarSettings = () => {
+    updateSettings(local);
+    showToast(t('Record saved successfully'));
+  };
+
+  /* Ctrl+S saves Calendar Settings — only while that tab is active */
+  useSaveShortcut(activeTab === 'calendar', handleSaveCalendarSettings);
+
   const handleModalLogoUpload = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
     setLogoError('');
@@ -2365,6 +2379,9 @@ const Settings = () => {
     setWeekendModal(false);
     setWeekendEditId(null);
   };
+
+  /* Ctrl+S saves the Weekend modal — same action as the Save Change button */
+  useSaveShortcut(weekendModal, handleWeekendSave);
 
   const toggleWDay = (key) => setWForm(p => ({
     ...p, weekends: p.weekends.includes(key) ? p.weekends.filter(d => d !== key) : [...p.weekends, key],
@@ -2513,6 +2530,34 @@ const Settings = () => {
     }
   };
 
+  const handleBackupSql = async () => {
+    setSqlBackupLoading(true);
+    try {
+      const token = getToken();
+      const res = await fetch('/api/backup/sql', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { msg = (await res.json()).error || msg; } catch {}
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `ehajiri-backup-${new Date().toISOString().split('T')[0]}.sql`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addBackupHistory('SQL (pg_dump)', Math.round(blob.size / 1024));
+      showToast(L('SQL ब्याकअप सफलतापूर्वक डाउनलोड भयो','SQL backup downloaded successfully'));
+    } catch (e) {
+      showToast(e.message, 'danger');
+    } finally {
+      setSqlBackupLoading(false);
+    }
+  };
+
   const handleRestoreFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2600,19 +2645,24 @@ const Settings = () => {
     }
   };
 
-  /* ── Tabs & Sub-nav ── */
+  /* ── Tabs & Sub-nav ──
+     "Attendance Device" / "StandAlone Device" are gated by the role
+     permission matrix (Settings → Role Management) — hidden entirely from
+     roles that can't view them, regardless of the global on/off flag. */
   const tabs = [
     { key:'system',        icon:'🏢',  label:L('कम्पनी सेटिङ','Company Settings')        },
     { key:'setup',         icon:'🏗️', label:L('संगठन सेटअप','Official Setting')         },
     { key:'leaveType',     icon:'🌴',  label:L('बिदा','Leave')                            },
     { key:'officeVisit',   icon:'🚗',  label:L('कार्यालय भ्रमण','Office Visit')          },
     { key:'publicHoliday', icon:'🎉',  label:L('सार्वजनिक छुट्टी','Public Holiday')      },
-    { key:'device',        icon:'📡',  label:L('हाजिरी डिभाइस','Attendance Device')      },
+    canView('attendanceDevice') && { key:'device',        icon:'📡',  label:L('हाजिरी डिभाइस','Attendance Device')      },
+    canView('standaloneDevice') && { key:'standaloneDevice', icon:'🖥️', label:L('स्टान्डअलोन डिभाइस','StandAlone Device') },
     { key:'language',      icon:'🌐',  label:L('भाषा','Language')                         },
     { key:'profile',       icon:'👤',  label:L('प्रोफाइल','Profile')                     },
     { key:'emailSetup',    icon:'📧',  label:L('इमेल सेटअप','Email Setup')               },
     { key:'database',      icon:'🗄️', label:L('डेटाबेस','Database')                     },
-  ];
+    isAdmin && { key:'bugFinder', icon:'🐞',  label:L('बग फाइन्डर','Bug Finder')          },
+  ].filter(Boolean);
 
   const setupSubNav = [
     { key:'fiscalYear',  icon:'📆',  label:L('आर्थिक वर्ष','Fiscal Year')  },
@@ -2910,9 +2960,7 @@ const Settings = () => {
                     ⚡ {L('यो ढाँचा — कर्मचारी फारम (Join Date), सप्ताहन्त मिति, Leave, Office Visit सबैमा लागू।','This format applies to: Employee Join Date, Weekend dates, Leave dates, Office Visit dates — everywhere.')}
                   </div>
                   <div style={{ marginTop:16 }}>
-                    <button className="btn btn-primary" onClick={() => { updateSettings(local); showToast(t('Record saved successfully')); }}>
-                      💾 {L('क्यालेन्डर सेटिङ सुरक्षित','Save Calendar Settings')}
-                    </button>
+                    <SaveButton onClick={handleSaveCalendarSettings} label={L('क्यालेन्डर सेटिङ सुरक्षित','Save Calendar Settings')} />
                   </div>
                 </div>
               </div>
@@ -3126,13 +3174,43 @@ const Settings = () => {
           )}
 
           {/* ══════════ ATTENDANCE DEVICE (ZKTeco) ══════════ */}
-          {activeTab === 'device' && (
+          {activeTab === 'device' && canView('attendanceDevice') && (
             <div className="card">
               <div className="card-header">
                 <h3>📡 {L('हाजिरी डिभाइस सेटिङ','Attendance Device Setting')}</h3>
               </div>
               <div className="card-body">
-                <ZKTecoDeviceSettings />
+                {!moduleFlagsLoading && (
+                  <ModuleToggleBanner
+                    enabled={moduleFlags.attendanceDeviceEnabled}
+                    isAdmin={isAdmin}
+                    onToggle={() => toggleModule('module_attendance_device_enabled')}
+                    label={L('हाजिरी डिभाइस मोड्युल','Attendance Device module')}
+                    L={L}
+                  />
+                )}
+                {moduleFlags.attendanceDeviceEnabled && <ZKTecoDeviceSettings />}
+              </div>
+            </div>
+          )}
+
+          {/* ══════════ STANDALONE DEVICE (ZKTeco Legacy SDK) ══════════ */}
+          {activeTab === 'standaloneDevice' && canView('standaloneDevice') && (
+            <div className="card">
+              <div className="card-header">
+                <h3>🖥️ {L('स्टान्डअलोन डिभाइस सेटिङ','StandAlone Device Setting')}</h3>
+              </div>
+              <div className="card-body">
+                {!moduleFlagsLoading && (
+                  <ModuleToggleBanner
+                    enabled={moduleFlags.standaloneDeviceEnabled}
+                    isAdmin={isAdmin}
+                    onToggle={() => toggleModule('module_standalone_device_enabled')}
+                    label={L('स्टान्डअलोन डिभाइस मोड्युल','StandAlone Device module')}
+                    L={L}
+                  />
+                )}
+                {moduleFlags.standaloneDeviceEnabled && <StandAloneDeviceSettings />}
               </div>
             </div>
           )}
@@ -3176,6 +3254,15 @@ const Settings = () => {
                 desc:L('केवल आफ्नो रिपोर्ट मात्र हेर्न सक्छ','View own reports only — no management access'),
               },
             ];
+
+            /* keep the Ctrl+S ref pointed at this render's closure (correct GROUPS/changeModal) */
+            changeRoleActionRef.current = () => {
+              if (!changeModal) return;
+              updateEmployee(changeModal.emp.id, { ...changeModal.emp, role: changeModal.newRole });
+              const grpName = GROUPS.find(g => g.key === changeModal.newRole)?.name || changeModal.newRole;
+              showToast(`${changeModal.emp.fullName} → ${grpName}`);
+              setChangeModal(null);
+            };
 
             const PERMS = [
               { label:L('सबै कर्मचारी व्यवस्थापन','All Staff Management'),    vals:[true, false,false,false] },
@@ -3381,14 +3468,7 @@ const Settings = () => {
                       </div>
                       <div className="modal-footer">
                         <button className="btn btn-outline" onClick={() => setChangeModal(null)}>{t('Cancel')}</button>
-                        <button className="btn btn-primary" onClick={() => {
-                          updateEmployee(changeModal.emp.id, { ...changeModal.emp, role: changeModal.newRole });
-                          const grpName = GROUPS.find(g => g.key === changeModal.newRole)?.name || changeModal.newRole;
-                          showToast(`${changeModal.emp.fullName} → ${grpName}`);
-                          setChangeModal(null);
-                        }}>
-                          💾 {L('सुरक्षित','Save Role')}
-                        </button>
+                        <SaveButton onClick={() => changeRoleActionRef.current?.()} label={L('सुरक्षित','Save Role')} />
                       </div>
                     </div>
                   </div>
@@ -3450,9 +3530,9 @@ const Settings = () => {
                       </div>
                     ))}
                     <div style={{ marginLeft:'auto', background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'6px 14px', fontSize:12, color:'#6b7280', display:'flex', gap:14 }}>
-                      <span>🖥️ <strong>localhost:5000</strong></span>
+                      <span>🖥️ <strong>localhost:5001</strong></span>
                       <span>📦 <strong>{isOnline ? 'ehajiri_db' : 'localStorage'}</strong></span>
-                      <span>📅 <strong>{fd(new Date().toISOString().split('T')[0])}</strong></span>
+                      <span>📅 {L('अन्तिम अपडेट','Last Updated')}: <strong>{dbVersionInfo?.dbAppliedAt ? fd(dbVersionInfo.dbAppliedAt.split('T')[0]) : fd(new Date().toISOString().split('T')[0])}</strong></span>
                     </div>
                   </div>
                 </div>
@@ -3483,6 +3563,15 @@ const Settings = () => {
                       disabled={backupLoading}
                     >
                       {backupLoading ? '⏳ ...' : '📥'} {L('ब्याकअप डाउनलोड गर्नुहोस','Download Backup')}
+                    </button>
+                    <button
+                      className="btn btn-outline"
+                      style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, padding:'10px 22px' }}
+                      onClick={handleBackupSql}
+                      disabled={sqlBackupLoading || !isOnline}
+                      title={L('psql/pg_restore जस्ता मानक उपकरणहरूसँग प्रयोग गर्न मिल्ने SQL डम्प (pg_dump मार्फत)।','Native SQL dump (via pg_dump) restorable with standard tools like psql/pg_restore.')}
+                    >
+                      {sqlBackupLoading ? '⏳ ...' : '🗄️'} {L('SQL निर्यात गर्नुहोस','Export SQL')}
                     </button>
                     <button
                       className="btn btn-outline"
@@ -3612,6 +3701,8 @@ const Settings = () => {
           </div>
         )}
 
+        {/* ══════════ BUG FINDER ══════════ */}
+        {activeTab === 'bugFinder' && <BugFinder />}
 
         </div>
       </div>
@@ -3677,9 +3768,8 @@ const Settings = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => { setWeekendModal(false); setWeekendEditId(null); }}>{t('Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleWeekendSave}>
-                💾 {weekendEditId ? L('अपडेट गर्नुहोस','Update Record') : L('परिवर्तन सुरक्षित','Save Change')}
-              </button>
+              <SaveButton onClick={handleWeekendSave}
+                label={weekendEditId ? L('अपडेट गर्नुहोस','Update Record') : L('परिवर्तन सुरक्षित','Save Change')} />
             </div>
           </div>
         </div>
@@ -3768,7 +3858,7 @@ const Settings = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setCompanyModal(false)}>{t('Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleCompanySave}>💾 {t('Save')}</button>
+              <SaveButton onClick={handleCompanySave} label={t('Save')} />
             </div>
           </div>
         </div>

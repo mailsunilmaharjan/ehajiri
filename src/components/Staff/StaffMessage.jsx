@@ -1,28 +1,20 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
+import DataGrid from '../DataGrid/DataGrid.jsx';
 import api from '../../api/client.js';
 
 /* ─── helpers ─────────────────────────────────── */
-const fmtDate = (d) => {
-  if (!d) return '—';
-  const dt  = new Date(d);
-  const now = new Date();
-  const diffMs  = now - dt;
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1)  return 'Just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24)   return `${diffH}h ago`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 7)    return `${diffD}d ago`;
-  return dt.toLocaleDateString();
-};
-
 const fmtFull = (d) => d ? new Date(d).toLocaleString() : '—';
+
+/** Sent-tab rows/reading-pane don't have a sender — describe the audience instead. */
+const recipientLabel = (msg) =>
+  msg.recipient_type === 'all' ? 'All Staff'
+  : msg.recipient_type === 'department' ? (msg.department || 'Department')
+  : `${msg.total_recipients || 0} recipient(s)`;
 
 const RecipientBadge = ({ type, department }) => {
   const map = {
@@ -33,7 +25,7 @@ const RecipientBadge = ({ type, department }) => {
   const s = map[type] || map.individual;
   return (
     <span style={{ background: s.bg, color: s.color, borderRadius: 10,
-      padding: '1px 9px', fontSize: 11, fontWeight: 700 }}>
+      padding: '1px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
       {s.label}
     </span>
   );
@@ -95,7 +87,7 @@ const ComposeModal = ({ onClose, onSent, employees, settings }) => {
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header" style={{ background: 'linear-gradient(135deg,#eff6ff,#dbeafe)' }}>
-          <h2 style={{ color: '#1e40af' }}>✉ Compose Message</h2>
+          <h2 style={{ color: '#1e40af' }}>✉ New Message</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -215,52 +207,150 @@ const ComposeModal = ({ onClose, onSent, employees, settings }) => {
   );
 };
 
-/* ─── Message Detail Modal ─────────────────────── */
-const DetailModal = ({ msg, onClose, onDelete }) => (
-  <div className="modal-overlay">
-    <div className="modal" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
-      <div className="modal-header" style={{ background: 'linear-gradient(135deg,#eff6ff,#dbeafe)' }}>
-        <h2 style={{ color: '#1e40af', fontSize: 15 }}>✉ {msg.subject}</h2>
-        <button className="modal-close" onClick={onClose}>✕</button>
-      </div>
-      <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+/* ─── Reading pane (right column) ──────────────── */
+const ReadingPane = ({ msg, folder, onDelete }) => {
+  const fromLabel = folder === 'inbox' ? (msg.sender_name || '—') : recipientLabel(msg);
+  const initial = (fromLabel || '?')[0]?.toUpperCase() || '?';
 
-        {/* Meta strip */}
-        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8,
-          padding: '10px 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {[
-            ['From',    msg.sender_name || '—'],
-            ['Date',    fmtFull(msg.created_at)],
-            ['Type',    <RecipientBadge key="b" type={msg.recipient_type} department={msg.department} />],
-            msg.department ? ['Department', msg.department] : null,
-          ].filter(Boolean).map(([lbl, val], i) => (
-            <div key={i}>
-              <div style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>{lbl}</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2937' }}>{val}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Body */}
-        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
-          padding: '14px 16px', fontSize: 14, color: '#374151', lineHeight: 1.6,
-          whiteSpace: 'pre-wrap', minHeight: 80 }}>
-          {msg.body}
-        </div>
-
-      </div>
-      <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 20px', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
+        <RecipientBadge type={msg.recipient_type} department={msg.department} />
         <button
-          onClick={() => onDelete(msg.id)}
+          onClick={() => onDelete(msg)}
+          title="Delete message"
           style={{ background: 'none', border: '1px solid #fca5a5', color: '#dc2626',
-            borderRadius: 7, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+            borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
           🗑 Delete
         </button>
-        <button className="btn btn-outline" onClick={onClose}>Close</button>
       </div>
-    </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '22px 30px' }}>
+        <h2 style={{ fontSize: 19, fontWeight: 700, color: '#111827', marginBottom: 18, wordBreak: 'break-word' }}>
+          {msg.subject}
+        </h2>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
+          paddingBottom: 18, borderBottom: '1px solid #f3f4f6' }}>
+          <div style={{ width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
+            background: '#eff6ff', color: '#1a56db', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontWeight: 700, fontSize: 16 }}>
+            {initial}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{fromLabel}</div>
+            <div style={{ fontSize: 12, color: '#9ca3af' }}>{fmtFull(msg.created_at)}</div>
+          </div>
+          {folder === 'sent' && msg.total_recipients > 0 && (
+            <div style={{ fontSize: 12, color: '#6b7280', flexShrink: 0 }}>
+              {msg.read_count}/{msg.total_recipients} read
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize: 14, color: '#374151', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+          {msg.body}
+        </div>
+      </div>
+    </>
+  );
+};
+
+const EmptyReadingPane = () => (
+  <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+    <div style={{ fontSize: 44, marginBottom: 10 }}>📨</div>
+    <div style={{ fontSize: 14, fontWeight: 600, color: '#6b7280' }}>Select a message to read</div>
   </div>
 );
+
+/* ─── Big message popup (opened on row double-click) ───── */
+const BigMessageModal = ({ msg, onClose, onDelete, onReply }) => {
+  const isSent = !!msg._sent;
+  const fromLabel = isSent ? recipientLabel(msg) : (msg.sender_name || '—');
+  const initial = (fromLabel || '?')[0]?.toUpperCase() || '?';
+
+  const [replyText, setReplyText] = useState('');
+  const [sending,   setSending]   = useState(false);
+
+  const send = async () => {
+    if (!replyText.trim()) return;
+    setSending(true);
+    const ok = await onReply(msg, replyText);
+    setSending(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 760, width: '92%' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#eff6ff,#dbeafe)' }}>
+          <h2 style={{ color: '#1e40af', fontSize: 16, wordBreak: 'break-word' }}>✉ {msg.subject}</h2>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="modal-body" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
+            paddingBottom: 16, borderBottom: '1px solid #f3f4f6' }}>
+            <div style={{ width: 46, height: 46, borderRadius: '50%', flexShrink: 0,
+              background: '#eff6ff', color: '#1a56db', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', fontWeight: 700, fontSize: 18 }}>
+              {initial}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#111827' }}>{fromLabel}</div>
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>{fmtFull(msg.created_at)}</div>
+            </div>
+            <RecipientBadge type={msg.recipient_type} department={msg.department} />
+            {isSent && msg.total_recipients > 0 && (
+              <div style={{ fontSize: 12, color: '#6b7280', flexShrink: 0 }}>
+                {msg.read_count}/{msg.total_recipients} read
+              </div>
+            )}
+          </div>
+
+          <div style={{ fontSize: 14, color: '#374151', lineHeight: 1.8, whiteSpace: 'pre-wrap', marginBottom: 22 }}>
+            {msg.body}
+          </div>
+
+          {!isSent && (
+            <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8 }}>
+                ↩ Reply to {msg.sender_name}
+              </div>
+              <textarea
+                value={replyText}
+                onChange={e => setReplyText(e.target.value)}
+                rows={4}
+                placeholder="Type your reply…"
+                style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '8px 10px',
+                  fontSize: 13, resize: 'vertical', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+          <button
+            onClick={() => onDelete(msg)}
+            style={{ background: 'none', border: '1px solid #fca5a5', color: '#dc2626',
+              borderRadius: 7, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+            🗑 Delete
+          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-outline" onClick={onClose}>Close</button>
+            {!isSent && (
+              <button className="btn btn-primary" onClick={send} disabled={sending || !replyText.trim()}>
+                {sending ? '⏳ Sending…' : '↩ Send Reply'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 /* ─── Main Component ───────────────────────────── */
 const StaffMessage = () => {
@@ -269,14 +359,51 @@ const StaffMessage = () => {
   const { settings } = useSettings();
   const { clearMsgCount } = useNotifications();
 
-  const [tab,       setTab]       = useState('inbox');
+  const [folder,    setFolder]    = useState('inbox');
   const [inbox,     setInbox]     = useState([]);
   const [sent,      setSent]      = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [selected,  setSelected]  = useState(null);
   const [compose,   setCompose]   = useState(false);
   const [toast,     setToast]     = useState(null);
-  const [delConfirm, setDelConfirm] = useState(null);
+  const [delConfirm, setDelConfirm] = useState(null);   // holds the whole msg object being confirmed
+  const [selectedIds, setSelectedIds] = useState([]);   // checkbox multi-select (inbox only)
+  const [bigMsg,    setBigMsg]    = useState(null);      // message shown in the big popup (double-click)
+
+  /* ── Resizable list / reading-pane splitter ── */
+  const [midWidth, setMidWidth] = useState(640);
+  const containerRef = useRef(null);
+  const resizingRef  = useRef(false);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizingRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const railWidth = 190;
+      let next = e.clientX - rect.left - railWidth;
+      next = Math.max(380, Math.min(next, rect.width - railWidth - 320));
+      setMidWidth(next);
+    };
+    const onUp = () => {
+      if (!resizingRef.current) return;
+      resizingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  const startResize = (e) => {
+    e.preventDefault();
+    resizingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -319,36 +446,131 @@ const StaffMessage = () => {
     if (!msg.is_read) markRead(msg.id);
   };
 
-  const deleteMsg = async (msgId) => {
+  const selectFolder = (key) => {
+    setFolder(key);
+    setSelected(null);
+    setSelectedIds([]);
+    setBigMsg(null);
+  };
+
+  /** Opens the given row in the big popup — also drives the reading pane and read status, same as a single click. */
+  const openBig = (row) => {
+    if (folder === 'inbox') {
+      openMessage(row);
+      setBigMsg({ ...row, is_read: true });
+    } else {
+      const withFlag = { ...row, _sent: true };
+      setSelected(withFlag);
+      setBigMsg(withFlag);
+    }
+  };
+
+  const deleteMsg = async (msg) => {
     try {
-      await api.delete(`/messages/${msgId}`);
-      setInbox(prev => prev.filter(m => m.id !== msgId));
-      setSelected(null);
+      await api.delete(`/messages/${msg.id}`);
+      if (!msg._sent) setInbox(prev => prev.filter(m => m.id !== msg.id));
+      setSelected(prev => (prev && prev.id === msg.id) ? null : prev);
+      setBigMsg(prev => (prev && prev.id === msg.id) ? null : prev);
       setDelConfirm(null);
       showToast('Message deleted');
     } catch (e) { showToast(e.message || 'Delete failed', 'error'); }
   };
 
+  /** Bulk-delete via DataGrid checkboxes — inbox only (deleting removes the recipient's own copy). */
+  const bulkDelete = async (ids) => {
+    try {
+      await Promise.all(ids.map(id => api.delete(`/messages/${id}`)));
+      setInbox(prev => prev.filter(m => !ids.includes(m.id)));
+      setSelected(prev => (prev && ids.includes(prev.id)) ? null : prev);
+      setBigMsg(prev => (prev && ids.includes(prev.id)) ? null : prev);
+      setSelectedIds([]);
+      showToast(`${ids.length} message(s) deleted`);
+    } catch (e) { showToast(e.message || 'Delete failed', 'error'); }
+  };
+
+  /** Reply from the big popup — always a direct individual message back to the original sender. */
+  const sendReply = async (msg, text) => {
+    try {
+      await api.post('/messages', {
+        recipientType: 'individual',
+        recipientIds : [msg.sender_id],
+        department   : null,
+        subject      : msg.subject?.startsWith('Re: ') ? msg.subject : `Re: ${msg.subject}`,
+        body         : text.trim(),
+      });
+      showToast('Reply sent');
+      loadSent();
+      return true;
+    } catch (e) {
+      showToast(e.message || 'Failed to send reply', 'error');
+      return false;
+    }
+  };
+
   const unread = useMemo(() => inbox.filter(m => !m.is_read).length, [inbox]);
 
-  const currentList = tab === 'inbox' ? inbox : sent;
+  const folders = [
+    { key: 'inbox', label: 'Inbox', icon: '📥', count: unread },
+    { key: 'sent',  label: 'Sent',  icon: '📤', count: 0 },
+  ];
+
+  const currentList = folder === 'inbox' ? inbox : sent;
+
+  const columns = useMemo(() => {
+    const typeCol = {
+      field: 'recipient_type', header: 'Type', width: 130, align: 'center', sortable: false, filterable: false,
+      render: (v, row) => <RecipientBadge type={v} department={row.department} />,
+    };
+    const dateCol = {
+      field: 'created_at', header: 'Date', width: 160,
+      render: v => fmtFull(v),
+    };
+    const subjectCol = {
+      field: 'subject', header: 'Subject', width: 260,
+      render: (v, row) => <span style={{ fontWeight: (folder === 'inbox' && !row.is_read) ? 700 : 400 }}>{v}</span>,
+    };
+
+    if (folder === 'inbox') {
+      return [
+        {
+          field: 'sender_name', header: 'From', width: 170,
+          render: (v, row) => <span style={{ fontWeight: row.is_read ? 500 : 700, color: row.is_read ? '#374151' : '#111827' }}>{v}</span>,
+        },
+        subjectCol,
+        typeCol,
+        {
+          field: 'is_read', header: 'Status', width: 100, align: 'center', sortable: false,
+          render: v => v
+            ? <span style={{ background: '#f3f4f6', color: '#6b7280', borderRadius: 10, padding: '1px 9px', fontSize: 11, fontWeight: 700 }}>Read</span>
+            : <span style={{ background: '#eff6ff', color: '#1a56db', borderRadius: 10, padding: '1px 9px', fontSize: 11, fontWeight: 700 }}>● Unread</span>,
+        },
+        dateCol,
+      ];
+    }
+
+    return [
+      {
+        field: '_to', header: 'To', width: 170, sortable: false, filterable: false,
+        render: (_, row) => recipientLabel(row),
+      },
+      subjectCol,
+      typeCol,
+      {
+        field: 'read_count', header: 'Read', width: 100, align: 'center', sortable: false,
+        render: (v, row) => row.total_recipients > 0 ? `${v}/${row.total_recipients}` : '—',
+      },
+      dateCol,
+    ];
+  }, [folder]);
 
   return (
-    <div className="page-container">
+    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
       {/* ── Header ── */}
-      <div className="page-header">
+      <div className="page-header" style={{ flexShrink: 0 }}>
         <div>
           <h1 className="page-title">💬 Messages</h1>
           <p className="page-subtitle">Internal communication — Individual, All Staff, Department</p>
         </div>
-        <button
-          onClick={() => setCompose(true)}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '8px 18px', background: '#1a56db', color: '#fff',
-            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
-            cursor: 'pointer', boxShadow: '0 2px 8px rgba(26,86,219,.25)' }}>
-          ✉ Compose
-        </button>
       </div>
 
       {/* ── Toast ── */}
@@ -363,112 +585,108 @@ const StaffMessage = () => {
         </div>
       )}
 
-      {/* ── Tabs ── */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-        {[
-          { key: 'inbox', label: 'Inbox', count: unread },
-          { key: 'sent',  label: 'Sent',  count: 0 },
-        ].map(t => (
-          <button key={t.key}
-            onClick={() => setTab(t.key)}
-            style={{ padding: '6px 18px', borderRadius: 20, fontSize: 13, fontWeight: 600,
-              cursor: 'pointer', border: 'none', transition: 'all .12s',
-              background: tab === t.key ? '#1a56db' : '#f3f4f6',
-              color:      tab === t.key ? '#fff'    : '#374151' }}>
-            {t.label}
-            {t.count > 0 && (
-              <span style={{ marginLeft: 6, background: tab === t.key ? 'rgba(255,255,255,.3)' : '#dc2626',
-                color: '#fff', borderRadius: 10, fontSize: 10, fontWeight: 700,
-                padding: '1px 6px', minWidth: 18, display: 'inline-block', textAlign: 'center' }}>
-                {t.count}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* ── Outlook-style 3-pane layout ── */}
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0, display: 'flex',
+        border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+
+        {/* Left rail — folders */}
+        <div style={{ width: 190, flexShrink: 0, borderRight: '1px solid #e5e7eb',
+          background: '#f9fafb', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: 14 }}>
+            <button
+              onClick={() => setCompose(true)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                padding: '9px 0', background: '#1a56db', color: '#fff', border: 'none',
+                borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(26,86,219,.25)' }}>
+              ✉ New Message
+            </button>
+          </div>
+          <div style={{ padding: '2px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {folders.map(f => (
+              <div key={f.key}
+                onClick={() => selectFolder(f.key)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px',
+                  borderRadius: 7, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  color: folder === f.key ? '#1a56db' : '#374151',
+                  background: folder === f.key ? '#e0e7f0' : 'transparent' }}
+                onMouseEnter={e => { if (folder !== f.key) e.currentTarget.style.background = '#f0f0f0'; }}
+                onMouseLeave={e => { if (folder !== f.key) e.currentTarget.style.background = 'transparent'; }}>
+                <span>{f.icon}</span>
+                <span style={{ flex: 1 }}>{f.label}</span>
+                {f.count > 0 && (
+                  <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
+                    fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18,
+                    textAlign: 'center' }}>
+                    {f.count}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Middle — message list (classic DataGrid) */}
+        <div style={{ width: midWidth, flexShrink: 0, borderRight: '1px solid #e5e7eb',
+          display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+              Loading…
+            </div>
+          ) : (
+            <div className="dg-fixed-height" style={{ height: '100%' }}>
+              <DataGrid
+                key={folder}
+                columns={columns}
+                data={currentList}
+                rowKey="id"
+                title={folder === 'inbox' ? 'Inbox' : 'Sent'}
+                showCheckbox={folder === 'inbox'}
+                searchPlaceholder={folder === 'inbox' ? 'Search inbox…' : 'Search sent…'}
+                onRowClick={(row) => folder === 'inbox' ? openMessage(row) : setSelected({ ...row, _sent: true })}
+                onRowDoubleClick={openBig}
+                onSelectionChange={setSelectedIds}
+                onDeleteSelected={folder === 'inbox' ? bulkDelete : undefined}
+                selectionActions={
+                  selectedIds.length === 1 && (
+                    <button
+                      onClick={() => openBig(currentList.find(m => m.id === selectedIds[0]))}
+                      style={{ background: '#dbeafe', color: '#1e40af', border: 'none', borderRadius: 6,
+                        padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                      ✏️ Edit
+                    </button>
+                  )
+                }
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Drag handle — resize the reading pane by dragging left/right */}
+        <div
+          onMouseDown={startResize}
+          title="Drag to resize"
+          style={{ width: 6, flexShrink: 0, cursor: 'col-resize', position: 'relative', background: '#fff' }}
+          onMouseEnter={e => { e.currentTarget.firstChild.style.background = '#93c5fd'; }}
+          onMouseLeave={e => { e.currentTarget.firstChild.style.background = '#e5e7eb'; }}>
+          <div style={{ position: 'absolute', left: 2, top: 0, bottom: 0, width: 2, background: '#e5e7eb', transition: 'background .12s' }} />
+        </div>
+
+        {/* Right — reading pane */}
+        <div style={{ flex: 1, minWidth: 280, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {selected
+            ? <ReadingPane msg={selected} folder={folder} onDelete={(m) => setDelConfirm(m)} />
+            : <EmptyReadingPane />}
+        </div>
       </div>
 
-      {/* ── Message List ── */}
-      {loading ? (
-        <div style={{ padding: 48, textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
-          Loading messages…
-        </div>
-      ) : currentList.length === 0 ? (
-        <div style={{ padding: 60, textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📭</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#374151' }}>
-            {tab === 'inbox' ? 'Your inbox is empty' : 'No sent messages'}
-          </div>
-          <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
-            {tab === 'inbox' ? 'Messages sent to you will appear here.' : 'Messages you send will appear here.'}
-          </div>
-        </div>
-      ) : (
-        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-          {currentList.map((msg, idx) => {
-            const isUnread = tab === 'inbox' && !msg.is_read;
-            return (
-              <div key={msg.id}
-                onClick={() => tab === 'inbox' ? openMessage(msg) : setSelected({ ...msg, _sent: true })}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 14, padding: '13px 18px',
-                  borderBottom: idx < currentList.length - 1 ? '1px solid #f3f4f6' : 'none',
-                  cursor: 'pointer', transition: 'background .1s',
-                  background: isUnread ? '#f0f9ff' : 'white',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = isUnread ? '#e0f2fe' : '#f9fafb'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = isUnread ? '#f0f9ff' : 'white'; }}>
-
-                {/* Unread dot */}
-                <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                  background: isUnread ? '#1a56db' : 'transparent' }} />
-
-                {/* Avatar */}
-                <div style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                  background: '#eff6ff', color: '#1a56db', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
-                  {(tab === 'inbox' ? msg.sender_name : 'Me')?.[0]?.toUpperCase() || '?'}
-                </div>
-
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                    <span style={{ fontSize: 13, fontWeight: isUnread ? 700 : 600, color: '#111827',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {tab === 'inbox' ? msg.sender_name : (msg.recipient_type === 'all' ? 'All Staff' : msg.recipient_type === 'department' ? msg.department : `${msg.total_recipients || 0} recipient(s)`)}
-                    </span>
-                    <RecipientBadge type={msg.recipient_type} department={msg.department} />
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: isUnread ? 700 : 400, color: '#1f2937',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {msg.subject}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#9ca3af',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
-                    {String(msg.body).substring(0, 80)}
-                  </div>
-                </div>
-
-                {/* Right: time + sent stats */}
-                <div style={{ flexShrink: 0, textAlign: 'right', minWidth: 80 }}>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{fmtDate(msg.created_at)}</div>
-                  {tab === 'sent' && msg.total_recipients > 0 && (
-                    <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>
-                      {msg.read_count}/{msg.total_recipients} read
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── Detail Modal ── */}
-      {selected && (
-        <DetailModal
-          msg={selected}
-          onClose={() => setSelected(null)}
-          onDelete={(id) => { setDelConfirm(id); }}
+      {/* ── Big popup (double-click a row) ── */}
+      {bigMsg && (
+        <BigMessageModal
+          msg={bigMsg}
+          onClose={() => setBigMsg(null)}
+          onDelete={(m) => setDelConfirm(m)}
+          onReply={sendReply}
         />
       )}
 
@@ -482,7 +700,7 @@ const StaffMessage = () => {
             </div>
             <div className="modal-body">
               <p style={{ fontSize: 13, color: '#374151' }}>
-                Remove this message from your inbox? This cannot be undone.
+                Remove <strong>{delConfirm.subject}</strong> from your inbox? This cannot be undone.
               </p>
             </div>
             <div className="modal-footer">

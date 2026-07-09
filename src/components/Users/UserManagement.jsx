@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
@@ -10,6 +11,9 @@ import ImportDeviceUsersModal from '../Common/ImportDeviceUsersModal.jsx';
 import ImportExcelModal       from './ImportExcelModal.jsx';
 import RecoApprovalModal from './RecoApprovalModal.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
+import SaveButton       from '../Common/SaveButton.jsx';
+import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
+import api              from '../../api/client.js';
 
 const ROLE_COLORS = {
   admin:'#7e3af2', branchManager:'#1a56db', departmentHead:'#0e9f6e',
@@ -109,21 +113,26 @@ const PRIV_OPTIONS = [
   { value:14, label:'Super Admin' },
 ];
 
-const DeviceConnTab = ({ devicePin, staffName }) => {
+const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
+  const { t } = useLanguage();
   const [devices,     setDevices]     = useState([]);
   const [enrollments, setEnrollments] = useState([]);
-  const [selDevId,    setSelDevId]    = useState('');
+  const [selDevIds,   setSelDevIds]   = useState([]); // multi-select — actions apply to all of these
   const [loading,     setLoading]     = useState(false);
   const [toast,       setToast]       = useState(null);
   const [fpSlot,      setFpSlot]      = useState(0);
   const [delFpSlot,   setDelFpSlot]   = useState(0);
   const [privilege,   setPrivilege]   = useState(0);
   const [passwd,      setPasswd]      = useState('');
-  const [expires,     setExpires]     = useState(false);
+  // expires mirrors the device's own Expires value: 0 none | 1 date range |
+  // 2 use-count | 3 date range AND use-count (see Validity/Expiry panel below).
+  const [expires,     setExpires]     = useState(0);
   const [startDate,   setStartDate]   = useState(() => new Date().toISOString().split('T')[0]);
   const [endDate,     setEndDate]     = useState(() => {
     const d = new Date(); d.setFullYear(d.getFullYear() + 1); return d.toISOString().split('T')[0];
   });
+  const [validCount,  setValidCount]  = useState(1);
+  const faceFileInputRef = useRef(null);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -132,86 +141,156 @@ const DeviceConnTab = ({ devicePin, staffName }) => {
 
   const loadEnrollments = () => {
     if (!devicePin) return;
-    fetch(`/api/zkteco/device-users?pin=${encodeURIComponent(devicePin)}`)
-      .then(r => r.json())
+    api.get(`/zkteco/device-users?pin=${encodeURIComponent(devicePin)}`)
       .then(d => setEnrollments(Array.isArray(d) ? d : []))
       .catch(() => {});
   };
 
-  useEffect(() => {
-    fetch('/api/zkteco/devices')
-      .then(r => r.json())
+  const loadDevices = () => {
+    api.get('/zkteco/devices')
       .then(d => {
         const list = Array.isArray(d) ? d : [];
         setDevices(list);
-        if (list.length > 0) setSelDevId(String(list[0].id));
+        setSelDevIds(prev => {
+          const kept = prev.filter(id => list.some(dev => String(dev.id) === id));
+          return kept.length ? kept : (list[0] ? [String(list[0].id)] : []);
+        });
       })
       .catch(() => {});
+  };
+
+  const refresh = () => { loadDevices(); loadEnrollments(); };
+
+  useEffect(() => {
+    loadDevices();
     loadEnrollments();
   }, [devicePin]);
 
-  const selDev = devices.find(d => String(d.id) === selDevId);
+  // FP-slot / face-sample status indicators reflect the first selected device —
+  // actions below still apply to ALL selected devices.
+  const selDev = devices.find(d => String(d.id) === selDevIds[0]);
   const enrollment = selDev ? enrollments.find(e => e.device_sn === selDev.serial_number) : null;
+
+  // Group devices by Area for the multi-select tree (Area checkbox → its devices).
+  const devicesByArea = (() => {
+    const groups = new Map();
+    for (const d of devices) {
+      const key   = d.area_id != null ? String(d.area_id) : 'unassigned';
+      const label = d.area_name || 'Unassigned';
+      if (!groups.has(key)) groups.set(key, { areaId:key, areaName:label, devices:[] });
+      groups.get(key).devices.push(d);
+    }
+    return [...groups.values()];
+  })();
+
+  const toggleDevice = (id) => {
+    const sid = String(id);
+    setSelDevIds(prev => prev.includes(sid) ? prev.filter(x => x !== sid) : [...prev, sid]);
+  };
+  const toggleArea = (areaDevices) => {
+    const ids = areaDevices.map(d => String(d.id));
+    const allSelected = ids.every(id => selDevIds.includes(id));
+    setSelDevIds(prev => allSelected
+      ? prev.filter(id => !ids.includes(id))
+      : [...new Set([...prev, ...ids])]);
+  };
+
+  // Reflect the staff member's actual saved validity status (server-enforced —
+  // see PostVerifyData) instead of always showing the toggle off with default dates.
+  useEffect(() => {
+    if (!enrollment) return;
+    const mode = Number(enrollment.access_expiry_mode ?? (enrollment.access_expires ? 1 : 0));
+    setExpires(mode);
+    if (enrollment.access_valid_from) setStartDate(String(enrollment.access_valid_from).slice(0,10));
+    if (enrollment.access_valid_to)   setEndDate(String(enrollment.access_valid_to).slice(0,10));
+    if (enrollment.access_valid_count != null) setValidCount(enrollment.access_valid_count);
+  }, [enrollment?.access_expiry_mode, enrollment?.access_expires, enrollment?.access_valid_from, enrollment?.access_valid_to, enrollment?.access_valid_count]);
 
   const isOnline = (dev) => {
     if (!dev?.last_seen) return false;
     return (Date.now() - new Date(dev.last_seen).getTime()) < 5 * 60 * 1000;
   };
 
-  const post = (path, body) =>
-    fetch(`/api/zkteco${path}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  const post = (path, body) => api.post(`/zkteco${path}`, body);
 
-  const doPost = async (r) => {
-    let data = {};
-    try { data = await r.json(); } catch {}
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    return data;
-  };
-
+  // fn receives each selected device's id — actions apply to every device currently ticked.
   const run = async (label, fn) => {
-    if (!selDevId) { showToast('Select a device first', 'error'); return; }
+    if (!selDevIds.length) { showToast('Select at least one device first', 'error'); return; }
     setLoading(true);
     try {
-      const data = await doPost(await fn());
-      showToast(data.message || `${label} queued`);
+      const results = await Promise.allSettled(selDevIds.map(devId => fn(devId)));
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length) {
+        showToast(`${label}: ${failed.length}/${selDevIds.length} device(s) failed — ${failed[0].reason?.message || ''}`, 'error');
+      } else {
+        showToast(`${label} queued on ${selDevIds.length} device${selDevIds.length>1?'s':''}`);
+      }
       loadEnrollments();
-    } catch (e) {
-      showToast(e.message || `${label} failed`, 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // Sync user info to device THEN run enrollment command
+  // Sync user info to device THEN run enrollment command — for every selected device
   const runEnroll = async (label, enrollFn) => {
-    if (!selDevId) { showToast('Select a device first', 'error'); return; }
+    if (!selDevIds.length) { showToast('Select at least one device first', 'error'); return; }
     setLoading(true);
     try {
-      // Always push name/privilege first so the device knows this user
-      await doPost(await post(`/devices/${selDevId}/upload-user`, {
-        pin: devicePin, name: staffName, privilege,
-        card: enrollment?.card_no || '',
-        expires: expires ? 1 : 0,
-        startDatetime: startDate + ' 00:00:00',
-        endDatetime:   endDate   + ' 23:59:00',
+      const results = await Promise.allSettled(selDevIds.map(async (devId) => {
+        // Always push name/privilege first so the device knows this user
+        await post(`/devices/${devId}/upload-user`, {
+          pin: devicePin, name: staffName, privilege,
+          card: enrollment?.card_no || '',
+          expires,
+          startDatetime: startDate + ' 00:00:00',
+          endDatetime:   endDate   + ' 23:59:00',
+          validCount: (expires === 2 || expires === 3) ? (Number(validCount) || 0) : null,
+        });
+        await enrollFn(devId);
       }));
-      // Then send the enrollment command
-      await doPost(await enrollFn());
-      showToast(`${label} queued — name synced to device`);
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length) {
+        showToast(`${label}: ${failed.length}/${selDevIds.length} device(s) failed — ${failed[0].reason?.message || ''}`, 'error');
+      } else {
+        showToast(`${label} queued on ${selDevIds.length} device${selDevIds.length>1?'s':''} — name synced`);
+      }
       loadEnrollments();
-    } catch (e) {
-      showToast(e.message || `${label} failed`, 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFacePhotoFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file next time
+    if (!file) return;
+    if (!selDevIds.length) { showToast('Select at least one device first', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setLoading(true);
+      try {
+        const results = await Promise.allSettled(
+          selDevIds.map(devId => post(`/devices/${devId}/upload-face-photo`, { pin: devicePin, photo: reader.result }))
+        );
+        const failed = results.filter(r => r.status === 'rejected');
+        showToast(failed.length
+          ? `Upload failed on ${failed.length}/${selDevIds.length} device(s)`
+          : `Face photo uploaded to ${selDevIds.length} device${selDevIds.length>1?'s':''}`,
+          failed.length ? 'error' : 'success');
+        loadEnrollments();
+      } finally {
+        setLoading(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   if (!devicePin) {
     return (
       <div className="empty-state" style={{ padding:'40px 0' }}>
         <div className="empty-state-icon">🔗</div>
-        <h3>No Device PIN</h3>
-        <p>Set an Attendance Device ID on the Staff Detail tab first.</p>
+        <h3>{t('No Device PIN')}</h3>
+        <p>{t('Set an Attendance Device ID on the Staff Detail tab first.')}</p>
       </div>
     );
   }
@@ -229,9 +308,12 @@ const DeviceConnTab = ({ devicePin, staffName }) => {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      {/* Toast */}
+      {/* Toast — sticky so it stays visible even when scrolled deep into this
+          long form (e.g. after clicking Apply Validity near the bottom) */}
       {toast && (
-        <div style={{ padding:'10px 14px', borderRadius:8, fontSize:13, fontWeight:600,
+        <div style={{ position:'sticky', top:0, zIndex:50,
+          padding:'10px 14px', borderRadius:8, fontSize:13, fontWeight:600,
+          boxShadow:'0 4px 12px rgba(0,0,0,.12)',
           background: toast.type === 'error' ? '#fef2f2' : '#f0fdf4',
           border: `1px solid ${toast.type === 'error' ? '#fca5a5' : '#86efac'}`,
           color: toast.type === 'error' ? '#dc2626' : '#16a34a' }}>
@@ -239,130 +321,186 @@ const DeviceConnTab = ({ devicePin, staffName }) => {
         </div>
       )}
 
-      {/* PIN + Name info */}
-      <div style={{ display:'flex', gap:12, background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13 }}>
-        <div><span style={{ color:'#6b7280', fontWeight:600 }}>Device PIN: </span><span style={{ fontWeight:700, fontFamily:'monospace', color:'#1a56db' }}>{devicePin}</span></div>
-        <div style={{ borderLeft:'1px solid #e5e7eb', paddingLeft:12 }}><span style={{ color:'#6b7280', fontWeight:600 }}>Staff: </span><span style={{ fontWeight:700 }}>{staffName || '—'}</span></div>
+      {/* PIN + Name + selection summary */}
+      <div style={{ display:'flex', gap:12, alignItems:'center', background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13 }}>
+        <div><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Device PIN')}: </span><span style={{ fontWeight:700, fontFamily:'monospace', color:'#1a56db' }}>{devicePin}</span></div>
+        <div style={{ borderLeft:'1px solid #e5e7eb', paddingLeft:12 }}><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Staff')}: </span><span style={{ fontWeight:700 }}>{staffName || '—'}</span></div>
+        <div style={{ borderLeft:'1px solid #e5e7eb', paddingLeft:12, flex:1, display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ color:'#6b7280', fontWeight:600 }}>
+            {selDevIds.length} {selDevIds.length===1 ? t('device selected') : t('devices selected')}
+          </span>
+        </div>
+        <button style={{ ...outlineBtn, height:28, fontSize:12, padding:'0 10px' }} onClick={refresh}>↺ {t('Refresh')}</button>
       </div>
 
-      {/* Device cards — show all devices with online + enrollment status */}
-      {devices.length > 0 && (
-        <div>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-            <span style={s.label}>Select Target Device</span>
-            <button style={{ ...outlineBtn, height:28, fontSize:12, padding:'0 10px' }} onClick={loadEnrollments}>↺ Refresh</button>
+      {/* Target Devices — multi-select tree: Area Name (tick selects all its devices) → Serial No. */}
+      <div>
+        <span style={s.label}>{t('Target Devices')}</span>
+        {devices.length === 0 ? (
+          <div className="empty-state" style={{ padding:'20px 0' }}>
+            <div className="empty-state-icon">📡</div>
+            <h3>{t('No Devices Found')}</h3>
+            <p>{t('Add a device in Settings → Attendance Device → Devices before enrolling staff.')}</p>
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-            {devices.map(d => {
-              const online  = isOnline(d);
-              const enr     = enrollments.find(en => en.device_sn === d.serial_number);
-              const isSelected = String(d.id) === selDevId;
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            {devicesByArea.map(group => {
+              const ids = group.devices.map(d => String(d.id));
+              const allSelected = ids.every(id => selDevIds.includes(id));
+              const someSelected = !allSelected && ids.some(id => selDevIds.includes(id));
               return (
-                <div key={d.id} onClick={() => setSelDevId(String(d.id))}
-                  style={{ padding:'8px 12px', borderRadius:10, cursor:'pointer', minWidth:160,
-                    border: isSelected ? '2px solid #1a56db' : '2px solid #e5e7eb',
-                    background: isSelected ? '#eff6ff' : 'white',
-                    boxShadow: isSelected ? '0 2px 8px rgba(26,86,219,.12)' : 'none',
-                    transition:'all .15s' }}>
-                  <div style={{ fontWeight:700, fontSize:13, color: isSelected ? '#1a56db' : '#1f2937', marginBottom:5 }}>
-                    {d.name || d.serial_number}
+                <div key={group.areaId} style={{ border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden' }}>
+                  <div onClick={() => toggleArea(group.devices)}
+                    style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px', cursor:'pointer',
+                      background: allSelected ? '#eff6ff' : '#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
+                    <input type="checkbox" checked={allSelected} readOnly
+                      style={{ opacity: someSelected ? 0.6 : 1, accentColor:'#1a56db', width:15, height:15 }} />
+                    <span style={{ fontWeight:700, fontSize:13, color:'#1f2937' }}>📍 {group.areaName}</span>
+                    <span style={{ fontSize:11, color:'#9ca3af' }}>({group.devices.length} {group.devices.length===1 ? t('device') : t('devices')})</span>
                   </div>
-                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                    <span style={{ fontSize:11, fontWeight:600, padding:'2px 7px', borderRadius:10,
-                      background: online ? '#d1fae5' : '#f3f4f6',
-                      color:      online ? '#065f46' : '#6b7280',
-                      border:     `1px solid ${online ? '#6ee7b7' : '#e5e7eb'}` }}>
-                      {online ? '● Online' : '○ Offline'}
-                    </span>
-                    <span style={{ fontSize:11, fontWeight:600, padding:'2px 7px', borderRadius:10,
-                      background: enr ? '#eff6ff' : '#fff7ed',
-                      color:      enr ? '#1d4ed8' : '#9a3412',
-                      border:     `1px solid ${enr ? '#bfdbfe' : '#fed7aa'}` }}>
-                      {enr ? 'Enrolled' : 'Not Enrolled'}
-                    </span>
-                    {enr && enr.fp_slots_count > 0 && (
-                      <span style={{ fontSize:11, padding:'2px 7px', borderRadius:10,
-                        background:'#f3f4f6', color:'#374151', border:'1px solid #e5e7eb' }}>
-                        {enr.fp_slots_count} FP
-                      </span>
-                    )}
-                    {enr?.card_no && (
-                      <span style={{ fontSize:11, padding:'2px 7px', borderRadius:10,
-                        background:'#f3f4f6', color:'#374151', border:'1px solid #e5e7eb' }}>
-                        Card
-                      </span>
-                    )}
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:8, padding:8 }}>
+                    {group.devices.map(d => {
+                      const online      = isOnline(d);
+                      const enr         = enrollments.find(en => en.device_sn === d.serial_number);
+                      const isSelected  = selDevIds.includes(String(d.id));
+                      return (
+                        <div key={d.id} onClick={() => toggleDevice(d.id)}
+                          style={{ padding:'8px 12px', borderRadius:10, cursor:'pointer', minWidth:160,
+                            border: isSelected ? '2px solid #1a56db' : '2px solid #e5e7eb',
+                            background: isSelected ? '#eff6ff' : 'white',
+                            boxShadow: isSelected ? '0 2px 8px rgba(26,86,219,.12)' : 'none',
+                            transition:'all .15s' }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
+                            <input type="checkbox" checked={isSelected} readOnly style={{ accentColor:'#1a56db', width:13, height:13 }} />
+                            <span style={{ fontWeight:700, fontSize:13, color: isSelected ? '#1a56db' : '#1f2937' }}>
+                              {d.name || d.serial_number}
+                            </span>
+                          </div>
+                          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:5, marginLeft:19 }}>
+                            <span style={{ fontSize:11, fontWeight:600, padding:'2px 7px', borderRadius:10,
+                              background: online ? '#d1fae5' : '#f3f4f6',
+                              color:      online ? '#065f46' : '#6b7280',
+                              border:     `1px solid ${online ? '#6ee7b7' : '#e5e7eb'}` }}>
+                              {online ? `● ${t('Online')}` : `○ ${t('Offline')}`}
+                            </span>
+                            <span style={{ fontSize:11, fontWeight:600, padding:'2px 7px', borderRadius:10,
+                              background: enr ? '#eff6ff' : '#fff7ed',
+                              color:      enr ? '#1d4ed8' : '#9a3412',
+                              border:     `1px solid ${enr ? '#bfdbfe' : '#fed7aa'}` }}>
+                              {enr ? t('Enrolled') : t('Not Enrolled')}
+                            </span>
+                            {enr && enr.fp_slots_count > 0 && (
+                              <span style={{ fontSize:11, padding:'2px 7px', borderRadius:10,
+                                background:'#f3f4f6', color:'#374151', border:'1px solid #e5e7eb' }}>
+                                {enr.fp_slots_count} {t('FP')}
+                              </span>
+                            )}
+                            {enr?.card_no && (
+                              <span style={{ fontSize:11, padding:'2px 7px', borderRadius:10,
+                                background:'#f3f4f6', color:'#374151', border:'1px solid #e5e7eb' }}>
+                                {t('Card')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Action sections grid */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
 
         {/* ENROLL section */}
-        <Panel title="Enroll">
+        <Panel title={t('Enroll')}>
           <div style={{ padding:'10px 12px', display:'flex', flexDirection:'column', gap:10 }}>
             <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
               <div style={{ flex:1 }}>
-                <span style={s.label}>Fingerprint Slot</span>
+                <span style={s.label}>{t('Fingerprint Slot')}</span>
                 <select value={fpSlot} onChange={e => setFpSlot(+e.target.value)} style={selectStyle}>
                   {FINGER_LABELS.map((l,i) => {
                     const has = enrollment?.fp_slots?.some(f => f.fid === i);
-                    return <option key={i} value={i}>{i}: {l}{has ? ' ✓' : ''}</option>;
+                    return <option key={i} value={i}>{i}: {t(l)}{has ? ' ✓' : ''}</option>;
                   })}
                 </select>
               </div>
               <button style={btn()} disabled={loading}
-                onClick={() => runEnroll('Enroll FP', () => post(`/devices/${selDevId}/enroll-fp`, { pin:devicePin, name:staffName, fingerId:fpSlot }))}>
-                Enroll FP
+                onClick={() => runEnroll('Enroll FP', (devId) => post(`/devices/${devId}/enroll-fp`, { pin:devicePin, name:staffName, fingerId:fpSlot }))}>
+                {t('Enroll FP')}
               </button>
             </div>
             <button style={{ ...btn('#7c3aed'), width:'100%' }} disabled={loading}
-              onClick={() => runEnroll('Enroll Face', () => post(`/devices/${selDevId}/enroll-face`, { pin:devicePin, name:staffName }))}>
-              Enroll Face
+              onClick={() => runEnroll('Enroll Face', (devId) => post(`/devices/${devId}/enroll-face`, { pin:devicePin, name:staffName }))}>
+              {t('Enroll Face')}
             </button>
+
+            {/* Face sample status + delete/upload */}
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+              background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'6px 10px' }}>
+              <span style={{ display:'flex', alignItems:'center', gap:6, fontSize:12.5, fontWeight:600,
+                color: enrollment?.face_photo ? '#059669' : '#9ca3af' }}>
+                <span style={{ fontSize:15 }}>{enrollment?.face_photo ? '🟢😀' : '⚪😐'}</span>
+                {t('Face Sample')}{enrollment?.face_photo ? ' ✓' : ''}
+              </span>
+              <div style={{ display:'flex', gap:6 }}>
+                <input ref={faceFileInputRef} type="file" accept="image/*" style={{ display:'none' }} onChange={handleFacePhotoFile} />
+                <button style={{ ...outlineBtn, height:26, fontSize:11.5, padding:'0 8px' }} disabled={loading}
+                  onClick={() => faceFileInputRef.current?.click()}>
+                  📤 {t('Upload Photo')}
+                </button>
+                <button style={{ ...dangerBtn, height:26, fontSize:11.5, padding:'0 8px' }}
+                  disabled={loading || !enrollment?.face_photo}
+                  onClick={() => run('Delete Face Sample', (devId) => post(`/devices/${devId}/delete-face`, { pin:devicePin }))}>
+                  🗑️ {t('Delete')}
+                </button>
+              </div>
+            </div>
+
             <button style={{ ...btn('#0891b2'), width:'100%' }} disabled={loading}
-              onClick={() => runEnroll('Enroll Card', () => post(`/devices/${selDevId}/enroll-card`, { pin:devicePin }))}>
-              Enroll Card
+              onClick={() => runEnroll('Enroll Card', (devId) => post(`/devices/${devId}/enroll-card`, { pin:devicePin }))}>
+              {t('Enroll Card')}
             </button>
           </div>
         </Panel>
 
         {/* MANAGE section */}
-        <Panel title="Manage Access">
+        <Panel title={t('Manage Access')}>
           <div style={{ padding:'10px 12px', display:'flex', flexDirection:'column', gap:10 }}>
             <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
               <div style={{ flex:1 }}>
-                <span style={s.label}>Privilege</span>
+                <span style={s.label}>{t('Privilege')}</span>
                 <select value={privilege} onChange={e => setPrivilege(+e.target.value)} style={selectStyle}>
-                  {PRIV_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {PRIV_OPTIONS.map(o => <option key={o.value} value={o.value}>{t(o.label)}</option>)}
                 </select>
               </div>
               <button style={btn()} disabled={loading}
-                onClick={() => run('Set Privilege', () => post(`/devices/${selDevId}/upload-user`, {
+                onClick={() => run('Set Privilege', (devId) => post(`/devices/${devId}/upload-user`, {
                   pin:devicePin, name:staffName, privilege,
-                  expires: expires ? 1 : 0, startDatetime: startDate+' 00:00:00', endDatetime: endDate+' 23:59:00',
+                  expires, startDatetime: startDate+' 00:00:00', endDatetime: endDate+' 23:59:00',
+                  validCount: (expires === 2 || expires === 3) ? (Number(validCount) || 0) : null,
                 }))}>
-                Set
+                {t('Set')}
               </button>
             </div>
             <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
               <div style={{ flex:1 }}>
-                <span style={s.label}>Device Password</span>
+                <span style={s.label}>{t('Device Password')}</span>
                 <input type="text" value={passwd} onChange={e => setPasswd(e.target.value)}
-                  placeholder="Leave blank to keep current" style={inputStyle} />
+                  placeholder={t('Leave blank to keep current')} style={inputStyle} />
               </div>
               <button style={btn()} disabled={loading}
-                onClick={() => run('Set Password', () => post(`/devices/${selDevId}/upload-user`, {
+                onClick={() => run('Set Password', (devId) => post(`/devices/${devId}/upload-user`, {
                   pin:devicePin, name:staffName, privilege,
                   card: enrollment?.card_no || '', passwd,
-                  expires: expires ? 1 : 0, startDatetime: startDate+' 00:00:00', endDatetime: endDate+' 23:59:00',
+                  expires, startDatetime: startDate+' 00:00:00', endDatetime: endDate+' 23:59:00',
+                  validCount: (expires === 2 || expires === 3) ? (Number(validCount) || 0) : null,
                 }))}>
-                Set
+                {t('Set')}
               </button>
             </div>
           </div>
@@ -370,24 +508,30 @@ const DeviceConnTab = ({ devicePin, staffName }) => {
       </div>
 
       {/* VALIDITY section */}
-      <Panel title="Validity / Expiry">
+      <Panel title={t('Validity / Expiry')}>
         <div style={{ padding:'14px' }}>
-          {/* Toggle row */}
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: expires ? 14 : 0 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <div onClick={() => setExpires(p => !p)}
-                style={{ width:40, height:22, borderRadius:11, background: expires ? '#059669' : '#d1d5db',
-                  position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}>
-                <div style={{ position:'absolute', top:3, left: expires ? 21 : 3, width:16, height:16,
-                  borderRadius:'50%', background:'white', transition:'left .2s',
-                  boxShadow:'0 1px 3px rgba(0,0,0,.25)' }} />
-              </div>
-              <span style={{ fontSize:13, fontWeight:600, color: expires ? '#059669' : '#6b7280' }}>
-                {expires ? 'Expiry Enabled' : 'Enable Expiry'}
-              </span>
-            </div>
-            {expires && (
-              <div style={{ display:'flex', gap:5 }}>
+          {/* Mode selector — mirrors the device's own Expires value:
+              0 none | 1 date range | 2 use-count | 3 date range AND use-count */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(110px, 1fr))', gap:8, marginBottom:14 }}>
+            {[
+              [0, t('No Expiry')],
+              [1, t('Date Range')],
+              [2, t('Use Count')],
+              [3, t('Date + Count')],
+            ].map(([m, label]) => (
+              <button key={m} onClick={() => setExpires(m)}
+                style={{ height:36, borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer',
+                  border: expires === m ? '2px solid #059669' : '1px solid #d1d5db',
+                  background: expires === m ? '#d1fae5' : 'white',
+                  color: expires === m ? '#065f46' : '#374151' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {(expires === 1 || expires === 3) && (
+            <div style={{ marginBottom:12 }}>
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:5, marginBottom:8 }}>
                 {[['1M',1],['3M',3],['6M',6],['1Y',12]].map(([lbl,mo]) => (
                   <button key={lbl} onClick={() => {
                     const s = new Date(); const e = new Date();
@@ -399,104 +543,120 @@ const DeviceConnTab = ({ devicePin, staffName }) => {
                     borderRadius:5, cursor:'pointer' }}>{lbl}</button>
                 ))}
               </div>
-            )}
-          </div>
-
-          {expires && (
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
-              <div>
-                <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', letterSpacing:'.4px',
-                  textTransform:'uppercase', display:'block', marginBottom:5 }}>From Date</span>
-                <div style={{ position:'relative' }}>
-                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                    style={{ width:'100%', height:38, border:'2px solid #e5e7eb', borderRadius:8,
-                      padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
-                      outline:'none', fontWeight:500, background:'#f9fafb',
-                      cursor:'pointer' }}
-                    onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
-                    onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
-                  <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
-                    fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+                <div>
+                  <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', letterSpacing:'.4px',
+                    textTransform:'uppercase', display:'block', marginBottom:5 }}>{t('From Date')}</span>
+                  <div style={{ position:'relative' }}>
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                      style={{ width:'100%', height:38, border:'2px solid #e5e7eb', borderRadius:8,
+                        padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
+                        outline:'none', fontWeight:500, background:'#f9fafb',
+                        cursor:'pointer' }}
+                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
+                      onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
+                    <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
+                      fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', letterSpacing:'.4px',
+                    textTransform:'uppercase', display:'block', marginBottom:5 }}>{t('To Date')}</span>
+                  <div style={{ position:'relative' }}>
+                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                      style={{ width:'100%', height:38, border:'2px solid #e5e7eb', borderRadius:8,
+                        padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
+                        outline:'none', fontWeight:500, background:'#f9fafb',
+                        cursor:'pointer' }}
+                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
+                      onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
+                    <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
+                      fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
+                  </div>
                 </div>
               </div>
-              <div>
-                <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', letterSpacing:'.4px',
-                  textTransform:'uppercase', display:'block', marginBottom:5 }}>To Date</span>
-                <div style={{ position:'relative' }}>
-                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                    style={{ width:'100%', height:38, border:'2px solid #e5e7eb', borderRadius:8,
-                      padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
-                      outline:'none', fontWeight:500, background:'#f9fafb',
-                      cursor:'pointer' }}
-                    onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
-                    onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
-                  <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
-                    fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
-                </div>
+            </div>
+          )}
+
+          {(expires === 2 || expires === 3) && (
+            <div style={{ marginBottom:12 }}>
+              <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', letterSpacing:'.4px',
+                textTransform:'uppercase', display:'block', marginBottom:5 }}>{t('Allowed Uses')}</span>
+              <input type="number" min="1" value={validCount}
+                onChange={e => setValidCount(e.target.value)}
+                style={{ width:'100%', maxWidth:160, height:38, border:'2px solid #e5e7eb', borderRadius:8,
+                  padding:'0 12px', fontSize:13, boxSizing:'border-box', outline:'none', fontWeight:500,
+                  background:'#f9fafb' }}
+                onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
+                onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
+              <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>
+                {t('Access is denied once this many successful verifications have been used.')}
               </div>
             </div>
           )}
 
           <button style={{ width:'100%', height:38, borderRadius:8, border:'none', fontSize:13,
             fontWeight:700, cursor: loading ? 'not-allowed' : 'pointer', transition:'opacity .15s',
-            background: expires ? '#059669' : '#6b7280', color:'white', opacity: loading ? 0.7 : 1 }}
+            background: expires > 0 ? '#059669' : '#6b7280', color:'white', opacity: loading ? 0.7 : 1 }}
             disabled={loading}
-            onClick={() => run(expires ? 'Apply Validity' : 'Remove Expiry', () => post(`/devices/${selDevId}/upload-user`, {
+            onClick={() => run(expires > 0 ? 'Apply Validity' : 'Remove Expiry', (devId) => post(`/devices/${devId}/upload-user`, {
               pin:devicePin, name:staffName, privilege,
               card: enrollment?.card_no || '',
-              expires: expires ? 1 : 0,
+              expires,
               startDatetime: startDate + ' 00:00:00',
               endDatetime:   endDate   + ' 23:59:00',
+              validCount: (expires === 2 || expires === 3) ? (Number(validCount) || 0) : null,
             }))}>
-            {expires ? '✅ Apply Validity' : '🚫 Remove Expiry'}
+            {expires > 0 ? `✅ ${t('Apply Validity')}` : `🚫 ${t('Remove Expiry')}`}
           </button>
 
-          {!expires && (
+          {expires === 0 && (
             <div style={{ fontSize:11, color:'#9ca3af', marginTop:8, textAlign:'center' }}>
-              Toggle on to restrict device access to a date range
+              {t('Select a mode above to restrict device access')}
             </div>
           )}
         </div>
       </Panel>
 
       {/* DELETE section */}
-      <Panel title="Delete Operations">
+      <Panel title={t('Delete Operations')}>
         <div style={{ padding:'10px 12px', display:'flex', flexDirection:'column', gap:10 }}>
           <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
             <div style={{ flex:1 }}>
-              <span style={s.label}>Delete Fingerprint Slot</span>
+              <span style={s.label}>{t('Delete Fingerprint Slot')}</span>
               <select value={delFpSlot} onChange={e => setDelFpSlot(+e.target.value)} style={selectStyle}>
                 {FINGER_LABELS.map((l,i) => {
                   const hasFp = enrollment?.fp_slots?.some(f => f.fid === i);
-                  return <option key={i} value={i}>{i}: {l}{hasFp ? ' ✅' : ''}</option>;
+                  return <option key={i} value={i}>{i}: {t(l)}{hasFp ? ' ✅' : ''}</option>;
                 })}
               </select>
             </div>
             <button style={dangerBtn} disabled={loading}
               onClick={() => {
-                if (!window.confirm(`Delete FP slot ${delFpSlot} (${FINGER_LABELS[delFpSlot]}) for PIN ${devicePin}?`)) return;
-                run('Delete FP Slot', () => post(`/devices/${selDevId}/delete-fp-slot`, { pin:devicePin, fid:delFpSlot }));
+                if (!window.confirm(`${t('Delete FP slot')} ${delFpSlot} (${t(FINGER_LABELS[delFpSlot])}) ${t('for PIN')} ${devicePin} ${t('on')} ${selDevIds.length} ${t('device(s)?')}`)) return;
+                run('Delete FP Slot', (devId) => post(`/devices/${devId}/delete-fp-slot`, { pin:devicePin, fid:delFpSlot }));
               }}>
-              Delete FP
+              {t('Delete FP')}
             </button>
           </div>
           <div style={{ display:'flex', gap:8 }}>
             <button style={{ ...dangerBtn, flex:1 }} disabled={loading}
               onClick={() => {
-                if (!window.confirm(`Remove card for PIN ${devicePin}? This clears the card number.`)) return;
-                run('Remove Card', () => post(`/devices/${selDevId}/upload-user`, {
+                if (!window.confirm(`${t('Remove card for PIN')} ${devicePin} ${t('on')} ${selDevIds.length} ${t('device(s)? This clears the card number.')}`)) return;
+                run('Remove Card', (devId) => post(`/devices/${devId}/upload-user`, {
                   pin:devicePin, name:staffName, privilege, card:'',
-                  expires: expires ? 1 : 0, startDatetime: startDate+' 00:00:00', endDatetime: endDate+' 23:59:00',
+                  expires, startDatetime: startDate+' 00:00:00', endDatetime: endDate+' 23:59:00',
+                  validCount: (expires === 2 || expires === 3) ? (Number(validCount) || 0) : null,
                 }));
               }}>
-              Remove Card
+              {t('Remove Card')}
             </button>
             <button style={{ ...dangerBtn, flex:1 }} disabled={loading}
               onClick={() => {
-                if (!window.confirm(`DELETE user PIN ${devicePin} from device "${selDev?.name || selDevId}"?\nThis removes them from the device — eHajiri data is unaffected.`)) return;
-                run('Delete from Device', () => post(`/devices/${selDevId}/delete-user`, { pin:devicePin }));
+                if (!window.confirm(`${t('DELETE user PIN')} ${devicePin} ${t('from')} ${selDevIds.length} ${t('selected device(s)?')}\n${t('This removes them from the device(s) — eHajiri data is unaffected.')}`)) return;
+                run('Delete from Device', (devId) => post(`/devices/${devId}/delete-user`, { pin:devicePin }));
               }}>
-              Delete from Device
+              {t('Delete from Device')}
             </button>
           </div>
         </div>
@@ -528,6 +688,7 @@ const UserManagement = () => {
 
   const [modal,         setModal]         = useState(false);
   const [activeTab,     setActiveTab]     = useState('Staff Detail');
+  const [quickDeviceView, setQuickDeviceView] = useState(false);
   const [editId,        setEditId]        = useState(null);
   const [form,          setForm]          = useState(defaultForm);
   const [errors,        setErrors]        = useState({});
@@ -544,6 +705,7 @@ const UserManagement = () => {
   const [resetPwdConfirm,   setResetPwdConfirm]   = useState('');
   const [resetPwdLoading,   setResetPwdLoading]   = useState(false);
   const [resetPwdShowPass,  setResetPwdShowPass]  = useState(false);
+  const modalBodyRef = useRef(null);
   const [advFilters, setAdvFilters] = useState({
     q: '',
     branches: [], departments: [], positions: [], grades: [],
@@ -615,11 +777,11 @@ const UserManagement = () => {
 
   const openAdd = () => {
     setForm({ ...defaultForm, ...buildDefaults(), employeeId:`EMP${String(employees.length+1).padStart(3,'0')}` });
-    setErrors({}); setEditId(null); setActiveTab('Staff Detail'); setModal(true);
+    setErrors({}); setEditId(null); setActiveTab('Staff Detail'); setQuickDeviceView(false); setModal(true);
   };
 
 
-  const openEdit = (u) => {
+  const openEdit = (u, quick=false) => {
     const { joinDate: fyStart } = buildDefaults();
     setForm({
       ...defaultForm, ...u,
@@ -635,12 +797,37 @@ const UserManagement = () => {
       rankingOrder: u.rankingOrder != null ? String(u.rankingOrder) : '',
       remarks:   u.remarks   || '',
     });
-    setErrors({}); setEditId(u.id); setActiveTab('Staff Detail'); setModal(true);
+    setErrors({}); setEditId(u.id);
+    setActiveTab(quick ? 'Device Connectivity' : 'Staff Detail');
+    setQuickDeviceView(quick);
+    setModal(true);
   };
+
+  // Lets other pages (e.g. Access Rules → By Person, double-click a row) deep-link
+  // here and have that person's Edit Staff form open automatically.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const editEmpId = searchParams.get('editEmployee');
+    if (!editEmpId || !employees.length) return;
+    const emp = employees.find(e => String(e.id) === editEmpId);
+    if (emp) openEdit(emp, false);
+    setSearchParams(p => { p.delete('editEmployee'); return p; }, { replace: true });
+  }, [searchParams, employees]);
 
   const handleSave = async () => {
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      // Required fields all live on "Staff Detail" — jump there and scroll to
+      // top so the red-bordered field is actually visible. Without this, a
+      // required field scrolled out of view (e.g. Attendance Device ID, which
+      // is the very first field) makes Save look like it silently did nothing.
+      setActiveTab('Staff Detail');
+      setQuickDeviceView(false);
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      showToast(t('Please fill in the required fields'), 'error');
+      return;
+    }
 
     /* ── Duplicate checks ── */
     const others = employees.filter(e => e.id !== editId);
@@ -667,6 +854,9 @@ const UserManagement = () => {
       }
     }
   };
+
+  /* Ctrl+S saves the Edit/Add Staff modal — same action as the Save button */
+  useSaveShortcut(modal && activeTab !== 'Device Connectivity', handleSave);
 
   const handleBulkDelete = (ids) => {
     ids.forEach(id => deleteEmployee(id));
@@ -864,7 +1054,12 @@ const UserManagement = () => {
     { field:'employeeId', header:'Staff ID',   width:90,
       render:v=><span style={{fontFamily:'monospace',fontSize:14,background:'#f3f4f6',padding:'2px 6px',borderRadius:4}}>{v}</span> },
     { field:'fullName',   header:'Full Name',  width:160,
-      render:v=><span style={{fontWeight:500}}>{v}</span> },
+      render:(v,row)=>(
+        <span style={{fontWeight:500, color:'#1a56db', cursor:'pointer'}}
+          onClick={e=>{ e.stopPropagation(); if (canManageStaff) openEdit(row, true); }}>
+          {v}
+        </span>
+      ) },
     { field:'deviceId',   header:'Device ID',  width:90,
       render:v=>v?<span style={{fontFamily:'monospace',fontSize:14,color:'#0369a1'}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
     { field:'position',   header:'Post',       width:140,
@@ -1225,13 +1420,13 @@ const UserManagement = () => {
         showFilterButton={false}
         searchPlaceholder={t('Search')+'...'}
         compact={true}
-        onRowDoubleClick={canManageStaff ? openEdit : undefined}
+        onRowDoubleClick={canManageStaff ? (row) => openEdit(row, false) : undefined}
         onDeleteKey={canManageStaff ? (row) => setDeleteConfirm(row.id) : null}
         contextMenu={canManageStaff ? [
           { label: 'Add New Staff',         icon: '➕', onClick: () => openAdd() },
           'divider',
           { label: 'Edit',                  icon: '✏️', onClick: (row) => openEdit(row) },
-          { label: 'Enroll Device',         icon: '📲', onClick: (row) => { openEdit(row); setTimeout(() => setActiveTab('Device Connectivity'), 50); } },
+          { label: 'Enroll Device',         icon: '📲', onClick: (row) => openEdit(row, true) },
           { label: 'Reset Login Password',  icon: '🔑', onClick: (row) => resetToDefault(row) },
           'divider',
           { label: 'Delete',                icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
@@ -1287,24 +1482,28 @@ const UserManagement = () => {
       />
 
       {/* ══════════ ADD / EDIT MODAL ══════════ */}
+      {/* Device Connectivity (row's Full Name clicked) opens as a right-side
+          drawer instead of the centered popup used for Add/Edit Staff. */}
       {modal && (
-        <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth:1100 }} onClick={e => e.stopPropagation()}>
+        <div className={`modal-overlay ${quickDeviceView ? 'modal-drawer-overlay' : ''}`}>
+          <div className={`modal ${quickDeviceView ? 'modal-drawer' : ''}`} ref={modalBodyRef}
+            style={{ maxWidth: quickDeviceView ? 480 : 1100, maxHeight: quickDeviceView ? undefined : '95vh' }}
+            onClick={e => e.stopPropagation()}>
 
             {/* Header */}
             <div className="modal-header">
-              <h2>{editId ? `✏️ ${t('Edit Staff')}` : `+ ${t('Add Staff Management')}`}</h2>
+              <h2>{quickDeviceView ? `📲 ${t('Device Connectivity')}` : editId ? `✏️ ${t('Edit Staff')}` : `+ ${t('Add Staff Management')}`}</h2>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
 
-            {/* Tab bar */}
-            <div style={{ display:'flex', borderBottom:'1px solid var(--border)', padding:'0 20px', background:'#fafbfc' }}>
+            {/* Tab bar — hidden in quick device view (row click), shown for full Edit */}
+            {!quickDeviceView && <div style={{ display:'flex', borderBottom:'1px solid var(--border)', padding:'0 20px', background:'#fafbfc' }}>
               {MODAL_TABS.map(tab => (
                 <button key={tab} className={`tab-btn ${activeTab===tab?'active':''}`} onClick={() => setActiveTab(tab)}>
                   {tab}
                 </button>
               ))}
-            </div>
+            </div>}
 
             {/* Body */}
             <div className="modal-body" style={{ padding:'16px 20px' }}>
@@ -1523,7 +1722,7 @@ const UserManagement = () => {
                       <p>Save the staff record before managing device connectivity.</p>
                     </div>
                   ) : (
-                    <DeviceConnTab devicePin={form.deviceId} staffName={form.fullName} />
+                    <DeviceConnTab devicePin={form.deviceId} staffName={form.fullName} employeeId={editId} />
                   )
               ) : (
                 <div className="empty-state" style={{ padding:'40px 0' }}>
@@ -1537,7 +1736,7 @@ const UserManagement = () => {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(false)}>{t('Cancel')}</button>
               {activeTab !== 'Device Connectivity' && (
-                <button className="btn btn-primary" onClick={handleSave}>💾 {t('Save')}</button>
+                <SaveButton onClick={handleSave} label={t('Save')} />
               )}
             </div>
           </div>

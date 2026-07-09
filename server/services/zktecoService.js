@@ -14,6 +14,7 @@
  */
 
 import pool from '../db.js';
+import { getCurrentUserId } from './requestContext.js';
 
 export const CHECK_TYPE_LABELS  = { 0:'Check In', 1:'Check Out', 2:'Break Out', 3:'Break In', 4:'OT In', 5:'OT Out' };
 export const VERIFY_TYPE_LABELS = { 1:'Fingerprint', 2:'Password', 4:'Card', 8:'Face', 20:'Password' };
@@ -87,9 +88,9 @@ export async function incrementLogCount(sn, count) {
  */
 export async function queueCommand(deviceSn, commandType, params = '') {
   const { rows: [stub] } = await pool.query(
-    `INSERT INTO zkteco_commands (device_sn, command_payload, status)
-     VALUES ($1,'__PENDING__','PENDING') RETURNING id`,
-    [deviceSn]
+    `INSERT INTO zkteco_commands (device_sn, command_payload, status, created_by_user_id)
+     VALUES ($1,'__PENDING__','PENDING',$2) RETURNING id`,
+    [deviceSn, getCurrentUserId()]
   );
   const cmdId = stub.id;
   const payload = params
@@ -166,11 +167,83 @@ export function parseAttlog(body) {
 import { broadcastNotification }   from './liveNotifications.js';
 import { buildPunchNotification }  from './punchNotification.js';
 
+// ── Access-window check ──────────────────────────────────────────────────
+// Shared by PostVerifyData (real-time door-relay allow/deny, in routes/zkteco.js)
+// AND saveAttlogs below (the attendance-log insert path). These are separate
+// protocol mechanisms on the device — PostVerifyData only gates the door relay,
+// it does NOT stop the device from pushing an ATTLOG record regardless of the
+// answer. So the schedule must be enforced here too, or out-of-window punches
+// still land in attendance history even though the door correctly stayed locked.
+const DOW_KEYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+export async function checkTimezoneAccess(employeeId, department, now) {
+  // 1. Person-level rule — timezone resolved via access level (primary) or direct override
+  let res = await pool.query(
+    `SELECT tz.schedule
+     FROM   zkteco_person_access pa
+     LEFT   JOIN zkteco_access_levels al ON al.id = pa.access_level_id
+     JOIN   zkteco_timezones tz
+               ON tz.id = COALESCE(pa.timezone_id, al.timezone_id)
+     WHERE  pa.employee_id = $1
+     ORDER  BY pa.timezone_id NULLS LAST, pa.id DESC
+     LIMIT  1`,
+    [employeeId]
+  );
+
+  // 2. Department-level fallback — same dual lookup
+  if (!res.rows[0] && department) {
+    res = await pool.query(
+      `SELECT tz.schedule
+       FROM   zkteco_dept_access da
+       LEFT   JOIN zkteco_access_levels al ON al.id = da.access_level_id
+       JOIN   zkteco_timezones tz
+                 ON tz.id = COALESCE(da.timezone_id, al.timezone_id)
+       WHERE  LOWER(TRIM(da.department)) = LOWER(TRIM($1))
+       LIMIT  1`,
+      [department]
+    );
+  }
+
+  if (!res.rows[0]) return true; // no rule → always allow
+
+  const schedule = typeof res.rows[0].schedule === 'string'
+    ? JSON.parse(res.rows[0].schedule)
+    : res.rows[0].schedule;
+
+  const dayKey  = DOW_KEYS[now.getDay()];
+  const current = now.getHours() * 60 + now.getMinutes();
+  const intervals = schedule[dayKey] || [];
+
+  for (const iv of intervals) {
+    if (!iv?.s || !iv?.e) continue;
+    const [sh, sm] = iv.s.split(':').map(Number);
+    const [eh, em] = iv.e.split(':').map(Number);
+    const start = sh * 60 + sm;
+    const end   = eh * 60 + em;
+    if (start === 0 && end === 0) continue; // 00:00–00:00 means no access
+    if (current >= start && current <= end) return true;
+  }
+
+  return false; // outside all allowed windows
+}
+
 export async function saveAttlogs(deviceSn, records) {
   let inserted = 0;
   for (const r of records) {
-    const empRes = await pool.query('SELECT id FROM users WHERE device_id=$1 LIMIT 1', [r.pin]);
+    const empRes = await pool.query('SELECT id, department FROM users WHERE device_id=$1 LIMIT 1', [r.pin]);
     const employeeId = empRes.rows[0]?.id || null;
+
+    // Reject punches outside the person's allowed access window — mirrors the
+    // device's own "Invalid Time period" rejection so it isn't recorded as
+    // valid attendance just because ATTLOG arrived independently of the relay.
+    if (employeeId) {
+      const allowed = await checkTimezoneAccess(employeeId, empRes.rows[0].department, r.checkTime);
+      if (!allowed) {
+        console.warn(`[ZK] ATTLOG rejected — outside access window: PIN=${r.pin} time=${r.checkTime.toISOString()}`);
+        continue;
+      }
+    }
+
     try {
       const result = await pool.query(
         `INSERT INTO zkteco_attendance_logs
@@ -362,7 +435,7 @@ export async function saveDeviceInfo(deviceSn, info) {
 export async function addOrUpdateUserOnDevice(deviceSn, fullName, pin, cardNumber = '', privilege = 0, expires = 0, endDatetime = '2099-12-31 23:59:00') {
   const ed = endDatetime.replace('T', ' ').slice(0, 19);
   return queueCommand(deviceSn, 'DATA UPDATE USERINFO',
-    `PIN=${pin}\tName=${fullName}\tPri=${privilege}\tPasswd=\tCard=${cardNumber||''}\tGrp=1\tTZ=1\tVerify=0\tExpires=${expires}\tStartDatetime=2000-01-01 00:00:00\tEndDatetime=${ed}`
+    `PIN=${pin}\tName=${fullName}\tPri=${privilege}\tPasswd=\tCard=${cardNumber||''}\tGrp=1\tTZ=0000000000000000\tVerify=0\tExpires=${expires}\tStartDatetime=2000-01-01 00:00:00\tEndDatetime=${ed}`
   );
 }
 
@@ -481,7 +554,7 @@ export function buildInitResponse(sn, stamp = null, tzOffset = 345) {
     `IDCARDStamp=0`,
     `ERRORLOGStamp=0`,
     `ErrorDelay=60`,
-    `Delay=30`,
+    `Delay=5`,
     `TimeZone=${tzOffset}`,
     `transTimes=00:00;14:05`, // lowercase 't' — CRITICAL per guide
     `TransInterval=1`,

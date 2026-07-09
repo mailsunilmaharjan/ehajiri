@@ -401,7 +401,7 @@
 }
 
 /* Layout content */
-.main-layout { padding-top: 62px; min-height: 100vh; }
+.main-layout { padding-top: 62px; min-height: 100vh; min-height: 100dvh; }
 
 /* Mobile toggle */
 .tm-mobile-toggle {
@@ -420,20 +420,34 @@
   .tm-brand-name { font-size: 13px; }
   .tm-item { padding: 0 9px; font-size: 13px; }
 }
+@media (max-width: 1024px) {
+  .tm-brand-sub { display: none; }
+  .tm-item { padding: 0 8px; font-size: 13px; }
+}
+
 @media (max-width: 768px) {
-  .topmenu { padding: 0 14px; }
+  .topmenu {
+    padding: 0 14px;
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+    height: 56px;
+  }
+  .tm-ribbon-stage { height: 56px; }
   .tm-mobile-toggle { display: flex; }
   .tm-nav {
     display: none; flex-direction: column; align-items: stretch;
-    position: absolute; top: 62px; left: 0; right: 0;
+    position: absolute; top: 56px; left: 0; right: 0;
     background: #fff; z-index: 200; padding: 8px 0;
     border-bottom: 1px solid #e5e7eb;
     box-shadow: 0 8px 20px rgba(0,0,0,.1);
-    overflow: visible;
+    overflow-y: auto; overflow-x: hidden;
+    max-height: calc(100vh - 56px);
+    max-height: calc(100dvh - 56px);
+    -webkit-overflow-scrolling: touch;
   }
   .tm-nav.open { display: flex; }
   .tm-item {
-    height: auto; padding: 11px 18px;
+    height: auto; padding: 13px 18px; min-height: 44px;
     border-bottom: none; border-left: 3px solid transparent;
   }
   .tm-item.active { border-left-color: #1a56db; border-bottom: none; background: #eff6ff; }
@@ -442,9 +456,20 @@
     position: static; box-shadow: none; border: none; border-radius: 0;
     background: #f8fafc; animation: none;
   }
-  .tm-dropdown-item { padding-left: 32px; }
+  .tm-dropdown-item { padding-left: 32px; min-height: 40px; }
+  .tm-sub-item { min-height: 40px; }
   .tm-user-info { display: none; }
   .tm-mobile-toggle.open span:nth-child(1) { transform: rotate(45deg) translate(5px, 5px); }
   .tm-mobile-toggle.open span:nth-child(2) { opacity: 0; }
   .tm-mobile-toggle.open span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
+
+  /* Content area: account for 56px topbar on mobile */
+  .main-layout { padding-top: 56px; }
+}
+
+@media (max-width: 480px) {
+  .tm-brand-text { max-width: 120px; }
+  .tm-brand-name { font-size: 13px; }
+  .tm-lang-btn { padding: 4px 8px; font-size: 11px; }
+  .tm-avatar { width: 30px; height: 30px; font-size: 12px; }
 }

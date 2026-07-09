@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client.js';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import { useData }     from '../../context/DataContext.jsx';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -170,17 +171,17 @@ const BarRow = ({ label, value, total, color, max }) => {
 const RosterDashboard = () => {
   const navigate        = useNavigate();
   const { settings }    = useSettings();
+  const { filteredEmployees: employees } = useData();
 
   const [rosters,   setRosters]   = useState([]);
-  const [employees, setEmployees] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
   const [lastRefresh, setLastRefresh] = useState(new Date());
 
   const load = useCallback(() => {
     setLoading(true); setError(null);
-    Promise.all([api.get('/duty-roster'), api.get('/employees')])
-      .then(([ros, emps]) => { setRosters(ros); setEmployees(emps); setLastRefresh(new Date()); })
+    api.get('/duty-roster')
+      .then(ros => { setRosters(ros); setLastRefresh(new Date()); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);

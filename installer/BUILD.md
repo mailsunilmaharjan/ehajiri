@@ -93,6 +93,29 @@ DB_PASS=Eh@jiri2026!@Pl@nE!iNfOsYS
 UPDATE_SERVER_URL=https://updates.ehajiri.com
 ```
 
+If you already have PostgreSQL installed, the installer may not be able to create the database automatically. In that case, create the database and user manually using the commands below, then update `{app}\server\.env` to match.
+
+### Manual PostgreSQL setup for an existing server
+
+```sql
+CREATE ROLE ehajiri LOGIN PASSWORD 'Eh@jiri2026!@Pl@nE!iNfOsYS';
+CREATE DATABASE "ehajiriPlanetInfosys_db" OWNER ehajiri;
+GRANT ALL PRIVILEGES ON DATABASE "ehajiriPlanetInfosys_db" TO ehajiri;
+```
+
+Then set `server\.env` like this:
+
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ehajiriPlanetInfosys_db
+DB_USER=ehajiri
+DB_PASS=Eh@jiri2026!@Pl@nE!iNfOsYS
+PORT=5000
+```
+
+During installation you can choose the destination folder, so you may install to `C:\Program Files\eHajiri` or another drive such as `D:\Apps\eHajiri`.
+
 ---
 
 ## Folder Structure After Install

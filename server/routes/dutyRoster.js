@@ -1,10 +1,31 @@
 import { Router } from 'express';
 import pool from '../db.js';
+import { resolveOrgScope } from './orgScope.js';
 
 const router = Router();
 
-/* ── GET /api/duty-roster  — list all roster entries ── */
-router.get('/', async (_req, res) => {
+/** Appends the requester's org-scope condition to a WHERE clause targeting users u / duty_roster dr. */
+function scopeCondition(scope, params) {
+  if (scope.level === 'department') { params.push(scope.value); return `AND u.department = $${params.length}`; }
+  if (scope.level === 'branch')     { params.push(scope.value); return `AND u.branch = $${params.length}`; }
+  if (scope.level === 'self')       { params.push(scope.value); return `AND dr.employee_id = $${params.length}`; }
+  return '';
+}
+
+/** True if the given employee row falls within the requester's org scope. */
+async function isEmployeeInScope(scope, employeeId) {
+  if (scope.level === 'all') return true;
+  if (scope.level === 'self') return String(scope.value) === String(employeeId);
+  const field = scope.level === 'department' ? 'department' : 'branch';
+  const { rows } = await pool.query(`SELECT 1 FROM users WHERE id=$1 AND ${field}=$2`, [employeeId, scope.value]);
+  return rows.length > 0;
+}
+
+/* ── GET /api/duty-roster  — list roster entries within the requester's scope ── */
+router.get('/', async (req, res) => {
+  const scope = resolveOrgScope(req);
+  const params = [];
+  const cond = scopeCondition(scope, params);
   try {
     const { rows } = await pool.query(`
       SELECT
@@ -33,16 +54,21 @@ router.get('/', async (_req, res) => {
       FROM duty_roster dr
       JOIN users  u ON u.id = dr.employee_id
       LEFT JOIN shifts s ON s.id = dr.shift_id
+      WHERE 1=1 ${cond}
       ORDER BY dr.created_at DESC
-    `);
+    `, params);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── POST /api/duty-roster  — create a roster entry ── */
+/* ── POST /api/duty-roster  — create a roster entry (target employee must be in-scope) ── */
 router.post('/', async (req, res) => {
   const { employeeId, shiftId, dateFrom, dateTo, offDays, createdBy } = req.body;
   try {
+    const scope = resolveOrgScope(req);
+    if (scope.level === 'self' || !(await isEmployeeInScope(scope, employeeId))) {
+      return res.status(403).json({ error: 'Not authorized to create a roster entry for this employee' });
+    }
     const { rows } = await pool.query(`
       INSERT INTO duty_roster (employee_id, shift_id, date_from, date_to, off_days, created_by)
       VALUES ($1, $2, $3, $4, $5, $6)
@@ -54,10 +80,16 @@ router.post('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── PUT /api/duty-roster/:id  — update a roster entry ── */
+/* ── PUT /api/duty-roster/:id  — update a roster entry (must be in-scope) ── */
 router.put('/:id', async (req, res) => {
   const { shiftId, dateFrom, dateTo, offDays } = req.body;
   try {
+    const scope = resolveOrgScope(req);
+    const { rows: existing } = await pool.query('SELECT employee_id FROM duty_roster WHERE id=$1', [req.params.id]);
+    if (!existing.length) return res.status(404).json({ error: 'Not found' });
+    if (scope.level === 'self' || !(await isEmployeeInScope(scope, existing[0].employee_id))) {
+      return res.status(403).json({ error: 'Not authorized to edit this roster entry' });
+    }
     const { rows } = await pool.query(`
       UPDATE duty_roster
       SET shift_id = $1, date_from = $2, date_to = $3, off_days = $4
@@ -72,6 +104,10 @@ router.put('/:id', async (req, res) => {
 /* ── DELETE /api/duty-roster/clear  — bulk delete + re-seed default shift ── */
 router.delete('/clear', async (req, res) => {
   const { dateFrom, dateTo, branch, department, position, grade, mode } = req.body;
+  const scope = resolveOrgScope(req);
+  if (scope.level === 'self') {
+    return res.status(403).json({ error: 'Not authorized to bulk-clear roster entries' });
+  }
   try {
     // ── Build DELETE filter ────────────────────────────────────────────────
     const conds  = ['dr.employee_id = u.id'];
@@ -91,6 +127,10 @@ router.delete('/clear', async (req, res) => {
       params.push(mode);
       conds.push(`u.mode = $${params.length}`);
     }
+
+    // Requester's org-scope always narrows the delete, regardless of the caller-supplied filters above.
+    if (scope.level === 'department') { params.push(scope.value); conds.push(`u.department = $${params.length}`); }
+    if (scope.level === 'branch')     { params.push(scope.value); conds.push(`u.branch = $${params.length}`); }
 
     const { rowCount } = await pool.query(
       `DELETE FROM duty_roster dr USING users u WHERE ${conds.join(' AND ')}`,
@@ -118,6 +158,8 @@ router.delete('/clear', async (req, res) => {
         staffParams.push(mode);
         staffConds.push(`u.mode = $${staffParams.length}`);
       }
+      if (scope.level === 'department') { staffParams.push(scope.value); staffConds.push(`u.department = $${staffParams.length}`); }
+      if (scope.level === 'branch')     { staffParams.push(scope.value); staffConds.push(`u.branch = $${staffParams.length}`); }
 
       staffParams.push(dateFrom);
       staffParams.push(dateTo);
@@ -154,6 +196,12 @@ router.delete('/clear', async (req, res) => {
 /* ── DELETE /api/duty-roster/:id ── */
 router.delete('/:id', async (req, res) => {
   try {
+    const scope = resolveOrgScope(req);
+    const { rows: existing } = await pool.query('SELECT employee_id FROM duty_roster WHERE id=$1', [req.params.id]);
+    if (!existing.length) return res.status(404).json({ error: 'Not found' });
+    if (scope.level === 'self' || !(await isEmployeeInScope(scope, existing[0].employee_id))) {
+      return res.status(403).json({ error: 'Not authorized to delete this roster entry' });
+    }
     await pool.query('DELETE FROM duty_roster WHERE id=$1', [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
