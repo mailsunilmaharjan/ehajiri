@@ -133,20 +133,31 @@ If present, `forge.config.js` includes it as an extra resource and
 via a marker file in `userData`) before the embedded DB starts. Skipped
 entirely if the file isn't there — not a required step.
 
-### Optional: bundle pg_dump.exe (native SQL backup export)
+### Optional: bundle pg_dump.exe + pg_restore.exe (native backup/restore)
 `@embedded-postgres/windows-x64` only ships server binaries (`postgres.exe`,
-`pg_ctl.exe`, `initdb.exe`) — no `pg_dump.exe`. To enable the "Export SQL"
-button in Settings → Database Backup (`GET /api/backup/sql`, a plain SQL dump
-restorable with standard `psql`/`pg_restore`, as opposed to the default JSON
-backup used for in-app restore-with-migration), copy `pg_dump.exe` from a
-matching PostgreSQL 18.x Windows install (e.g.
-`C:\Program Files\PostgreSQL\18\bin\pg_dump.exe`) to
-`installer/deps/pg_dump.exe` before running `electron-forge package`.
-`forge.config.js`'s `afterCopy` hook then copies it into
-`@embedded-postgres/windows-x64`'s own `native/bin/` folder so it resolves
-its DLL dependencies (`libpq.dll` etc.) from the binaries already bundled
-there — see `resolvePgDumpPath()` in `electron/main.cjs`. Skipped entirely if
-the file isn't there; JSON backup is unaffected either way.
+`pg_ctl.exe`, `initdb.exe`) — no client tools. Two of them are bundled
+separately to power the native backup features in Settings → Database Backup:
+
+- **`pg_dump.exe`** — the "Export SQL" button (`GET /api/backup/sql`), a
+  compressed custom-format dump (`pg_dump -Fc`, `.backup` file) of ALL
+  tables including attendance logs. Not human-readable in a text editor;
+  restorable outside the app with `pg_restore -d ehajiri_db <file>.backup`.
+- **`pg_restore.exe`** — the in-app restore of those `.backup` files
+  (`POST /api/backup/restore-native`, wired to the same "Database Restore"
+  file picker as JSON backups). Runs `--clean --single-transaction` (atomic:
+  failure leaves the DB untouched), then re-runs schema migrations so dumps
+  from older app versions come up to the current schema.
+
+Source both from a matching PostgreSQL 18.x Windows distribution (e.g. the
+EDB binaries zip `postgresql-18.x-x-windows-x64-binaries.zip`, `pgsql/bin/`)
+and place them at `installer/deps/pg_dump.exe` / `installer/deps/pg_restore.exe`
+before running `electron-forge package` (gitignored — they must exist on the
+build machine). `forge.config.js`'s `afterCopy` hook copies them into
+`@embedded-postgres/windows-x64`'s own `native/bin/` folder so they resolve
+their DLL dependencies (`libpq.dll` etc.) from the binaries already bundled
+there — see `resolvePgClientTool()` in `electron/main.cjs`. Each is skipped
+if absent (the UI surfaces a clear error); the JSON backup/restore
+(restore-with-migration) works either way.
 
 ### GitHub credentials
 - Repo: `https://github.com/mailsunilmaharjan/ehajiri-releases`

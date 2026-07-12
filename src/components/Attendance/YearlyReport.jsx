@@ -112,50 +112,6 @@ const TrendChart = ({ trend, useNP }) => {
   );
 };
 
-/* ── Department table ── */
-const DeptTable = ({ depts }) => (
-  <div style={{ overflowX:'auto', borderRadius:8, border:'1px solid #e5e7eb' }}>
-    <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
-      <thead>
-        <tr>
-          {['Department','Staff','Present','Absent','Leave','Late','Att. %'].map(h => (
-            <th key={h} style={{ background:'#efefef', color:'#374151', fontWeight:700, fontSize:11,
-              padding:'7px 10px', borderRight:'1px solid #dedede', borderBottom:'2px solid #dedede',
-              textAlign:'center', whiteSpace:'nowrap' }}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {depts.map((d, i) => {
-          const attBg = d.attRate>=90?'#d1fae5':d.attRate>=75?'#fef3c7':'#fee2e2';
-          const attC  = d.attRate>=90?'#065f46':d.attRate>=75?'#92400e':'#991b1b';
-          return (
-            <tr key={d.dept} style={{ background:i%2===0?'#fff':'#f9fafb' }}>
-              <td style={{ padding:'6px 10px', borderRight:'1px solid #e5e7eb', fontWeight:700, color:'#374151' }}>{d.dept}</td>
-              <td style={{ padding:'6px 10px', borderRight:'1px solid #e5e7eb', textAlign:'center', color:'#6b7280' }}>{d.staff}</td>
-              <td style={{ padding:'6px 10px', borderRight:'1px solid #e5e7eb', textAlign:'center' }}>
-                <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:5, padding:'1px 7px', fontWeight:700 }}>{d.present}</span>
-              </td>
-              <td style={{ padding:'6px 10px', borderRight:'1px solid #e5e7eb', textAlign:'center' }}>
-                {d.absent>0 ? <span style={{ background:'#fee2e2', color:'#991b1b', borderRadius:5, padding:'1px 7px', fontWeight:700 }}>{d.absent}</span> : <span style={{ color:'#d1d5db' }}>0</span>}
-              </td>
-              <td style={{ padding:'6px 10px', borderRight:'1px solid #e5e7eb', textAlign:'center' }}>
-                {d.leave>0 ? <span style={{ background:'#ede9fe', color:'#5b21b6', borderRadius:5, padding:'1px 7px', fontWeight:700 }}>{d.leave}</span> : <span style={{ color:'#d1d5db' }}>0</span>}
-              </td>
-              <td style={{ padding:'6px 10px', borderRight:'1px solid #e5e7eb', textAlign:'center' }}>
-                {d.late>0 ? <span style={{ color:'#dc2626', fontWeight:700 }}>{d.late}</span> : <span style={{ color:'#d1d5db' }}>0</span>}
-              </td>
-              <td style={{ padding:'6px 10px', textAlign:'center' }}>
-                <span style={{ background:attBg, color:attC, borderRadius:5, padding:'1px 7px', fontWeight:800 }}>{d.attRate}%</span>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  </div>
-);
-
 /* ════════════════════════════════════════════════════════════
    MAIN COMPONENT
 ════════════════════════════════════════════════════════════ */
@@ -193,7 +149,6 @@ const YearlyReport = () => {
 
   const s   = data?.summary   || {};
   const r   = data?.rankings  || {};
-  const dep = data?.deptStats || [];
   const trend = data?.monthlyTrend || [];
 
   const yearLabel = useNP ? `${fmt(year)} BS` : String(year);
@@ -249,6 +204,14 @@ const YearlyReport = () => {
 
       {data && !loading && (
         <>
+
+          {/* ── Year calendar stats row ── */}
+          <div style={{ display:'flex', gap:10, marginBottom:20, flexWrap:'wrap', alignItems:'stretch' }}>
+            <Chip label={L('जम्मा दिन','Total No. of Days')}                value={fmt(s.totalDays||0)}        color="#1a56db" bg="#eff6ff" />
+            <Chip label={L('जम्मा सप्ताहन्त','Total Weekends')}              value={fmt(s.weekendDays||0)}      color="#6b7280" bg="#f3f4f6" />
+            <Chip label={L('जम्मा सार्वजनिक बिदा','Total Public Holiday')}    value={fmt(s.holidayDays||0)}      color="#d97706" bg="#fef3c7" />
+            <Chip label={L('उपस्थित हुनुपर्ने दिन','Total Need to be Present Days')} value={fmt(s.totalWorkingDays||0)} color="#065f46" bg="#d1fae5" />
+          </div>
 
           {/* ── 6 ranking cards ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',
@@ -342,65 +305,24 @@ const YearlyReport = () => {
             </div>
           </div>
 
-          {/* ── Monthly trend + dept analysis side by side ── */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:20 }}>
-
-            {/* Monthly trend */}
-            <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12,
-              padding:'18px 20px', boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
-              <div style={{ fontWeight:700, fontSize:13, color:'#1f2937', marginBottom:14 }}>
-                📈 {L('मासिक प्रवृत्ति','Monthly Attendance Trend')}
-              </div>
-              {trend.length > 0
-                ? <>
-                    <TrendChart trend={trend} useNP={useNP} />
-                    <div style={{ display:'flex', gap:14, marginTop:10, fontSize:10, color:'#6b7280' }}>
-                      <span><span style={{ display:'inline-block', width:8, height:8, background:'#059669', borderRadius:2, marginRight:4 }}/>{L('उपस्थित','Present')}</span>
-                      <span><span style={{ display:'inline-block', width:8, height:8, background:'#dc2626', borderRadius:2, marginRight:4 }}/>{L('अनुपस्थित','Absent')}</span>
-                      <span><span style={{ display:'inline-block', width:8, height:8, background:'#7c3aed', borderRadius:2, marginRight:4 }}/>{L('बिदा','Leave')}</span>
-                    </div>
-                  </>
-                : <div style={{ color:'#9ca3af', fontSize:12, textAlign:'center', padding:'24px 0' }}>No trend data</div>
-              }
+          {/* ── Monthly trend ── */}
+          <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12,
+            padding:'18px 20px', boxShadow:'0 1px 3px rgba(0,0,0,.06)', marginBottom:20 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:'#1f2937', marginBottom:14 }}>
+              📈 {L('मासिक प्रवृत्ति','Monthly Attendance Trend')}
             </div>
-
-            {/* Summary stats panel — replaces the old insight boxes */}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, alignContent:'start' }}>
-              <Chip label={L('कुल कर्मचारी','Total Staff')}       value={fmt(s.totalStaff||0)}       color="#1a56db" bg="#eff6ff" />
-              <Chip label={L('कार्य दिन','Working Days')}          value={fmt(s.totalWorkingDays||0)}  color="#374151" bg="#f9fafb" />
-              <Chip label={L('कुल उपस्थित','Total Present')}       value={fmt(s.grandPresent||0)}      color="#065f46" bg="#d1fae5" />
-              <Chip label={L('कुल अनुपस्थित','Total Absent')}      value={fmt(s.grandAbsent||0)}       color="#991b1b" bg="#fee2e2" />
-              <Chip label={L('कुल बिदा','Total Leave')}            value={fmt(s.grandLeave||0)}        color="#5b21b6" bg="#ede9fe" />
-              <Chip label={L('कुल ढिला','Total Late')}             value={fmt(s.grandLate||0)}         color="#92400e" bg="#fef3c7" />
-              <Chip label={L('परफेक्ट हाजिरी','Perfect Att.')}
-                value={`${fmt(s.perfectCount||0)} / ${fmt(s.totalStaff||0)}`}
-                color="#059669" bg="#f0fdf4" />
-              {/* Avg att rate — full width */}
-              <div style={{ gridColumn:'1 / -1',
-                background: s.avgAttRate>=90?'#d1fae5':s.avgAttRate>=75?'#fef3c7':'#fee2e2',
-                border:`1px solid ${s.avgAttRate>=90?'#059669':s.avgAttRate>=75?'#d97706':'#dc2626'}44`,
-                borderRadius:10, padding:'14px 18px', textAlign:'center' }}>
-                <div style={{ fontSize:28, fontWeight:800, lineHeight:1.1,
-                  color: s.avgAttRate>=90?'#065f46':s.avgAttRate>=75?'#92400e':'#991b1b' }}>
-                  {fmt(s.avgAttRate||0)}%
-                </div>
-                <div style={{ fontSize:11, color:'#6b7280', marginTop:3, fontWeight:500 }}>
-                  {L('वार्षिक औसत हाजिरी दर','Annual Avg. Attendance Rate')}
-                </div>
-              </div>
-            </div>
+            {trend.length > 0
+              ? <>
+                  <TrendChart trend={trend} useNP={useNP} />
+                  <div style={{ display:'flex', gap:14, marginTop:10, fontSize:10, color:'#6b7280' }}>
+                    <span><span style={{ display:'inline-block', width:8, height:8, background:'#059669', borderRadius:2, marginRight:4 }}/>{L('उपस्थित','Present')}</span>
+                    <span><span style={{ display:'inline-block', width:8, height:8, background:'#dc2626', borderRadius:2, marginRight:4 }}/>{L('अनुपस्थित','Absent')}</span>
+                    <span><span style={{ display:'inline-block', width:8, height:8, background:'#7c3aed', borderRadius:2, marginRight:4 }}/>{L('बिदा','Leave')}</span>
+                  </div>
+                </>
+              : <div style={{ color:'#9ca3af', fontSize:12, textAlign:'center', padding:'24px 0' }}>No trend data</div>
+            }
           </div>
-
-          {/* ── Department-wise breakdown ── */}
-          {dep.length > 0 && (
-            <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:12,
-              padding:'18px 20px', boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
-              <div style={{ fontWeight:700, fontSize:13, color:'#1f2937', marginBottom:14 }}>
-                🏢 {L('विभागअनुसार विश्लेषण','Department-wise Analysis')}
-              </div>
-              <DeptTable depts={dep} />
-            </div>
-          )}
 
           {/* Empty state */}
           {(data?.allStats||[]).length === 0 && (

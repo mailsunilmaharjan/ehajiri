@@ -1576,6 +1576,66 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 65,
+    description: 'Profile picture — users.profile_photo (small data-URL image, shown on avatars app-wide)',
+    up: async (client) => {
+      // Distinct from bio_photo (full-size staff identity photo, lazily
+      // fetched one at a time): profile_photo is downscaled client-side to
+      // ~256px before upload so it is small enough to ship inline in the
+      // employees list, login response, messages and chat payloads.
+      await client.query(`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+      `);
+    },
+  },
+  {
+    version    : 66,
+    description: 'Chat — quick emoji reactions on messages (one reaction per user per message)',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS chat_message_reactions (
+          message_id INTEGER     NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+          user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          emoji      VARCHAR(16) NOT NULL,          -- an emoji, or the literal text "OK"
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          PRIMARY KEY (message_id, user_id)
+        );
+      `);
+    },
+  },
+  {
+    version    : 67,
+    description: 'Messages — user-created parent/sub folders that filter the inbox',
+    up: async (client) => {
+      // Folders are per-user labels over the recipient's own inbox copies —
+      // two levels max (parent → sub), enforced at the API. folder_id lives
+      // on message_recipients (not internal_messages) so each recipient
+      // organises their copy independently of everyone else's.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS message_folders (
+          id         SERIAL      PRIMARY KEY,
+          user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name       VARCHAR(60) NOT NULL,
+          parent_id  INTEGER     REFERENCES message_folders(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        ALTER TABLE message_recipients
+          ADD COLUMN IF NOT EXISTS folder_id INTEGER REFERENCES message_folders(id) ON DELETE SET NULL;
+      `);
+    },
+  },
+  {
+    version    : 68,
+    description: 'Chat — editable sent messages (chat_messages.edited_at, shown as "edited")',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE chat_messages
+          ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

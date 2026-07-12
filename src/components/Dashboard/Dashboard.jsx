@@ -245,13 +245,20 @@ const Pill = ({ status }) => {
   );
 };
 
-const Av = ({ name }) => (
-  <div style={{ width: 29, height: 29, borderRadius: '50%', flexShrink: 0,
-    background: '#f1f5f9', color: '#64748b',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 12, fontWeight: 700, border: '1px solid #e2e8f0' }}>
-    {(name || '?')[0].toUpperCase()}
-  </div>
+const Av = ({ name, photo }) => (
+  photo ? (
+    <div style={{ width: 29, height: 29, borderRadius: '50%', flexShrink: 0,
+      overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f1f5f9' }}>
+      <img src={photo} alt={name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+    </div>
+  ) : (
+    <div style={{ width: 29, height: 29, borderRadius: '50%', flexShrink: 0,
+      background: '#f1f5f9', color: '#64748b',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 12, fontWeight: 700, border: '1px solid #e2e8f0' }}>
+      {(name || '?')[0].toUpperCase()}
+    </div>
+  )
 );
 
 const TH = ({ children }) => (
@@ -308,7 +315,7 @@ export default function Dashboard() {
   const L = (np, en) => language === 'np' ? np : en;
   const {
     stats, filteredLeaves: leaves, filteredVisits: officeVisits,
-    getEmployeeName, getLeaveTypeName, filteredEmployees: employees,
+    getEmployeeName, getEmployeeById, getLeaveTypeName, filteredEmployees: employees,
     employees: allEmployees,
   } = useData();
   const { settings, getCompanyName } = useSettings();
@@ -706,7 +713,7 @@ export default function Dashboard() {
                       <tr key={l.id} className="db-tr">
                         <TD>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Av name={getEmployeeName(l.employeeId)} />
+                            <Av name={getEmployeeName(l.employeeId)} photo={getEmployeeById(l.employeeId)?.profilePhoto} />
                             <span style={{ fontWeight: 600, color: '#1e293b' }}>
                               {getEmployeeName(l.employeeId)}
                             </span>
@@ -732,7 +739,7 @@ export default function Dashboard() {
                       <tr key={v.id} className="db-tr">
                         <TD>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Av name={getEmployeeName(v.employeeId)} />
+                            <Av name={getEmployeeName(v.employeeId)} photo={getEmployeeById(v.employeeId)?.profilePhoto} />
                             <span style={{ fontWeight: 600, color: '#1e293b' }}>
                               {getEmployeeName(v.employeeId)}
                             </span>
@@ -796,12 +803,20 @@ export default function Dashboard() {
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '10px 18px', borderBottom: '1px solid #f8fafc' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                        background: '#eef2ff', color: '#6366f1', border: '1px solid #c7d2fe',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 13, fontWeight: 800 }}>
-                        {(e.fullName?.[0] || '?').toUpperCase()}
-                      </div>
+                      {e.profilePhoto ? (
+                        <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                          overflow: 'hidden', border: '1px solid #c7d2fe', background: '#eef2ff' }}>
+                          <img src={e.profilePhoto} alt={e.fullName || ''}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                        </div>
+                      ) : (
+                        <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                          background: '#eef2ff', color: '#6366f1', border: '1px solid #c7d2fe',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 13, fontWeight: 800 }}>
+                          {(e.fullName?.[0] || '?').toUpperCase()}
+                        </div>
+                      )}
                       <div>
                         <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{e.fullName}</p>
                         <p style={{ margin: '1px 0 0', fontSize: 11, color: '#94a3b8' }}>{fmtDate(e.dob, settings)}</p>
@@ -957,7 +972,7 @@ export default function Dashboard() {
                       <div key={`${item.kind}-${item.id}`} className="db-tr" style={{ display: 'flex', alignItems: 'center',
                         justifyContent: 'space-between', padding: '9px 18px', borderBottom: '1px solid #f8fafc' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Av name={getEmployeeName(item.employeeId)} />
+                          <Av name={getEmployeeName(item.employeeId)} photo={getEmployeeById(item.employeeId)?.profilePhoto} />
                           <div>
                             <p style={{ margin: 0, fontSize: 12.5, fontWeight: 600, color: '#1e293b' }}>{getEmployeeName(item.employeeId)}</p>
                             <p style={{ margin: 0, fontSize: 10.5, color: '#94a3b8' }}>{item.kind === 'leave' ? '📅 Leave' : '🏢 Visit'}</p>

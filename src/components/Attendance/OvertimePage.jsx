@@ -575,10 +575,6 @@ const OvertimePage = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">⏱️ {L('ओभरटाइम स्वीकृति','Overtime (OT) Approval')}</h1>
-          <p className="page-subtitle" style={{ margin:0 }}>
-            {L('OT स्वीकृति नभएसम्म कुनै पनि रिपोर्टमा देखिँदैन — Approved OT मात्र रिपोर्टमा जान्छ',
-               'OT must be approved — only Approved OT appears in reports')}
-          </p>
         </div>
         <div style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
           <div>

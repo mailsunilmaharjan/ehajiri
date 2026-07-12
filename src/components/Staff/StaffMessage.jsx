@@ -5,6 +5,7 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import api from '../../api/client.js';
 
 /* ─── helpers ─────────────────────────────────── */
@@ -208,51 +209,172 @@ const ComposeModal = ({ onClose, onSent, employees, settings }) => {
 };
 
 /* ─── Reading pane (right column) ──────────────── */
-const ReadingPane = ({ msg, folder, onDelete }) => {
+const ReadingPane = ({ msg, folder, onDelete, onReply, customFolders = [], onMove }) => {
   const fromLabel = folder === 'inbox' ? (msg.sender_name || '—') : recipientLabel(msg);
-  const initial = (fromLabel || '?')[0]?.toUpperCase() || '?';
+
+  const [replyText, setReplyText] = useState('');
+  const [sending,   setSending]   = useState(false);
+  const [folderMenu, setFolderMenu] = useState(false);
+  const replyRef = useRef(null);
+
+  const currentFolderName = msg.folder_id
+    ? (customFolders.find(f => f.id === msg.folder_id)?.name || 'Folder') : null;
+  /* parents first, each followed by its subs — same order as the sidebar */
+  const folderOptions = customFolders.filter(f => !f.parent_id)
+    .flatMap(p => [{ ...p, sub: false }, ...customFolders.filter(s => s.parent_id === p.id).map(s => ({ ...s, sub: true }))]);
+
+  /* Switching to another message discards the unsent draft */
+  useEffect(() => { setReplyText(''); }, [msg.id]);
+
+  const send = async () => {
+    if (!replyText.trim() || sending) return;
+    setSending(true);
+    const ok = await onReply(msg, replyText);
+    setSending(false);
+    if (ok) setReplyText('');
+  };
 
   return (
     <>
+      {/* ── Toolbar — badge left, actions right ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 20px', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
+        padding: '10px 20px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', flexShrink: 0 }}>
         <RecipientBadge type={msg.recipient_type} department={msg.department} />
-        <button
-          onClick={() => onDelete(msg)}
-          title="Delete message"
-          style={{ background: 'none', border: '1px solid #fca5a5', color: '#dc2626',
-            borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-          🗑 Delete
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {folder === 'inbox' && onMove && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setFolderMenu(p => !p)}
+                title="File this message into one of your folders"
+                style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', color: '#6d28d9',
+                  borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                📁 {currentFolderName || 'Folder'} ▾
+              </button>
+              {folderMenu && (
+                <>
+                  <div onClick={() => setFolderMenu(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                  <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 41,
+                    background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, minWidth: 180,
+                    boxShadow: '0 6px 20px rgba(0,0,0,.15)', padding: 4, maxHeight: 260, overflowY: 'auto' }}>
+                    <div
+                      onClick={() => { onMove(msg, null); setFolderMenu(false); }}
+                      style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer',
+                        fontWeight: !msg.folder_id ? 700 : 400, color: !msg.folder_id ? '#1a56db' : '#374151' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                      📥 Inbox (no folder)
+                    </div>
+                    {folderOptions.length === 0 && (
+                      <div style={{ padding: '6px 10px', fontSize: 11.5, color: '#9ca3af' }}>
+                        No folders yet — create one with “+” in the sidebar.
+                      </div>
+                    )}
+                    {folderOptions.map(f => (
+                      <div key={f.id}
+                        onClick={() => { onMove(msg, f.id); setFolderMenu(false); }}
+                        style={{ padding: f.sub ? '6px 10px 6px 26px' : '6px 10px', borderRadius: 6,
+                          fontSize: 12.5, cursor: 'pointer',
+                          fontWeight: msg.folder_id === f.id ? 700 : 400,
+                          color: msg.folder_id === f.id ? '#1a56db' : '#374151' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                        {f.sub ? '📂' : '📁'} {f.name}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {folder === 'inbox' && (
+            <button
+              onClick={() => { replyRef.current?.focus(); replyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}
+              title={`Reply to ${msg.sender_name}`}
+              style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1a56db',
+                borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              ↩ Reply
+            </button>
+          )}
+          <button
+            onClick={() => onDelete(msg)}
+            title="Delete message"
+            style={{ background: '#fff', border: '1px solid #fca5a5', color: '#dc2626',
+              borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            🗑 Delete
+          </button>
+        </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '22px 30px' }}>
-        <h2 style={{ fontSize: 19, fontWeight: 700, color: '#111827', marginBottom: 18, wordBreak: 'break-word' }}>
+      {/* ── Message ── */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 26px' }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0, wordBreak: 'break-word' }}>
           {msg.subject}
         </h2>
+        <div style={{ width: 38, height: 3, borderRadius: 2, margin: '10px 0 18px',
+          background: 'linear-gradient(90deg,#3b82f6,#8b5cf6)' }} />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
-          paddingBottom: 18, borderBottom: '1px solid #f3f4f6' }}>
-          <div style={{ width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
-            background: '#eff6ff', color: '#1a56db', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', fontWeight: 700, fontSize: 16 }}>
-            {initial}
-          </div>
+        {/* Sender card */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
+          background: '#f9fafb', border: '1px solid #f0f1f4', borderRadius: 10, padding: '12px 14px' }}>
+          <Avatar photo={folder === 'inbox' ? msg.sender_photo : null} name={fromLabel} size={44}
+            style={{ boxShadow: '0 2px 6px rgba(26,86,219,.25)' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{fromLabel}</div>
-            <div style={{ fontSize: 12, color: '#9ca3af' }}>{fmtFull(msg.created_at)}</div>
+            <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>🕐 {fmtFull(msg.created_at)}</div>
           </div>
           {folder === 'sent' && msg.total_recipients > 0 && (
-            <div style={{ fontSize: 12, color: '#6b7280', flexShrink: 0 }}>
-              {msg.read_count}/{msg.total_recipients} read
-            </div>
+            <span style={{ background: '#f0fdf4', color: '#065f46', border: '1px solid #bbf7d0',
+              borderRadius: 10, padding: '2px 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+              ✓ {msg.read_count}/{msg.total_recipients} read
+            </span>
           )}
         </div>
 
-        <div style={{ fontSize: 14, color: '#374151', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+        {/* Body */}
+        <div style={{ fontSize: 14, color: '#374151', lineHeight: 1.75, whiteSpace: 'pre-wrap',
+          background: '#fff', border: '1px solid #f0f1f4', borderRadius: 10,
+          padding: '16px 18px', minHeight: 90 }}>
           {msg.body}
         </div>
       </div>
+
+      {/* ── Inline reply composer (inbox only) — send action on the right ── */}
+      {folder === 'inbox' && (
+        <div style={{ flexShrink: 0, borderTop: '1px solid #eef0f3', background: '#fafbfc',
+          padding: '12px 20px 14px' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 7 }}>
+            ↩ Reply to <span style={{ color: '#1a56db' }}>{msg.sender_name}</span>
+          </div>
+          <textarea
+            ref={replyRef}
+            value={replyText}
+            onChange={e => setReplyText(e.target.value)}
+            onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') send(); }}
+            rows={2}
+            placeholder="Type your reply…"
+            style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px',
+              fontSize: 13, resize: 'vertical', outline: 'none', fontFamily: 'inherit',
+              boxSizing: 'border-box', background: '#fff' }}
+          />
+          {/* paddingRight keeps the button clear of the floating Chat/+ widgets
+              pinned to the viewport's bottom-right corner */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginTop: 8, paddingRight: 170 }}>
+            <span style={{ fontSize: 11, color: '#9ca3af' }}>Ctrl+Enter to send</span>
+            <button
+              onClick={send}
+              disabled={sending || !replyText.trim()}
+              style={{ background: (!replyText.trim() || sending) ? '#93c5fd' : '#1a56db', color: '#fff',
+                border: 'none', borderRadius: 8, padding: '7px 18px', fontSize: 13, fontWeight: 700,
+                cursor: (!replyText.trim() || sending) ? 'not-allowed' : 'pointer',
+                boxShadow: '0 2px 6px rgba(26,86,219,.25)' }}>
+              {sending ? '⏳ Sending…' : '↩ Send Reply'}
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 };
@@ -269,7 +391,6 @@ const EmptyReadingPane = () => (
 const BigMessageModal = ({ msg, onClose, onDelete, onReply }) => {
   const isSent = !!msg._sent;
   const fromLabel = isSent ? recipientLabel(msg) : (msg.sender_name || '—');
-  const initial = (fromLabel || '?')[0]?.toUpperCase() || '?';
 
   const [replyText, setReplyText] = useState('');
   const [sending,   setSending]   = useState(false);
@@ -293,11 +414,7 @@ const BigMessageModal = ({ msg, onClose, onDelete, onReply }) => {
         <div className="modal-body" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
             paddingBottom: 16, borderBottom: '1px solid #f3f4f6' }}>
-            <div style={{ width: 46, height: 46, borderRadius: '50%', flexShrink: 0,
-              background: '#eff6ff', color: '#1a56db', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', fontWeight: 700, fontSize: 18 }}>
-              {initial}
-            </div>
+            <Avatar photo={isSent ? null : msg.sender_photo} name={fromLabel} size={46} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: '#111827' }}>{fromLabel}</div>
               <div style={{ fontSize: 12, color: '#9ca3af' }}>{fmtFull(msg.created_at)}</div>
@@ -370,6 +487,13 @@ const StaffMessage = () => {
   const [selectedIds, setSelectedIds] = useState([]);   // checkbox multi-select (inbox only)
   const [bigMsg,    setBigMsg]    = useState(null);      // message shown in the big popup (double-click)
 
+  /* ── Custom folders (parent → sub) — user-created filters over the inbox ── */
+  const [customFolders,  setCustomFolders]  = useState([]);
+  const [activeFolderId, setActiveFolderId] = useState(null);   // null = plain Inbox/Sent
+  const [newFolder,      setNewFolder]      = useState(null);   // { parentId, parentName } | null → create modal
+  const [newFolderName,  setNewFolderName]  = useState('');
+  const [delFolder,      setDelFolder]      = useState(null);   // folder pending delete confirmation
+
   /* ── Resizable list / reading-pane splitter ── */
   const [midWidth, setMidWidth] = useState(640);
   const containerRef = useRef(null);
@@ -424,15 +548,85 @@ const StaffMessage = () => {
     } catch (e) { showToast(e.message || 'Failed to load sent', 'error'); }
   }, []);
 
+  const loadFolders = useCallback(async () => {
+    try {
+      const data = await api.get('/messages/folders');
+      setCustomFolders(Array.isArray(data) ? data : []);
+    } catch (_) {}
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([loadInbox(), loadSent()]);
+      await Promise.all([loadInbox(), loadSent(), loadFolders()]);
       setLoading(false);
     };
     load();
     if (clearMsgCount) clearMsgCount();
-  }, [loadInbox, loadSent, clearMsgCount]);
+  }, [loadInbox, loadSent, loadFolders, clearMsgCount]);
+
+  /* ── Folder helpers ── */
+  const parentFolders = useMemo(() => customFolders.filter(f => !f.parent_id), [customFolders]);
+  const subsOf = useCallback((pid) => customFolders.filter(f => f.parent_id === pid), [customFolders]);
+
+  /** ids covered by a folder — itself plus (for a parent) all of its subs */
+  const folderSubtree = useCallback((id) => {
+    const ids = new Set([id]);
+    customFolders.forEach(f => { if (f.parent_id === id) ids.add(f.id); });
+    return ids;
+  }, [customFolders]);
+
+  const folderCounts = useMemo(() => {
+    const counts = {};
+    inbox.forEach(m => { if (m.folder_id) counts[m.folder_id] = (counts[m.folder_id] || 0) + 1; });
+    return counts;
+  }, [inbox]);
+  const folderCount = useCallback(
+    (f) => [...folderSubtree(f.id)].reduce((n, id) => n + (folderCounts[id] || 0), 0),
+    [folderSubtree, folderCounts]
+  );
+
+  const selectCustomFolder = (id) => {
+    setFolder('inbox');
+    setActiveFolderId(id);
+    setSelected(null);
+    setSelectedIds([]);
+    setBigMsg(null);
+  };
+
+  const createFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    try {
+      await api.post('/messages/folders', { name, parentId: newFolder?.parentId || null });
+      setNewFolder(null);
+      setNewFolderName('');
+      loadFolders();
+      showToast(`Folder “${name}” created`);
+    } catch (e) { showToast(e.message || 'Failed to create folder', 'error'); }
+  };
+
+  const deleteFolder = async (f) => {
+    try {
+      await api.delete(`/messages/folders/${f.id}`);
+      if (activeFolderId && folderSubtree(f.id).has(activeFolderId)) setActiveFolderId(null);
+      setDelFolder(null);
+      loadFolders();
+      loadInbox();   // server nulls folder_id on the messages that were inside
+      showToast(`Folder “${f.name}” deleted`);
+    } catch (e) { showToast(e.message || 'Delete failed', 'error'); }
+  };
+
+  /** File the recipient's copy of a message into a folder (null = back to plain Inbox). */
+  const moveToFolder = async (msg, folderId) => {
+    try {
+      await api.put(`/messages/${msg.id}/folder`, { folderId });
+      setInbox(prev => prev.map(m => m.id === msg.id ? { ...m, folder_id: folderId } : m));
+      setSelected(prev => (prev && prev.id === msg.id) ? { ...prev, folder_id: folderId } : prev);
+      const target = folderId ? customFolders.find(f => f.id === folderId)?.name : 'Inbox';
+      showToast(`Moved to ${target}`);
+    } catch (e) { showToast(e.message || 'Move failed', 'error'); }
+  };
 
   const markRead = async (msgId) => {
     try {
@@ -448,6 +642,7 @@ const StaffMessage = () => {
 
   const selectFolder = (key) => {
     setFolder(key);
+    setActiveFolderId(null);
     setSelected(null);
     setSelectedIds([]);
     setBigMsg(null);
@@ -514,7 +709,10 @@ const StaffMessage = () => {
     { key: 'sent',  label: 'Sent',  icon: '📤', count: 0 },
   ];
 
-  const currentList = folder === 'inbox' ? inbox : sent;
+  const activeFolder = activeFolderId ? customFolders.find(f => f.id === activeFolderId) : null;
+  const currentList = folder !== 'inbox' ? sent
+    : activeFolder ? inbox.filter(m => folderSubtree(activeFolder.id).has(m.folder_id))
+    : inbox;
 
   const columns = useMemo(() => {
     const typeCol = {
@@ -569,7 +767,6 @@ const StaffMessage = () => {
       <div className="page-header" style={{ flexShrink: 0 }}>
         <div>
           <h1 className="page-title">💬 Messages</h1>
-          <p className="page-subtitle">Internal communication — Individual, All Staff, Department</p>
         </div>
       </div>
 
@@ -603,26 +800,102 @@ const StaffMessage = () => {
             </button>
           </div>
           <div style={{ padding: '2px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {folders.map(f => (
-              <div key={f.key}
-                onClick={() => selectFolder(f.key)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px',
-                  borderRadius: 7, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                  color: folder === f.key ? '#1a56db' : '#374151',
-                  background: folder === f.key ? '#e0e7f0' : 'transparent' }}
-                onMouseEnter={e => { if (folder !== f.key) e.currentTarget.style.background = '#f0f0f0'; }}
-                onMouseLeave={e => { if (folder !== f.key) e.currentTarget.style.background = 'transparent'; }}>
-                <span>{f.icon}</span>
-                <span style={{ flex: 1 }}>{f.label}</span>
-                {f.count > 0 && (
-                  <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
-                    fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18,
-                    textAlign: 'center' }}>
-                    {f.count}
-                  </span>
-                )}
+            {folders.map(f => {
+              const isActive = folder === f.key && !activeFolderId;
+              return (
+                <div key={f.key}
+                  onClick={() => selectFolder(f.key)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px',
+                    borderRadius: 7, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                    color: isActive ? '#1a56db' : '#374151',
+                    background: isActive ? '#e0e7f0' : 'transparent' }}
+                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f0f0'; }}
+                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}>
+                  <span>{f.icon}</span>
+                  <span style={{ flex: 1 }}>{f.label}</span>
+                  {f.count > 0 && (
+                    <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
+                      fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18,
+                      textAlign: 'center' }}>
+                      {f.count}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Custom folders — create your own parents & subs, click to filter ── */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 8px 8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '0 6px 4px' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#6b7280',
+                textTransform: 'uppercase', letterSpacing: .5 }}>Folders</span>
+              <button onClick={() => { setNewFolder({ parentId: null, parentName: null }); setNewFolderName(''); }}
+                title="Create a new folder"
+                style={{ width: 20, height: 20, borderRadius: 6, border: '1px solid #d1d5db',
+                  background: '#fff', color: '#1a56db', fontSize: 13, fontWeight: 800, lineHeight: 1,
+                  cursor: 'pointer', padding: 0 }}>
+                +
+              </button>
+            </div>
+            {parentFolders.length === 0 && (
+              <div style={{ fontSize: 11, color: '#9ca3af', padding: '4px 6px', lineHeight: 1.5 }}>
+                Create folders to organise your inbox — e.g. a parent “Clients” with sub-folders per client.
               </div>
-            ))}
+            )}
+            {parentFolders.map(p => {
+              const rows = [{ f: p, sub: false }, ...subsOf(p.id).map(s => ({ f: s, sub: true }))];
+              return rows.map(({ f, sub }) => {
+                const isActive = activeFolderId === f.id;
+                return (
+                  <div key={f.id}
+                    onClick={() => selectCustomFolder(f.id)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6,
+                      padding: sub ? '6px 8px 6px 24px' : '7px 8px',
+                      borderRadius: 7, cursor: 'pointer', fontSize: 12.5,
+                      fontWeight: sub ? 500 : 600,
+                      color: isActive ? '#1a56db' : '#374151',
+                      background: isActive ? '#e0e7f0' : 'transparent' }}
+                    onMouseEnter={e => {
+                      if (!isActive) e.currentTarget.style.background = '#f0f0f0';
+                      e.currentTarget.querySelectorAll('[data-fact]').forEach(el => { el.style.visibility = 'visible'; });
+                    }}
+                    onMouseLeave={e => {
+                      if (!isActive) e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.querySelectorAll('[data-fact]').forEach(el => { el.style.visibility = 'hidden'; });
+                    }}>
+                    <span style={{ fontSize: 12 }}>{sub ? '📂' : '📁'}</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={f.name}>
+                      {f.name}
+                    </span>
+                    {folderCount(f) > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#6b7280',
+                        background: '#eef0f2', borderRadius: 8, padding: '0 5px' }}>
+                        {folderCount(f)}
+                      </span>
+                    )}
+                    {!sub && (
+                      <button data-fact onClick={e => { e.stopPropagation(); setNewFolder({ parentId: f.id, parentName: f.name }); setNewFolderName(''); }}
+                        title={`New sub-folder under “${f.name}”`}
+                        style={{ visibility: 'hidden', width: 17, height: 17, borderRadius: 5, border: 'none',
+                          background: '#dbeafe', color: '#1a56db', fontSize: 11, fontWeight: 800,
+                          lineHeight: 1, cursor: 'pointer', padding: 0, flexShrink: 0 }}>
+                        +
+                      </button>
+                    )}
+                    <button data-fact onClick={e => { e.stopPropagation(); setDelFolder(f); }}
+                      title="Delete folder"
+                      style={{ visibility: 'hidden', width: 17, height: 17, borderRadius: 5, border: 'none',
+                        background: '#fee2e2', color: '#dc2626', fontSize: 9, lineHeight: 1,
+                        cursor: 'pointer', padding: 0, flexShrink: 0 }}>
+                      ✕
+                    </button>
+                  </div>
+                );
+              });
+            })}
           </div>
         </div>
 
@@ -640,7 +913,7 @@ const StaffMessage = () => {
                 columns={columns}
                 data={currentList}
                 rowKey="id"
-                title={folder === 'inbox' ? 'Inbox' : 'Sent'}
+                title={folder !== 'inbox' ? 'Sent' : activeFolder ? `📁 ${activeFolder.name}` : 'Inbox'}
                 showCheckbox={folder === 'inbox'}
                 searchPlaceholder={folder === 'inbox' ? 'Search inbox…' : 'Search sent…'}
                 onRowClick={(row) => folder === 'inbox' ? openMessage(row) : setSelected({ ...row, _sent: true })}
@@ -675,7 +948,8 @@ const StaffMessage = () => {
         {/* Right — reading pane */}
         <div style={{ flex: 1, minWidth: 280, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {selected
-            ? <ReadingPane msg={selected} folder={folder} onDelete={(m) => setDelConfirm(m)} />
+            ? <ReadingPane msg={selected} folder={folder} onDelete={(m) => setDelConfirm(m)} onReply={sendReply}
+                customFolders={customFolders} onMove={moveToFolder} />
             : <EmptyReadingPane />}
         </div>
       </div>
@@ -706,6 +980,62 @@ const StaffMessage = () => {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setDelConfirm(null)}>Cancel</button>
               <button className="btn btn-danger" onClick={() => deleteMsg(delConfirm)}>🗑 Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create Folder Modal ── */}
+      {newFolder && (
+        <div className="modal-overlay" onClick={() => setNewFolder(null)}>
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header" style={{ background: 'linear-gradient(135deg,#f5f3ff,#ede9fe)' }}>
+              <h2 style={{ color: '#6d28d9' }}>
+                {newFolder.parentId ? `📂 New Sub-folder in “${newFolder.parentName}”` : '📁 New Folder'}
+              </h2>
+              <button className="modal-close" onClick={() => setNewFolder(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
+                Folder Name <span style={{ color: '#dc2626' }}>*</span>
+              </div>
+              <input
+                type="text" autoFocus value={newFolderName}
+                onChange={e => setNewFolderName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') createFolder(); }}
+                placeholder={newFolder.parentId ? 'e.g. VIP' : 'e.g. Clients'}
+                style={{ width: '100%', height: 36, border: '1px solid #d1d5db', borderRadius: 7,
+                  padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setNewFolder(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={createFolder} disabled={!newFolderName.trim()}>
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Folder Confirm ── */}
+      {delFolder && (
+        <div className="modal-overlay">
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header" style={{ background: 'linear-gradient(135deg,#fff5f5,#fef2f2)' }}>
+              <h2>⚠️ Delete Folder</h2>
+              <button className="modal-close" onClick={() => setDelFolder(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, color: '#374151' }}>
+                Delete <strong>{delFolder.name}</strong>
+                {!delFolder.parent_id && ' and all of its sub-folders'}?
+                Messages inside are not deleted — they go back to the Inbox.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setDelFolder(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={() => deleteFolder(delFolder)}>🗑 Delete</button>
             </div>
           </div>
         </div>

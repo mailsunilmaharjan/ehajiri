@@ -79,7 +79,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         onClick={e=>e.stopPropagation()}>
 
         {/* Header */}
-        <div style={{ padding:'16px 22px 12px',borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'16px 22px 12px',background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex',justifyContent:'space-between',alignItems:'center' }}>
           <span style={{ fontSize:16,fontWeight:700,color:'#1e40af' }}>{L('एडभान्स खोज','Advance Search')}</span>
           <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1 }}>✕</button>
@@ -364,9 +364,9 @@ const HalfInOutReport = () => {
         {/* Advance Search */}
         <button onClick={()=>setShowSearch(true)}
           style={{ display:'inline-flex',alignItems:'center',gap:6,padding:'0 14px',height:36,
-            background:activeFilterCount>0?'#eff6ff':'white',
-            border:`1.5px solid ${activeFilterCount>0?'#1a56db':'#d1d5db'}`,
-            color:activeFilterCount>0?'#1e40af':'#374151',
+            background:activeFilterCount>0?'#ede9fe':'#f5f3ff',
+            border:`1.5px solid ${activeFilterCount>0?'#7c3aed':'#c4b5fd'}`,
+            color:activeFilterCount>0?'#5b21b6':'#6d28d9',
             borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
             <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>

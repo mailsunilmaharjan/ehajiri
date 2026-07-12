@@ -124,13 +124,14 @@ thing to one — use it to verify changes.
   `src/api/client.js` and `src/context/AuthContext.jsx`) before navigating
   to `/dashboard`. If you need to test the *actual login form UI*, use an
   account whose username is a real email address instead.
-- **`/api/*` calls return 401 or ECONNREFUSED noise on every page load even
-  when nothing is wrong.** `DataContext` eagerly fetches `/api/employees`,
-  `/api/leaves`, etc. on mount regardless of auth state, and there's an
-  unrelated `advertisement` widget that always tries `localhost:3000` (a
+- **Some `/api/*` console noise is expected — don't treat it as a smoke-test
+  failure.** An `advertisement` widget always tries `localhost:3000` (a
   separate LicenseAdmin service, not part of this unit) and fails with
-  `ERR_CONNECTION_REFUSED` if that's not running. Both are expected noise —
-  don't treat them as smoke-test failures.
+  `ERR_CONNECTION_REFUSED` if that's not running. (Historical note: before
+  2026-07-09, `DataContext`/`SettingsContext` also fired authGuarded fetches
+  on mount while logged out, producing 401 noise on the login screen AND a
+  real bug — staff/settings stayed empty after a form login until a manual
+  refresh. Both now fetch on login, keyed on `currentUser?.id`.)
 - **Stale dev-server processes accumulate across sessions.** This
   environment already had a `vite` + `node server/index.js` pair listening
   on :4000/:5001 from an earlier session when this skill was built — check

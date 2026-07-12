@@ -10,6 +10,7 @@ import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits } from '../../u
 import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const WEEKDAYS_SHORT  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const BS_MONTHS_SHORT  = ['Baisakh','Jestha','Asadh','Shrawan','Bhadra','Ashwin',
                            'Kartik','Mangsir','Poush','Magh','Falgun','Chaitra'];
 
@@ -220,11 +221,16 @@ const YearlyInOutReport = () => {
 
   const maxDays = useMemo(()=>Math.max(...matrix.map(m=>m.days.length),31),[matrix]);
   const selectedEmp = sortedEmps.find(e=>String(e.id)===selectedId);
+  const currentIdx  = sortedEmps.findIndex(e=>String(e.id)===selectedId);
+  const navTo = (idx) => { if (idx>=0 && idx<sortedEmps.length) setSelectedId(String(sortedEmps[idx].id)); };
 
   /* Cell value */
   const getCellValue = (d, rowKey) => {
     if (!d.dateStr) return null;
-    if (d.isWeekend) return { text:'W', color:'#9ca3af', bg:'#f3f4f6', mono:false };
+    if (d.isWeekend) {
+      if (rowKey==='ot') return { text:'—', color:'#e5e7eb', bg:'#faf5ff', mono:false };
+      return { text:'W', color:'#9ca3af', bg:'#f3f4f6', mono:false };
+    }
     if (d.isHoliday && !d.timeIn) {
       if (rowKey==='in') return { text:(d.holidayName||'PH').slice(0,8), color:'#92400e', bg:'#fef3c7', mono:false, small:true };
       return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'#fef9e7', mono:false };
@@ -263,24 +269,35 @@ const YearlyInOutReport = () => {
           <button onClick={()=>{
               if (!matrix.length||!selectedEmp) return;
               const rptTitle = 'Yearly IN & OUT Log Report';
-              const rptSub = `${selectedEmp.fullName} | ${useNP?`${settings.nepaliDigits?toNepaliDigits(year):year} BS`:String(year)}`;
+              const empInfo = [selectedEmp.branch, selectedEmp.position, selectedEmp.department].filter(Boolean).join(' | ');
+              const rptSub = `${selectedEmp.fullName}${empInfo?` | ${empInfo}`:''} | ${useNP?`${settings.nepaliDigits?toNepaliDigits(year):year} BS`:String(year)}`;
               const maxD = maxDays;
               const dayHeaders = Array.from({length:maxD},(_,i)=>`<th style="padding:3px 2px;border:1px solid #dedede;background:#efefef;font-size:9px;min-width:32px">${i+1}</th>`).join('');
               const rowKeys = ['in','out','wh','ot'];
               const rowLabels = {in:'IN',out:'OUT',wh:'WH',ot:'OT'};
-              const dataRows = matrix.flatMap(m => rowKeys.map(rk => {
-                const cells = m.days.map(d => {
-                  const v = getCellValue(d, rk);
-                  return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:9px">${v?v.text:''}</td>`;
-                });
+              const dataRows = matrix.flatMap(m => {
                 const empty = Array.from({length:maxD-m.days.length},()=>`<td style="border:1px solid #ebebeb"></td>`);
-                const isFirst = rk==='in';
-                return `<tr>
-                  ${isFirst?`<td rowspan="4" style="padding:3px 5px;border:1px solid #dedede;font-weight:700;vertical-align:middle">${m.label}</td>`:''}
-                  <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:10px;font-weight:700">${rowLabels[rk]}</td>
-                  ${cells.join('')}${empty.join('')}
+                const wdCells = m.days.map(d => {
+                  const wd = d.dateStr ? WEEKDAYS_SHORT[new Date(d.dateStr).getDay()] : '';
+                  return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:8px;font-weight:700;background:#f8fafc;color:${d.isWeekend?'#dc2626':'#6b7280'}">${wd}</td>`;
+                });
+                const wdRow = `<tr>
+                  <td rowspan="5" style="padding:3px 5px;border:1px solid #dedede;font-weight:700;vertical-align:middle">${m.label}</td>
+                  <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:8px;font-weight:700;color:#9ca3af;background:#f8fafc">Day</td>
+                  ${wdCells.join('')}${empty.join('')}
                 </tr>`;
-              })).join('');
+                const rows = rowKeys.map(rk => {
+                  const cells = m.days.map(d => {
+                    const v = getCellValue(d, rk);
+                    return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:9px">${v?v.text:''}</td>`;
+                  });
+                  return `<tr>
+                    <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:10px;font-weight:700">${rowLabels[rk]}</td>
+                    ${cells.join('')}${empty.join('')}
+                  </tr>`;
+                });
+                return [wdRow, ...rows];
+              }).join('');
               const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:10px">
                 <thead><tr>
                   <th style="padding:4px 6px;border:1px solid #dedede;background:#efefef">Month</th>
@@ -311,14 +328,52 @@ const YearlyInOutReport = () => {
         <button className="btn btn-outline btn-sm" style={{ height:36 }} onClick={load} disabled={loading||!selectedId}>🔃</button>
       </div>
 
-      {/* Staff info */}
+      {/* Staff info + Back/Next navigation */}
       {selectedEmp && (
-        <div style={{ display:'flex',gap:12,flexWrap:'wrap',marginBottom:14,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:'10px 16px',alignItems:'center',borderLeft:'4px solid #1a56db' }}>
-          <span style={{ fontSize:14,fontWeight:800,color:'#1f2937' }}>{selectedEmp.fullName}</span>
-          {selectedEmp.employeeId && <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,padding:'1px 8px',fontSize:11,fontWeight:700 }}>{selectedEmp.employeeId}</span>}
-          {[{icon:'🎖️',v:selectedEmp.position},{icon:'🏗️',v:selectedEmp.department},{icon:'💼',v:selectedEmp.mode},{icon:'🎓',v:selectedEmp.grade}].filter(f=>f.v).map((f,i)=>(
-            <span key={i} style={{ display:'inline-flex',alignItems:'center',gap:4,fontSize:12,color:'#374151' }}><span>{f.icon}</span><strong>{f.v}</strong></span>
-          ))}
+        <div style={{ display:'flex',gap:12,marginBottom:14,alignItems:'stretch',flexWrap:'wrap' }}>
+          <div style={{ display:'flex',gap:12,flexWrap:'wrap',flex:1,minWidth:280,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:'10px 16px',alignItems:'center',borderLeft:'4px solid #1a56db' }}>
+            <span style={{ fontSize:14,fontWeight:800,color:'#1f2937' }}>{selectedEmp.fullName}</span>
+            {selectedEmp.employeeId && <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,padding:'1px 8px',fontSize:11,fontWeight:700 }}>{selectedEmp.employeeId}</span>}
+            {[{icon:'🏢',v:selectedEmp.branch},{icon:'🎖️',v:selectedEmp.position},{icon:'🏗️',v:selectedEmp.department}].filter(f=>f.v).map((f,i,arr)=>(
+              <React.Fragment key={i}>
+                <span style={{ display:'inline-flex',alignItems:'center',gap:4,fontSize:12,color:'#374151' }}><span>{f.icon}</span><strong>{f.v}</strong></span>
+                {i<arr.length-1 && <span style={{ color:'#cbd5e1',fontWeight:700 }}>|</span>}
+              </React.Fragment>
+            ))}
+          </div>
+          {sortedEmps.length > 1 && (
+            <div style={{ display:'flex',flexDirection:'row',alignItems:'center',justifyContent:'center',
+              gap:8,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,
+              padding:'10px 16px',flexShrink:0 }}>
+              <button
+                disabled={currentIdx <= 0}
+                onClick={() => navTo(currentIdx - 1)}
+                style={{ display:'inline-flex',alignItems:'center',gap:4,
+                  padding:'6px 14px',border:'1px solid #bae6fd',borderRadius:8,
+                  background: currentIdx <= 0 ? '#f1f5f9' : '#e0f2fe',
+                  color: currentIdx <= 0 ? '#cbd5e1' : '#0369a1',
+                  cursor: currentIdx <= 0 ? 'not-allowed' : 'pointer',
+                  fontSize:13,fontWeight:700,whiteSpace:'nowrap' }}>
+                ← {L('पछाडि','Back')}
+              </button>
+              <span style={{ fontSize:12,fontWeight:700,color:'#374151',
+                background:'white',borderRadius:7,padding:'5px 14px',
+                border:'1px solid #e2e8f0',whiteSpace:'nowrap' }}>
+                Staff: {currentIdx >= 0 ? currentIdx + 1 : '—'} / {sortedEmps.length}
+              </span>
+              <button
+                disabled={currentIdx < 0 || currentIdx >= sortedEmps.length - 1}
+                onClick={() => navTo(currentIdx + 1)}
+                style={{ display:'inline-flex',alignItems:'center',gap:4,
+                  padding:'6px 14px',border:'1px solid #86efac',borderRadius:8,
+                  background: (currentIdx < 0 || currentIdx >= sortedEmps.length-1) ? '#f1f5f9' : '#dcfce7',
+                  color: (currentIdx < 0 || currentIdx >= sortedEmps.length-1) ? '#cbd5e1' : '#15803d',
+                  cursor: (currentIdx < 0 || currentIdx >= sortedEmps.length-1) ? 'not-allowed' : 'pointer',
+                  fontSize:13,fontWeight:700,whiteSpace:'nowrap' }}>
+                {L('अर्को','Next')} →
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -345,29 +400,53 @@ const YearlyInOutReport = () => {
               </thead>
               <tbody>
                 {matrix.map((month, mi) => (
-                  ROWS.map((row, ri) => {
+                  <React.Fragment key={mi}>
+                    {/* Weekday row — Sun/Mon/Tue under each date, per calendar */}
+                    <tr style={{ background:'#f8fafc' }}>
+                      {/* Month name — rowspan 5 (weekday + 4 data rows) */}
+                      <td rowSpan={5} style={{ ...TD,fontWeight:700,color:'#374151',textAlign:'left',
+                        padding:'0 10px',verticalAlign:'middle',
+                        position:'sticky',left:0,background:'white',zIndex:1,
+                        borderRight:'1px solid #dedede',minWidth:78,
+                        borderBottom:'2px solid #d1d5db' }}>
+                        {month.label}
+                      </td>
+                      <td style={{ ...TD,fontSize:10,color:'#9ca3af',fontWeight:600,
+                        textAlign:'left',paddingLeft:8,background:'#f8fafc',
+                        position:'sticky',left:78,zIndex:1,
+                        borderLeft:'3px solid #e5e7eb',
+                        borderBottom:'1px solid #e5e7eb',minWidth:82 }}>
+                        Day
+                      </td>
+                      {Array.from({length:maxDays},(_,di)=>{
+                        const dayData = month.days[di];
+                        const wd = dayData?.dateStr ? WEEKDAYS_SHORT[new Date(dayData.dateStr).getDay()] : '';
+                        return (
+                          <td key={di} style={{ ...TD,fontSize:10,fontWeight:700,
+                            color:dayData?.isWeekend?'#dc2626':'#6b7280',
+                            background:'#f8fafc',borderBottom:'1px solid #e5e7eb',
+                            width:52,minWidth:52 }}
+                            title={dayData?.dateStr?fd(dayData.dateStr):''}>
+                            {wd}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  {ROWS.map((row, ri) => {
                     const isLastRow = ri===ROWS.length-1;
+                    const rowBorder = isLastRow ? '2px solid #d1d5db'
+                                    : (row.key==='wh' || row.key==='out') ? '2px solid #b8c0cc'
+                                    : '1px solid #f3f4f6';
                     return (
                       <tr key={`${mi}-${ri}`}
                         style={{ background:row.key==='wh'?'#fafafa':row.key==='ot'?'#faf5ff':'white' }}>
-
-                        {/* Month name — rowspan 4 */}
-                        {ri===0 && (
-                          <td rowSpan={4} style={{ ...TD,fontWeight:700,color:'#374151',textAlign:'left',
-                            padding:'0 10px',verticalAlign:'middle',
-                            position:'sticky',left:0,background:'white',zIndex:1,
-                            borderRight:'1px solid #dedede',minWidth:78,
-                            borderBottom:'2px solid #d1d5db' }}>
-                            {month.label}
-                          </td>
-                        )}
 
                         {/* Row label */}
                         <td style={{ ...TD,fontSize:11,color:row.color,fontWeight:600,
                           textAlign:'left',paddingLeft:8,background:'#fafafa',
                           position:'sticky',left:78,zIndex:1,
                           borderLeft:`3px solid ${row.color}33`,
-                          borderBottom:isLastRow?'2px solid #d1d5db':'1px solid #f3f4f6',
+                          borderBottom:rowBorder,
                           minWidth:82 }}>
                           {row.label}
                         </td>
@@ -380,7 +459,7 @@ const YearlyInOutReport = () => {
                           return (
                             <td key={di} style={{ ...TD,
                               background:cell?.bg||bg,
-                              borderBottom:isLastRow?'2px solid #d1d5db':'1px solid #f3f4f6',
+                              borderBottom:rowBorder,
                               width:52,minWidth:52 }}
                               title={dayData?.dateStr?fd(dayData.dateStr):''}>
                               {!cell ? <span style={{ color:'#f0f0f0',fontSize:9 }}>·</span>
@@ -396,7 +475,8 @@ const YearlyInOutReport = () => {
                         })}
                       </tr>
                     );
-                  })
+                  })}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

@@ -1,17 +1,16 @@
-﻿import { Router } from 'express';
+﻿import express, { Router } from 'express';
 import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import pool from '../db.js';
 import { APP_VERSION, DB_VERSION } from '../version.js';
-import { migrateBackupData } from '../migrations/runner.js';
+import { migrateBackupData, runMigrations } from '../migrations/runner.js';
 
 const router = Router();
 
-// ══════════════════════════════════════════════════════════
-//  GET /api/backup  — export full database as JSON
-// ══════════════════════════════════════════════════════════
-router.get('/', async (req, res) => {
-  try {
-    const [
+async function buildJsonBackup(by) {
+  const [
       users, shifts, leaveTypes, leaveBalances, leaves, officeVisits,
       fiscalYears, branches, departments, posts, grades,
       modes, religions, statuses, jobTimings, weekendHistory, appSettings,
@@ -37,12 +36,12 @@ router.get('/', async (req, res) => {
       pool.query('SELECT * FROM staff_notes').catch(() => ({ rows: [] })),
     ]);
 
-    const backup = {
+    return {
       meta: {
         appVersion : APP_VERSION,
         dbVersion  : DB_VERSION,
         exportedAt : new Date().toISOString(),
-        exportedBy : req.query.by || 'System',
+        exportedBy : by || 'System',
       },
       data: {
         users          : users.rows,
@@ -65,7 +64,14 @@ router.get('/', async (req, res) => {
         staffNotes     : staffNotes.rows,
       },
     };
+}
 
+// ══════════════════════════════════════════════════════════
+//  GET /api/backup  — export full database as JSON
+// ══════════════════════════════════════════════════════════
+router.get('/', async (req, res) => {
+  try {
+    const backup = await buildJsonBackup(req.query.by);
     res.setHeader('Content-Type', 'application/json');
     res.json(backup);
   } catch (e) {
@@ -73,12 +79,108 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Timestamped, date-sortable filename stem: 2026-07-12_143512
+function backupStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function resolveBackupDir(dir) {
+  const bad = (msg) => { const e = new Error(msg); e.statusCode = 400; return e; };
+  if (typeof dir !== 'string' || !dir.trim()) throw bad('Backup path is required');
+  const abs = dir.trim();
+  if (!path.isAbsolute(abs)) throw bad(`Backup path must be a full path (e.g. D:\\eHajiri Backups), got: ${abs}`);
+  try { fs.mkdirSync(abs, { recursive: true }); }
+  catch (e) { throw bad(`Cannot create backup folder "${abs}": ${e.message}`); }
+  return abs;
+}
+
 // ══════════════════════════════════════════════════════════
-//  GET /api/backup/sql — export a native PostgreSQL SQL dump via pg_dump,
-//  restorable with standard psql/pg_restore tooling outside the app. This
-//  is a plain logical dump (schema + data) for external/disaster-recovery
-//  use — it is NOT used by /restore above, which stays JSON-based since
-//  only that format carries meta.dbVersion for automatic schema migration.
+//  GET /api/backup/default-path — suggested folder for first-time setup
+// ══════════════════════════════════════════════════════════
+router.get('/default-path', (_req, res) => {
+  res.json({ path: path.join(os.homedir(), 'Documents', 'eHajiri Backups') });
+});
+
+// ══════════════════════════════════════════════════════════
+//  POST /api/backup/save — write the JSON backup straight to a folder on
+//  this machine (the server runs locally in the desktop app). Much faster
+//  than the download route: no HTTP transfer of the payload and no
+//  re-stringify in the browser. Body: { path, by }
+// ══════════════════════════════════════════════════════════
+router.post('/save', async (req, res) => {
+  try {
+    const dir = resolveBackupDir(req.body?.path);
+    const backup = await buildJsonBackup(req.body?.by);
+    const file = path.join(dir, `ehajiri-backup-v${APP_VERSION}-${backupStamp()}.json`);
+    const json = JSON.stringify(backup);
+    fs.writeFileSync(file, json);
+    res.json({ file, sizeKb: Math.round(Buffer.byteLength(json) / 1024) });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+//  POST /api/backup/sql/save — run pg_dump -Fc writing directly to a
+//  folder on this machine. Body: { path }
+// ══════════════════════════════════════════════════════════
+router.post('/sql/save', (req, res) => {
+  let dir;
+  try { dir = resolveBackupDir(req.body?.path); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const pgDumpPath = process.env.PG_DUMP_PATH || 'pg_dump';
+  const file = path.join(dir, `ehajiri-backup-${backupStamp()}.backup`);
+
+  const child = spawn(pgDumpPath, [
+    '--host', process.env.DB_HOST || 'localhost',
+    '--port', process.env.DB_PORT || '5432',
+    '--username', process.env.DB_USER || 'postgres',
+    '--no-owner',
+    '--no-privileges',
+    '--format=custom',
+    '--file', file,
+    process.env.DB_NAME || 'ehajiri_db',
+  ], {
+    env: { ...process.env, PGPASSWORD: process.env.DB_PASS || 'postgres' },
+  });
+
+  let stderr = '';
+  child.stderr.on('data', (d) => { stderr += d.toString(); });
+
+  // On spawn failure (e.g. ENOENT) 'error' AND 'close' both fire — only the
+  // first may respond, or Express throws ERR_HTTP_HEADERS_SENT.
+  child.on('error', (err) => {
+    if (res.headersSent) return;
+    const hint = err.code === 'ENOENT'
+      ? 'pg_dump not found — native SQL export is not bundled in this build. Use the JSON backup instead.'
+      : err.message;
+    res.status(500).json({ error: hint });
+  });
+
+  child.on('close', (code) => {
+    if (res.headersSent) return;
+    if (code !== 0) {
+      console.error('[backup/sql/save] pg_dump exited with code', code, stderr);
+      try { fs.unlinkSync(file); } catch {}
+      return res.status(500).json({ error: stderr || `pg_dump exited with code ${code}` });
+    }
+    let sizeKb = 0;
+    try { sizeKb = Math.round(fs.statSync(file).size / 1024); } catch {}
+    res.json({ file, sizeKb });
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+//  GET /api/backup/sql — export a native PostgreSQL dump via pg_dump in
+//  custom format (-Fc): compressed, not human-readable in a text editor,
+//  and covers ALL tables (attendance logs included). Restore outside the
+//  app with standard tooling:  pg_restore -d ehajiri_db <file>.backup
+//  This is for external/disaster-recovery use — it is NOT used by
+//  /restore above, which stays JSON-based since only that format carries
+//  meta.dbVersion for automatic schema migration.
 // ══════════════════════════════════════════════════════════
 router.get('/sql', (_req, res) => {
   const pgDumpPath = process.env.PG_DUMP_PATH || 'pg_dump';
@@ -89,7 +191,7 @@ router.get('/sql', (_req, res) => {
     '--username', process.env.DB_USER || 'postgres',
     '--no-owner',
     '--no-privileges',
-    '--format=plain',
+    '--format=custom',
     process.env.DB_NAME || 'ehajiri_db',
   ], {
     env: { ...process.env, PGPASSWORD: process.env.DB_PASS || 'postgres' },
@@ -102,8 +204,8 @@ router.get('/sql', (_req, res) => {
   // launched — an ENOENT (binary not bundled/found) fires 'error' instead
   // of 'spawn', so it can still be reported as a normal JSON error below.
   child.once('spawn', () => {
-    const filename = `ehajiri-backup-${new Date().toISOString().split('T')[0]}.sql`;
-    res.setHeader('Content-Type', 'application/sql');
+    const filename = `ehajiri-backup-${new Date().toISOString().split('T')[0]}.backup`;
+    res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     child.stdout.pipe(res);
   });
@@ -123,6 +225,68 @@ router.get('/sql', (_req, res) => {
     else res.end();
   });
 });
+
+// ══════════════════════════════════════════════════════════
+//  POST /api/backup/restore-native — restore a pg_dump custom-format
+//  (-Fc, "PGDMP" magic) dump produced by GET /sql above, via pg_restore.
+//  Unlike the JSON /restore, this is a FULL replacement of every table
+//  (attendance logs included). --single-transaction makes it atomic: if
+//  anything fails, the database is left untouched. Afterwards the schema
+//  migrations re-run, so a dump taken on an older app version still ends
+//  up at the current schema (app_schema_version is part of the dump).
+// ══════════════════════════════════════════════════════════
+router.post('/restore-native',
+  express.raw({ type: 'application/octet-stream', limit: '2gb' }),
+  async (req, res) => {
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length < 5 || buf.subarray(0, 5).toString('ascii') !== 'PGDMP') {
+      return res.status(400).json({
+        error: 'Not a PostgreSQL custom-format dump (PGDMP header missing). Use a .backup file from "Export SQL", or the JSON restore for .json backups.',
+      });
+    }
+
+    const pgRestorePath = process.env.PG_RESTORE_PATH || 'pg_restore';
+    const tmpFile = path.join(os.tmpdir(), `ehajiri-restore-${Date.now()}.backup`);
+
+    try {
+      fs.writeFileSync(tmpFile, buf);
+
+      const stderr = await new Promise((resolve, reject) => {
+        const child = spawn(pgRestorePath, [
+          '--host', process.env.DB_HOST || 'localhost',
+          '--port', process.env.DB_PORT || '5432',
+          '--username', process.env.DB_USER || 'postgres',
+          '--dbname', process.env.DB_NAME || 'ehajiri_db',
+          '--clean', '--if-exists',
+          '--no-owner', '--no-privileges',
+          '--single-transaction',
+          tmpFile,
+        ], {
+          env: { ...process.env, PGPASSWORD: process.env.DB_PASS || 'postgres' },
+        });
+        let err = '';
+        child.stderr.on('data', (d) => { err += d.toString(); });
+        child.on('error', (e) => reject(e.code === 'ENOENT'
+          ? new Error('pg_restore not found — native restore is not bundled in this build. Use a JSON backup instead.')
+          : e));
+        child.on('close', (code) => code === 0
+          ? resolve(err)
+          : reject(new Error(err.split('\n').slice(-8).join('\n') || `pg_restore exited with code ${code}`)));
+      });
+
+      // The dump may be from an older app version — bring the schema forward.
+      await runMigrations();
+
+      res.json({
+        message: 'Database restored from PostgreSQL dump (all tables).',
+        warnings: stderr.trim() || null,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    } finally {
+      fs.unlink(tmpFile, () => {});
+    }
+  });
 
 // ══════════════════════════════════════════════════════════
 //  GET /api/backup/version  — current version info

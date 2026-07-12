@@ -620,9 +620,6 @@ const RoleManagement = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title" style={{ fontSize: 20 }}>🔐 Role & Permission Management</h1>
-          <p className="page-subtitle" style={{ fontSize: 13 }}>
-            System Admin only — configure page access, edit/delete rights, and assign roles to staff.
-          </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8,
           background: '#ede9fe', border: '1px solid #c4b5fd', borderRadius: 8, padding: '6px 14px' }}>

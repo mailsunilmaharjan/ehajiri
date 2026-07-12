@@ -165,9 +165,33 @@ router.post('/change-password', authGuard, async (req, res) => {
 router.get('/users', async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, employee_id, username, full_name, role, department, branch, position, shift, email, phone, join_date, gender, avatar, active FROM users WHERE is_system IS NOT TRUE ORDER BY id'
+      'SELECT id, employee_id, username, full_name, role, department, branch, position, shift, email, phone, join_date, gender, avatar, active, profile_photo FROM users WHERE is_system IS NOT TRUE ORDER BY id'
     );
     res.json(rows.map(camelUser));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** PUT /api/auth/profile-photo — set/remove the logged-in user's own picture */
+router.put('/profile-photo', authGuard, async (req, res) => {
+  const { photo } = req.body || {};
+  if (photo !== null && photo !== undefined) {
+    if (typeof photo !== 'string' || !photo.startsWith('data:image/'))
+      return res.status(400).json({ error: 'Photo must be a data-URL image' });
+    // Client downscales to ~256px JPEG before upload; anything bigger than
+    // this means that step was bypassed — refuse rather than bloat every
+    // employees/chat/messages payload it gets embedded into.
+    if (photo.length > 400_000)
+      return res.status(400).json({ error: 'Photo too large — must be under ~300 KB' });
+  }
+  try {
+    const { rows } = await pool.query(
+      'UPDATE users SET profile_photo=$1 WHERE id=$2 RETURNING profile_photo',
+      [photo || null, req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'User not found' });
+    res.json({ profilePhoto: rows[0].profile_photo });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -190,6 +214,7 @@ function camelUser(r) {
     gender      : r.gender,
     avatar      : r.avatar,
     active      : r.active,
+    profilePhoto: r.profile_photo,
     eligibleForOt: r.eligible_for_ot,
   };
 }

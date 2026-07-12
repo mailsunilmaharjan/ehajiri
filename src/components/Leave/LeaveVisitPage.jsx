@@ -2450,7 +2450,6 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
           <span style={{ color:'#d1d5db', fontWeight:300, fontSize:14 }}>|</span>
           <span style={{ fontSize:13 }}>🏢</span> Office Visit
         </h1>
-        <p className="page-subtitle" style={{ marginTop:3 }}>{t('Leave Applications')} &amp; {t('Visit Applications')}</p>
       </div>
 
       {/* ── Tab Bar ── */}

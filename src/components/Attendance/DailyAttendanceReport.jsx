@@ -113,7 +113,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
       }} onClick={e => e.stopPropagation()}>
 
         {/* ── Header ── */}
-        <div style={{ padding:'20px 24px 16px', borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'20px 24px 16px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <span style={{ fontSize:18, fontWeight:700, color:'#1e40af', letterSpacing:'-.2px' }}>
             {L('एडभान्स खोज','Advance Search')}
@@ -490,19 +490,22 @@ const DailyAttendanceReport = () => {
   return (
     <div className="page-container">
 
-      {/* ══ Page Header — same style as all pages ══ */}
-      <div className="page-header">
+      {/* ══ Page Header — same style as all pages, but tighter: the date nav +
+          summary row below acts as part of the header, so no 20px gap here ══ */}
+      <div className="page-header" style={{ marginBottom: 8 }}>
         <div>
-          <h1 className="page-title">📋 {L('दैनिक हाजिरी रिपोर्ट','Daily Attendance Report')}</h1>
-          <p className="page-subtitle">
-            {displayDate} &nbsp;·&nbsp; {dayLabel}
+          <h1 className="page-title">
+            📋 {L('दैनिक हाजिरी रिपोर्ट','Daily Attendance Report')}
+            <span style={{ fontSize:14, fontWeight:600, color:'#6b7280', marginLeft:10 }}>
+              [ {displayDate} &nbsp;·&nbsp; {dayLabel} ]
+            </span>
             {data?.isWeekend && (
               <span style={{ marginLeft:8, background:'#f3f4f6', color:'#6b7280',
-                borderRadius:6, padding:'1px 8px', fontSize:11 }}>
+                borderRadius:6, padding:'1px 8px', fontSize:11, fontWeight:600 }}>
                 {L('साप्ताहिक विदा','Weekend')}
               </span>
             )}
-          </p>
+          </h1>
         </div>
         <div style={{ display:'flex', gap:8 }}>
           {/* Excel Export */}
@@ -719,7 +722,7 @@ const DailyAttendanceReport = () => {
         </div>
 
         {/* RIGHT: inline summary stats */}
-        <div style={{ display:'flex', justifyContent:'flex-end' }}>
+        <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8, flexWrap:'wrap' }}>
         {summary && (
           <div style={{ display:'flex', alignItems:'stretch', gap:0,
             background:'white', border:'1px solid #e5e7eb', borderRadius:8,
@@ -812,9 +815,9 @@ const DailyAttendanceReport = () => {
             {/* Advance Search button — replaces the DataGrid Filter button */}
             <button onClick={() => setSearchModal(true)}
               style={{ height:32, padding:'0 14px',
-                border:`1.5px solid ${activeCount?'#1a56db':'#d1d5db'}`,
-                borderRadius:6, background: activeCount?'#eff6ff':'white',
-                color: activeCount?'#1a56db':'#374151',
+                border:`1.5px solid ${activeCount?'#7c3aed':'#c4b5fd'}`,
+                borderRadius:6, background: activeCount?'#ede9fe':'#f5f3ff',
+                color: activeCount?'#5b21b6':'#6d28d9',
                 cursor:'pointer', fontSize:12, fontWeight: activeCount?700:600,
                 display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
               <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">

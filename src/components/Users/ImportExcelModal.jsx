@@ -3,23 +3,15 @@ import * as XLSX from 'xlsx';
 
 /* ── Column schema ── */
 const COLUMNS = [
+  { key: 'deviceId',     label: 'Attendance Device Id', required: false, note: 'PIN on the attendance device (defaults to Employee ID)' },
   { key: 'employeeId',   label: 'Employee ID',   required: true  },
   { key: 'fullName',     label: 'Full Name',      required: true  },
-  { key: 'email',        label: 'Email',          required: false },
   { key: 'phone',        label: 'Phone',          required: false },
+  { key: 'email',        label: 'Email',          required: false },
+  { key: 'gender',       label: 'Gender',         required: false, note: 'male / female / other' },
+  { key: 'branch',       label: 'Branch',         required: false },
   { key: 'department',   label: 'Department',     required: false },
   { key: 'position',     label: 'Position',       required: false },
-  { key: 'branch',       label: 'Branch',         required: false },
-  { key: 'role',         label: 'Role',           required: false, note: 'employee / admin / branchManager / departmentHead' },
-  { key: 'gender',       label: 'Gender',         required: false, note: 'male / female / other' },
-  { key: 'joinDate',     label: 'Join Date',      required: false, note: 'YYYY-MM-DD' },
-  { key: 'mode',         label: 'Mode',           required: false, note: 'Permanent / Temporary / Contract' },
-  { key: 'deviceId',     label: 'Device ID',      required: false },
-  { key: 'grade',        label: 'Grade',          required: false },
-  { key: 'dob',          label: 'Date of Birth',  required: false, note: 'YYYY-MM-DD' },
-  { key: 'status',       label: 'Status',         required: false, note: 'Active / Inactive' },
-  { key: 'eligibleForOt',label: 'OT Eligible',    required: false, note: 'yes / no' },
-  { key: 'remarks',      label: 'Remarks',        required: false },
 ];
 
 /* ── Flexible header → field key mapping ── */
@@ -36,6 +28,7 @@ const HEADER_MAP = {
   'join_date':'joinDate','join date':'joinDate','joindate':'joinDate','joining date':'joinDate','date of joining':'joinDate',
   'mode':'mode','employment mode':'mode','employment type':'mode','type':'mode',
   'device_id':'deviceId','device id':'deviceId','deviceid':'deviceId','device pin':'deviceId',
+  'attendance device id':'deviceId','attendance device':'deviceId','attendance id':'deviceId',
   'grade':'grade',
   'dob':'dob','date of birth':'dob','birth date':'dob','birthday':'dob',
   'status':'status','emp status':'status','employment status':'status',
@@ -73,8 +66,8 @@ function parseSheet(ws) {
 /* ── Download template ── */
 function downloadTemplate() {
   const headers = COLUMNS.map(c => c.label);
-  const sample1 = ['EMP001','Ram Bahadur Shrestha','ram@example.com','9800000001','Admin','CEO','PIPL','employee','male','2080-01-15','Permanent','1001','A','2055-06-10','Active','yes',''];
-  const sample2 = ['EMP002','Sita Kumari Karki','sita@example.com','9800000002','Finance','Finance Director','PIPL','employee','female','2079-04-20','Permanent','1002','B','2058-02-25','Active','no',''];
+  const sample1 = ['1001','EMP001','Ram Bahadur Shrestha','9800000001','ram@example.com','male','PIPL','Admin','CEO'];
+  const sample2 = ['1002','EMP002','Sita Kumari Karki','9800000002','sita@example.com','female','PIPL','Finance','Finance Director'];
 
   const ws = XLSX.utils.aoa_to_sheet([headers, sample1, sample2]);
 
@@ -312,7 +305,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
                         borderBottom:'2px solid #dedede', borderRight:'1px solid #dedede', textAlign:'center', whiteSpace:'nowrap' }}>
                         #
                       </th>
-                      {['Employee ID','Full Name','Email','Phone','Dept.','Position','Branch','Role','Gender','Join Date','Mode','Device ID','Status'].map(h => (
+                      {['Attendance Device Id','Employee ID','Full Name','Phone','Email','Gender','Branch','Department','Position'].map(h => (
                         <th key={h} style={{ padding:'7px 10px', fontWeight:700, color:'#374151', fontSize:12,
                           borderBottom:'2px solid #dedede', borderRight:'1px solid #dedede', whiteSpace:'nowrap' }}>
                           {h}
@@ -332,9 +325,8 @@ export default function ImportExcelModal({ onClose, onImported }) {
                           <td style={{ padding:'5px 10px', color:'#9ca3af', fontSize:12, borderBottom:'1px solid #f0f0f0',
                             borderRight:'1px solid #f0f0f0', textAlign:'center' }}>{i + 1}</td>
                           {[
-                            row.employeeId, row.fullName, row.email, row.phone,
-                            row.department, row.position, row.branch, row.role,
-                            row.gender, row.joinDate, row.mode, row.deviceId, row.status,
+                            row.deviceId, row.employeeId, row.fullName, row.phone,
+                            row.email, row.gender, row.branch, row.department, row.position,
                           ].map((val, ci) => (
                             <td key={ci} style={{ padding:'5px 10px', color:'#1f2937', borderBottom:'1px solid #f0f0f0',
                               borderRight:'1px solid #f0f0f0', whiteSpace:'nowrap', maxWidth:140,

@@ -2250,6 +2250,10 @@ const Settings = () => {
   const [restorePreview, setRestorePreview] = useState(null); // parsed backup meta
   const [restoreData,    setRestoreData]    = useState(null); // full backup object
   const [restoreLog,     setRestoreLog]     = useState('');
+  const [backupPath, setBackupPath] = useState(() => {
+    try { return localStorage.getItem('ls_backupPath') || ''; } catch { return ''; }
+  });
+  const [backupPathModal, setBackupPathModal] = useState(null); // { input, next: 'json'|'sql'|null }
   const [backupHistory,  setBackupHistory]  = useState(() => {
     try { return JSON.parse(localStorage.getItem('ls_backupHistory') || '[]'); } catch { return []; }
   });
@@ -2479,7 +2483,7 @@ const Settings = () => {
   });
 
   const downloadJson = (data) => {
-    const json = JSON.stringify(data, null, 2);
+    const json = JSON.stringify(data);
     const blob = new Blob([json], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -2490,12 +2494,13 @@ const Settings = () => {
   };
 
   /* ── Backup handlers ── */
-  const addBackupHistory = (source, sizeKb) => {
+  const addBackupHistory = (source, sizeKb, path) => {
     const entry = {
       id: Date.now(),
       date: new Date().toISOString(),
       source,
       sizeKb,
+      path: path || '',
       by: currentUser?.fullName || 'Admin',
     };
     setBackupHistory(prev => {
@@ -2505,52 +2510,64 @@ const Settings = () => {
     });
   };
 
-  const handleBackup = async () => {
+  /* Open the backup-location modal; `next` = which backup to run after saving */
+  const openBackupPathModal = async (next = null) => {
+    let suggestion = backupPath;
+    if (!suggestion) {
+      try { suggestion = (await api.get('/backup/default-path')).path || ''; } catch { suggestion = ''; }
+    }
+    setBackupPathModal({ input: suggestion, next });
+  };
+
+  const confirmBackupPath = () => {
+    const p = (backupPathModal?.input || '').trim();
+    if (!p) return;
+    setBackupPath(p);
+    try { localStorage.setItem('ls_backupPath', p); } catch {}
+    const next = backupPathModal?.next;
+    setBackupPathModal(null);
+    if (next === 'json') handleBackup(p);
+    if (next === 'sql')  handleBackupSql(p);
+  };
+
+  /* Backups are written server-side straight into the chosen folder
+     (date-wise file name) — no browser download of the payload. */
+  const handleBackup = async (dirArg) => {
+    const dir = typeof dirArg === 'string' ? dirArg : backupPath;
+    if (!dir) { openBackupPathModal('json'); return; }
     setBackupLoading(true);
     try {
-      /* Try PostgreSQL backup via API first */
-      const data = await api.get(`/backup?by=${encodeURIComponent(currentUser?.fullName || 'Admin')}`);
-      const json = JSON.stringify(data);
-      downloadJson(data);
-      addBackupHistory('PostgreSQL', Math.round(json.length / 1024));
-      showToast(L('ब्याकअप सफलतापूर्वक डाउनलोड भयो','Backup downloaded successfully'));
-    } catch {
-      /* API unavailable — export current in-memory / localStorage state */
-      try {
-        const offline = buildOfflineBackup();
-        const json = JSON.stringify(offline);
-        downloadJson(offline);
-        addBackupHistory('localStorage', Math.round(json.length / 1024));
-        showToast(L('अफलाइन ब्याकअप डाउनलोड भयो (स्थानीय डेटा)','Offline backup downloaded (local data)'));
-      } catch (e2) {
-        showToast(e2.message, 'danger');
+      const r = await api.post('/backup/save', { path: dir, by: currentUser?.fullName || 'Admin' });
+      addBackupHistory('PostgreSQL', r.sizeKb, r.file);
+      showToast(`${L('ब्याकअप सुरक्षित भयो','Backup saved')}: ${r.file}`);
+    } catch (e) {
+      if (isOnline) {
+        showToast(e.message, 'danger');
+      } else {
+        /* API unavailable — export current in-memory / localStorage state */
+        try {
+          const offline = buildOfflineBackup();
+          const json = JSON.stringify(offline);
+          downloadJson(offline);
+          addBackupHistory('localStorage', Math.round(json.length / 1024), L('ब्राउजर डाउनलोड','Browser download'));
+          showToast(L('अफलाइन ब्याकअप डाउनलोड भयो (स्थानीय डेटा)','Offline backup downloaded (local data)'));
+        } catch (e2) {
+          showToast(e2.message, 'danger');
+        }
       }
     } finally {
       setBackupLoading(false);
     }
   };
 
-  const handleBackupSql = async () => {
+  const handleBackupSql = async (dirArg) => {
+    const dir = typeof dirArg === 'string' ? dirArg : backupPath;
+    if (!dir) { openBackupPathModal('sql'); return; }
     setSqlBackupLoading(true);
     try {
-      const token = getToken();
-      const res = await fetch('/api/backup/sql', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try { msg = (await res.json()).error || msg; } catch {}
-        throw new Error(msg);
-      }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `ehajiri-backup-${new Date().toISOString().split('T')[0]}.sql`;
-      a.click();
-      URL.revokeObjectURL(url);
-      addBackupHistory('SQL (pg_dump)', Math.round(blob.size / 1024));
-      showToast(L('SQL ब्याकअप सफलतापूर्वक डाउनलोड भयो','SQL backup downloaded successfully'));
+      const r = await api.post('/backup/sql/save', { path: dir });
+      addBackupHistory('PostgreSQL dump (pg_dump -Fc)', r.sizeKb, r.file);
+      showToast(`${L('SQL ब्याकअप सुरक्षित भयो','SQL backup saved')}: ${r.file}`);
     } catch (e) {
       showToast(e.message, 'danger');
     } finally {
@@ -2562,6 +2579,25 @@ const Settings = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
+
+    // .backup = pg_dump custom-format dump ("PGDMP" magic) → native pg_restore path
+    if (/\.backup$/i.test(file.name)) {
+      reader.onload = (ev) => {
+        const buf = ev.target.result;
+        const magic = String.fromCharCode(...new Uint8Array(buf.slice(0, 5)));
+        if (magic !== 'PGDMP') {
+          showToast(L('अमान्य .backup फाइल','Not a valid PostgreSQL .backup dump'), 'danger');
+          return;
+        }
+        setRestorePreview({ native: true, fileName: file.name, sizeMB: (file.size / 1048576).toFixed(1) });
+        setRestoreData({ native: true, buffer: buf });
+        setRestoreLog('');
+      };
+      reader.readAsArrayBuffer(file);
+      e.target.value = '';
+      return;
+    }
+
     reader.onload = (ev) => {
       try {
         const parsed = JSON.parse(ev.target.result);
@@ -2616,6 +2652,35 @@ const Settings = () => {
     if (!restoreData) return;
     setRestoreLoading(true);
     setRestoreLog('');
+
+    // Native pg_restore path — full replacement of all tables, no offline fallback
+    if (restoreData.native) {
+      try {
+        const token = getToken();
+        const res = await fetch('/api/backup/restore-native', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: restoreData.buffer,
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || `Restore failed (${res.status})`);
+        setRestoreLog(`✅ ${result.message}${result.warnings ? `\n⚠️ ${result.warnings}` : ''}`);
+        showToast(L('डेटाबेस पुनर्स्थापित भयो','Database restored successfully'));
+        setRestorePreview(null);
+        setRestoreData(null);
+        setTimeout(() => window.location.reload(), 1500);
+      } catch (e) {
+        setRestoreLog(`❌ Error: ${e.message}`);
+        showToast(e.message, 'danger');
+      } finally {
+        setRestoreLoading(false);
+      }
+      return;
+    }
+
     try {
       /* Try API (PostgreSQL) restore first */
       const result = await api.post('/backup/restore', restoreData);
@@ -2686,7 +2751,6 @@ const Settings = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">⚙️ {t('Settings')}</h1>
-          <p className="page-subtitle">eHajiri TMS — {L('प्रणाली सेटिङ','System Settings')}</p>
         </div>
       </div>
 
@@ -3544,10 +3608,15 @@ const Settings = () => {
                   <h3>📥 {L('डेटाबेस ब्याकअप','Database Backup')}</h3>
                 </div>
                 <div className="card-body">
-                  <p style={{ fontSize:13, color:'#6b7280', marginBottom:16 }}>
-                    {L('सम्पूर्ण डेटाबेस (कर्मचारी, बिदा, अफिस भिजिट, सेटिङ, आर्थिक वर्ष र अन्य सबै) JSON फाइलमा डाउनलोड गर्नुहोस।',
-                       'Download the complete database (employees, leaves, visits, settings, fiscal years & all) as a JSON file.')}
-                  </p>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, fontSize:13, flexWrap:'wrap' }}>
+                    <span style={{ color:'#6b7280', fontWeight:600 }}>📁 {L('ब्याकअप स्थान','Backup Location')}:</span>
+                    {backupPath
+                      ? <code style={{ background:'#f3f4f6', border:'1px solid #e5e7eb', borderRadius:6, padding:'3px 10px', fontSize:12, color:'#1f2937' }}>{backupPath}</code>
+                      : <span style={{ color:'#9ca3af' }}>{L('सेट गरिएको छैन — पहिलो ब्याकअपमा सोधिनेछ','Not set — you will be asked on first backup')}</span>}
+                    <button className="btn btn-sm btn-outline" onClick={() => openBackupPathModal(null)}>
+                      {backupPath ? `✏️ ${L('परिवर्तन','Change')}` : `📂 ${L('स्थान छान्नुहोस','Set Location')}`}
+                    </button>
+                  </div>
                   <div style={{ background: isOnline ? '#f0fdf4' : '#fefce8', border:`1px solid ${isOnline ? '#bbf7d0' : '#fde68a'}`, borderRadius:8, padding:'12px 14px', marginBottom:16, fontSize:13, color: isOnline ? '#065f46' : '#92400e' }}>
                     {isOnline ? '✅' : '💾'}{' '}
                     {isOnline
@@ -3559,17 +3628,17 @@ const Settings = () => {
                     <button
                       className="btn btn-primary"
                       style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, padding:'10px 22px' }}
-                      onClick={handleBackup}
+                      onClick={() => handleBackup()}
                       disabled={backupLoading}
                     >
-                      {backupLoading ? '⏳ ...' : '📥'} {L('ब्याकअप डाउनलोड गर्नुहोस','Download Backup')}
+                      {backupLoading ? '⏳ ...' : '📥'} {L('ब्याकअप लिनुहोस','Backup')}
                     </button>
                     <button
                       className="btn btn-outline"
                       style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, padding:'10px 22px' }}
-                      onClick={handleBackupSql}
+                      onClick={() => handleBackupSql()}
                       disabled={sqlBackupLoading || !isOnline}
-                      title={L('psql/pg_restore जस्ता मानक उपकरणहरूसँग प्रयोग गर्न मिल्ने SQL डम्प (pg_dump मार्फत)।','Native SQL dump (via pg_dump) restorable with standard tools like psql/pg_restore.')}
+                      title={L('सबै तालिकाहरू (हाजिरी लग सहित) समेट्ने compressed PostgreSQL डम्प — pg_restore बाट restore गर्नुहोस्।','Compressed PostgreSQL dump of ALL tables (attendance logs included) — restore with: pg_restore -d ehajiri_db <file>.backup')}
                     >
                       {sqlBackupLoading ? '⏳ ...' : '🗄️'} {L('SQL निर्यात गर्नुहोस','Export SQL')}
                     </button>
@@ -3580,7 +3649,7 @@ const Settings = () => {
                     >
                       📤 {L('ब्याकअप पुनर्स्थापना / फाइल छान्नुहोस','Database Restore / Select Backup File')}
                     </button>
-                    <input ref={restoreRef} type="file" accept=".json" style={{ display:'none' }} onChange={handleRestoreFileSelect} />
+                    <input ref={restoreRef} type="file" accept=".json,.backup" style={{ display:'none' }} onChange={handleRestoreFileSelect} />
                     {restorePreview && (
                       <span style={{ fontSize:12, color:'#059669', fontWeight:600 }}>
                         ✅ {L('फाइल लोड भयो','File loaded')}
@@ -3600,37 +3669,50 @@ const Settings = () => {
                           📋 {L('ब्याकअप विवरण','Backup Details')}
                         </div>
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:13 }}>
-                          {[
-                            [L('एप संस्करण','App Version'),    `v${restorePreview.appVersion}`],
-                            [L('DB संस्करण','DB Version'),     `v${restorePreview.dbVersion}`],
-                            [L('निर्यात मिति','Exported At'),  fd(restorePreview.exportedAt?.split('T')[0])],
-                            [L('निर्यात गरेको','Exported By'), restorePreview.exportedBy],
-                          ].map(([k, v]) => (
+                          {(restorePreview.native
+                            ? [
+                                [L('फाइल','File'),   restorePreview.fileName],
+                                [L('साइज','Size'),   `${restorePreview.sizeMB} MB`],
+                                [L('ढाँचा','Format'), 'PostgreSQL dump (pg_dump -Fc)'],
+                              ]
+                            : [
+                                [L('एप संस्करण','App Version'),    `v${restorePreview.appVersion}`],
+                                [L('DB संस्करण','DB Version'),     `v${restorePreview.dbVersion}`],
+                                [L('निर्यात मिति','Exported At'),  fd(restorePreview.exportedAt?.split('T')[0])],
+                                [L('निर्यात गरेको','Exported By'), restorePreview.exportedBy],
+                              ]
+                          ).map(([k, v]) => (
                             <div key={k}>
                               <span style={{ color:'#9ca3af', fontSize:11 }}>{k}: </span>
                               <strong style={{ color:'#1f2937' }}>{v}</strong>
                             </div>
                           ))}
                         </div>
-                        {restorePreview.dbVersion < DB_VERSION && (
+                        {restorePreview.native && (
+                          <div style={{ marginTop:12, background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#0369a1' }}>
+                            🗄️ {L('पूर्ण PostgreSQL पुनर्स्थापना — हाजिरी लग सहित सबै तालिकाहरू बदलिनेछन्। पुरानो संस्करणको डम्प भए माइग्रेसन स्वत: चल्नेछ।',
+                                  'Full PostgreSQL restore — replaces ALL tables including attendance logs. If the dump is from an older version, migrations run automatically.')}
+                          </div>
+                        )}
+                        {!restorePreview.native && restorePreview.dbVersion < DB_VERSION && (
                           <div style={{ marginTop:12, background:'#fffbeb', border:'1px solid #fcd34d', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#92400e' }}>
                             🔄 {L('यो ब्याकअप पुरानो DB संस्करणको हो','This backup is from an older DB schema')}
                             {' '}(v{restorePreview.dbVersion} → v{DB_VERSION}).{' '}
                             {L('पुनर्स्थापनामा स्वत: माइग्रेसन लागू हुनेछ।','Migration will be applied automatically on restore.')}
                           </div>
                         )}
-                        {restorePreview.dbVersion === DB_VERSION && (
+                        {!restorePreview.native && restorePreview.dbVersion === DB_VERSION && (
                           <div style={{ marginTop:12, background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#065f46' }}>
                             ✅ {L('ब्याकअप हालको DB संस्करणसँग मेल खान्छ।','Backup matches current DB version — no migration needed.')}
                           </div>
                         )}
-                        {restorePreview.dbVersion > DB_VERSION && (
+                        {!restorePreview.native && restorePreview.dbVersion > DB_VERSION && (
                           <div style={{ marginTop:12, background:'#fef2f2', border:'1px solid #fca5a5', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#b91c1c' }}>
                             ❌ {L('ब्याकअप नयाँ DB संस्करणको छ।','Backup is from a newer DB version — please upgrade the app first.')}
                           </div>
                         )}
                       </div>
-                      {restorePreview.dbVersion <= DB_VERSION && (
+                      {(restorePreview.native || restorePreview.dbVersion <= DB_VERSION) && (
                         <button
                           className="btn btn-danger"
                           style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, padding:'10px 22px' }}
@@ -3652,19 +3734,13 @@ const Settings = () => {
 
               {/* ── Backup History Card ── */}
               <div className="card">
-                <div className="card-header">
-                  <div>
-                    <h3>🕓 {L('ब्याकअप इतिहास','Backup History')}</h3>
-                    <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{L('यस सत्रमा डाउनलोड गरिएका ब्याकअपहरू (अधिकतम २०)','Backups downloaded this session — last 20')}</div>
-                  </div>
-                  {backupHistory.length > 0 && (
-                    <button className="btn btn-sm btn-outline" onClick={() => {
-                      setBackupHistory([]);
-                      try { localStorage.removeItem('ls_backupHistory'); } catch {}
-                    }}>🗑 {L('सफा गर्नुस','Clear')}</button>
-                  )}
-                </div>
                 <DataGrid
+                  title={
+                    <div>
+                      <div style={{ fontSize:15, fontWeight:700, color:'#111827' }}>🕓 {L('ब्याकअप इतिहास','Backup History')}</div>
+                      <div style={{ fontSize:12, color:'#6b7280', marginTop:2, fontWeight:400 }}>{L('यस सत्रमा लिइएका ब्याकअपहरू (अधिकतम २०)','Backups taken this session — last 20')}</div>
+                    </div>
+                  }
                   columns={[
                     { field:'date',   header:L('मिति र समय','Date & Time'), width:160, render:v=>(
                       <div>
@@ -3683,7 +3759,10 @@ const Settings = () => {
                       </span>
                     )},
                     { field:'sizeKb', header:L('साइज','Size'), width:90, align:'center', render:v=><span style={{color:'#0369a1',fontWeight:600}}>{v} KB</span> },
-                    { field:'by',     header:L('गरेको','By'), render:v=><span style={{fontWeight:500}}>{v}</span> },
+                    { field:'by',     header:L('गरेको','By'), width:130, render:v=><span style={{fontWeight:500}}>{v}</span> },
+                    { field:'path',   header:L('ब्याकअप पथ','Backup Path'), render:v=> v
+                      ? <span title={v} style={{ fontSize:11, color:'#374151', fontFamily:'ui-monospace, SFMono-Regular, Consolas, monospace', wordBreak:'break-all' }}>{v}</span>
+                      : <span style={{ color:'#9ca3af' }}>—</span> },
                   ]}
                   data={backupHistory}
                   defaultPageSize={10}
@@ -3706,6 +3785,45 @@ const Settings = () => {
 
         </div>
       </div>
+
+      {/* ── Backup location modal ── */}
+      {backupPathModal && (
+        <div className="modal-overlay">
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📁 {L('ब्याकअप स्थान','Backup Location')}</h2>
+              <button className="modal-close" onClick={() => setBackupPathModal(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize:13, color:'#6b7280', marginBottom:14 }}>
+                {L('ब्याकअप फाइलहरू सुरक्षित गर्ने ड्राइभ/फोल्डर लेख्नुहोस। सबै ब्याकअप यहीँ मिति-अनुसारको फाइल नामसहित सुरक्षित हुनेछन्।',
+                   'Enter the drive/folder where backup files will be saved. Every backup is saved here with a date-wise file name.')}
+              </p>
+              <div className="form-group">
+                <label className="form-label required">{L('फोल्डर पथ (ड्राइभ + फोल्डर)','Folder Path (drive + folder)')}</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={backupPathModal.input}
+                  onChange={e => setBackupPathModal(p => ({ ...p, input: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') confirmBackupPath(); }}
+                  placeholder="D:\eHajiri Backups"
+                  autoFocus
+                />
+                <div style={{ fontSize:11, color:'#9ca3af', marginTop:5 }}>
+                  {L('उदाहरण','Example')}: D:\eHajiri Backups — {L('फोल्डर नभए स्वतः बनाइनेछ।','the folder is created automatically if it does not exist.')}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setBackupPathModal(null)}>{L('रद्द गर्नुस','Cancel')}</button>
+              <button className="btn btn-primary" disabled={!backupPathModal.input?.trim()} onClick={confirmBackupPath}>
+                💾 {backupPathModal.next ? L('सुरक्षित गरी ब्याकअप लिनुहोस','Save & Backup') : L('सुरक्षित गर्नुहोस','Save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Weekend change modal ── */}
       {weekendModal && (

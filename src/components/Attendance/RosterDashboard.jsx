@@ -207,11 +207,12 @@ const RosterDashboard = () => {
       {/* ── Header ── */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">📊 Roster Analysis Dashboard</h1>
-          <p className="page-subtitle">
-            {dateStr} &nbsp;·&nbsp; {timeStr} &nbsp;·&nbsp;
-            {loading ? 'Loading…' : `${rosters.length} total entries`}
-          </p>
+          <h1 className="page-title">
+            📊 Roster Analysis Dashboard
+            <span style={{ fontSize:14, fontWeight:600, color:'#6b7280', marginLeft:10 }}>
+              [ {dateStr} &nbsp;·&nbsp; {timeStr} &nbsp;·&nbsp; {loading ? 'Loading…' : `${rosters.length} total entries`} ]
+            </span>
+          </h1>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={load}

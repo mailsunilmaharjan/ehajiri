@@ -10,7 +10,8 @@ router.get('/', async (req, res) => {
     const { rows } = await pool.query(`
       SELECT m.id, m.subject, m.body, m.recipient_type, m.department, m.created_at,
              s.full_name AS sender_name, s.employee_id AS sender_emp_id, s.id AS sender_id,
-             mr.is_read, mr.read_at
+             s.profile_photo AS sender_photo,
+             mr.is_read, mr.read_at, mr.folder_id
       FROM   message_recipients mr
       JOIN   internal_messages m ON m.id = mr.message_id
       JOIN   users s             ON s.id = m.sender_id
@@ -49,6 +50,77 @@ router.get('/unread-count', async (req, res) => {
       WHERE  mr.recipient_id = $1 AND mr.is_read = FALSE
     `, [req.user.id]);
     res.json({ count: rows[0].count });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── Custom inbox folders — per-user, two levels (parent → sub) ────────── */
+
+/* GET /api/messages/folders — my folder tree (flat, parent_id links) */
+router.get('/folders', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, name, parent_id
+      FROM   message_folders
+      WHERE  user_id = $1
+      ORDER  BY parent_id NULLS FIRST, LOWER(name)
+    `, [req.user.id]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* POST /api/messages/folders — create a parent folder, or a sub with { parentId } */
+router.post('/folders', async (req, res) => {
+  const name = (req.body?.name || '').trim();
+  const parentId = req.body?.parentId ? parseInt(req.body.parentId) : null;
+  if (!name) return res.status(400).json({ error: 'Folder name is required' });
+  if (name.length > 60) return res.status(400).json({ error: 'Folder name too long (max 60)' });
+  try {
+    if (parentId) {
+      const { rows } = await pool.query(
+        'SELECT parent_id FROM message_folders WHERE id = $1 AND user_id = $2', [parentId, req.user.id]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Parent folder not found' });
+      if (rows[0].parent_id) return res.status(400).json({ error: 'Only two levels allowed — cannot nest under a sub-folder' });
+    }
+    const { rows: [f] } = await pool.query(
+      'INSERT INTO message_folders (user_id, name, parent_id) VALUES ($1, $2, $3) RETURNING id, name, parent_id',
+      [req.user.id, name, parentId]
+    );
+    res.status(201).json(f);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* DELETE /api/messages/folders/:id — remove a folder (subs cascade; messages fall back to Inbox) */
+router.delete('/folders/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM message_folders WHERE id = $1 AND user_id = $2', [id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Folder not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* PUT /api/messages/:id/folder — file my copy of a message into a folder (null = back to Inbox) */
+router.put('/:id/folder', async (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const folderId = req.body?.folderId ? parseInt(req.body.folderId) : null;
+  if (isNaN(msgId)) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    if (folderId) {
+      const { rows } = await pool.query(
+        'SELECT 1 FROM message_folders WHERE id = $1 AND user_id = $2', [folderId, req.user.id]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Folder not found' });
+    }
+    const { rowCount } = await pool.query(
+      'UPDATE message_recipients SET folder_id = $1 WHERE message_id = $2 AND recipient_id = $3',
+      [folderId, msgId, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Message not found' });
+    res.json({ ok: true, folderId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

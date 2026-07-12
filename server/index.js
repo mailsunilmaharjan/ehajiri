@@ -197,9 +197,19 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
 
     startAttendanceNotificationScheduler();
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`✅ Server running  →  http://localhost:${PORT}/api`);
       console.log(`   App ${APP_VERSION}  |  DB schema v${DB_VERSION}`);
+    });
+    // Port already taken (another dev server / the installed desktop app) is
+    // an environment condition, not a code bug — exit with a clear message
+    // instead of letting it reach uncaughtException and the Bug Finder list.
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        logError(`❌ Port ${PORT} is already in use — another eHajiri server (or the installed desktop app) is running. Stop it, or set a different PORT in server/.env.`, err);
+        process.exit(1);
+      }
+      throw err;
     });
   } catch (err) {
     logError('❌ Server failed to start:', err);

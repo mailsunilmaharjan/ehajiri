@@ -20,13 +20,16 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <ErrorBoundary>
       <BrowserRouter>
         <LanguageProvider>
-          <SettingsProvider>
-            <AuthProvider>
+          <AuthProvider>
+            {/* Settings/Data must sit inside AuthProvider: both refetch from
+                the API when the user logs in (their endpoints are authGuarded,
+                so a logged-out fetch can only ever 401). */}
+            <SettingsProvider>
               <DataProvider>
                 <App />
               </DataProvider>
-            </AuthProvider>
-          </SettingsProvider>
+            </SettingsProvider>
+          </AuthProvider>
         </LanguageProvider>
       </BrowserRouter>
     </ErrorBoundary>

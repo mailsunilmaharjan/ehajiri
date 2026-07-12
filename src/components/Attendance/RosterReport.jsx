@@ -994,8 +994,12 @@ const RosterReport = () => {
       {/* ── Header ── */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">📋 View Duty Roster Report</h1>
-          <p className="page-subtitle">{monthLabel} &nbsp;·&nbsp; {monthRosters.length} active rosters</p>
+          <h1 className="page-title">
+            📋 View Duty Roster Report
+            <span style={{ fontSize:14, fontWeight:600, color:'#6b7280', marginLeft:10 }}>
+              [ {monthLabel} &nbsp;·&nbsp; {monthRosters.length} active rosters ]
+            </span>
+          </h1>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={() => window.print()}

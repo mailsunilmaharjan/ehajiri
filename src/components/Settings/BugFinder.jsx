@@ -158,12 +158,6 @@ const BugFinder = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div>
           <h3 style={{ margin: 0 }}>🐞 {L('बग फाइन्डर','Bug Finder')}</h3>
-          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: '#6b7280' }}>
-            {L(
-              'एप्लिकेसनमा देखा परेका सबै फ्रन्टइन्ड र ब्याकइन्ड त्रुटिहरू स्वचालित रूपमा यहाँ लग हुन्छन्।',
-              'Every frontend crash and backend error that occurs in the app is logged here automatically.'
-            )}
-          </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {openCount > 0 && (

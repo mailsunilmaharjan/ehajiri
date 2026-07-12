@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
 import { useChat } from '../../context/ChatContext.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
-import ChatThread, { Avatar, staffLine } from './ChatThread.jsx';
+import ChatThread, { Avatar, stripMarkers } from './ChatThread.jsx';
 
 const fmtDay = (d) => {
   if (!d) return '';
@@ -114,13 +114,6 @@ const ChatPage = () => {
   const [showNewChat,   setShowNewChat]   = useState(false);
   const [showNewGroup,  setShowNewGroup]  = useState(false);
 
-  const roster = useMemo(() =>
-    [...employees].sort((a, b) => {
-      const aOn = onlineIds.has(a.id) ? 0 : 1, bOn = onlineIds.has(b.id) ? 0 : 1;
-      if (aOn !== bOn) return aOn - bOn;
-      return (a.fullName || '').localeCompare(b.fullName || '');
-    }), [employees, onlineIds]);
-
   const startChatWith = async (userId) => {
     const id = await startDirectChat(userId);
     setActiveId(id);
@@ -144,7 +137,6 @@ const ChatPage = () => {
       <div className="page-header" style={{ flexShrink: 0 }}>
         <div>
           <h1 className="page-title">💬 Internal Chat</h1>
-          <p className="page-subtitle">Individual & group chat with your team — online status shown live</p>
         </div>
       </div>
 
@@ -155,52 +147,27 @@ const ChatPage = () => {
         <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid #e5e7eb',
           display: 'flex', flexDirection: 'column', minHeight: 0, background: '#f9fafb' }}>
 
-          <div style={{ padding: '12px 14px 8px', display: 'flex', gap: 8, flexShrink: 0 }}>
+          <div style={{ padding: '12px 14px 6px', display: 'flex', gap: 8, flexShrink: 0 }}>
             <button onClick={() => setShowNewChat(true)}
-              style={{ flex: 1, padding: '8px 0', background: '#1a56db', color: '#fff', border: 'none',
-                borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              style={{ flex: 1, padding: '9px 0', background: '#1a56db', color: '#fff', border: 'none',
+                borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(26,86,219,.25)' }}>
               💬 New Chat
             </button>
             <button onClick={() => setShowNewGroup(true)}
-              style={{ flex: 1, padding: '8px 0', background: '#6d28d9', color: '#fff', border: 'none',
-                borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              style={{ flex: 1, padding: '9px 0', background: '#6d28d9', color: '#fff', border: 'none',
+                borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(109,40,217,.25)' }}>
               👥 New Group
             </button>
           </div>
 
-          {/* Staff directory — everyone, with live online/offline status */}
-          <div style={{ borderBottom: '1px solid #eef0f2', flexShrink: 0 }}>
-            <div style={{ padding: '6px 14px 4px', fontSize: 10, fontWeight: 700, color: '#6b7280',
-              textTransform: 'uppercase', letterSpacing: .5, display: 'flex', justifyContent: 'space-between' }}>
-              <span>Staff</span>
-              <span>{onlineIds.size} online / {roster.length}</span>
-            </div>
-            <div style={{ maxHeight: 190, overflowY: 'auto', padding: '2px 8px 8px' }}>
-              {roster.map(e => {
-                const online = onlineIds.has(e.id);
-                return (
-                  <div key={e.id} onClick={() => startChatWith(e.id)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 6px',
-                      borderRadius: 7, cursor: 'pointer' }}
-                    onMouseEnter={ev => { ev.currentTarget.style.background = '#f0f0f0'; }}
-                    onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent'; }}>
-                    <Avatar label={e.fullName} online={online} size={30} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#111827',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {staffLine(e)}
-                      </div>
-                      <div style={{ fontSize: 10.5, color: online ? '#16a34a' : '#9ca3af' }}>
-                        {online ? '🟢 Online' : '⚪ Offline'}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          {/* Live presence at a glance — the full staff picker lives behind "New Chat" */}
+          <div style={{ padding: '0 16px 6px', fontSize: 11, color: '#6b7280', flexShrink: 0 }}>
+            <span style={{ color: '#16a34a' }}>●</span> {onlineIds.size} of {employees.length} staff online
           </div>
 
-          <div style={{ padding: '8px 14px 6px', flexShrink: 0 }}>
+          <div style={{ padding: '2px 14px 6px', flexShrink: 0 }}>
             <input
               type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="🔍 Search chats…"
@@ -238,7 +205,7 @@ const ChatPage = () => {
                   borderBottom: '1px solid #f3f4f6' }}
                 onMouseEnter={e => { if (activeId !== c.id) e.currentTarget.style.background = '#f0f0f0'; }}
                 onMouseLeave={e => { if (activeId !== c.id) e.currentTarget.style.background = 'transparent'; }}>
-                <Avatar label={c.name} isGroup={c.type === 'group'} online={c.type === 'direct' ? c.online : null} />
+                <Avatar label={c.name} photo={c.photo} isGroup={c.type === 'group'} online={c.type === 'direct' ? c.online : null} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
                     <span style={{ fontSize: 13.5, fontWeight: c.unreadCount ? 700 : 600, color: '#111827',
@@ -251,7 +218,7 @@ const ChatPage = () => {
                     <span style={{ fontSize: 12, color: c.unreadCount ? '#111827' : '#9ca3af',
                       fontWeight: c.unreadCount ? 600 : 400,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {c.lastMessage ? `${c.lastIsMine ? 'You: ' : ''}${c.lastMessage}` : 'No messages yet'}
+                      {c.lastMessage ? `${c.lastIsMine ? 'You: ' : ''}${stripMarkers(c.lastMessage)}` : 'No messages yet'}
                     </span>
                     {c.unreadCount > 0 && (
                       <span style={{ background: '#22c55e', color: '#fff', borderRadius: 10, fontSize: 10,

@@ -53,6 +53,33 @@ function ensureFirewallRule() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Elevation detection — postgres.exe hard-refuses to run in a process holding
+// administrator privileges ("Execution of PostgreSQL by a user with
+// administrative permissions is not permitted"), and the embedded DB inherits
+// eHajiri's token. So an elevated launch (right-click → Run as administrator,
+// or the app auto-started at the end of an elevated Setup.exe run) can only
+// ever die inside startDatabase() with that cryptic log line. The 'ready'
+// handler checks this up front and offers a de-elevated relaunch instead.
+// ─────────────────────────────────────────────────────────────────────────────
+function isProcessElevated() {
+  if (process.platform !== 'win32') return false;
+  const { spawnSync } = require('child_process');
+  // fltmc.exe (filter manager) exits 0 only from an elevated process and
+  // "Access is denied" otherwise; unlike `net session` it doesn't depend on
+  // the LanmanServer service being up. If it can't be spawned at all, assume
+  // not elevated — worst case is the old startDatabase() error path.
+  const r = spawnSync('fltmc.exe', [], { windowsHide: true, stdio: 'ignore' });
+  return r.status === 0;
+}
+
+function relaunchDeElevated() {
+  // Launching via explorer.exe hands the spawn to the user's (unelevated)
+  // shell, shedding the admin token — the standard de-elevation trick.
+  const { spawn } = require('child_process');
+  spawn('explorer.exe', [process.execPath], { detached: true, stdio: 'ignore' }).unref();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // VELOPACK HOOK — must be the absolute first thing that runs.
 // ─────────────────────────────────────────────────────────────────────────────
 VelopackApp.build()
@@ -372,19 +399,21 @@ async function startDatabase() {
 // null when not bundled — the /sql route surfaces a clear error to the UI
 // rather than crashing; JSON backup is unaffected either way.
 // ─────────────────────────────────────────────────────────────────────────────
-function resolvePgDumpPath() {
+function resolvePgClientTool(exeName) {
   let pkgDir;
   try {
     pkgDir = path.dirname(require.resolve('@embedded-postgres/windows-x64/package.json'));
   } catch {
     return null;
   }
-  let pgDumpPath = path.join(pkgDir, 'native', 'bin', 'pg_dump.exe');
+  let toolPath = path.join(pkgDir, 'native', 'bin', exeName);
   if (app.isPackaged) {
-    pgDumpPath = pgDumpPath.split(`app.asar${path.sep}`).join(`app.asar.unpacked${path.sep}`);
+    toolPath = toolPath.split(`app.asar${path.sep}`).join(`app.asar.unpacked${path.sep}`);
   }
-  return fs.existsSync(pgDumpPath) ? pgDumpPath : null;
+  return fs.existsSync(toolPath) ? toolPath : null;
 }
+const resolvePgDumpPath    = () => resolvePgClientTool('pg_dump.exe');
+const resolvePgRestorePath = () => resolvePgClientTool('pg_restore.exe');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server lifecycle
@@ -404,13 +433,15 @@ function startServer() {
     DB_NAME: PG_DB,
   } : {};
 
-  const pgDumpPath = resolvePgDumpPath();
+  const pgDumpPath    = resolvePgDumpPath();
+  const pgRestorePath = resolvePgRestorePath();
 
   serverProcess = utilityProcess.fork(serverScript, [], {
     env: {
       ...process.env,
       ...dbEnv,
-      ...(pgDumpPath ? { PG_DUMP_PATH: pgDumpPath } : {}),
+      ...(pgDumpPath    ? { PG_DUMP_PATH: pgDumpPath }       : {}),
+      ...(pgRestorePath ? { PG_RESTORE_PATH: pgRestorePath } : {}),
       PORT    : String(SERVER_PORT),
       NODE_ENV: isDev ? 'development' : 'production',
       ELECTRON: 'true',
@@ -744,6 +775,27 @@ ipcMain.on('toggle-autostart',   () => {
 app.on('ready', async () => {
   initLogging();
 
+  // Refuse to run elevated (see isProcessElevated() above) — the embedded
+  // PostgreSQL cannot start under an administrator token, so explain and
+  // offer a normal relaunch instead of failing later with a cryptic error.
+  if (app.isPackaged && isProcessElevated()) {
+    console.error('[startup] Launched with administrator privileges — embedded PostgreSQL cannot run elevated.');
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      title: 'eHajiri — Administrator mode not supported',
+      message: 'eHajiri was started as Administrator.',
+      detail: 'The built-in database (PostgreSQL) does not allow running with ' +
+              'administrator privileges, so eHajiri cannot start in this mode.\n\n' +
+              'Click "Restart Normally" to relaunch eHajiri without administrator rights.',
+      buttons: ['Restart Normally', 'Exit'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice === 0) relaunchDeElevated();
+    app.quit();
+    return;
+  }
+
   // Register for auto-startup on first launch (packaged only)
   if (app.isPackaged && !app.getLoginItemSettings().openAtLogin) {
     app.setLoginItemSettings({ openAtLogin: true, path: app.getPath('exe') });
@@ -777,16 +829,31 @@ app.on('ready', async () => {
       // isn't always safe to read directly.
       const message = err?.message || String(err) || 'Unknown error';
       console.error('[db] startDatabase() failed:', err);
+      // Exit code 3221225781 = 0xC0000135 STATUS_DLL_NOT_FOUND: initdb.exe/
+      // postgres.exe failed at the Windows loader stage, which in practice
+      // means the machine is missing the Microsoft Visual C++ Redistributable
+      // (ensureVCRedist() above is a no-op when VC_redist.x64.exe wasn't
+      // bundled at package time, or its silent install was denied elevation).
+      // "Reinstall the application" can't fix that, so point at the real cure.
+      const missingVCRuntime = message.includes('3221225781');
+      const VC_REDIST_URL = 'https://aka.ms/vs/17/release/vc_redist.x64.exe';
       const choice = dialog.showMessageBoxSync({
         type: 'error',
         title: 'Database Error',
-        message: 'eHajiri could not start the database.',
-        detail: `Error: ${message}\n\nPlease try reinstalling the application.`,
-        buttons: ['Open Log File', 'OK'],
-        defaultId: 1,
-        cancelId: 1,
+        message: missingVCRuntime
+          ? 'eHajiri needs the Microsoft Visual C++ Redistributable, which is not installed on this computer.'
+          : 'eHajiri could not start the database.',
+        detail: missingVCRuntime
+          ? `Download and install it from:\n${VC_REDIST_URL}\n\nthen start eHajiri again.\n\n(Original error: ${message})`
+          : `Error: ${message}\n\nPlease try reinstalling the application.`,
+        buttons: missingVCRuntime
+          ? ['Download VC++ Redistributable', 'Open Log File', 'OK']
+          : ['Open Log File', 'OK'],
+        defaultId: missingVCRuntime ? 2 : 1,
+        cancelId: missingVCRuntime ? 2 : 1,
       });
-      if (choice === 0) shell.openPath(getLogFile());
+      if (missingVCRuntime && choice === 0) shell.openExternal(VC_REDIST_URL);
+      else if (choice === (missingVCRuntime ? 1 : 0)) shell.openPath(getLogFile());
       app.quit();
       return;
     }

@@ -1,5 +1,6 @@
 ﻿import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import api from '../api/client.js';
+import { useAuth } from './AuthContext.jsx';
 
 const SettingsContext = createContext(null);
 
@@ -85,11 +86,16 @@ const load = () => {
 };
 
 export const SettingsProvider = ({ children }) => {
+  const { currentUser } = useAuth();
   const [settings, setSettings] = useState(load);
   const [apiOk, setApiOk] = useState(false);
 
-  /* ── Load settings from DB on mount ── */
+  /* ── Load settings from DB on login (and on startup for an already
+     logged-in session). /api/settings is authGuarded, so fetching while
+     logged out 401s — which not only left the defaults showing, it left
+     apiOk stuck false so persist() never wrote changes back to the DB. ── */
   useEffect(() => {
+    if (!currentUser) return;
     api.get('/settings').then(remoteSettings => {
       if (remoteSettings.main) {
         const merged = { ...DEFAULT_SETTINGS, ...remoteSettings.main };
@@ -101,7 +107,7 @@ export const SettingsProvider = ({ children }) => {
       // Fall back to localStorage already loaded in useState
       setApiOk(false);
     });
-  }, []);
+  }, [currentUser?.id]);
 
   const persist = useCallback((next) => {
     localStorage.setItem('app_settings', JSON.stringify(next));

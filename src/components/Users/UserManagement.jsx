@@ -171,10 +171,18 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
   const selDev = devices.find(d => String(d.id) === selDevIds[0]);
   const enrollment = selDev ? enrollments.find(e => e.device_sn === selDev.serial_number) : null;
 
+  const isOnline = (dev) => {
+    if (!dev?.last_seen) return false;
+    return (Date.now() - new Date(dev.last_seen).getTime()) < 5 * 60 * 1000;
+  };
+
   // Group devices by Area for the multi-select tree (Area checkbox → its devices).
+  // Offline devices are hidden entirely — they can't receive enroll/manage
+  // commands, so listing them only invites actions that would fail.
   const devicesByArea = (() => {
     const groups = new Map();
     for (const d of devices) {
+      if (!isOnline(d)) continue;
       const key   = d.area_id != null ? String(d.area_id) : 'unassigned';
       const label = d.area_name || 'Unassigned';
       if (!groups.has(key)) groups.set(key, { areaId:key, areaName:label, devices:[] });
@@ -205,11 +213,6 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
     if (enrollment.access_valid_to)   setEndDate(String(enrollment.access_valid_to).slice(0,10));
     if (enrollment.access_valid_count != null) setValidCount(enrollment.access_valid_count);
   }, [enrollment?.access_expiry_mode, enrollment?.access_expires, enrollment?.access_valid_from, enrollment?.access_valid_to, enrollment?.access_valid_count]);
-
-  const isOnline = (dev) => {
-    if (!dev?.last_seen) return false;
-    return (Date.now() - new Date(dev.last_seen).getTime()) < 5 * 60 * 1000;
-  };
 
   const post = (path, body) => api.post(`/zkteco${path}`, body);
 
@@ -336,11 +339,20 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
       {/* Target Devices — multi-select tree: Area Name (tick selects all its devices) → Serial No. */}
       <div>
         <span style={s.label}>{t('Target Devices')}</span>
-        {devices.length === 0 ? (
+        {devicesByArea.length === 0 ? (
           <div className="empty-state" style={{ padding:'20px 0' }}>
             <div className="empty-state-icon">📡</div>
-            <h3>{t('No Devices Found')}</h3>
-            <p>{t('Add a device in Settings → Attendance Device → Devices before enrolling staff.')}</p>
+            {devices.length === 0 ? (
+              <>
+                <h3>{t('No Devices Found')}</h3>
+                <p>{t('Add a device in Settings → Attendance Device → Devices before enrolling staff.')}</p>
+              </>
+            ) : (
+              <>
+                <h3>{t('No Online Devices')}</h3>
+                <p>{t('All devices are currently offline — bring a device online to enroll staff.')}</p>
+              </>
+            )}
           </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -1470,8 +1482,8 @@ const UserManagement = () => {
             <button onClick={() => setRecoModal(true)} style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               padding: '6px 14px', height: 34,
-              background: '#f8fafc',
-              border: '1px solid #e2e8f0', color: '#1e293b', borderRadius: 6,
+              background: '#ede9fe',
+              border: '1px solid #c4b5fd', color: '#6d28d9', borderRadius: 6,
               fontSize: 13, fontWeight: 600, cursor: 'pointer',
               whiteSpace: 'nowrap',
             }}>

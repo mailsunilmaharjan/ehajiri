@@ -86,8 +86,14 @@ export const DataProvider = ({ children }) => {
   useEffect(() => { lsSet('ls_leaves',       leaves);       }, [leaves]);
   useEffect(() => { lsSet('ls_officeVisits', officeVisits); }, [officeVisits]);
 
-  /* ── Load all data from API on mount ── */
+  /* ── Load all data from API on login (and on startup for an already
+     logged-in session). Every endpoint below is behind authGuard, so
+     fetching while logged out can only ever 401 — worse, the form login
+     is an SPA navigation (no page reload), so a mount-only fetch that
+     ran on the login screen would leave employees/leaves/visits empty
+     for the whole session until a manual refresh. ── */
   useEffect(() => {
+    if (!currentUser) return;
     (async () => {
       try {
         const [emps, shfts, lvTypes, lvBals, lvs, visits] = await Promise.all([
@@ -123,7 +129,7 @@ export const DataProvider = ({ children }) => {
         setApiOk(false);
       }
     })();
-  }, []);
+  }, [currentUser?.id]);
 
   /* ── Employees ──
      Always write through to the API — staff records must persist to the

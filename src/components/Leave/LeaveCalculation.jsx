@@ -160,7 +160,7 @@ const LeaveAdvancedFilter = ({
   fyId, setFyId, fiscalYears,
   tempF, setTF,
   branchOpts, deptOpts, postOpts, gradeOpts, modeOpts, statusOpts, staffOpts, leaveTypeOpts,
-  showFY = true, L,
+  showFY = true, showAccum = true, L,
 }) => {
   if (!isOpen) return null;
   const funnelIcon = (
@@ -172,8 +172,8 @@ const LeaveAdvancedFilter = ({
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth:760, width:'96vw' }} onClick={e => e.stopPropagation()}>
 
-        {/* ── Header ── */}
-        <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+        {/* ── Header — standard form-modal gradient (from .modal-header) ── */}
+        <div className="modal-header">
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
             {funnelIcon}
             <h2>{L('उन्नत फिल्टर','Advanced Filter')}</h2>
@@ -245,8 +245,8 @@ const LeaveAdvancedFilter = ({
             </div>
           </div>
 
-          {/* ── Leave Category (only Leave Opening) ── */}
-          {showFY && (
+          {/* ── Leave Category (hidden where the tab is accumulate-only) ── */}
+          {showAccum && (
             <div className="form-group" style={{ marginBottom:0 }}>
               <label className="form-label">{L('बिदा वर्ग','Leave Category')}</label>
               <div style={{ display:'flex', gap:20, marginTop:6, flexWrap:'wrap' }}>
@@ -498,7 +498,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
 
         {/* Advanced filter button */}
         <button
-          className="btn btn-outline"
+          className="btn btn-outline btn-filter"
           onClick={openFilter}
           style={{ position:'relative', display:'flex', alignItems:'center', gap:6, paddingRight: activeFilterCount > 0 ? 20 : undefined }}
         >
@@ -553,7 +553,9 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
                 <th className="dg-th" style={{ width:80 }}>{L('शाखा','Branch')}</th>
                 {filteredLtConfigs.map(lt => (
                   <th key={lt.shortName} className="dg-th" style={{ textAlign:'center', minWidth:96, whiteSpace:'normal' }}>
-                    <div style={{ fontSize:13, color:'#374151', fontWeight:600, marginBottom:5 }}>{lt.name}</div>
+                    <div style={{ fontSize:13, color:'#374151', fontWeight:600, marginBottom:5 }}>
+                      {lt.name} <span style={{ fontWeight:500, color:'#6b7280' }}>(Max. {lt.daysPerYear})</span>
+                    </div>
                     <input
                       type="text" inputMode="numeric" pattern="[0-9.]*"
                       placeholder={String(lt.daysPerYear)}
@@ -568,7 +570,6 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
                       title={`Fill ALL staff (max ${lt.daysPerYear} days)`}
                       style={{ ...numInput, width:60, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1e40af' }}
                     />
-                    <div style={{ fontSize:9, color:'#9ca3af', marginTop:2 }}>max {lt.daysPerYear}</div>
                   </th>
                 ))}
               </tr>
@@ -736,7 +737,8 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     value: String(e.id),
     label: `${e.fullName} [${e.position || '—'} | ${e.deviceId || '—'}]`,
   })), [employees]);
-  const tLeaveTypeOpts = useMemo(() => ltConfigs.map(lt => ({ value:lt.shortName, label:`${lt.name} (${lt.shortName})` })), [ltConfigs]);
+  const tLeaveTypeOpts = useMemo(() => ltConfigs.filter(lt => lt.carryForward)
+    .map(lt => ({ value:lt.shortName, label:`${lt.name} (${lt.shortName})` })), [ltConfigs]);
 
   const tActiveCount = useMemo(() =>
     [tAdvFilters.branches, tAdvFilters.departments, tAdvFilters.posts,
@@ -898,14 +900,14 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     return r;
   }, [allRows, search, tAdvFilters]);
 
-  /* which leave type columns to show */
+  /* which leave type columns to show — Previous Year Opening is carry-forward
+     by definition, so only Accumulate (carryForward) leave types appear here;
+     non-accumulate leaves have no previous-year balance to transfer. */
   const visibleLtConfigs = useMemo(() => {
-    let configs = ltConfigs;
-    if (tAdvFilters.leaveAccum === 'accumulate')    configs = configs.filter(lt => lt.carryForward);
-    if (tAdvFilters.leaveAccum === 'nonAccumulate') configs = configs.filter(lt => !lt.carryForward);
-    if (tAdvFilters.leaveTypes.length > 0)          configs = configs.filter(lt => tAdvFilters.leaveTypes.includes(lt.shortName));
+    let configs = ltConfigs.filter(lt => lt.carryForward);
+    if (tAdvFilters.leaveTypes.length > 0) configs = configs.filter(lt => tAdvFilters.leaveTypes.includes(lt.shortName));
     return configs;
-  }, [ltConfigs, tAdvFilters.leaveAccum, tAdvFilters.leaveTypes]);
+  }, [ltConfigs, tAdvFilters.leaveTypes]);
 
   const numCellStyle = { width:72, textAlign:'center', border:'1px solid #d1d5db', borderRadius:4, padding:'3px 2px', fontSize:13, outline:'none', fontWeight:600 };
   const thBase = { padding:'7px 10px', textAlign:'center', fontWeight:700, fontSize:12, background:'#f0f5fa', borderBottom:'2px solid #c8d6e5', borderRight:'1px solid #dce6f0', whiteSpace:'nowrap' };
@@ -936,7 +938,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
         </div>
 
         {/* filter */}
-        <button className="btn btn-outline" onClick={openTFilter}
+        <button className="btn btn-outline btn-filter" onClick={openTFilter}
           style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/></svg>
           {L('फिल्टर','Filter')}
@@ -1132,7 +1134,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
         branchOpts={tBranchOpts} deptOpts={tDeptOpts}  postOpts={tPostOpts}
         gradeOpts={tGradeOpts}   modeOpts={tModeOpts}  statusOpts={tStatusOpts}
         staffOpts={tStaffOpts}   leaveTypeOpts={tLeaveTypeOpts}
-        showFY={true} L={L}
+        showFY={true} showAccum={false} L={L}
       />
     </div>
   );
@@ -1407,7 +1409,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         </div>
 
         {/* filter */}
-        <button className="btn btn-outline" onClick={openBFilter} style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
+        <button className="btn btn-outline btn-filter" onClick={openBFilter} style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/></svg>
           {L('फिल्टर','Filter')}
           {bActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#1a56db', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}>{bActiveCount}</span>}
@@ -1860,10 +1862,6 @@ const LeaveCalculation = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">🧮 {L('बिदा गणना','Leave Calculation')}</h1>
-          <p className="page-subtitle">
-            {L('कर्मचारीको बिदा प्रारम्भिक, हस्तान्तरण, ब्यालेन्स र प्रतिवेदन',
-               'Employee leave opening, transfer, balance & reports')}
-          </p>
         </div>
       </div>
 

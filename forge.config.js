@@ -26,6 +26,12 @@ const vcRedistBundled = fs.existsSync(path.resolve(process.cwd(), VC_REDIST_SRC)
 const PG_DUMP_SRC = 'installer/deps/pg_dump.exe';
 const pgDumpBundled = fs.existsSync(path.resolve(process.cwd(), PG_DUMP_SRC));
 
+// Same deal for pg_restore.exe — needed by the in-app native restore
+// (POST /api/backup/restore-native). Sourced from the same PostgreSQL 18.x
+// Windows distribution as pg_dump.exe. Skipped if not present.
+const PG_RESTORE_SRC = 'installer/deps/pg_restore.exe';
+const pgRestoreBundled = fs.existsSync(path.resolve(process.cwd(), PG_RESTORE_SRC));
+
 /** @type {import('@electron-forge/shared-types').ForgeConfig} */
 const config = {
   packagerConfig: {
@@ -99,10 +105,10 @@ const config = {
     // right next to postgres.exe in app.asar.unpacked — see PG_DUMP_SRC above.
     afterCopy: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {
-        if (!pgDumpBundled) return callback();
         const destDir = path.join(buildPath, 'node_modules', '@embedded-postgres', 'windows-x64', 'native', 'bin');
         if (!fs.existsSync(destDir)) return callback();
-        fs.copyFileSync(path.resolve(process.cwd(), PG_DUMP_SRC), path.join(destDir, 'pg_dump.exe'));
+        if (pgDumpBundled)    fs.copyFileSync(path.resolve(process.cwd(), PG_DUMP_SRC),    path.join(destDir, 'pg_dump.exe'));
+        if (pgRestoreBundled) fs.copyFileSync(path.resolve(process.cwd(), PG_RESTORE_SRC), path.join(destDir, 'pg_restore.exe'));
         callback();
       },
     ],

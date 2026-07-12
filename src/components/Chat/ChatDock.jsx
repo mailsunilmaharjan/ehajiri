@@ -40,7 +40,7 @@ const ContactsPopup = ({ onClose, employees, onlineIds, onPick }) => {
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 7, cursor: 'pointer' }}
               onMouseEnter={ev => { ev.currentTarget.style.background = '#f3f4f6'; }}
               onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent'; }}>
-              <Avatar label={e.fullName} online={online} size={30} />
+              <Avatar label={e.fullName} photo={e.profilePhoto} online={online} size={30} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: '#111827',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{staffLine(e)}</div>
@@ -98,7 +98,7 @@ const ChatDock = () => {
               style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff',
                 border: '1px solid #e5e7eb', borderBottom: 'none', borderRadius: '10px 10px 0 0',
                 padding: '7px 10px', cursor: 'pointer', boxShadow: '0 -2px 10px rgba(0,0,0,.08)' }}>
-              <Avatar label={conv.name} isGroup={conv.type === 'group'} online={conv.type === 'direct' ? conv.online : null} size={22} />
+              <Avatar label={conv.name} photo={conv.photo} isGroup={conv.type === 'group'} online={conv.type === 'direct' ? conv.online : null} size={22} />
               <span style={{ fontSize: 12, fontWeight: 600, color: '#111827', maxWidth: 90,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.name}</span>
               {conv.unreadCount > 0 && (

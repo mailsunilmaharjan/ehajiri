@@ -74,7 +74,9 @@ export function ChatProvider({ children }) {
       es.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data.type !== 'chat_message') return;
+          // chat_update = silent change to an existing message (e.g. a
+          // checklist box toggled) — refresh threads, never pop a toast.
+          if (data.type !== 'chat_message' && data.type !== 'chat_update') return;
           const uid = currentUser.id;
           const isMine = data.senderId === uid;
           const isRecipient = isMine || (Array.isArray(data.recipientIds) && data.recipientIds.includes(uid));
@@ -82,8 +84,8 @@ export function ChatProvider({ children }) {
           loadConversations();
           listenersRef.current.forEach(fn => fn(data));
           // Popup notification on the recipient's screen — not for your own
-          // sent message being echoed back to you.
-          if (!isMine) {
+          // sent message being echoed back to you, and not for silent updates.
+          if (!isMine && data.type === 'chat_message') {
             addToast({
               type: 'chat_message',
               conversationId  : data.conversationId,

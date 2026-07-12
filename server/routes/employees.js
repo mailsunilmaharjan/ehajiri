@@ -67,6 +67,7 @@ const SEL = `
   role, department, position, shift, email, phone,
   join_date        AS "joinDate",
   gender, avatar, active,
+  profile_photo    AS "profilePhoto",
   device_id        AS "deviceId",
   religion, handicapped, branch, mode, grade,
   timing_type      AS "timingType",
@@ -205,6 +206,7 @@ router.post('/import', async (req, res) => {
       if (dup.rows.length > 0) { skipped.push(String(employeeId)); continue; }
 
       const otVal = String(eligibleForOt || '').toLowerCase();
+      const today = new Date().toISOString().split('T')[0];
       await pool.query(sql.insert, [
         String(employeeId),
         email || String(employeeId),
@@ -212,7 +214,7 @@ router.post('/import', async (req, res) => {
         fullName,
         role || 'employee',
         department || null, position || null, null,
-        email || null, phone || null, joinDate || null,
+        email || null, phone || null, joinDate || today,
         gender || 'male',
         fullName?.[0]?.toUpperCase() || 'E',
         deviceId || null, null, false,

@@ -7,6 +7,7 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker  from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect  from '../Common/SearchableSelect.jsx';
+import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import SaveButton        from '../Common/SaveButton.jsx';
 import useSaveShortcut   from '../../hooks/useSaveShortcut.js';
 
@@ -61,9 +62,104 @@ const DateInput = ({ value, onChange }) => {
   );
 };
 
+/* ── Advance Search ─────────────────────────────────────────── */
+const EMPTY_FILTERS = { _status:'working', fiscalYear:'', branch:'', dept:'', post:'', shift:'' };
+
+const AdvanceSearchModal = ({ filters, onApply, onClose, settings, employees, shifts }) => {
+  const [local, setLocal] = useState({ ...filters });
+  const set = (k, v) => setLocal(p => ({ ...p, [k]: v }));
+
+  const activeFlag = (local._status || 'working') === 'working';
+  const activeEmps = employees.filter(e => (e.active !== false) === activeFlag);
+
+  const fiscalYears = (settings.fiscalYears || []).map(fy => ({ value: fy.name, label: fy.name }));
+  const branches    = [...new Set(activeEmps.map(e => e.branch).filter(Boolean))].sort().map(b => ({ value:b, label:b }));
+  const depts       = [...new Set(activeEmps.map(e => e.department).filter(Boolean))].sort().map(d => ({ value:d, label:d }));
+  const posts       = [...new Set(activeEmps.map(e => e.position).filter(Boolean))].sort().map(p => ({ value:p, label:p }));
+  const shiftOpts   = (shifts || []).map(s => ({ value:s.code, label:s.name || s.code }));
+
+  const Field = ({ label, children }) => (
+    <div style={{ position:'relative', overflow:'visible' }}>
+      <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:6 }}>{label}</div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="modal-overlay">
+      <div style={{ background:'white', borderRadius:16, width:'min(720px,96vw)',
+        boxShadow:'0 20px 60px rgba(0,0,0,.18)', overflow:'visible', position:'relative' }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ padding:'16px 22px 12px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)', backgroundSize:'300% 300%', animation:'headerShift 8s ease infinite', borderBottom:'1px solid #f3f4f6',
+          display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span style={{ fontSize:16, fontWeight:700, color:'#1e40af' }}>Advance Search</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#6b7280', fontSize:20, lineHeight:1 }}>✕</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding:'16px 22px', display:'flex', flexDirection:'column', gap:14 }}>
+
+          {/* Row 0: Working Status */}
+          <Field label="Working Status">
+            <div style={{ display:'flex', gap:0, border:'1px solid #d1d5db', borderRadius:8, overflow:'hidden' }}>
+              {[['working','Working'],['notworking','Not Working']].map(([v,label]) => (
+                <button key={v} onClick={() => set('_status', v)}
+                  style={{ flex:1, padding:'8px 12px', border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                    background:(local._status||'working')===v ? '#1a56db' : 'white',
+                    color:(local._status||'working')===v ? 'white' : '#374151', transition:'background .15s' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          {/* Row 1: Fiscal Year | Branch | Department */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14 }}>
+            <Field label="Fiscal Year">
+              <SearchableCheckSelect options={fiscalYears} value={local.fiscalYear} onChange={v => set('fiscalYear', v)} allLabel="All Fiscal Years" />
+            </Field>
+            <Field label="Branch">
+              <SearchableCheckSelect options={branches} value={local.branch} onChange={v => set('branch', v)} allLabel="All Branches" />
+            </Field>
+            <Field label="Department">
+              <SearchableCheckSelect options={depts} value={local.dept} onChange={v => set('dept', v)} allLabel="All Depts" />
+            </Field>
+          </div>
+
+          {/* Row 2: Post | Shift */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14 }}>
+            <Field label="Post">
+              <SearchableCheckSelect options={posts} value={local.post} onChange={v => set('post', v)} allLabel="All Posts" />
+            </Field>
+            <Field label="Shift">
+              <SearchableCheckSelect options={shiftOpts} value={local.shift} onChange={v => set('shift', v)} allLabel="All Shifts" />
+            </Field>
+            <div />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding:'10px 22px 16px', borderTop:'1px solid #f3f4f6', display:'flex', justifyContent:'flex-end', gap:10 }}>
+          <button onClick={() => { onApply({ ...EMPTY_FILTERS }); onClose(); }}
+            style={{ padding:'8px 18px', border:'1.5px solid #d1d5db', borderRadius:8, background:'white', color:'#374151', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+            Reset
+          </button>
+          <button onClick={() => { onApply(local); onClose(); }}
+            style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#1a56db', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+            Search
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ManualPostings = () => {
   const { canManageSystem } = useAuth();
-  const { filteredEmployees } = useData();
+  const { filteredEmployees, employees: allEmployees, shifts } = useData();
+  const { settings } = useSettings();
   const location = useLocation();
 
   const [records,       setRecords]       = useState([]);
@@ -75,6 +171,8 @@ const ManualPostings = () => {
   const [saving,        setSaving]        = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [toast,         setToast]         = useState(null);
+  const [filters,       setFilters]       = useState({ ...EMPTY_FILTERS });
+  const [showSearch,    setShowSearch]    = useState(false);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -194,13 +292,23 @@ const ManualPostings = () => {
 
   const columns = useMemo(() => [
     {
-      field: 'staffId', header: 'Staff ID',
-      width: 100, minWidth: 90,
+      field: 'fullName', header: 'Full Name',
+      minWidth: 150,
+    },
+    {
+      field: 'postShort', header: 'Post',
+      width: 80, minWidth: 70, align: 'center',
+      render: (v) => <span style={{ fontWeight: 600, color: '#0369a1', fontSize: 12 }}>{v || '—'}</span>,
+    },
+    {
+      field: 'deptShort', header: 'Department',
+      width: 100, minWidth: 85, align: 'center',
       render: (v) => <span style={{ fontWeight: 600, color: '#374151', fontSize: 12 }}>{v || '—'}</span>,
     },
     {
-      field: 'fullName', header: 'Full Name',
-      minWidth: 150,
+      field: 'branchShort', header: 'Branch',
+      width: 85, minWidth: 75, align: 'center',
+      render: (v) => <span style={{ fontWeight: 600, color: '#6b7280', fontSize: 12 }}>{v || '—'}</span>,
     },
     {
       field: 'date', header: 'Date',
@@ -270,6 +378,32 @@ const ManualPostings = () => {
     },
   ], [canManageSystem]);
 
+  /* Apply Advance Search filters to the loaded records */
+  const empById = useMemo(
+    () => Object.fromEntries((allEmployees || []).map(e => [String(e.id), e])),
+    [allEmployees]
+  );
+  const filteredRecords = useMemo(() => records.filter(r => {
+    const recDate = r.date ? String(r.date).split('T')[0] : '';
+    if (filters.fiscalYear) {
+      const fy = (settings.fiscalYears || []).find(f => f.name === filters.fiscalYear);
+      if (fy && (recDate < fy.startDate || recDate > fy.endDate)) return false;
+    }
+    const emp = empById[String(r.employeeId)];
+    if (emp) {
+      const working = emp.active !== false;
+      if ((filters._status || 'working') === 'working' ? !working : working) return false;
+      if (filters.branch && emp.branch      !== filters.branch) return false;
+      if (filters.dept   && emp.department  !== filters.dept)   return false;
+      if (filters.post   && emp.position    !== filters.post)   return false;
+      if (filters.shift  && emp.shift       !== filters.shift)  return false;
+    }
+    return true;
+  }), [records, filters, empById, settings.fiscalYears]);
+
+  const activeFilterCount = Object.entries(filters)
+    .filter(([k, v]) => k === '_status' ? v !== 'working' : v !== '').length;
+
   const f = (k) => (v) => setForm(p => ({ ...p, [k]: v }));
 
   // Employees allowed as Recommended By / Approved By for the selected employee
@@ -294,21 +428,34 @@ const ManualPostings = () => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0 }}>✍️ Manual Postings</h1>
-          <p style={{ fontSize: 13, color: '#6b7280', margin: '4px 0 0' }}>Manually enter attendance check-in / check-out records for staff</p>
         </div>
-        {canManageSystem && (
-          <button
-            onClick={openAdd}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '8px 18px', background: '#1a56db', color: '#fff',
-              border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
-              cursor: 'pointer', boxShadow: '0 2px 8px rgba(26,86,219,.25)',
-            }}
-          >
-            + Add Manual Entry
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => setShowSearch(true)}
+            style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'0 14px', height:36,
+              background:activeFilterCount>0?'#ede9fe':'#f5f3ff',
+              border:`1.5px solid ${activeFilterCount>0?'#7c3aed':'#c4b5fd'}`,
+              color:activeFilterCount>0?'#5b21b6':'#6d28d9',
+              borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+            <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+              <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
+            </svg>
+            Advance Search
+            {activeFilterCount>0 && <span style={{ background:'#1a56db', color:'white', borderRadius:'50%', width:18, height:18, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>{activeFilterCount}</span>}
           </button>
-        )}
+          {canManageSystem && (
+            <button
+              onClick={openAdd}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '8px 18px', background: '#1a56db', color: '#fff',
+                border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                cursor: 'pointer', boxShadow: '0 2px 8px rgba(26,86,219,.25)',
+              }}
+            >
+              + Add Manual Entry
+            </button>
+          )}
+        </div>
       </div>
 
       {/* DataGrid */}
@@ -317,10 +464,10 @@ const ManualPostings = () => {
       ) : (
         <DataGrid
           columns={columns}
-          data={records}
+          data={filteredRecords}
           defaultPageSize={20}
           compact={true}
-          showFilterButton={true}
+          showFilterButton={false}
           onRowDoubleClick={canManageSystem ? openEdit : undefined}
           onDeleteKey={canManageSystem ? (row) => setDeleteConfirm(row.id) : null}
           contextMenu={canManageSystem ? [
@@ -438,6 +585,18 @@ const ManualPostings = () => {
         }}>
           {toast.type === 'error' ? '❌' : '✅'} {toast.msg}
         </div>
+      )}
+
+      {/* Advance Search Modal */}
+      {showSearch && (
+        <AdvanceSearchModal
+          filters={filters}
+          onApply={setFilters}
+          onClose={() => setShowSearch(false)}
+          settings={settings}
+          employees={allEmployees || []}
+          shifts={shifts || []}
+        />
       )}
     </div>
   );

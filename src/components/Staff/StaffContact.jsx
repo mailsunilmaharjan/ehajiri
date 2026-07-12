@@ -41,6 +41,48 @@ const displayPost  = (row) => row.contactInfo === 'company' ? '—'             
 const displayMob1  = (row) => row.contactInfo === 'company' ? (row.companyPhone || '—') : (row.mobile1      || '—');
 const displayEmail = (row) => row.contactInfo === 'company' ? (row.companyEmail || '—') : (row.email        || '—');
 
+// ── Share to WhatsApp ─────────────────────────────────────────────────────────
+// Builds a WhatsApp-formatted (*bold*) text card of the contact and opens the
+// wa.me share sheet so the user picks the recipient in WhatsApp itself.
+
+const buildShareText = (c, persons = []) => {
+  const lines = [`*${displayName(c)}*`];
+  if (c.contactInfo === 'personal') {
+    if (c.office)      lines.push(`Office: ${c.office}`);
+    if (c.mobile1)     lines.push(`Mobile 1: ${c.mobile1}`);
+    if (c.mobile2)     lines.push(`Mobile 2: ${c.mobile2}`);
+    if (c.officePhone) lines.push(`Office Phone: ${c.officePhone}`);
+    if (c.email)       lines.push(`Email: ${c.email}`);
+    if (c.address)     lines.push(`Address: ${c.address}`);
+  } else {
+    if (c.companyPhone)   lines.push(`Phone: ${c.companyPhone}`);
+    if (c.companyEmail)   lines.push(`Email: ${c.companyEmail}`);
+    if (c.companyAddress) lines.push(`Address: ${c.companyAddress}`);
+  }
+  if (c.workScope) lines.push(`Work Scope: ${c.workScope}`);
+  if (persons.length) {
+    lines.push('', '*Contact Persons:*');
+    persons.forEach((p, i) => {
+      const bits = [p.post, p.mobile1, p.mobile2, p.email].filter(Boolean).join(' · ');
+      lines.push(`${i + 1}. ${p.name}${bits ? ' — ' + bits : ''}`);
+    });
+  }
+  return lines.join('\n');
+};
+
+const openWhatsAppShare = (text) =>
+  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
+
+// Context-menu path: persons aren't loaded with the grid rows, so fetch them
+// for company contacts before building the message.
+const shareContactOnWhatsApp = async (contact) => {
+  let persons = [];
+  if (contact.contactInfo === 'company' && contact.id) {
+    try { persons = await api.get(`/contacts/${contact.id}/persons`); } catch { /* share without persons */ }
+  }
+  openWhatsAppShare(buildShareText(contact, persons));
+};
+
 // ── Badges ────────────────────────────────────────────────────────────────────
 
 const TypeBadge = ({ type }) => (
@@ -716,6 +758,14 @@ const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
   const avatarBg    = isPersonal ? '#ede9fe' : '#dbeafe';
   const avatarColor = isPersonal ? '#7c3aed' : '#1e40af';
 
+  // Company contacts can hold multiple contact persons — show them here too.
+  const [persons, setPersons] = useState([]);
+  useEffect(() => {
+    setPersons([]);
+    if (isPersonal || !contact.id) return;
+    api.get(`/contacts/${contact.id}/persons`).then(setPersons).catch(() => {});
+  }, [contact.id, isPersonal]);
+
   return (
     <div style={{
       width:300, minWidth:300, flexShrink:0, background:'#fff',
@@ -735,6 +785,14 @@ const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
             border:'none', borderRadius:6, width:26, height:26, cursor:'pointer',
             fontSize:14, color:'#6b7280', display:'flex', alignItems:'center', justifyContent:'center' }}>
           ✕
+        </button>
+        <button onClick={() => openWhatsAppShare(buildShareText(contact, persons))}
+          title="Share this contact on WhatsApp"
+          style={{ position:'absolute', top:10, right:44, background:'#25D366',
+            border:'none', borderRadius:6, height:26, padding:'0 10px', cursor:'pointer',
+            fontSize:11.5, fontWeight:700, color:'#fff',
+            display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
+          📤 Share
         </button>
         <div style={{
           width:52, height:52, borderRadius:14, background:avatarBg, color:avatarColor,
@@ -772,6 +830,37 @@ const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
             <DRow icon="✉️"  label="Company Email" value={contact.companyEmail} />
             <DRow icon="📍" label="Address"        value={contact.companyAddress} />
           </>
+        )}
+
+        {/* Multiple contact persons under a company contact */}
+        {!isPersonal && persons.length > 0 && (
+          <div style={{ marginTop:14 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'#9ca3af',
+              textTransform:'uppercase', letterSpacing:'.5px', marginBottom:6 }}>
+              👥 Contact Persons ({persons.length})
+            </div>
+            {persons.map(p => (
+              <div key={p.id} style={{ background:'#f9fafb', border:'1px solid #e5e7eb',
+                borderRadius:10, padding:'8px 12px', marginBottom:8 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:'#111827' }}>{p.name}</div>
+                {(p.post || p.department) && (
+                  <div style={{ fontSize:11, color:'#6b7280', marginTop:1 }}>
+                    {[p.post, p.department].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+                {(p.mobile1 || p.mobile2) && (
+                  <div style={{ fontSize:12.5, color:'#1f2937', marginTop:3 }}>
+                    📱 {[p.mobile1, p.mobile2].filter(Boolean).join(', ')}
+                  </div>
+                )}
+                {(p.email || p.ext) && (
+                  <div style={{ fontSize:12.5, color:'#4b5563', marginTop:2, wordBreak:'break-word' }}>
+                    {p.email ? `✉️ ${p.email}` : ''}{p.email && p.ext ? ' · ' : ''}{p.ext ? `Ext ${p.ext}` : ''}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
 
         {contact.workScope && (
@@ -902,6 +991,7 @@ const StaffContact = () => {
   const contextMenu = [
     { label:'Add New', icon:'➕', onClick:() => setModal({ initial:EMPTY }) },
     { label:'Edit',    icon:'✏️', onClick:(row) => setModal({ initial:row }) },
+    { label:'Share',   icon:'📤', onClick:shareContactOnWhatsApp },
     { label:'Delete',  icon:'🗑️', className:'danger', onClick:handleDelete },
   ];
 
@@ -921,9 +1011,6 @@ const StaffContact = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">📞 {t('Contact')}</h1>
-          <p className="page-subtitle" style={{ fontSize:13, color:'#6b7280', marginTop:2 }}>
-            Personal &amp; company contact directory
-          </p>
         </div>
       </div>
 

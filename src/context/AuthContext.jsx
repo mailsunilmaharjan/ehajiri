@@ -152,10 +152,18 @@ export const AuthProvider = ({ children }) => {
           localStorage.removeItem('current_user');
         }
       })
-      .catch(() => {
-        setLicenseError(true);
-        setCurrentUser(null);
-        localStorage.removeItem('current_user');
+      .catch((err) => {
+        // /license/status answers 200 with { licensed } even when unlicensed,
+        // so landing here means the request never got a verdict — server not
+        // up yet, proxy hiccup, or the fetch was aborted by a navigation.
+        // Only a response that explicitly flags a license problem may lock
+        // the app; anything else must NOT destroy a valid session (this used
+        // to wipe current_user on every reload that raced the check).
+        if (err?.data?.licenseError) {
+          setLicenseError(true);
+          setCurrentUser(null);
+          localStorage.removeItem('current_user');
+        }
       })
       .finally(() => setLicenseChecked(true));
   }, []);
@@ -184,6 +192,17 @@ export const AuthProvider = ({ children }) => {
     setCurrentUser(null);
     localStorage.removeItem('current_user');
     setToken(null);
+  }, []);
+
+  /* Merge a patch into the logged-in user (e.g. a new profile photo) and
+     keep the localStorage copy in sync so it survives reloads. */
+  const updateCurrentUser = useCallback((patch) => {
+    setCurrentUser(prev => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      localStorage.setItem('current_user', JSON.stringify(next));
+      return next;
+    });
   }, []);
 
   // Wire up: a 401 with authError (expired/invalid token) triggers a clean logout.
@@ -272,7 +291,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{
-      currentUser, login, logout, error,
+      currentUser, login, logout, updateCurrentUser, error,
       licenseError, licenseChecked,
       // Role flags
       isAdmin, isSuperAdmin, isBranchManager, isDeptHead, isEmployee,

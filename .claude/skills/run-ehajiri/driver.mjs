@@ -23,6 +23,13 @@ import fs from 'fs';
 
 const BASE_URL  = process.env.BASE_URL || 'http://localhost:4000';
 const HEADLESS  = process.env.HEADLESS !== 'false';
+
+// v1.0.13+ polls the API continuously (chat, notifications), so
+// waitUntil:'networkidle' never fires — use 'load' plus a settle delay.
+async function goto(page, url) {
+  await page.goto(url, { waitUntil: 'load' });
+  await page.waitForTimeout(2000);
+}
 const DEFAULT_EMAIL    = 'admin';
 const DEFAULT_PASSWORD = '#28O29@9837'; // system admin seeded by migrations/runner.js v21 — see SKILL.md
 
@@ -48,7 +55,7 @@ async function withBrowser(fn) {
  * to fire the submit event no matter how the fields are filled.
  */
 async function login(page, username = DEFAULT_EMAIL, password = DEFAULT_PASSWORD) {
-  await page.goto(BASE_URL + '/login', { waitUntil: 'networkidle' }); // establish origin for localStorage
+  await goto(page, BASE_URL + '/login'); // establish origin for localStorage
   const loginRes = await page.request.post(BASE_URL + '/api/auth/login', {
     data: { username, password },
   });
@@ -60,12 +67,12 @@ async function login(page, username = DEFAULT_EMAIL, password = DEFAULT_PASSWORD
     localStorage.setItem('auth_token', t);
     localStorage.setItem('current_user', JSON.stringify(u));
   }, [token, user]);
-  await page.goto(BASE_URL + '/dashboard', { waitUntil: 'networkidle' });
+  await goto(page, BASE_URL + '/dashboard');
 }
 
 async function cmdScreenshot(routePath, outFile) {
   await withBrowser(async (page) => {
-    await page.goto(BASE_URL + routePath, { waitUntil: 'networkidle' });
+    await goto(page, BASE_URL + routePath);
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     await page.screenshot({ path: outFile, fullPage: true });
     console.log('Saved', outFile);
@@ -76,7 +83,7 @@ async function cmdLoginScreenshot(routePath, outFile, email, password) {
   await withBrowser(async (page) => {
     await login(page, email, password);
     if (routePath && routePath !== '/dashboard') {
-      await page.goto(BASE_URL + routePath, { waitUntil: 'networkidle' });
+      await goto(page, BASE_URL + routePath);
     }
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     await page.screenshot({ path: outFile, fullPage: true });
@@ -89,7 +96,7 @@ async function cmdSmoke(outDir = '.') {
   let failures = 0;
   await withBrowser(async (page, consoleErrors) => {
     console.log('[1/4] Loading login page…');
-    await page.goto(BASE_URL + '/login', { waitUntil: 'networkidle' });
+    await goto(page, BASE_URL + '/login');
     await page.screenshot({ path: path.join(outDir, '01-login.png') });
     const hasForm = await page.locator('.login-form').count();
     if (!hasForm) { console.error('FAIL: login form not found'); failures++; }
@@ -103,13 +110,13 @@ async function cmdSmoke(outDir = '.') {
     await page.screenshot({ path: path.join(outDir, '02-dashboard.png'), fullPage: true });
 
     console.log('[3/4] Navigating to Daily Attendance Report…');
-    await page.goto(BASE_URL + '/attendance/reports/daily', { waitUntil: 'networkidle' });
+    await goto(page, BASE_URL + '/attendance/reports/daily');
     const gridRows = await page.locator('table tbody tr, .dg-row').count();
     console.log(`  OK: attendance report loaded (${gridRows} grid rows)`);
     await page.screenshot({ path: path.join(outDir, '03-daily-attendance.png'), fullPage: true });
 
     console.log('[4/4] Navigating to Role & Permission Management…');
-    await page.goto(BASE_URL + '/settings/roles', { waitUntil: 'networkidle' });
+    await goto(page, BASE_URL + '/settings/roles');
     const hasMatrix = await page.locator('text=Leave Calculation').count();
     if (!hasMatrix) { console.error('FAIL: role matrix did not render expected content'); failures++; }
     else console.log('  OK: role matrix rendered');

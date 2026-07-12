@@ -37,6 +37,7 @@ router.get('/conversations', async (req, res) => {
     if (ids.length) {
       const { rows: members } = await pool.query(`
         SELECT cp.conversation_id, u.id, u.full_name, u.avatar, u.department,
+               u.profile_photo,
                (u.last_seen_at > NOW() - INTERVAL '${ONLINE_WINDOW}') AS online
         FROM   chat_participants cp
         JOIN   users u ON u.id = cp.user_id
@@ -56,6 +57,7 @@ router.get('/conversations', async (req, res) => {
         type          : r.type,
         name          : r.type === 'group' ? r.name : (others[0]?.full_name || 'Unknown'),
         avatar        : r.type === 'group' ? null : (others[0]?.avatar || null),
+        photo         : r.type === 'group' ? null : (others[0]?.profile_photo || null),
         online        : r.type === 'direct' ? !!others[0]?.online : null,
         members       : r.type === 'group' ? members : undefined,
         lastMessage   : r.last_body,
@@ -82,15 +84,24 @@ router.get('/conversations/:id/messages', async (req, res) => {
     if (!member.rows.length) return res.status(403).json({ error: 'Not a participant' });
 
     const { rows } = await pool.query(`
-      SELECT m.id, m.body, m.created_at, m.sender_id, u.full_name AS sender_name, u.avatar AS sender_avatar,
+      SELECT m.id, m.body, m.created_at, m.edited_at, m.sender_id, u.full_name AS sender_name, u.avatar AS sender_avatar,
+             u.profile_photo AS sender_photo,
              m.reply_to_id,
              r.body       AS reply_to_body,
              r.created_at AS reply_to_created_at,
-             ru.full_name AS reply_to_sender_name
+             ru.full_name AS reply_to_sender_name,
+             COALESCE(rx.reactions, '[]'::json) AS reactions
       FROM   chat_messages m
       JOIN   users u          ON u.id = m.sender_id
       LEFT JOIN chat_messages r ON r.id = m.reply_to_id
       LEFT JOIN users ru       ON ru.id = r.sender_id
+      LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object('emoji', cr.emoji, 'userId', cr.user_id, 'name', u2.full_name)
+                        ORDER BY cr.created_at) AS reactions
+        FROM   chat_message_reactions cr
+        JOIN   users u2 ON u2.id = cr.user_id
+        WHERE  cr.message_id = m.id
+      ) rx ON TRUE
       WHERE  m.conversation_id = $1
       ORDER  BY m.created_at ASC
       LIMIT  500
@@ -223,6 +234,140 @@ router.post('/conversations/:id/messages', async (req, res) => {
     });
 
     res.status(201).json({ id: msg.id, createdAt: msg.created_at });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* PATCH /api/chat/messages/:id — edit your own sent message (fix a typo,
+   add text …). Sender-only; flags the message as edited. */
+router.patch('/messages/:id', async (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const body = (req.body?.body || '').trim();
+  if (isNaN(msgId)) return res.status(400).json({ error: 'Invalid message id' });
+  if (!body) return res.status(400).json({ error: 'Message body is required' });
+  try {
+    const { rows } = await pool.query(
+      'SELECT sender_id, conversation_id FROM chat_messages WHERE id = $1', [msgId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Message not found' });
+    if (rows[0].sender_id !== req.user.id) {
+      return res.status(403).json({ error: 'Only the sender can edit a message' });
+    }
+    await pool.query(
+      'UPDATE chat_messages SET body = $1, edited_at = NOW() WHERE id = $2', [body, msgId]
+    );
+
+    const { rows: participants } = await pool.query(
+      'SELECT user_id FROM chat_participants WHERE conversation_id = $1', [rows[0].conversation_id]
+    );
+    broadcastNotification({
+      type          : 'chat_update',
+      conversationId: rows[0].conversation_id,
+      messageId     : msgId,
+      senderId      : req.user.id,
+      recipientIds  : participants.map(p => p.user_id),
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* PATCH /api/chat/messages/:id/check — toggle one "[ ]"/"[x]" checklist line.
+   Any participant of the conversation may toggle (checklists are shared
+   tasks), but only checkbox lines can be flipped — the rest of the message
+   body is untouchable. */
+router.patch('/messages/:id/check', async (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const { lineIndex } = req.body || {};
+  if (isNaN(msgId) || !Number.isInteger(lineIndex) || lineIndex < 0) {
+    return res.status(400).json({ error: 'Invalid message id or line index' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT m.id, m.body, m.conversation_id
+      FROM   chat_messages m
+      JOIN   chat_participants cp ON cp.conversation_id = m.conversation_id AND cp.user_id = $2
+      WHERE  m.id = $1
+    `, [msgId, req.user.id]);
+    if (!rows.length) return res.status(403).json({ error: 'Not a participant' });
+
+    const lines = (rows[0].body || '').split('\n');
+    const line = lines[lineIndex];
+    const m = line === undefined ? null : line.match(/^\[( |x)\]/i);
+    if (!m) return res.status(400).json({ error: 'Not a checklist line' });
+    lines[lineIndex] = (m[1].toLowerCase() === 'x' ? '[ ]' : '[x]') + line.slice(3);
+    const newBody = lines.join('\n');
+    await pool.query('UPDATE chat_messages SET body = $1 WHERE id = $2', [newBody, msgId]);
+
+    // Nudge every open thread to reload — chat_update is silent (no popup).
+    const { rows: participants } = await pool.query(
+      'SELECT user_id FROM chat_participants WHERE conversation_id = $1', [rows[0].conversation_id]
+    );
+    broadcastNotification({
+      type          : 'chat_update',
+      conversationId: rows[0].conversation_id,
+      messageId     : msgId,
+      senderId      : req.user.id,
+      recipientIds  : participants.map(p => p.user_id),
+    });
+
+    res.json({ id: msgId, body: newBody });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* PUT /api/chat/messages/:id/reaction — set/replace/remove your quick reaction.
+   Same emoji again (or emoji:null) removes it; a different one replaces it. */
+router.put('/messages/:id/reaction', async (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const emoji = req.body?.emoji == null ? null : String(req.body.emoji).slice(0, 16);
+  if (isNaN(msgId)) return res.status(400).json({ error: 'Invalid message id' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT m.conversation_id
+      FROM   chat_messages m
+      JOIN   chat_participants cp ON cp.conversation_id = m.conversation_id AND cp.user_id = $2
+      WHERE  m.id = $1
+    `, [msgId, req.user.id]);
+    if (!rows.length) return res.status(403).json({ error: 'Not a participant' });
+
+    const { rows: existing } = await pool.query(
+      'SELECT emoji FROM chat_message_reactions WHERE message_id = $1 AND user_id = $2', [msgId, req.user.id]
+    );
+    if (!emoji || existing[0]?.emoji === emoji) {
+      await pool.query('DELETE FROM chat_message_reactions WHERE message_id = $1 AND user_id = $2', [msgId, req.user.id]);
+    } else {
+      await pool.query(`
+        INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)
+        ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = $3, created_at = NOW()
+      `, [msgId, req.user.id, emoji]);
+    }
+
+    const { rows: participants } = await pool.query(
+      'SELECT user_id FROM chat_participants WHERE conversation_id = $1', [rows[0].conversation_id]
+    );
+    broadcastNotification({
+      type          : 'chat_update',
+      conversationId: rows[0].conversation_id,
+      messageId     : msgId,
+      senderId      : req.user.id,
+      recipientIds  : participants.map(p => p.user_id),
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* GET /api/chat/conversations/:id/receipts — every participant's last-read
+   time, for the group-chat "Seen by …" line under the newest message. */
+router.get('/conversations/:id/receipts', async (req, res) => {
+  const convId = parseInt(req.params.id);
+  if (isNaN(convId)) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT cp.user_id AS "userId", u.full_name AS name, cp.last_read_at AS "lastReadAt"
+      FROM   chat_participants cp
+      JOIN   users u ON u.id = cp.user_id
+      WHERE  cp.conversation_id = $1
+    `, [convId]);
+    if (!rows.some(r => r.userId === req.user.id)) return res.status(403).json({ error: 'Not a participant' });
+    res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

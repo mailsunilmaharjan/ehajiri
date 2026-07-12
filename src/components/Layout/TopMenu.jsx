@@ -8,6 +8,25 @@ import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import { useChat } from '../../context/ChatContext.jsx';
 import './TopMenu.css';
 
+// Inline SVG flags — Windows doesn't render emoji flags (🇬🇧 shows as "GB"),
+// so the language toggle draws them itself.
+const FlagUK = () => (
+  <svg viewBox="0 0 60 36" width="18" height="11" style={{ borderRadius: 2, flexShrink: 0 }}>
+    <rect fill="#012169" width="60" height="36"/>
+    <path d="M0,0 L60,36 M60,0 L0,36" stroke="#fff" strokeWidth="7"/>
+    <path d="M0,0 L60,36 M60,0 L0,36" stroke="#C8102E" strokeWidth="3"/>
+    <path d="M30,0 V36 M0,18 H60" stroke="#fff" strokeWidth="12"/>
+    <path d="M30,0 V36 M0,18 H60" stroke="#C8102E" strokeWidth="7"/>
+  </svg>
+);
+const FlagNepal = () => (
+  <svg viewBox="0 0 34 44" width="12" height="15" style={{ flexShrink: 0 }}>
+    <path d="M2,2 L28,13 L13,15 L28,40 L2,42 Z" fill="#DC143C" stroke="#003893" strokeWidth="3" strokeLinejoin="round"/>
+    <path d="M8,9 a4.2,4.2 0 0 0 8,1.4 a4.2,4.2 0 0 1 -8,-1.4" fill="#fff"/>
+    <circle cx="11" cy="28" r="3.4" fill="#fff"/>
+  </svg>
+);
+
 const TopMenu = () => {
   const {
     currentUser, logout,
@@ -365,8 +384,9 @@ const TopMenu = () => {
           className="tm-lang-btn"
           onClick={() => changeLanguage(language === 'np' ? 'en' : 'np')}
           title={language === 'np' ? 'Switch to English' : 'नेपालीमा जानुस'}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
         >
-          {language === 'np' ? 'EN' : 'ने'}
+          {language === 'np' ? <><FlagUK /> EN</> : <><FlagNepal /> ने</>}
         </button>
 
         {/* ── User dropdown ── */}
@@ -374,9 +394,16 @@ const TopMenu = () => {
           className={`tm-user ${openDropdown === 'user' ? 'open' : ''}`}
           onClick={() => toggleDropdown('user')}
         >
-          <div className="tm-avatar" style={{ background: avatarBg[currentUser?.role], color: roleColor[currentUser?.role] }}>
-            {currentUser?.avatar}
-          </div>
+          {currentUser?.profilePhoto ? (
+            <div className="tm-avatar" style={{ overflow: 'hidden', padding: 0 }}>
+              <img src={currentUser.profilePhoto} alt={currentUser?.fullName || ''}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            </div>
+          ) : (
+            <div className="tm-avatar" style={{ background: avatarBg[currentUser?.role], color: roleColor[currentUser?.role] }}>
+              {currentUser?.avatar}
+            </div>
+          )}
           <div className="tm-user-info">
             <span className="tm-user-name">{currentUser?.fullName}</span>
             <span className="tm-user-role" style={{ color: roleColor[currentUser?.role] }}>

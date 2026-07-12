@@ -89,7 +89,6 @@ const OfficeVisitManagement = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">🏢 {t('Office Visit Management')}</h1>
-          <p className="page-subtitle">{t('Visit Applications')}</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {isManager && (

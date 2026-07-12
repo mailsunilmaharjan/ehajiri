@@ -13,6 +13,23 @@ const translations = {
   'Login': 'लगइन',
   'Profile': 'प्रोफाइल',
 
+  // Top menu — Staff dropdown & misc items
+  'Staff Details': 'कर्मचारी विवरण',
+  'My Notes': 'मेरा टिपोटहरू',
+  'Contact': 'सम्पर्क',
+  'Message': 'सन्देश',
+  'Chat': 'च्याट',
+  'My Reports': 'मेरा रिपोर्टहरू',
+  'Half Monthly Reports': 'अर्धमासिक रिपोर्टहरू',
+  'Overtime (OT) Approval': 'ओभरटाइम (OT) स्वीकृति',
+  'Missing Attendance Requests': 'छुटेको हाजिरी अनुरोधहरू',
+  'License': 'लाइसेन्स',
+  'Role & Permissions': 'भूमिका र अनुमतिहरू',
+  'Branch': 'शाखा',
+  'Dept': 'विभाग',
+  'No Online Devices': 'कुनै अनलाइन डिभाइस छैन',
+  'All devices are currently offline — bring a device online to enroll staff.': 'सबै डिभाइसहरू हाल अफलाइन छन् — कर्मचारी दर्ता गर्न डिभाइस अनलाइन ल्याउनुहोस्।',
+
   // Leave Submenu
   'Apply for Leave': 'बिदाको लागि आवेदन',
   'Leave Applications': 'बिदा आवेदनहरू',

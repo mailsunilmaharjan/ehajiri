@@ -147,6 +147,9 @@ table { border-collapse: collapse; }
 .btn-warning:hover:not(:disabled) { background: #cc8f07; }
 .btn-outline { background: white; color: var(--text-primary); border-color: var(--border-dark); }
 .btn-outline:hover:not(:disabled) { background: var(--bg); }
+/* Filter / Advance Search buttons — violet, visually distinct from other actions */
+.btn.btn-filter { background: #f5f3ff; color: #6d28d9; border-color: #c4b5fd; font-weight: 600; }
+.btn.btn-filter:hover:not(:disabled) { background: #ede9fe; border-color: #8b5cf6; }
 .btn-outline-primary { background: white; color: var(--primary); border-color: var(--primary); }
 .btn-outline-primary:hover:not(:disabled) { background: var(--primary-light); }
 .btn-ghost { background: transparent; color: var(--text-secondary); border-color: transparent; }

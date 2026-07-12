@@ -84,7 +84,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         boxShadow:'0 20px 60px rgba(0,0,0,.18)',overflow:'visible',position:'relative' }}
         onClick={e=>e.stopPropagation()}>
 
-        <div style={{ padding:'16px 22px 12px',borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'16px 22px 12px',background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex',justifyContent:'space-between',alignItems:'center' }}>
           <span style={{ fontSize:16,fontWeight:700,color:'#1e40af' }}>{L('एडभान्स खोज','Advance Search')}</span>
           <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1 }}>✕</button>
@@ -555,9 +555,9 @@ const MonthlyInOutReport = () => {
         {/* Advance Search button */}
         <button onClick={() => setShowSearch(true)}
           style={{ display:'inline-flex',alignItems:'center',gap:6,padding:'0 14px',height:36,
-            background: activeFilterCount>0 ? '#eff6ff' : 'white',
-            border: `1.5px solid ${activeFilterCount>0 ? '#1a56db' : '#d1d5db'}`,
-            color: activeFilterCount>0 ? '#1e40af' : '#374151',
+            background: activeFilterCount>0 ? '#ede9fe' : '#f5f3ff',
+            border: `1.5px solid ${activeFilterCount>0 ? '#7c3aed' : '#c4b5fd'}`,
+            color: activeFilterCount>0 ? '#5b21b6' : '#6d28d9',
             borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
             <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>

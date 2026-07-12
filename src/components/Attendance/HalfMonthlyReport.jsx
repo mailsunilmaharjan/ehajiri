@@ -28,12 +28,9 @@ function formatPeriodLabel(year, month, half, settings, language) {
   const fmt = (n) => useNPDigits ? toNepaliDigits(n) : String(n);
 
   if (useNP) {
-    // Convert AD date to BS
-    const bsStart = adToBS(new Date(year, month - 1, half === 1 ? 1 : 16));
-    if (bsStart) {
-      const mnLabel = language === 'np' ? BS_MONTHS_NP[bsStart.month - 1] : BS_MONTHS_EN[bsStart.month - 1];
-      return `${mnLabel} ${fmt(bsStart.year)} BS · ${half === 1 ? '१–१५' : '१६–अन्त'}`;
-    }
+    // In NP mode `year`/`month` already hold the selected BS values — use directly
+    const mnLabel = language === 'np' ? BS_MONTHS_NP[month - 1] : BS_MONTHS_EN[month - 1];
+    return `${mnLabel} ${fmt(year)} BS · ${half === 1 ? '१–१५' : '१६–अन्त'}`;
   }
   const mnLabel = language === 'np' ? MONTHS_NP[month - 1] : MONTHS_EN[month - 1];
   return `${mnLabel} ${year} · ${half === 1 ? '1–15' : '16–End'}`;
@@ -199,10 +196,6 @@ const HalfMonthlyReport = () => {
   const rank   = data?.rankings;
   const ins    = data?.insights || [];
 
-  /* Attendance rate ring */
-  const attRate = sum?.avgAttRate ?? 0;
-  const rateColor = attRate>=90?'#059669':attRate>=75?'#d97706':'#dc2626';
-
   return (
     <div className="page-container">
 
@@ -211,21 +204,21 @@ const HalfMonthlyReport = () => {
         <div>
           <h1 className="page-title">
             🤖 {L('अर्धमासिक रिपोर्ट','Half Monthly Report')}
+            <span style={{ fontSize:14, fontWeight:600, color:'#6b7280', marginLeft:10 }}>
+              {currentFY && (
+                <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+                  padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
+                  {currentFY.name}
+                </span>
+              )}
+              [ {periodLabel}
+              {period && (
+                <span style={{ marginLeft:8,fontSize:12,color:'#9ca3af' }}>
+                  ({period.startDate} → {period.endDate} · {period.totalWorkingDays} {L('कार्य दिन','working days')})
+                </span>
+              )} ]
+            </span>
           </h1>
-          <p className="page-subtitle">
-            {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
-                padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
-                {currentFY.name}
-              </span>
-            )}
-            {periodLabel}
-            {period && (
-              <span style={{ marginLeft:8,fontSize:12,color:'#9ca3af' }}>
-                ({period.startDate} → {period.endDate} · {period.totalWorkingDays} {L('कार्य दिन','working days')})
-              </span>
-            )}
-          </p>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           <button onClick={()=>window.print()} style={{ display:'inline-flex',alignItems:'center',gap:5,
@@ -303,40 +296,12 @@ const HalfMonthlyReport = () => {
 
       {!loading && data && (
         <>
-          {/* ── Summary stats row ── */}
+          {/* ── Period calendar stats row ── */}
           <div style={{ display:'flex',gap:10,marginBottom:20,flexWrap:'wrap',alignItems:'stretch' }}>
-            {/* Attendance rate ring */}
-            <div style={{ background:'white',borderRadius:12,border:'1px solid #e5e7eb',
-              padding:'16px 20px',display:'flex',alignItems:'center',gap:16,
-              boxShadow:'0 1px 6px rgba(0,0,0,.06)',minWidth:200 }}>
-              {/* Simple SVG ring */}
-              <div style={{ position:'relative',width:64,height:64,flexShrink:0 }}>
-                <svg viewBox="0 0 36 36" style={{ transform:'rotate(-90deg)' }} width={64} height={64}>
-                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" strokeWidth="3"/>
-                  <circle cx="18" cy="18" r="15.9" fill="none" stroke={rateColor} strokeWidth="3"
-                    strokeDasharray={`${attRate} ${100-attRate}`} strokeLinecap="round"/>
-                </svg>
-                <div style={{ position:'absolute',top:'50%',left:'50%',
-                  transform:'translate(-50%,-50%)',fontWeight:800,fontSize:13,color:rateColor }}>
-                  {attRate}%
-                </div>
-              </div>
-              <div>
-                <div style={{ fontWeight:700,fontSize:14,color:'#1f2937' }}>
-                  {L('औसत हाजिरी','Avg Attendance')}
-                </div>
-                <div style={{ fontSize:12,color:'#6b7280',marginTop:2 }}>
-                  {sum.totalEmp} staff · {sum.perfectAtt} perfect
-                </div>
-              </div>
-            </div>
-
-            {/* Quick stats */}
-            <StatPill label={L('उपस्थित','Present Days')}  value={sum.totalPresent} color="#059669" bg="#d1fae5" />
-            <StatPill label={L('अनुपस्थित','Absent Days')} value={sum.totalAbsent}  color="#dc2626" bg="#fee2e2" />
-            <StatPill label={L('ढिला','Late Arrivals')}     value={sum.totalLate}    color="#d97706" bg="#fef3c7" />
-            <StatPill label={L('बिदा','Leave Days')}         value={sum.totalLeave}   color="#7c3aed" bg="#ede9fe" />
-            <StatPill label={L('सम्पूर्ण हाजिरी','Perfect Att.')} value={sum.perfectAtt} color="#065f46" bg="#d1fae5" />
+            <StatPill label={L('जम्मा दिन','Total Days')}           value={period.totalDays ?? '—'}        color="#1a56db" bg="#eff6ff" />
+            <StatPill label={L('कार्य दिन','No. of Working Days')} value={period.totalWorkingDays ?? '—'} color="#059669" bg="#d1fae5" />
+            <StatPill label={L('सप्ताहन्त','Weekend')}               value={period.weekendDays ?? '—'}      color="#6b7280" bg="#f3f4f6" />
+            <StatPill label={L('सार्वजनिक बिदा','Public Holiday')}   value={period.holidayDays ?? '—'}      color="#d97706" bg="#fef3c7" />
           </div>
 
           {/* ── AI Insights ── */}

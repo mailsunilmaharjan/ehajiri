@@ -36,7 +36,7 @@ const OfficeVisitApproval = () => {
   const fd              = makeDateFormatter(settings);
   const {
     filteredVisits: officeVisits, approveVisit, rejectVisit, recommendVisit,
-    getEmployeeName,
+    getEmployeeName, getEmployeeById,
   } = useData();
 
   const [actionModal, setActionModal] = useState(null);
@@ -198,10 +198,17 @@ const OfficeVisitApproval = () => {
               <div key={v.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
                 padding:'12px 18px', borderBottom:'1px solid #f9fafb', flexWrap:'wrap', gap:10 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  <div style={{ width:38, height:38, borderRadius:'50%', background:'#fdf3d0',
-                    color:'#e3a008', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>
-                    {getEmployeeName(v.employeeId)[0]}
-                  </div>
+                  {getEmployeeById(v.employeeId)?.profilePhoto ? (
+                    <div style={{ width:38, height:38, borderRadius:'50%', overflow:'hidden', flexShrink:0, background:'#fdf3d0' }}>
+                      <img src={getEmployeeById(v.employeeId).profilePhoto} alt=""
+                        style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                    </div>
+                  ) : (
+                    <div style={{ width:38, height:38, borderRadius:'50%', background:'#fdf3d0',
+                      color:'#e3a008', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>
+                      {getEmployeeName(v.employeeId)[0]}
+                    </div>
+                  )}
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:'#111827' }}>{getEmployeeName(v.employeeId)}</div>
                     <div style={{ fontSize:12, color:'#374151' }}>

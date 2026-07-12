@@ -74,7 +74,6 @@ const LeaveManagement = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">📅 {t('Leave Management')}</h1>
-          <p className="page-subtitle">{t('Leave Applications')}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {isManager && (

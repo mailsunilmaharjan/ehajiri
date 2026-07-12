@@ -36,7 +36,7 @@ const LeaveApproval = () => {
   const fd              = makeDateFormatter(settings);
   const {
     filteredLeaves: leaves, approveLeave, rejectLeave, recommendLeave,
-    getEmployeeName, getLeaveTypeName, getLeaveTypeColor,
+    getEmployeeName, getEmployeeById, getLeaveTypeName, getLeaveTypeColor,
   } = useData();
 
   const [actionModal, setActionModal] = useState(null); // { id, type: 'approve'|'reject'|'recommend', leave }
@@ -207,10 +207,17 @@ const LeaveApproval = () => {
               <div key={l.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
                 padding:'12px 18px', borderBottom:'1px solid #f9fafb', flexWrap:'wrap', gap:10 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  <div style={{ width:38, height:38, borderRadius:'50%', background:'#fdf3d0',
-                    color:'#e3a008', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>
-                    {getEmployeeName(l.employeeId)[0]}
-                  </div>
+                  {getEmployeeById(l.employeeId)?.profilePhoto ? (
+                    <div style={{ width:38, height:38, borderRadius:'50%', overflow:'hidden', flexShrink:0, background:'#fdf3d0' }}>
+                      <img src={getEmployeeById(l.employeeId).profilePhoto} alt=""
+                        style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                    </div>
+                  ) : (
+                    <div style={{ width:38, height:38, borderRadius:'50%', background:'#fdf3d0',
+                      color:'#e3a008', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>
+                      {getEmployeeName(l.employeeId)[0]}
+                    </div>
+                  )}
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:'#111827' }}>{getEmployeeName(l.employeeId)}</div>
                     <div style={{ fontSize:12, color:'#374151' }}>{getLeaveTypeName(l.leaveTypeCode)} · {l.fromDate} – {l.toDate} ({l.days} days)</div>

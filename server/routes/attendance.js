@@ -1216,7 +1216,9 @@ router.get('/half-monthly', async (req, res) => {
     }
 
     res.json({
-      period: { year, month, half, startDate, endDate, totalWorkingDays },
+      period: { year, month, half, startDate, endDate,
+                totalDays: workingDays.length + weekendDates.length + holidayDates.length,
+                totalWorkingDays, weekendDays: weekendDates.length, holidayDays: holidayDates.length },
       summary: { totalEmp, totalPresent, totalAbsent, totalLeave, totalLate, totalOTMins, avgAttRate, perfectAtt },
       rankings: { topPunctual, mostLate, mostEarlyOut, mostAbsent, mostOT, mostPresent },
       insights,
@@ -1250,11 +1252,14 @@ router.get('/monthly', async (req, res) => {
 
     // Working days = non-weekend, non-public-holiday days in the month
     const workingDays = [];
+    let weekendDays = 0, holidayDays = 0;
     for (let d = 1; d <= lastDayOfMonth; d++) {
       const dt      = new Date(year, month - 1, d);
       const key     = DOW[dt.getDay()];
       const dateStr = `${year}-${pad(month)}-${pad(d)}`;
-      if (!weekends.includes(key) && !getHoliday(dateStr)) workingDays.push(dateStr);
+      if (weekends.includes(key)) weekendDays++;
+      else if (getHoliday(dateStr)) holidayDays++;
+      else workingDays.push(dateStr);
     }
     const totalWorkingDays = workingDays.length;
 
@@ -1269,7 +1274,7 @@ router.get('/monthly', async (req, res) => {
              s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed
       FROM   users u
       LEFT   JOIN shifts s ON s.code = u.shift
-      WHERE  u.active=$1
+      WHERE  u.active=$1 AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
       ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [hmActiveParam]);
     const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
@@ -1475,7 +1480,7 @@ router.get('/monthly', async (req, res) => {
     if (totalOTMins>0) insights.push({ type:'positive', icon:'💪', text:`Total monthly OT: ${Math.round(totalOTMins/60)} hours. Top: ${mostOT[0]?.fullName||'—'} (${mostOT[0]?.otFormatted||'—'}).` });
 
     res.json({
-      period: { year, month, startDate, endDate, totalWorkingDays },
+      period: { year, month, startDate, endDate, totalDays: lastDayOfMonth, totalWorkingDays, weekendDays, holidayDays },
       summary: { totalEmp, totalPresent, totalAbsent, totalLeave, totalLate, totalOTMins, avgAttRate, perfectAtt },
       rankings: { topPunctual, mostLate, mostEarlyOut, mostAbsent, mostOT, mostPresent },
       insights, allStats: stats,
@@ -2087,7 +2092,7 @@ router.get('/yearly-analytics', async (req, res) => {
     const [wkRows, publicHolidays, empRows, shiftRow] = await Promise.all([
       pool.query(`SELECT weekends, effective_date FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date ASC`, [endDate]),
       loadPublicHolidays(),
-      pool.query(`SELECT id, employee_id AS "empCode", full_name AS "fullName", department, position, shift, join_date AS "joinDate" FROM users WHERE active=TRUE ORDER BY ranking_order ASC NULLS LAST, full_name ASC`),
+      pool.query(`SELECT id, employee_id AS "empCode", full_name AS "fullName", department, position, shift, join_date AS "joinDate" FROM users WHERE active=TRUE AND (is_system IS NOT TRUE AND role NOT IN ('superAdmin')) ORDER BY ranking_order ASC NULLS LAST, full_name ASC`),
       pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
 
@@ -2111,12 +2116,16 @@ router.get('/yearly-analytics', async (req, res) => {
 
     // All working days in the year (weekends + public holidays excluded)
     const workingDays = [];
+    let yearTotalDays = 0, yearWeekendDays = 0, yearHolidayDays = 0;
     const cur = new Date(adYear, 0, 1);
     const end = new Date(adYear, 11, 31);
     while (cur <= end) {
       const ds  = `${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`;
       const dow = DOW_KEYS[cur.getDay()];
-      if (!getWeekends(ds).includes(dow) && !getHoliday(ds)) workingDays.push(ds);
+      yearTotalDays++;
+      if (getWeekends(ds).includes(dow)) yearWeekendDays++;
+      else if (getHoliday(ds))           yearHolidayDays++;
+      else workingDays.push(ds);
       cur.setDate(cur.getDate()+1);
     }
     // globalWorkingDays used only for the year total chip in the summary
@@ -2307,6 +2316,9 @@ router.get('/yearly-analytics', async (req, res) => {
 
     const summary = {
       totalStaff       : allStats.length,
+      totalDays        : yearTotalDays,
+      weekendDays      : yearWeekendDays,
+      holidayDays      : yearHolidayDays,
       totalWorkingDays : globalWorkingDays,   // full-year count for reference
       grandPresent     : allStats.reduce((s,e)=>s+e.presentDays, 0),
       grandAbsent      : allStats.reduce((s,e)=>s+e.absentDays,  0),
@@ -2401,11 +2413,17 @@ router.get('/manual-postings', async (req, res) => {
         mp.approved_by       AS "approvedById",
         u.full_name          AS "fullName",
         u.employee_id        AS "staffId",
+        COALESCE(NULLIF(TRIM(p.short_name),''),  LEFT(u.position,5))   AS "postShort",
+        COALESCE(NULLIF(TRIM(dd.short_name),''), LEFT(u.department,5)) AS "deptShort",
+        COALESCE(NULLIF(TRIM(br.short_name),''), LEFT(u.branch,4))     AS "branchShort",
         cb.full_name         AS "createdBy",
         rb.full_name         AS "recommendedByName",
         ab.full_name         AS "approvedByName"
       FROM attendance_manual_postings mp
       JOIN  users u  ON u.id = mp.employee_id
+      LEFT JOIN posts       p  ON LOWER(TRIM(p.name))  = LOWER(TRIM(u.position))
+      LEFT JOIN departments dd ON LOWER(TRIM(dd.name)) = LOWER(TRIM(u.department))
+      LEFT JOIN branches    br ON LOWER(TRIM(br.name)) = LOWER(TRIM(u.branch))
       LEFT JOIN users cb ON cb.id = mp.created_by
       LEFT JOIN users rb ON rb.id = mp.recommended_by
       LEFT JOIN users ab ON ab.id = mp.approved_by
