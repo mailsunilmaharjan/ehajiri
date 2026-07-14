@@ -1314,18 +1314,25 @@ const ZKTecoDeviceSettings = () => {
     )) return;
     setUserActionBusy(true);
     try {
-      let deleted = 0;
+      let deleted = 0, noDevice = 0;
       for (const user of usersToDelete) {
         const device = devices.find(d => d.serial_number === user.device_sn);
         if (device) {
           // Queue DATA DELETE USERINFO PIN=X on the device
           await api.post(`/zkteco/devices/${device.id}/delete-user`, { pin: user.pin });
+        } else {
+          noDevice++;
         }
         // Remove from local DB
         await api.delete(`/zkteco/device-users/${user.id}`);
         deleted++;
       }
-      showToast(`${deleted} user(s) deleted — device command queued`);
+      showToast(
+        noDevice
+          ? `${deleted} user(s) removed — ⚠️ ${noDevice} had no registered device, removed from database only`
+          : `${deleted} user(s) deleted — device command queued`,
+        noDevice ? 'danger' : 'success'
+      );
       setSelectedUserIds([]);
       await loadDevUsers(false);
     } catch (err) { showToast(err.message, 'danger'); }

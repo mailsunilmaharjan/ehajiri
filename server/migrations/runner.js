@@ -1636,6 +1636,134 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 69,
+    description: 'Staff status change history (Officially Changes tab) — scheduled emp_status transitions',
+    up: async (client) => {
+      // Each row is one scheduled/effected status transition for a staff member.
+      // Rows stay applied=FALSE until effective_date arrives; the employees API
+      // sweeps due rows into users.emp_status/users.active on each list fetch.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS staff_status_changes (
+          id             SERIAL       PRIMARY KEY,
+          user_id        INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          from_status    VARCHAR(100),
+          to_status      VARCHAR(100) NOT NULL,
+          effective_date DATE         NOT NULL,
+          remarks        TEXT,
+          applied        BOOLEAN      DEFAULT FALSE,
+          created_by     VARCHAR(100),
+          created_at     TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_ssc_user    ON staff_status_changes(user_id);
+        CREATE INDEX IF NOT EXISTS idx_ssc_pending ON staff_status_changes(applied, effective_date);
+      `);
+    },
+  },
+  {
+    version    : 70,
+    description: 'Officially Changes — track branch/post/department/mode/grade too, not just status',
+    up: async (client) => {
+      // Generalise v69's status-only table into one history table for every
+      // officially-changeable field. `field` says which users column the row
+      // transitions ('status' → emp_status+active, others map by name).
+      await client.query(`
+        ALTER TABLE staff_status_changes RENAME TO staff_official_changes;
+        ALTER TABLE staff_official_changes RENAME COLUMN from_status TO from_value;
+        ALTER TABLE staff_official_changes RENAME COLUMN to_status   TO to_value;
+        ALTER TABLE staff_official_changes
+          ADD COLUMN IF NOT EXISTS field VARCHAR(30) NOT NULL DEFAULT 'status';
+        CREATE INDEX IF NOT EXISTS idx_soc_user_field ON staff_official_changes(user_id, field);
+      `);
+    },
+  },
+  {
+    version    : 71,
+    description: 'Fix staff delete — message/audit FKs had no ON DELETE rule, so DELETE FROM users silently 500ed',
+    up: async (client) => {
+      // Any staff who had ever received an internal message (or appeared as an
+      // audit actor / leave approver / …) could not be deleted: the FK raised
+      // 23503 and the UI still toasted "deleted successfully", so the rows
+      // kept reappearing. Inbox copies + sent messages die with the user;
+      // audit/approval references are kept with the user reference nulled.
+      await client.query(`
+        ALTER TABLE message_recipients
+          DROP CONSTRAINT IF EXISTS message_recipients_recipient_id_fkey,
+          ADD CONSTRAINT message_recipients_recipient_id_fkey
+            FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE;
+
+        ALTER TABLE internal_messages
+          DROP CONSTRAINT IF EXISTS internal_messages_sender_id_fkey,
+          ADD CONSTRAINT internal_messages_sender_id_fkey
+            FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE;
+
+        ALTER TABLE audit_log
+          DROP CONSTRAINT IF EXISTS audit_log_actor_id_fkey,
+          ADD CONSTRAINT audit_log_actor_id_fkey
+            FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE attendance_remarks
+          DROP CONSTRAINT IF EXISTS attendance_remarks_created_by_fkey,
+          ADD CONSTRAINT attendance_remarks_created_by_fkey
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE leaves
+          DROP CONSTRAINT IF EXISTS leaves_approved_by_fkey,
+          ADD CONSTRAINT leaves_approved_by_fkey
+            FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL;
+
+        ALTER TABLE office_visits
+          DROP CONSTRAINT IF EXISTS office_visits_approved_by_fkey,
+          ADD CONSTRAINT office_visits_approved_by_fkey
+            FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL;
+      `);
+    },
+  },
+  {
+    version    : 72,
+    description: 'Staff Identity tab — addresses, personal ID cards (with document image), emergency contacts',
+    up: async (client) => {
+      // Three per-staff collections behind Edit Staff → Staff Identity.
+      // id_cards.doc_image is a data-URL (like users.profile_photo) so the
+      // uploaded document ships inline with no separate file storage.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS staff_addresses (
+          id           SERIAL       PRIMARY KEY,
+          user_id      INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          country      VARCHAR(100),
+          province     VARCHAR(100),
+          district     VARCHAR(100),
+          ward         VARCHAR(50),
+          address_type VARCHAR(20)  NOT NULL DEFAULT 'Permanent',
+          created_at   TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_staff_addresses_user ON staff_addresses(user_id);
+
+        CREATE TABLE IF NOT EXISTS staff_id_cards (
+          id          SERIAL       PRIMARY KEY,
+          user_id     INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          id_name     VARCHAR(100) NOT NULL,
+          id_number   VARCHAR(100) NOT NULL,
+          expiry_date DATE,
+          doc_image   TEXT,
+          created_at  TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_staff_id_cards_user ON staff_id_cards(user_id);
+
+        CREATE TABLE IF NOT EXISTS staff_emergency_contacts (
+          id         SERIAL       PRIMARY KEY,
+          user_id    INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name       VARCHAR(100) NOT NULL,
+          contact1   VARCHAR(50),
+          contact2   VARCHAR(50),
+          relation   VARCHAR(50),
+          address    TEXT,
+          created_at TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_staff_emg_contacts_user ON staff_emergency_contacts(user_id);
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

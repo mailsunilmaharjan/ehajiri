@@ -14,6 +14,10 @@ function friendlyDbError(e) {
   if (e.code === '23505' && e.constraint === 'users_username_key') {
     return 'Duplicate Email Address';
   }
+  if (e.code === '23503') {
+    return `Cannot delete — this staff still has linked records in "${e.table}". ` +
+           'Mark them Not Working via Officially Changes instead, or remove the linked records first.';
+  }
   return e.message;
 }
 
@@ -103,9 +107,268 @@ const sql = {
     RETURNING ${SEL}`,
 };
 
+/* ══════════ Officially Changes — status/branch/post/department/mode/grade history ══════════ */
+
+/* Which users column each officially-changeable field transitions.
+   'status' is special-cased in the sweep (also derives users.active). */
+const OFFICIAL_FIELDS = {
+  status:     'emp_status',
+  branch:     'branch',
+  position:   'position',
+  department: 'department',
+  mode:       'mode',
+  grade:      'grade',
+};
+
+/* Sweep due official changes into the users table. Per user+field, the row
+   with the latest effective_date that has arrived wins; every due row is
+   then marked applied. For status, active follows the status's status_type
+   in employee_statuses ('Working'). */
+async function applyDueOfficialChanges() {
+  for (const [field, col] of Object.entries(OFFICIAL_FIELDS)) {
+    const setClause = field === 'status'
+      ? `emp_status = d.to_value,
+         active = COALESCE(
+           (SELECT s.status_type = 'Working' FROM employee_statuses s WHERE s.name = d.to_value LIMIT 1),
+           d.to_value = 'Active')`
+      : `${col} = d.to_value`;
+    await pool.query(`
+      WITH due AS (
+        SELECT DISTINCT ON (user_id) user_id, to_value
+        FROM staff_official_changes
+        WHERE field = $1 AND applied = FALSE AND effective_date <= CURRENT_DATE
+        ORDER BY user_id, effective_date DESC, id DESC
+      )
+      UPDATE users u SET ${setClause}
+      FROM due d WHERE u.id = d.user_id
+    `, [field]);
+  }
+  await pool.query(`
+    UPDATE staff_official_changes SET applied = TRUE
+    WHERE applied = FALSE AND effective_date <= CURRENT_DATE
+  `);
+}
+
 router.get('/', async (_req, res) => {
-  try { res.json((await pool.query(sql.list)).rows); }
+  try {
+    // Apply any official changes that became due since the last fetch —
+    // this is what makes a future-dated change take effect on its date.
+    await applyDueOfficialChanges().catch(() => {});
+    res.json((await pool.query(sql.list)).rows);
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const SOC_SEL = `
+  id, field,
+  user_id                              AS "userId",
+  from_value                           AS "fromValue",
+  to_value                             AS "toValue",
+  to_char(effective_date,'YYYY-MM-DD') AS "effectiveDate",
+  remarks, applied,
+  created_by                           AS "createdBy",
+  created_at                           AS "createdAt"
+`;
+
+router.get('/:id/official-changes', async (req, res) => {
+  try {
+    const { field } = req.query;
+    const params = [req.params.id];
+    let where = 'user_id=$1';
+    if (field) { params.push(field); where += ' AND field=$2'; }
+    const { rows } = await pool.query(
+      `SELECT ${SOC_SEL} FROM staff_official_changes
+       WHERE ${where} ORDER BY effective_date DESC, id DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/:id/official-changes', canManageStaff, async (req, res) => {
+  const { field, toValue, effectiveDate, remarks } = req.body;
+  const col = OFFICIAL_FIELDS[field];
+  if (!col)             return res.status(400).json({ error: `Unknown field "${field}"` });
+  if (!toValue?.trim()) return res.status(400).json({ error: 'Changing value is required' });
+  if (!effectiveDate)   return res.status(400).json({ error: 'Effective Date is required' });
+  try {
+    const cur = await pool.query(`SELECT ${col} AS val FROM users WHERE id=$1`, [req.params.id]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'Staff not found' });
+
+    const { rows } = await pool.query(
+      `INSERT INTO staff_official_changes (user_id, field, from_value, to_value, effective_date, remarks, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING ${SOC_SEL}`,
+      [req.params.id, field, cur.rows[0].val || null, toValue.trim(), effectiveDate,
+       remarks?.trim() || null, req.user?.fullName || req.user?.username || null]
+    );
+
+    await applyDueOfficialChanges();
+
+    const after = (await pool.query(`SELECT ${SEL} FROM users WHERE id=$1`, [req.params.id])).rows[0];
+    logAudit({ actor: req.user, action: 'official-change', entity: 'employee', entityId: req.params.id,
+               before: { [field]: cur.rows[0].val }, after: { [field]: toValue, effectiveDate, remarks } });
+    res.status(201).json({
+      change: { ...rows[0], applied: rows[0].effectiveDate <= new Date().toISOString().split('T')[0] },
+      user: after,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Edit an entry (grid double-click). The row is reset to pending and the
+   sweep re-runs, so per user+field the latest due row still wins — editing
+   an already-applied entry re-applies correctly. */
+router.put('/:id/official-changes/:changeId', canManageStaff, async (req, res) => {
+  const { toValue, effectiveDate, remarks } = req.body;
+  if (!toValue?.trim()) return res.status(400).json({ error: 'Changing value is required' });
+  if (!effectiveDate)   return res.status(400).json({ error: 'Effective Date is required' });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE staff_official_changes
+       SET to_value=$1, effective_date=$2, remarks=$3, applied=FALSE
+       WHERE id=$4 AND user_id=$5
+       RETURNING ${SOC_SEL}`,
+      [toValue.trim(), effectiveDate, remarks?.trim() || null, req.params.changeId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Change not found' });
+
+    await applyDueOfficialChanges();
+
+    const after = (await pool.query(`SELECT ${SEL} FROM users WHERE id=$1`, [req.params.id])).rows[0];
+    logAudit({ actor: req.user, action: 'official-change-edit', entity: 'employee', entityId: req.params.id,
+               before: null, after: { field: rows[0].field, toValue, effectiveDate, remarks } });
+    res.json({
+      change: { ...rows[0], applied: rows[0].effectiveDate <= new Date().toISOString().split('T')[0] },
+      user: after,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ══════════ Staff Identity — addresses / ID cards / emergency contacts ══════════
+   One generic CRUD over the three per-staff collections behind the
+   Edit Staff → Staff Identity tab. `kind` is the URL segment. */
+const IDENTITY_KINDS = {
+  addresses: {
+    table: 'staff_addresses',
+    sel: `id, user_id AS "userId", country, province, district, ward,
+          address_type AS "addressType", created_at AS "createdAt"`,
+    cols: { country:'country', province:'province', district:'district', ward:'ward', addressType:'address_type' },
+    required: { addressType: 'Address Type' },
+  },
+  'id-cards': {
+    table: 'staff_id_cards',
+    sel: `id, user_id AS "userId", id_name AS "idName", id_number AS "idNumber",
+          to_char(expiry_date,'YYYY-MM-DD') AS "expiryDate", doc_image AS "docImage",
+          created_at AS "createdAt"`,
+    cols: { idName:'id_name', idNumber:'id_number', expiryDate:'expiry_date', docImage:'doc_image' },
+    required: { idName: 'ID Name', idNumber: 'ID Number' },
+  },
+  'emergency-contacts': {
+    table: 'staff_emergency_contacts',
+    sel: `id, user_id AS "userId", name, contact1, contact2, relation, address,
+          created_at AS "createdAt"`,
+    cols: { name:'name', contact1:'contact1', contact2:'contact2', relation:'relation', address:'address' },
+    required: { name: 'Name', contact1: 'Contact No. 1' },
+  },
+};
+
+function identityKind(req, res) {
+  const kind = IDENTITY_KINDS[req.params.kind];
+  if (!kind) res.status(400).json({ error: `Unknown identity section "${req.params.kind}"` });
+  return kind;
+}
+
+/* Pull the body values in column order; '' → null. Returns an error string
+   if a required field is missing. */
+function identityValues(kind, body) {
+  const values = [];
+  for (const [key, label] of Object.entries(kind.required)) {
+    if (!String(body[key] ?? '').trim()) return { error: `${label} is required` };
+  }
+  for (const key of Object.keys(kind.cols)) {
+    const v = body[key];
+    values.push(typeof v === 'string' ? (v.trim() || null) : (v ?? null));
+  }
+  return { values };
+}
+
+router.get('/:id/identity/:kind', async (req, res) => {
+  const kind = identityKind(req, res);
+  if (!kind) return;
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${kind.sel} FROM ${kind.table} WHERE user_id=$1 ORDER BY id DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/:id/identity/:kind', canManageStaff, async (req, res) => {
+  const kind = identityKind(req, res);
+  if (!kind) return;
+  const { values, error } = identityValues(kind, req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    const cols = Object.values(kind.cols);
+    const { rows } = await pool.query(
+      `INSERT INTO ${kind.table} (user_id, ${cols.join(', ')})
+       VALUES ($1, ${cols.map((_, i) => `$${i + 2}`).join(', ')})
+       RETURNING ${kind.sel}`,
+      [req.params.id, ...values]
+    );
+    logAudit({ actor: req.user, action: `identity-add-${req.params.kind}`, entity: 'employee',
+               entityId: req.params.id, before: null, after: { id: rows[0].id } });
+    res.status(201).json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/:id/identity/:kind/:rowId', canManageStaff, async (req, res) => {
+  const kind = identityKind(req, res);
+  if (!kind) return;
+  const { values, error } = identityValues(kind, req.body);
+  if (error) return res.status(400).json({ error });
+  try {
+    const cols = Object.values(kind.cols);
+    const { rows } = await pool.query(
+      `UPDATE ${kind.table} SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(', ')}
+       WHERE id=$${cols.length + 1} AND user_id=$${cols.length + 2}
+       RETURNING ${kind.sel}`,
+      [...values, req.params.rowId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Record not found' });
+    logAudit({ actor: req.user, action: `identity-edit-${req.params.kind}`, entity: 'employee',
+               entityId: req.params.id, before: null, after: { id: rows[0].id } });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/:id/identity/:kind/:rowId', canManageStaff, async (req, res) => {
+  const kind = identityKind(req, res);
+  if (!kind) return;
+  try {
+    const { rows } = await pool.query(
+      `DELETE FROM ${kind.table} WHERE id=$1 AND user_id=$2 RETURNING id`,
+      [req.params.rowId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Record not found' });
+    logAudit({ actor: req.user, action: `identity-delete-${req.params.kind}`, entity: 'employee',
+               entityId: req.params.id, before: { id: rows[0].id }, after: null });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Only pending (not-yet-applied) entries can be removed — applied ones are history */
+router.delete('/:id/official-changes/:changeId', canManageStaff, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `DELETE FROM staff_official_changes
+       WHERE id=$1 AND user_id=$2 AND applied=FALSE RETURNING id`,
+      [req.params.changeId, req.params.id]
+    );
+    if (!rows.length) return res.status(400).json({ error: 'Only pending (future-dated) changes can be deleted' });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => {
@@ -295,7 +558,7 @@ router.delete('/:id', canDeleteStaff, guardAdminAccountMutation, async (req, res
     await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
     logAudit({ actor: req.user, action: 'delete', entity: 'employee', entityId: req.params.id, before, after: null });
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: friendlyDbError(e) }); }
 });
 
 router.put('/:id/reset-password', canManageStaff, async (req, res) => {

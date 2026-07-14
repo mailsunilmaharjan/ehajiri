@@ -677,6 +677,687 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
   );
 };
 
+/* ══════════ Officially Changes tab — status/branch/post/department/mode/grade history ══════════ */
+const OFFICIAL_CHANGE_FIELDS = [
+  { key:'status',     label:'Status',     icon:'🔄' },
+  { key:'branch',     label:'Branch',     icon:'🏢' },
+  { key:'position',   label:'Post',       icon:'💼' },
+  { key:'department', label:'Department', icon:'🏗️' },
+  { key:'mode',       label:'Mode',       icon:'📋' },
+  { key:'grade',      label:'Grade',      icon:'🎖️' },
+];
+
+const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
+  const { t }        = useLanguage();
+  const { settings } = useSettings();
+  const fd = useDateFormat();
+  const [fieldTab, setFieldTab] = useState('status');
+  const [rows,     setRows]     = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [editor,   setEditor]   = useState(null);  // { row? } — popup open; row set = edit mode
+  const [saving,   setSaving]   = useState(false);
+  const [scForm,   setScForm]   = useState({ toValue:'', effectiveDate:'', remarks:'' });
+  const [scErrors, setScErrors] = useState({});
+
+  const fieldDef     = OFFICIAL_CHANGE_FIELDS.find(f => f.key === fieldTab);
+  const fieldLabel   = t(fieldDef.label);
+  const currentValue = current[fieldTab] || '';
+  const fieldRows    = rows.filter(r => r.field === fieldTab);
+
+  const load = async () => {
+    try { setRows(await api.get(`/employees/${employeeId}/official-changes`)); }
+    catch { /* table shows empty state */ }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [employeeId]);
+
+  const statusType = (name) =>
+    (settings.statuses || []).find(s => s.name === name)?.statusType;
+
+  /* Dropdown options per field — same sources as the Staff Detail selects */
+  const fieldOptions = () => {
+    switch (fieldTab) {
+      case 'status':
+        return (settings.statuses || []).map(s => ({ value:s.name, label:`${s.name}${s.statusType ? ` (${s.statusType})` : ''}` }));
+      case 'branch':
+        return [
+          ...(settings.companyNameEn ? [{ value: settings.companyNameEn, label: `${settings.companyNameEn} (HQ)` }] : []),
+          ...(settings.branches || []).map(b => ({ value:b.name, label:`${b.name} Branch` })),
+        ];
+      case 'position':   return (settings.posts       || []).map(p => ({ value:p.name, label:p.name }));
+      case 'department': return (settings.departments || []).map(d => ({ value:d.name, label:d.name }));
+      case 'mode':       return (settings.modes       || []).map(m => ({ value:m.name, label:m.name }));
+      case 'grade':      return (settings.grades      || []).map(g => ({ value:g.name, label:g.name }));
+      default:           return [];
+    }
+  };
+
+  const openAddNew = () => {
+    setScForm({ toValue:'', effectiveDate: new Date().toISOString().split('T')[0], remarks:'' });
+    setScErrors({});
+    setEditor({});
+  };
+
+  const openEditRow = (row) => {
+    setScForm({ toValue: row.toValue, effectiveDate: row.effectiveDate, remarks: row.remarks || '' });
+    setScErrors({});
+    setEditor({ row });
+  };
+
+  const save = async () => {
+    const e = {};
+    if (!scForm.toValue) e.toValue = t('Required field');
+    else if (!editor?.row && scForm.toValue === currentValue)
+      e.toValue = t('Select a value different from the current one');
+    if (!scForm.effectiveDate) e.effectiveDate = t('Required field');
+    if (Object.keys(e).length) { setScErrors(e); return; }
+    setSaving(true);
+    try {
+      const resp = editor?.row
+        ? await api.put(`/employees/${employeeId}/official-changes/${editor.row.id}`, scForm)
+        : await api.post(`/employees/${employeeId}/official-changes`, { field: fieldTab, ...scForm });
+      setEditor(null);
+      await load();
+      onApplied?.(resp.user, resp.change);
+    } catch (err) {
+      setScErrors({ _global: err.message });
+    } finally { setSaving(false); }
+  };
+
+  const remove = async (row) => {
+    if (!window.confirm(`${t('Delete pending change to')} "${row.toValue}" (${fd(row.effectiveDate)})?`)) return;
+    try {
+      await api.delete(`/employees/${employeeId}/official-changes/${row.id}`);
+      await load();
+    } catch (err) { window.alert(err.message); }
+  };
+
+  /* Grid cells reuse the global DataGrid classes (dg-th / dg-td / dg-sn-col)
+     so this table matches the Staff Detail grid exactly. */
+
+  /* Status values get a green/red Working tint; other fields a neutral chip */
+  const ValueChip = ({ name }) => {
+    if (!name) return <span style={{ color:'#d1d5db' }}>—</span>;
+    let bg = '#eff6ff', color = '#1e40af', border = '#1e40af33';
+    if (fieldTab === 'status') {
+      const working = statusType(name) ? statusType(name) === 'Working' : name === 'Active';
+      bg = working ? '#f0fdf4' : '#fff5f5';
+      color = working ? '#065f46' : '#991b1b';
+      border = working ? '#065f4633' : '#991b1b33';
+    }
+    return (
+      <span style={{ fontSize:12, fontWeight:600, padding:'2px 10px', borderRadius:10, whiteSpace:'nowrap',
+        background:bg, color, border:`1px solid ${border}` }}>
+        {name}
+      </span>
+    );
+  };
+
+  /* Most recent applied change for this field — its date is when the
+     current value took effect (blank if the value was never changed here) */
+  const latestApplied = fieldRows.find(r => r.applied);
+
+  return (
+    <div>
+      {/* Field tab strip — underline tabs with count badges, same style as the
+          Attendance Device sub-tabs (Devices / Att. Logs / Device Users / …) */}
+      <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:14, flexWrap:'wrap' }}>
+        {OFFICIAL_CHANGE_FIELDS.map(f => {
+          const active = fieldTab === f.key;
+          const count  = rows.filter(r => r.field === f.key).length;
+          return (
+            <button key={f.key} onClick={() => setFieldTab(f.key)} style={{
+              padding:'8px 14px', background:'none', border:'none',
+              borderBottom: active ? '2px solid #1a56db' : '2px solid transparent',
+              color: active ? '#1a56db' : '#6b7280',
+              fontWeight: active ? 700 : 400,
+              cursor:'pointer', fontSize:12.5, display:'flex', alignItems:'center', gap:5, marginBottom:-2,
+            }}>
+              {f.icon} {t(f.label)}
+              {count > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab content card */}
+      <div style={{ border:'1px solid #dedede', borderRadius:8, background:'white',
+        boxShadow:'0 1px 3px rgba(0,0,0,.07)', overflow:'hidden' }}>
+
+      {/* Toolbar — title + Add New, mirrors the DataGrid toolbar */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+        padding:'9px 14px', background:'#f9fafb', borderBottom:'1px solid #dedede' }}>
+        <span style={{ fontSize:14, fontWeight:600, color:'#111827' }}>
+          {fieldDef.icon} {fieldLabel} {t('Change History')}
+        </span>
+        <button className="btn btn-primary" style={{ height:32, fontSize:13 }} onClick={openAddNew}>
+          + {t('Add New')}
+        </button>
+      </div>
+
+      {/* History grid — same dg-* classes as the Staff Detail grid */}
+      <table className="dg-table compact" style={{ minWidth:'unset' }}>
+        <thead>
+          <tr className="dg-header-row">
+            <th className="dg-th dg-sn-col">SN</th>
+            <th className="dg-th" style={{ textAlign:'left' }}>{fieldLabel}</th>
+            <th className="dg-th" style={{ textAlign:'left', width:150 }}>{t('Effective Date')}</th>
+            <th className="dg-th" style={{ textAlign:'left' }}>{t('Remarks')}</th>
+            <th className="dg-th" style={{ width:110 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {/* Pinned first row — the staff's current value */}
+          {!loading && (
+            <tr className="dg-row">
+              <td className="dg-td dg-sn-col">★</td>
+              <td className="dg-td"><ValueChip name={currentValue} /></td>
+              <td className="dg-td">{latestApplied ? fd(latestApplied.effectiveDate) : <span className="dg-null">—</span>}</td>
+              <td className="dg-td" style={{ color:'#9ca3af', fontStyle:'italic' }}>{t('Current')} {fieldLabel}</td>
+              <td className="dg-td" style={{ textAlign:'right' }}>
+                <span style={{ fontSize:11, fontWeight:700, color:'#1e40af', background:'#dbeafe', padding:'2px 8px', borderRadius:10 }}>
+                  {t('Current')}
+                </span>
+              </td>
+            </tr>
+          )}
+          {loading ? (
+            <tr><td colSpan={5} className="dg-td" style={{ textAlign:'center', color:'#9ca3af', padding:'24px 0' }}>Loading…</td></tr>
+          ) : fieldRows.length === 0 ? (
+            <tr><td colSpan={5} className="dg-td" style={{ textAlign:'center', color:'#9ca3af', padding:'24px 0' }}>
+              {t('No changes yet')} — {t('use + Add New to record one')}
+            </td></tr>
+          ) : fieldRows.map((r, i) => (
+            <tr key={r.id} className="dg-row clickable" title={t('Double-click to edit')}
+              onDoubleClick={() => openEditRow(r)}>
+              <td className="dg-td dg-sn-col">{i + 1}</td>
+              <td className="dg-td">
+                <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                  {r.fromValue && <>
+                    <span style={{ fontSize:12, color:'#6b7280' }}>{r.fromValue}</span>
+                    <span style={{ color:'#9ca3af' }}>→</span>
+                  </>}
+                  <ValueChip name={r.toValue} />
+                </div>
+              </td>
+              <td className="dg-td">{fd(r.effectiveDate)}</td>
+              <td className="dg-td" style={{ whiteSpace:'normal' }}>{r.remarks || <span className="dg-null">—</span>}</td>
+              <td className="dg-td" style={{ textAlign:'right' }}>
+                {r.applied ? (
+                  <span style={{ fontSize:11, fontWeight:700, color:'#065f46', background:'#d1fae5', padding:'2px 8px', borderRadius:10 }}>
+                    ✓ {t('Applied')}
+                  </span>
+                ) : (
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+                    <span style={{ fontSize:11, fontWeight:700, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10 }}>
+                      ⏳ {t('Pending')}
+                    </span>
+                    <button title={t('Delete')} onClick={e => { e.stopPropagation(); remove(r); }}
+                      style={{ background:'none', border:'none', cursor:'pointer', color:'#ef4444', fontSize:14, padding:2 }}>
+                      🗑
+                    </button>
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Footer hint — mirrors the DataGrid footer */}
+      <div style={{ padding:'7px 14px', background:'#f9fafb', borderTop:'1px solid #dedede',
+        fontSize:12, color:'#6b7280' }}>
+        {t('Future-dated changes stay pending and apply automatically on the effective date. Double-click a row to edit it.')}
+      </div>
+
+      </div>{/* /tab content card */}
+
+      {/* ── Add New / Edit popup ── */}
+      {editor && (
+        <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
+          <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:440 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+              <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {fieldLabel} {t('Change')}</h2>
+              <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {scErrors._global && (
+                <div style={{ background:'#fff5f5', color:'#991b1b', border:'1px solid #fecaca',
+                  borderRadius:6, padding:'8px 12px', fontSize:13, marginBottom:12 }}>
+                  {scErrors._global}
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label">{t('Current')} {fieldLabel}</label>
+                <input type="text" className="form-control" readOnly
+                  value={(editor.row ? editor.row.fromValue : currentValue) || '—'}
+                  style={{ fontSize:13, background:'#f3f4f6', color:'#6b7280' }} />
+              </div>
+              <div className="form-group">
+                <label className="form-label required">{t('Changing')} {fieldLabel}</label>
+                <SearchableSelect
+                  value={scForm.toValue}
+                  onChange={v => { setScForm(p => ({ ...p, toValue:v })); setScErrors(p => ({ ...p, toValue:'' })); }}
+                  placeholder="— Select —"
+                  options={fieldOptions().filter(o => editor.row || o.value !== currentValue)}
+                />
+                {scErrors.toValue && <div className="form-error">{scErrors.toValue}</div>}
+              </div>
+              <div className="form-group">
+                <label className="form-label required">{t('Effective Date')}</label>
+                <DateInput value={scForm.effectiveDate}
+                  onChange={v => { setScForm(p => ({ ...p, effectiveDate:v })); setScErrors(p => ({ ...p, effectiveDate:'' })); }}
+                  error={!!scErrors.effectiveDate} />
+                {scErrors.effectiveDate && <div className="form-error">{scErrors.effectiveDate}</div>}
+              </div>
+              <div className="form-group">
+                <label className="form-label">{t('Remarks')}</label>
+                <textarea className="form-control" rows={3} style={{ fontSize:13, resize:'vertical' }}
+                  placeholder={t('Reason for the change...')}
+                  value={scForm.remarks}
+                  onChange={e => setScForm(p => ({ ...p, remarks:e.target.value }))} />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setEditor(null)}>{t('Cancel')}</button>
+              <SaveButton onClick={save} label={saving ? t('Saving...') : t('Save')} disabled={saving} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ══════════ Staff Identity tab — addresses / ID cards / emergency contacts ══════════ */
+const IDENTITY_SECTIONS = [
+  { key:'addresses',          label:'Address',           icon:'🏠' },
+  { key:'id-cards',           label:'Personal ID Card',  icon:'🪪' },
+  { key:'emergency-contacts', label:'Emergency Contact', icon:'🚨' },
+];
+
+const NEPAL_PROVINCES = ['Koshi','Madhesh','Bagmati','Gandaki','Lumbini','Karnali','Sudurpashchim'];
+const RELATIONS = ['Father','Mother','Husband','Wife','Brother','Sister','Son','Daughter','Uncle','Aunt','Mama','Maiju','Grandfather','Grandmother','Boyfriend','Girlfriend','Friend','Driver','Other'];
+
+const IDENTITY_EMPTY_FORMS = {
+  'addresses':          { country:'Nepal', province:'', district:'', ward:'', addressType:'Permanent' },
+  'id-cards':           { idName:'', idNumber:'', expiryDate:'', docImage:'' },
+  'emergency-contacts': { name:'', contact1:'', contact2:'', relation:'', address:'' },
+};
+
+/** Downscale a picked document image to a JPEG data URL. Wider cap than the
+    256px avatar downscale in ProfileTab — the document must stay readable. */
+const readDocImage = (file) => new Promise((resolve, reject) => {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const max = 1400;
+    const scale = Math.min(1, max / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    resolve(canvas.toDataURL('image/jpeg', 0.85));
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Invalid image file')); };
+  img.src = url;
+});
+
+const StaffIdentityTab = ({ employeeId }) => {
+  const { t } = useLanguage();
+  const fd = useDateFormat();
+  const [section, setSection] = useState('addresses');
+  const [data,    setData]    = useState({ 'addresses':[], 'id-cards':[], 'emergency-contacts':[] });
+  const [loading, setLoading] = useState(true);
+  const [editor,  setEditor]  = useState(null);   // { row? } — popup open; row set = edit mode
+  const [siForm,  setSiForm]  = useState(IDENTITY_EMPTY_FORMS.addresses);
+  const [siErrors,setSiErrors]= useState({});
+  const [saving,  setSaving]  = useState(false);
+  const [docView, setDocView] = useState(null);   // data URL — full-size document viewer
+
+  const sectionDef = IDENTITY_SECTIONS.find(s => s.key === section);
+  const rows = data[section];
+
+  const load = async () => {
+    try {
+      const [addresses, idCards, contacts] = await Promise.all(
+        IDENTITY_SECTIONS.map(s => api.get(`/employees/${employeeId}/identity/${s.key}`))
+      );
+      setData({ 'addresses':addresses, 'id-cards':idCards, 'emergency-contacts':contacts });
+    } catch { /* grids show empty state */ }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [employeeId]);
+
+  const setField = (key, value) => {
+    setSiForm(p => ({ ...p, [key]: value }));
+    setSiErrors(p => ({ ...p, [key]: '' }));
+  };
+
+  const openAddNew = () => {
+    setSiForm(IDENTITY_EMPTY_FORMS[section]);
+    setSiErrors({});
+    setEditor({});
+  };
+
+  const openEditRow = (row) => {
+    const form = {};
+    for (const key of Object.keys(IDENTITY_EMPTY_FORMS[section])) form[key] = row[key] || '';
+    setSiForm(form);
+    setSiErrors({});
+    setEditor({ row });
+  };
+
+  /* Frontend mirror of the API's required fields per section */
+  const REQUIRED = {
+    'addresses':          ['addressType'],
+    'id-cards':           ['idName', 'idNumber'],
+    'emergency-contacts': ['name', 'contact1'],
+  };
+
+  const save = async () => {
+    const e = {};
+    for (const key of REQUIRED[section]) {
+      if (!String(siForm[key] || '').trim()) e[key] = t('Required field');
+    }
+    if (Object.keys(e).length) { setSiErrors(e); return; }
+    setSaving(true);
+    try {
+      if (editor?.row) await api.put(`/employees/${employeeId}/identity/${section}/${editor.row.id}`, siForm);
+      else             await api.post(`/employees/${employeeId}/identity/${section}`, siForm);
+      setEditor(null);
+      await load();
+    } catch (err) {
+      setSiErrors({ _global: err.message });
+    } finally { setSaving(false); }
+  };
+
+  const remove = async (row) => {
+    if (!window.confirm(`${t('Delete this')} ${t(sectionDef.label)} ${t('record?')}`)) return;
+    try {
+      await api.delete(`/employees/${employeeId}/identity/${section}/${row.id}`);
+      await load();
+    } catch (err) { window.alert(err.message); }
+  };
+
+  const TypeChip = ({ type }) => {
+    const permanent = type === 'Permanent';
+    return (
+      <span style={{ fontSize:12, fontWeight:600, padding:'2px 10px', borderRadius:10, whiteSpace:'nowrap',
+        background: permanent ? '#eff6ff' : '#fef3c7',
+        color:      permanent ? '#1e40af' : '#92400e',
+        border:     `1px solid ${permanent ? '#1e40af33' : '#92400e33'}` }}>
+        {t(type)}
+      </span>
+    );
+  };
+
+  const cell = (v) => v || <span className="dg-null">—</span>;
+
+  /* Column heads + row cells per section — rendered into the shared dg-table */
+  const GRID = {
+    'addresses': {
+      heads: ['Address Type', 'Country', 'Province', 'District', 'Ward'],
+      cells: r => [<TypeChip type={r.addressType} />, cell(r.country), cell(r.province), cell(r.district), cell(r.ward)],
+    },
+    'id-cards': {
+      heads: ['ID Name', 'ID Number', 'Expiry Date', 'Document'],
+      cells: r => [
+        <span style={{ fontWeight:600 }}>{r.idName}</span>,
+        cell(r.idNumber),
+        r.expiryDate ? fd(r.expiryDate) : <span className="dg-null">—</span>,
+        r.docImage
+          ? <img src={r.docImage} alt={r.idName} title={t('Click to view')}
+              onClick={e => { e.stopPropagation(); setDocView(r.docImage); }}
+              style={{ height:34, borderRadius:4, border:'1px solid #dedede', cursor:'zoom-in', verticalAlign:'middle' }} />
+          : <span className="dg-null">—</span>,
+      ],
+    },
+    'emergency-contacts': {
+      heads: ['Name', 'Contact No. 1', 'Contact No. 2', 'Relation', 'Address'],
+      cells: r => [<span style={{ fontWeight:600 }}>{r.name}</span>, cell(r.contact1), cell(r.contact2), cell(r.relation), cell(r.address)],
+    },
+  }[section];
+
+  return (
+    <div>
+      {/* Section tab strip — same underline style as the Officially Changes field tabs */}
+      <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:14, flexWrap:'wrap' }}>
+        {IDENTITY_SECTIONS.map(s => {
+          const active = section === s.key;
+          const count  = data[s.key].length;
+          return (
+            <button key={s.key} onClick={() => setSection(s.key)} style={{
+              padding:'8px 14px', background:'none', border:'none',
+              borderBottom: active ? '2px solid #1a56db' : '2px solid transparent',
+              color: active ? '#1a56db' : '#6b7280',
+              fontWeight: active ? 700 : 400,
+              cursor:'pointer', fontSize:12.5, display:'flex', alignItems:'center', gap:5, marginBottom:-2,
+            }}>
+              {s.icon} {t(s.label)}
+              {count > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Section content card */}
+      <div style={{ border:'1px solid #dedede', borderRadius:8, background:'white',
+        boxShadow:'0 1px 3px rgba(0,0,0,.07)', overflow:'hidden' }}>
+
+        {/* Toolbar — title + Add New */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+          padding:'9px 14px', background:'#f9fafb', borderBottom:'1px solid #dedede' }}>
+          <span style={{ fontSize:14, fontWeight:600, color:'#111827' }}>
+            {sectionDef.icon} {t(sectionDef.label)}
+          </span>
+          <button className="btn btn-primary" style={{ height:32, fontSize:13 }} onClick={openAddNew}>
+            + {t('Add New')}
+          </button>
+        </div>
+
+        <table className="dg-table compact" style={{ minWidth:'unset' }}>
+          <thead>
+            <tr className="dg-header-row">
+              <th className="dg-th dg-sn-col">SN</th>
+              {GRID.heads.map(h => <th key={h} className="dg-th" style={{ textAlign:'left' }}>{t(h)}</th>)}
+              <th className="dg-th" style={{ width:60 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={GRID.heads.length + 2} className="dg-td" style={{ textAlign:'center', color:'#9ca3af', padding:'24px 0' }}>Loading…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={GRID.heads.length + 2} className="dg-td" style={{ textAlign:'center', color:'#9ca3af', padding:'24px 0' }}>
+                {t('No records yet')} — {t('use + Add New to record one')}
+              </td></tr>
+            ) : rows.map((r, i) => (
+              <tr key={r.id} className="dg-row clickable" title={t('Double-click to edit')}
+                onDoubleClick={() => openEditRow(r)}>
+                <td className="dg-td dg-sn-col">{i + 1}</td>
+                {GRID.cells(r).map((c, ci) => <td key={ci} className="dg-td" style={{ whiteSpace:'normal' }}>{c}</td>)}
+                <td className="dg-td" style={{ textAlign:'right' }}>
+                  <button title={t('Delete')} onClick={e => { e.stopPropagation(); remove(r); }}
+                    style={{ background:'none', border:'none', cursor:'pointer', color:'#ef4444', fontSize:14, padding:2 }}>
+                    🗑
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div style={{ padding:'7px 14px', background:'#f9fafb', borderTop:'1px solid #dedede',
+          fontSize:12, color:'#6b7280' }}>
+          {t('Double-click a row to edit it.')}
+        </div>
+      </div>{/* /section content card */}
+
+      {/* ── Add New / Edit popup ── */}
+      {editor && (
+        <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
+          <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:460 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+              <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {t(sectionDef.label)}</h2>
+              <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {siErrors._global && (
+                <div style={{ background:'#fff5f5', color:'#991b1b', border:'1px solid #fecaca',
+                  borderRadius:6, padding:'8px 12px', fontSize:13, marginBottom:12 }}>
+                  {siErrors._global}
+                </div>
+              )}
+
+              {section === 'addresses' && <>
+                <div className="form-group">
+                  <label className="form-label required">{t('Address Type')}</label>
+                  <div style={{ display:'flex', gap:8 }}>
+                    {['Permanent', 'Temporary'].map(type => (
+                      <button key={type} type="button" onClick={() => setField('addressType', type)}
+                        style={{
+                          flex:1, padding:'8px 0', fontSize:13, borderRadius:6, cursor:'pointer',
+                          fontWeight: siForm.addressType === type ? 700 : 400,
+                          border: siForm.addressType === type ? '2px solid #1a56db' : '1px solid #d1d5db',
+                          background: siForm.addressType === type ? '#eff6ff' : 'white',
+                          color: siForm.addressType === type ? '#1a56db' : '#374151',
+                        }}>
+                        {type === 'Permanent' ? '🏛️' : '🏕️'} {t(type)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('Country')}</label>
+                  <input type="text" className="form-control" style={{ fontSize:13 }}
+                    value={siForm.country} onChange={e => setField('country', e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('Province')}</label>
+                  <SearchableSelect
+                    value={siForm.province}
+                    onChange={v => setField('province', v)}
+                    placeholder="— Select —"
+                    options={NEPAL_PROVINCES.map(p => ({ value:p, label:p }))}
+                  />
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 110px', gap:10 }}>
+                  <div className="form-group">
+                    <label className="form-label">{t('District')}</label>
+                    <input type="text" className="form-control" style={{ fontSize:13 }}
+                      value={siForm.district} onChange={e => setField('district', e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('Ward')}</label>
+                    <input type="text" className="form-control" style={{ fontSize:13 }}
+                      placeholder="e.g. 5"
+                      value={siForm.ward} onChange={e => setField('ward', e.target.value)} />
+                  </div>
+                </div>
+              </>}
+
+              {section === 'id-cards' && <>
+                <div className="form-group">
+                  <label className="form-label required">{t('ID Name')}</label>
+                  <input type="text" className="form-control" style={{ fontSize:13 }}
+                    placeholder={t('e.g. Citizenship, Passport, Driving License...')}
+                    value={siForm.idName} onChange={e => setField('idName', e.target.value)} />
+                  {siErrors.idName && <div className="form-error">{siErrors.idName}</div>}
+                </div>
+                <div className="form-group">
+                  <label className="form-label required">{t('ID Number')}</label>
+                  <input type="text" className="form-control" style={{ fontSize:13 }}
+                    value={siForm.idNumber} onChange={e => setField('idNumber', e.target.value)} />
+                  {siErrors.idNumber && <div className="form-error">{siErrors.idNumber}</div>}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('Expiry Date')}</label>
+                  <DateInput value={siForm.expiryDate} onChange={v => setField('expiryDate', v)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('Upload Doc')}</label>
+                  {siForm.docImage ? (
+                    <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                      <img src={siForm.docImage} alt="document"
+                        onClick={() => setDocView(siForm.docImage)}
+                        style={{ height:64, borderRadius:6, border:'1px solid #dedede', cursor:'zoom-in' }} />
+                      <button type="button" className="btn btn-outline" style={{ height:30, fontSize:12, color:'#ef4444' }}
+                        onClick={() => setField('docImage', '')}>
+                        ✕ {t('Remove')}
+                      </button>
+                    </div>
+                  ) : (
+                    <input type="file" accept="image/*" className="form-control" style={{ fontSize:13, padding:6 }}
+                      onChange={async e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        try { setField('docImage', await readDocImage(file)); }
+                        catch (err) { setSiErrors(p => ({ ...p, _global: err.message })); }
+                      }} />
+                  )}
+                </div>
+              </>}
+
+              {section === 'emergency-contacts' && <>
+                <div className="form-group">
+                  <label className="form-label required">{t('Name')}</label>
+                  <input type="text" className="form-control" style={{ fontSize:13 }}
+                    value={siForm.name} onChange={e => setField('name', e.target.value)} />
+                  {siErrors.name && <div className="form-error">{siErrors.name}</div>}
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  <div className="form-group">
+                    <label className="form-label required">{t('Contact No. 1')}</label>
+                    <input type="text" className="form-control" style={{ fontSize:13 }}
+                      value={siForm.contact1} onChange={e => setField('contact1', e.target.value)} />
+                    {siErrors.contact1 && <div className="form-error">{siErrors.contact1}</div>}
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">{t('Contact No. 2')}</label>
+                    <input type="text" className="form-control" style={{ fontSize:13 }}
+                      value={siForm.contact2} onChange={e => setField('contact2', e.target.value)} />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('Relation')}</label>
+                  <SearchableSelect
+                    value={siForm.relation}
+                    onChange={v => setField('relation', v)}
+                    placeholder="— Select —"
+                    options={RELATIONS.map(r => ({ value:r, label:t(r) }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t('Address')}</label>
+                  <textarea className="form-control" rows={2} style={{ fontSize:13, resize:'vertical' }}
+                    value={siForm.address} onChange={e => setField('address', e.target.value)} />
+                </div>
+              </>}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setEditor(null)}>{t('Cancel')}</button>
+              <SaveButton onClick={save} label={saving ? t('Saving...') : t('Save')} disabled={saving} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Full-size document viewer ── */}
+      {docView && (
+        <div className="modal-overlay" style={{ zIndex:1300, cursor:'zoom-out' }} onClick={() => setDocView(null)}>
+          <img src={docView} alt="document"
+            style={{ maxWidth:'88vw', maxHeight:'88vh', borderRadius:8, boxShadow:'0 8px 40px rgba(0,0,0,.45)' }} />
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ────────────────────────────────── */
 
 const defaultForm = {
@@ -724,10 +1405,28 @@ const UserManagement = () => {
     modes: [], genders: [], timingTypes: [], religions: [],
     handicapped: '', eligibleForOt: '', statuses: [], roles: [],
   });
+  /* Working / Not Working view — staff whose status is a "Not Working" type
+     (active === false) are hidden from the default list; flip the toggle to see them */
+  const [statusView, setStatusView] = useState('working');
 
   const showToast = (msg, type='success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2500);
+  };
+
+  /* Push staff full names to the ZKTeco devices of their assigned Area */
+  const [syncingNames, setSyncingNames] = useState(false);
+  const handleSyncNames = async () => {
+    if (!window.confirm(t('Send each staff member\'s name to the attendance devices in their assigned Area?'))) return;
+    setSyncingNames(true);
+    try {
+      const r = await api.post('/zkteco/sync-names-to-devices', {});
+      showToast(
+        `${r.staffSynced} staff name(s) queued to ${r.devices} device(s)` +
+        (r.skippedNoDevice ? ` — ${r.skippedNoDevice} skipped (no device/area)` : '')
+      );
+    } catch (err) { showToast(err.message, 'error'); }
+    setSyncingNames(false);
   };
 
   const handleChange = (field, val) => {
@@ -867,12 +1566,40 @@ const UserManagement = () => {
     }
   };
 
-  /* Ctrl+S saves the Edit/Add Staff modal — same action as the Save button */
-  useSaveShortcut(modal && activeTab !== 'Device Connectivity', handleSave);
+  /* Ctrl+S saves the Edit/Add Staff modal — same action as the Save button.
+     Skipped on tabs without a footer Save (Device Connectivity, Officially Changes). */
+  useSaveShortcut(modal && activeTab !== 'Device Connectivity' && activeTab !== 'Officially Changes' && activeTab !== 'Staff Identity', handleSave);
 
-  const handleBulkDelete = (ids) => {
-    ids.forEach(id => deleteEmployee(id));
-    showToast(`${ids.length} ${t('records deleted successfully')}`);
+  /* Called by the Officially Changes tab after a change is saved/edited.
+     If it took effect immediately (effective date ≤ today), sync the form so a
+     later "Save" on Staff Detail doesn't revert the value, and refresh the
+     staff list so grid columns and Working/Not Working filtering pick it up. */
+  const handleOfficialChangeApplied = (user, change) => {
+    refreshEmployees?.();
+    if (user && change?.applied) {
+      setForm(p => ({ ...p,
+        status:     user.status     || p.status,
+        branch:     user.branch     ?? p.branch,
+        position:   user.position   ?? p.position,
+        department: user.department ?? p.department,
+        mode:       user.mode       ?? p.mode,
+        grade:      user.grade      ?? p.grade,
+        active:     user.active,
+      }));
+      showToast(t('Change applied successfully'));
+    } else {
+      showToast(t('Change scheduled for the effective date'));
+    }
+  };
+
+  const handleBulkDelete = async (ids) => {
+    const results = await Promise.allSettled(ids.map(id => deleteEmployee(id)));
+    const failed  = results.filter(r => r.status === 'rejected');
+    if (failed.length) {
+      showToast(`${failed.length}/${ids.length} ${t('could not be deleted')}: ${failed[0].reason?.message || ''}`, 'error');
+    } else {
+      showToast(`${ids.length} ${t('records deleted successfully')}`);
+    }
   };
 
   const openResetPwd = () => {
@@ -939,9 +1666,9 @@ const UserManagement = () => {
     setQaModal(null);
   };
 
-  /* ── Print ── */
+  /* ── Print — prints the currently displayed (filtered) rows ── */
   const handlePrint = () => {
-    const rows = employees.map((e, i) => `
+    const rows = filteredEmployees.map((e, i) => `
       <tr>
         <td style="text-align:center;color:#6b7280">${i+1}</td>
         <td style="font-family:monospace;background:#f3f4f6;padding:2px 6px;border-radius:4px">${e.employeeId}</td>
@@ -962,7 +1689,7 @@ const UserManagement = () => {
       td{padding:5px 10px;border:1px solid #dedede;font-size:12px}tr:nth-child(even)td{background:#f9fafb}
       @media print{body{margin:0}}</style></head><body>
       <h2>👥 Staff Detail</h2>
-      <p style="color:#6b7280;font-size:11px">Total: ${employees.length} staff | Printed: ${new Date().toLocaleDateString()}</p>
+      <p style="color:#6b7280;font-size:11px">Total: ${filteredEmployees.length} staff | Printed: ${new Date().toLocaleDateString()}</p>
       <table><thead><tr><th>SN</th><th>Staff ID</th><th>Full Name</th><th>Device ID</th>
       <th>Post</th><th>Department</th><th>Branch</th><th>Mobile</th><th>Email</th><th>Mode</th><th>Join Date</th>
       </tr></thead><tbody>${rows}</tbody></table></body></html>`);
@@ -970,10 +1697,10 @@ const UserManagement = () => {
     setTimeout(() => { win.print(); win.close(); }, 400);
   };
 
-  /* ── Export CSV ── */
+  /* ── Export CSV — exports the currently displayed (filtered) rows ── */
   const handleExport = () => {
     const h = ['SN','Staff ID','Full Name','Device ID','Post','Department','Branch','Mobile','Email','Mode','Join Date'];
-    const rows = employees.map((e,i) => [
+    const rows = filteredEmployees.map((e,i) => [
       i+1, e.employeeId, e.fullName, e.deviceId||'',
       e.position||'', e.department||'', e.branch||'',
       e.phone||'', e.email||'', e.mode||'', e.joinDate||'',
@@ -1014,6 +1741,7 @@ const UserManagement = () => {
     advFilters.statuses.length + advFilters.roles.length;
 
   const filteredEmployees = sortedEmployees.filter(e => {
+    if ((e.active !== false) !== (statusView === 'working')) return false;
     const f = advFilters;
     if (f.q) {
       const ql = f.q.toLowerCase();
@@ -1106,9 +1834,41 @@ const UserManagement = () => {
   /* ═══════════════════════════ RENDER ═══════════════════════════ */
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
+      <div className="page-header" style={{ flexDirection:'column', alignItems:'stretch' }}>
+        {/* Row 1: title left — Export / Print right */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap' }}>
           <h1 className="page-title">👥 Staff Detail</h1>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            {canManageStaff && (
+              <button onClick={() => setExcelImport(true)} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
+                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 9.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 8.414V13a1 1 0 11-2 0V8.414L7.707 9.707a1 1 0 01-1.414 0z" clipRule="evenodd"/>
+                </svg>
+                Import Excel
+              </button>
+            )}
+            {canManageStaff && (
+              <button onClick={handleSyncNames} disabled={syncingNames}
+                title={t('Push each staff member\'s name to the attendance devices in their assigned Area')}
+                style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:6, fontSize:13, fontWeight:600, cursor: syncingNames ? 'wait' : 'pointer', whiteSpace:'nowrap', opacity: syncingNames ? .6 : 1 }}>
+                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"/>
+                </svg>
+                {syncingNames ? t('Syncing…') : t('Sync Name in Device')}
+              </button>
+            )}
+            <button onClick={handleExport} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+              Export
+            </button>
+            <button onClick={handlePrint} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9h8v3H6v-3zm8-4a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd"/></svg>
+              Print
+            </button>
+          </div>
+        </div>
+        {/* Row 2: stat chips left — action buttons right */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap' }}>
           <div style={{ display:'flex', gap:10, marginTop:6, flexWrap:'wrap' }}>
             {[
               { label:t('Total Staff'), count:scopedEmployees.length,                                                bg:'#f3f4f6', color:'#374151' },
@@ -1124,8 +1884,19 @@ const UserManagement = () => {
               </span>
             ))}
           </div>
-        </div>
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', justifyContent:'flex-end', marginLeft:'auto' }}>
+          {/* Working / Not Working list toggle */}
+          <div style={{ display:'flex', border:'1px solid #d1d5db', borderRadius:6, overflow:'hidden', height:34 }}>
+            {[['working', t('Working')], ['notworking', t('Not Working')]].map(([v, label]) => (
+              <button key={v} onClick={() => setStatusView(v)}
+                style={{ padding:'0 13px', border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                  transition:'background .15s',
+                  background: statusView === v ? '#1a56db' : 'white',
+                  color: statusView === v ? 'white' : '#374151' }}>
+                {label}
+              </button>
+            ))}
+          </div>
           {/* Advanced Search — opens popup modal */}
           <button onClick={() => setShowAdvSearch(true)} style={{
             display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34,
@@ -1145,14 +1916,6 @@ const UserManagement = () => {
               </span>
             )}
           </button>
-          <button onClick={handleExport} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
-            <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
-            Export
-          </button>
-          <button onClick={handlePrint} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
-            <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9h8v3H6v-3zm8-4a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd"/></svg>
-            Print
-          </button>
           {canManageStaff && (
             <button
               onClick={() => setImportModal(true)}
@@ -1164,9 +1927,10 @@ const UserManagement = () => {
               📥 Import Device Users
             </button>
           )}
-          {canManageStaff && (
-            <button className="btn btn-primary" onClick={openAdd}>+ {t('Add New Staff')}</button>
-          )}
+            {canManageStaff && (
+              <button className="btn btn-primary" onClick={openAdd}>+ {t('Add New Staff')}</button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1458,25 +2222,6 @@ const UserManagement = () => {
           ) : null
         }
         filterButtonLabel="Advance Search"
-        toolbarLeft={
-          canManageStaff && (
-            <button
-              onClick={() => setExcelImport(true)}
-              style={{
-                display:'inline-flex', alignItems:'center', gap:6,
-                padding:'5px 13px', height:32,
-                background:'#f0fdf4', border:'1px solid #86efac',
-                color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer',
-                whiteSpace:'nowrap',
-              }}
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
-                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 9.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 8.414V13a1 1 0 11-2 0V8.414L7.707 9.707a1 1 0 01-1.414 0z" clipRule="evenodd"/>
-              </svg>
-              Import Excel
-            </button>
-          )
-        }
         toolbar={
           canManageStaff && (
             <button onClick={() => setRecoModal(true)} style={{
@@ -1736,6 +2481,39 @@ const UserManagement = () => {
                   ) : (
                     <DeviceConnTab devicePin={form.deviceId} staffName={form.fullName} employeeId={editId} />
                   )
+              ) : activeTab === 'Officially Changes' ? (
+                !editId
+                  ? (
+                    <div className="empty-state" style={{ padding:'40px 0' }}>
+                      <div className="empty-state-icon">💾</div>
+                      <h3>Save Staff First</h3>
+                      <p>Save the staff record before adding official changes.</p>
+                    </div>
+                  ) : (
+                    <OfficialChangesTab
+                      employeeId={editId}
+                      current={{
+                        status:     form.status,
+                        branch:     form.branch,
+                        position:   form.position,
+                        department: form.department,
+                        mode:       form.mode,
+                        grade:      form.grade,
+                      }}
+                      onApplied={handleOfficialChangeApplied}
+                    />
+                  )
+              ) : activeTab === 'Staff Identity' ? (
+                !editId
+                  ? (
+                    <div className="empty-state" style={{ padding:'40px 0' }}>
+                      <div className="empty-state-icon">💾</div>
+                      <h3>Save Staff First</h3>
+                      <p>Save the staff record before adding identity records.</p>
+                    </div>
+                  ) : (
+                    <StaffIdentityTab employeeId={editId} />
+                  )
               ) : (
                 <div className="empty-state" style={{ padding:'40px 0' }}>
                   <div className="empty-state-icon">🚧</div>
@@ -1747,7 +2525,7 @@ const UserManagement = () => {
 
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(false)}>{t('Cancel')}</button>
-              {activeTab !== 'Device Connectivity' && (
+              {activeTab !== 'Device Connectivity' && activeTab !== 'Officially Changes' && activeTab !== 'Staff Identity' && (
                 <SaveButton onClick={handleSave} label={t('Save')} />
               )}
             </div>
@@ -1969,7 +2747,11 @@ const UserManagement = () => {
             <div className="modal-body"><p>{t('Are you sure you want to delete this record?')}</p></div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setDeleteConfirm(null)}>{t('Cancel')}</button>
-              <button className="btn btn-danger" onClick={() => { deleteEmployee(deleteConfirm); showToast(t('Record deleted successfully')); setDeleteConfirm(null); }}>
+              <button className="btn btn-danger" onClick={async () => {
+                try { await deleteEmployee(deleteConfirm); showToast(t('Record deleted successfully')); }
+                catch (e) { showToast(e?.message || t('Delete failed'), 'error'); }
+                setDeleteConfirm(null);
+              }}>
                 🗑 {t('Delete')}
               </button>
             </div>

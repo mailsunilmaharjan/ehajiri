@@ -28,7 +28,7 @@ function readAppVersion() {
 }
 
 export const APP_VERSION = readAppVersion();
-export const DB_VERSION  = 68;
+export const DB_VERSION  = 72;
 
 /** Human-readable changelog shown in the UI */
 export const VERSION_HISTORY = [
@@ -55,5 +55,17 @@ export const VERSION_HISTORY = [
     dbVersion  : 63,
     releaseDate: '2026-07-06',
     notes      : 'Internal Chat (individual & group, online/offline presence, emoji, reply quoting, popup + beep alerts); Outlook-style Messages page with resizing, multi-select, and reply-in-popup; personalized Dashboard for Staff/Branch Manager/Dept Head roles — privacy-safe peer ranking, monthly attendance ledger, duty roster, latest message, pending approvals; app version now always matches the packaged build.',
+  },
+  {
+    appVersion : '1.0.18',
+    dbVersion  : 72,
+    releaseDate: '2026-07-13',
+    notes      : 'Officially Changes tab in User Management — schedule status/branch/post/department/mode/grade transitions with effective dates and full history; fixed staff delete failing silently for users with messages or audit records.',
+  },
+  {
+    appVersion : '1.0.19',
+    dbVersion  : 72,
+    releaseDate: '2026-07-14',
+    notes      : 'Clicking the eHajiri desktop logo while the app is running now opens the application dashboard in the browser instead of the Monitor popup (the Monitor still appears while the server is starting up).',
   },
 ];

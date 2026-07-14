@@ -602,6 +602,19 @@ router.post('/devices/:id/delete-user', canManageDevices, async (req, res) => {
     if (areaId) {
       areaDeleted = await deleteUserFromAreaDevices(areaId, pin, sn);
     }
+
+    // Purge stored FP templates for this PIN on the affected devices — leaving
+    // them makes autoRestoreTemplates() re-push them after the device's next
+    // RESTART, and DATA UPDATE FINGERTMP for a nonexistent PIN recreates the
+    // "deleted" user on the device as a nameless entry.
+    const sns = [sn];
+    if (areaId) {
+      const { rows: sibs } = await pool.query(
+        `SELECT serial_number FROM zkteco_devices WHERE area_id=$1 AND serial_number IS NOT NULL`, [areaId]);
+      sibs.forEach(s => sns.push(s.serial_number));
+    }
+    await pool.query(`DELETE FROM zkteco_fingerprints WHERE pin=$1 AND device_sn = ANY($2)`, [pin, sns]);
+
     res.json({ ok:true, sn, command:cmd.command_payload, areaDeletedFrom:areaDeleted });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
@@ -973,6 +986,10 @@ router.post('/devices/:id/clear-all-users', canManageDevices, async (req, res) =
   try {
     const sn  = await getSnById(req.params.id);
     const cmd = await queueCommand(sn, 'CLEAR ALL USERINFO');
+    // Drop the server-side template store for this device too — otherwise the
+    // next RESTART's autoRestoreTemplates() re-pushes every template and
+    // recreates all the wiped users on the device.
+    await pool.query('DELETE FROM zkteco_fingerprints WHERE device_sn=$1', [sn]);
     res.json({ ok:true, sn, command:cmd.command_payload,
       warning:'This wipes all user records and biometric templates from the device.' });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
@@ -1071,6 +1088,60 @@ router.post('/sync-to-staff', async (req, res) => {
       FROM zkteco_users zu WHERE al.pin=zu.pin AND al.device_sn=zu.device_sn
         AND al.employee_id IS NULL AND zu.employee_id IS NOT NULL`);
     res.json({ ok:true, matched:r1.rowCount+r2.rowCount, byPin:r1.rowCount, byName:r2.rowCount, staffUpdated:r3.rowCount });
+  } catch (err) { res.status(500).json({ error:err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+//  SYNC eHajiri STAFF NAMES → DEVICES (reverse of sync-to-staff)
+// ═══════════════════════════════════════════════════════
+
+/* Push each active staff member's eHajiri full_name to every active device in
+ * the Area(s) their device user belongs to. Device users with no Area fall
+ * back to the device they were enrolled on. Also updates zkteco_users.name so
+ * later Area syncs don't reintroduce the stale device-side name. */
+router.post('/sync-names-to-devices', async (req, res) => {
+  try {
+    const { rows: emps } = await pool.query(`
+      SELECT id, full_name, TRIM(device_id) AS pin FROM users
+      WHERE active=TRUE AND device_id IS NOT NULL AND TRIM(device_id)<>''
+        AND full_name IS NOT NULL AND TRIM(full_name)<>''`);
+    let staffSynced = 0, commandsQueued = 0, skippedNoDevice = 0;
+    const allTargets = new Set();
+    for (const emp of emps) {
+      const { rows: dus } = await pool.query(
+        `SELECT pin, area_id, device_sn, privilege, card_no FROM zkteco_users WHERE TRIM(pin)=$1`,
+        [emp.pin]);
+      const targets = new Set();
+      let privilege = 0, card = '';
+      for (const du of dus) {
+        privilege = du.privilege || 0;
+        card      = du.card_no   || '';
+        if (du.area_id) {
+          const { rows: devs } = await pool.query(
+            `SELECT serial_number FROM zkteco_devices
+             WHERE area_id=$1 AND serial_number IS NOT NULL AND active=TRUE`,
+            [du.area_id]);
+          devs.forEach(d => targets.add(d.serial_number));
+        } else if (du.device_sn) {
+          const { rows: [d] } = await pool.query(
+            `SELECT serial_number FROM zkteco_devices WHERE serial_number=$1 AND active=TRUE`,
+            [du.device_sn]);
+          if (d) targets.add(d.serial_number);
+        }
+      }
+      if (!targets.size) { skippedNoDevice++; continue; }
+      const grp    = await resolveGrpForEmployee(emp.id);
+      const params = buildUserInfoParams({ pin:emp.pin, name:emp.full_name, privilege, card, grp });
+      for (const sn of targets) {
+        await queueCommand(sn, 'DATA UPDATE USERINFO', params);
+        commandsQueued++;
+        allTargets.add(sn);
+      }
+      await pool.query(`UPDATE zkteco_users SET name=$1 WHERE TRIM(pin)=$2`, [emp.full_name, emp.pin]);
+      staffSynced++;
+    }
+    console.log(`[ZK Sync Names] ${staffSynced} staff → ${allTargets.size} devices (${commandsQueued} commands, ${skippedNoDevice} staff with no reachable device)`);
+    res.json({ ok:true, staffSynced, devices:allTargets.size, commandsQueued, skippedNoDevice });
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
@@ -1272,7 +1343,15 @@ router.put('/device-users/:id', canManageDevices, async (req, res) => {
 });
 
 router.delete('/device-users/:id', async (req, res) => {
-  try { await pool.query('DELETE FROM zkteco_users WHERE id=$1',[req.params.id]); res.json({ ok:true }); }
+  try {
+    // Purge this user's stored FP templates for the same device first — else
+    // autoRestoreTemplates() resurrects the user on the device after its next
+    // RESTART (see /devices/:id/delete-user).
+    const { rows: [du] } = await pool.query('SELECT pin, device_sn FROM zkteco_users WHERE id=$1', [req.params.id]);
+    if (du) await pool.query('DELETE FROM zkteco_fingerprints WHERE pin=$1 AND device_sn=$2', [du.pin, du.device_sn]);
+    await pool.query('DELETE FROM zkteco_users WHERE id=$1',[req.params.id]);
+    res.json({ ok:true });
+  }
   catch (err) { res.status(500).json({ error:err.message }); }
 });
 
@@ -1395,8 +1474,16 @@ async function getAreasOrdered() {
              WHERE  d.area_id = at.id
            ) AS device_qty,
            (
+             -- Users explicitly stamped with this area PLUS users enrolled on
+             -- any device assigned to it — direct on-device enrollments never
+             -- get zkteco_users.area_id stamped, so counting the column alone
+             -- undercounts (showed 2 when the area's device held 19 users).
              SELECT COUNT(DISTINCT zu.pin)::int FROM zkteco_users zu
              WHERE  zu.area_id = at.id
+                OR  zu.device_sn IN (
+                      SELECT d2.serial_number FROM zkteco_devices d2
+                      WHERE  d2.area_id = at.id AND d2.serial_number IS NOT NULL
+                    )
            ) AS employee_qty
     FROM   area_tree at
     LEFT   JOIN zkteco_areas p ON p.id = at.parent_id

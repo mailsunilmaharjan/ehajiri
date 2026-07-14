@@ -109,7 +109,13 @@ if (!app.requestSingleInstanceLock()) {
   return;
 }
 app.on('second-instance', () => {
-  if (monitorPopup && !monitorPopup.isDestroyed()) {
+  // Relaunching from the desktop/Start-menu logo means the user wants the
+  // application, so open the dashboard. Only while the server isn't up yet
+  // does the Monitor popup appear instead, so they can watch startup progress
+  // rather than land on a browser error page.
+  if (srvStatus === 'running') {
+    openDashboardInBrowser();
+  } else if (monitorPopup && !monitorPopup.isDestroyed()) {
     monitorPopup.show();
     monitorPopup.focus();
   }
