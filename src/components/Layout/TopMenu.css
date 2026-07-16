@@ -20,7 +20,7 @@
   position: fixed;
   top: 0; left: 0; right: 0;
   height: 62px;
-  color: #1e293b;
+  color: #fff;
   display: flex;
   align-items: center;
   z-index: 100;
@@ -28,15 +28,12 @@
   gap: 0;
   user-select: none;
   overflow: visible;   /* must stay visible so dropdowns show */
-  /* Near-white pastel animated gradient */
-  background: linear-gradient(135deg, #fdfeff, #fafcff, #fafffd, #fafffc, #fdfaff, #fffafd, #fdfeff);
-  background-size: 300% 300%;
-  animation: navShift 14s ease infinite;
+  /* Solid ZKTeco-style green bar */
+  background: linear-gradient(90deg, #63c033, #52b02c);
   box-shadow:
-    0 1px 0 rgba(0,0,0,.05),
-    0 4px 16px rgba(0,0,0,.07),
-    0 1px 3px rgba(0,0,0,.04);
-  backdrop-filter: blur(12px);
+    0 1px 0 rgba(0,0,0,.08),
+    0 4px 16px rgba(0,0,0,.12),
+    0 1px 3px rgba(0,0,0,.08);
 }
 
 /* Ribbon stage — logo-side only, clips ribbons without affecting dropdowns */
@@ -48,19 +45,6 @@
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
-}
-
-/* Animated rainbow top accent line */
-.topmenu::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-  background: linear-gradient(90deg,
-    #dde4ff 0%, #c8f5fd 18%, #fef3c7 36%,
-    #fde8f1 54%, #d1fae5 72%, #dde4ff 90%, #c8f5fd 100%);
-  background-size: 200% 100%;
-  animation: navShift 7s linear infinite;
 }
 
 /* Sunshine shimmer sweep across bottom edge */
@@ -87,28 +71,28 @@
 .tm-brand {
   display: flex; align-items: center; gap: 10px;
   cursor: pointer; padding: 0 16px 0 0; flex-shrink: 0;
-  border-right: 1px solid #e5e7eb;
+  border-right: 1px solid rgba(255,255,255,.25);
   margin-right: 10px;
   transition: opacity .15s;
 }
-.tm-brand:hover { opacity: .8; }
+.tm-brand:hover { opacity: .85; }
 
 .tm-logo {
   width: 36px; height: 36px; border-radius: 10px;
-  background: linear-gradient(135deg, #52b02c, #2f6e1a);
-  color: white; font-size: 14px; font-weight: 800;
+  background: #fff;
+  color: #3e8620; font-size: 14px; font-weight: 800;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(82,176,44,.35);
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
 }
 
 .tm-brand-text { display: flex; flex-direction: column; }
 .tm-brand-name {
-  font-size: 14px; font-weight: 700; color: #111827;
+  font-size: 14px; font-weight: 700; color: #fff;
   line-height: 1.2; white-space: nowrap;
   letter-spacing: -.2px;
 }
-.tm-brand-sub { font-size: 11px; color: #94a3b8; font-weight: 500; }
+.tm-brand-sub { font-size: 11px; color: rgba(255,255,255,.75); font-weight: 500; }
 
 /* Nav — overflow:visible so dropdowns can extend below the bar */
 .tm-nav {
@@ -122,7 +106,7 @@
   display: flex; align-items: center; gap: 6px;
   padding: 0 12px; height: 62px;
   font-size: 14px; font-weight: 500;
-  color: #4b5563;
+  color: rgba(255,255,255,.92);
   cursor: pointer;
   transition: all .18s ease;
   white-space: nowrap;
@@ -131,19 +115,19 @@
   letter-spacing: .1px;
 }
 
-/* Hover effect — subtle background + color shift */
+/* Hover effect — subtle white overlay */
 .tm-item:hover {
-  color: #52b02c;
-  background: linear-gradient(180deg, transparent 60%, rgba(82,176,44,.04) 100%);
-  border-bottom-color: rgba(82,176,44,.25);
+  color: #fff;
+  background: rgba(255,255,255,.12);
+  border-bottom-color: rgba(255,255,255,.5);
 }
 
-/* Active state */
+/* Active state — dark block, matching the ZKTeco reference */
 .tm-item.active {
-  color: #52b02c;
+  color: #fff;
   font-weight: 600;
-  border-bottom-color: #52b02c;
-  background: linear-gradient(180deg, transparent 50%, rgba(82,176,44,.06) 100%);
+  border-bottom-color: transparent;
+  background: rgba(0,0,0,.22);
 }
 
 /* Ripple on click */
@@ -157,12 +141,12 @@
 
 .tm-chevron {
   width: 14px; height: 14px;
-  color: #9ca3af;
+  color: rgba(255,255,255,.7);
   transition: transform .22s ease, color .15s;
   flex-shrink: 0;
 }
-.tm-item:hover .tm-chevron { color: #52b02c; }
-.tm-item.open .tm-chevron { transform: rotate(180deg); color: #52b02c; }
+.tm-item:hover .tm-chevron { color: #fff; }
+.tm-item.open .tm-chevron { transform: rotate(180deg); color: #fff; }
 
 /* Dropdown — overflow:visible so sub-menus can extend outside */
 .tm-dropdown {
@@ -242,11 +226,11 @@
   position: relative; font-size: 19px; cursor: pointer;
   padding: 7px; border-radius: 8px;
   transition: all .15s;
-  color: #4b5563;
+  color: #fff;
 }
 .tm-bell:hover {
-  background: #f0fdf4;
-  color: #52b02c;
+  background: rgba(255,255,255,.18);
+  color: #fff;
   transform: rotate(-10deg) scale(1.1);
 }
 .tm-bell-badge {
@@ -263,32 +247,32 @@
   width: 36px; height: 36px; border-radius: 8px;
   cursor: pointer;
   transition: all .15s;
-  color: #4b5563;
+  color: #fff;
 }
 .tm-settings-btn:hover {
-  background: #f0fdf4;
-  color: #52b02c;
+  background: rgba(255,255,255,.18);
+  color: #fff;
   transform: rotate(30deg) scale(1.1);
 }
 .tm-settings-btn.active {
-  background: #f0fdf4;
-  color: #52b02c;
+  background: rgba(255,255,255,.22);
+  color: #fff;
 }
 
 /* Language button */
 .tm-lang-btn {
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  color: #374151;
+  background: rgba(255,255,255,.15);
+  border: 1px solid rgba(255,255,255,.4);
+  color: #fff;
   border-radius: 8px; padding: 5px 11px;
   font-size: 12px; font-weight: 700; cursor: pointer;
   transition: all .15s; letter-spacing: .5px;
 }
 .tm-lang-btn:hover {
-  background: #52b02c;
-  color: white;
-  border-color: #52b02c;
-  box-shadow: 0 2px 8px rgba(82,176,44,.3);
+  background: #fff;
+  color: #3e8620;
+  border-color: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
   transform: translateY(-1px);
 }
 .tm-lang-btn:active { transform: translateY(0); }
@@ -296,7 +280,7 @@
 /* Divider between right items */
 .tm-right-divider {
   width: 1px; height: 28px;
-  background: #e5e7eb; flex-shrink: 0;
+  background: rgba(255,255,255,.3); flex-shrink: 0;
 }
 
 /* User section */
@@ -309,29 +293,29 @@
   border: 1px solid transparent;
 }
 .tm-user:hover {
-  background: #f8fafc;
-  border-color: #e5e7eb;
-  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  background: rgba(255,255,255,.15);
+  border-color: rgba(255,255,255,.3);
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
 }
 .tm-user.open {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+  background: rgba(255,255,255,.2);
+  border-color: rgba(255,255,255,.4);
 }
 
 .tm-avatar {
   width: 34px; height: 34px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 700; flex-shrink: 0;
-  box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(82,176,44,.2);
+  box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(255,255,255,.35);
   transition: box-shadow .15s;
 }
-.tm-user:hover .tm-avatar { box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(82,176,44,.5); }
+.tm-user:hover .tm-avatar { box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(255,255,255,.6); }
 .tm-avatar.lg { width: 42px; height: 42px; font-size: 17px; }
 
 .tm-user-info { display: flex; flex-direction: column; }
 .tm-user-name {
   font-size: 14px; font-weight: 400;
-  color: #111827; line-height: 1.2; background: transparent;
+  color: #fff; line-height: 1.2; background: transparent;
 }
 .tm-user-role { font-size: 11px; font-weight: 500; line-height: 1.2; }
 
@@ -411,7 +395,7 @@
 }
 .tm-mobile-toggle span {
   display: block; width: 22px; height: 2px;
-  background: #374151; border-radius: 2px;
+  background: #fff; border-radius: 2px;
   transition: all .2s;
 }
 

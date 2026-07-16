@@ -167,10 +167,10 @@ const TopMenu = () => {
         <div className="tm-logo">EH</div>
         <div className="tm-brand-text">
           <span className="tm-brand-name">
-            <span style={{ color: '#111827' }}>eHajiri</span>{' '}
-            <span style={{ color: '#52b02c' }}>TMS</span>
+            <span style={{ color: '#fff' }}>eHajiri</span>{' '}
+            <span style={{ color: '#e9f7e0' }}>TMS</span>
           </span>
-          <span className="tm-brand-sub" style={{ color: '#111827', fontWeight: 600 }}>{getCompanyName(language)}</span>
+          <span className="tm-brand-sub" style={{ color: 'rgba(255,255,255,.85)', fontWeight: 600 }}>{getCompanyName(language)}</span>
         </div>
         {scopeChip && (
           <span style={{
