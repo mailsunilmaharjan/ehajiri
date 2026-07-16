@@ -21,6 +21,7 @@ standalone-bridge/publish/
 .env
 .env.deploy
 server/.env
+server/certs/
 
 # Logs
 *.log

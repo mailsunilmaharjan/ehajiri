@@ -56,20 +56,26 @@ function ensureFirewallRule() {
 // Elevation detection — postgres.exe hard-refuses to run in a process holding
 // administrator privileges ("Execution of PostgreSQL by a user with
 // administrative permissions is not permitted"), and the embedded DB inherits
-// eHajiri's token. So an elevated launch (right-click → Run as administrator,
-// or the app auto-started at the end of an elevated Setup.exe run) can only
-// ever die inside startDatabase() with that cryptic log line. The 'ready'
-// handler checks this up front and offers a de-elevated relaunch instead.
+// eHajiri's token. Elevated launches are common in the field: right-click →
+// Run as administrator, the app auto-started at the end of an elevated
+// Setup.exe run, or PCs that run everything elevated (built-in Administrator
+// account, UAC disabled). startDatabase() checks this and, when elevated,
+// starts the cluster through pg_ctl.exe — which strips its own token — so
+// the app works in that mode instead of dying with the cryptic log line.
+// relaunchDeElevated() remains as a last resort in the failure dialog.
 // ─────────────────────────────────────────────────────────────────────────────
+let processElevated = null;
 function isProcessElevated() {
-  if (process.platform !== 'win32') return false;
+  if (processElevated !== null) return processElevated;
+  if (process.platform !== 'win32') return (processElevated = false);
   const { spawnSync } = require('child_process');
   // fltmc.exe (filter manager) exits 0 only from an elevated process and
   // "Access is denied" otherwise; unlike `net session` it doesn't depend on
   // the LanmanServer service being up. If it can't be spawned at all, assume
   // not elevated — worst case is the old startDatabase() error path.
   const r = spawnSync('fltmc.exe', [], { windowsHide: true, stdio: 'ignore' });
-  return r.status === 0;
+  processElevated = r.status === 0;
+  return processElevated;
 }
 
 function relaunchDeElevated() {
@@ -212,6 +218,7 @@ let srvStartedAt  = null;
 let pollTimer     = null;
 let updateTimer   = null;
 let cleaningUp    = false;
+let pgViaPgCtl    = false;  // cluster was started via pg_ctl (elevated mode) — stop it the same way
 let pendingUpdate = null;   // Velopack release object once a silent check finds one — awaits user click
 let updating      = false;  // true once download/apply has actually started (prevents double-trigger)
 
@@ -361,9 +368,21 @@ async function startDatabase() {
   // data directory (it errors out rather than being a no-op) — so it must
   // only be called once, on the very first launch.
   if (isFirstRun) {
+    // Safe even when elevated: initdb.exe strips its own admin token via
+    // CreateRestrictedToken before doing any work (only postgres.exe refuses).
     await embeddedPg.initialise();
   }
-  await embeddedPg.start();
+
+  if (isProcessElevated()) {
+    // embedded-postgres's start() spawns postgres.exe directly, which refuses
+    // the elevated token it would inherit — go through pg_ctl instead (see
+    // comment above runPgCtl()).
+    console.log(`[db] Process is elevated — starting embedded PostgreSQL via pg_ctl with a restricted token`);
+    await startPostgresViaPgCtl(pgDataDir);
+    pgViaPgCtl = true;
+  } else {
+    await embeddedPg.start();
+  }
 
   if (isFirstRun) {
     setTrayTooltip('eHajiri — Creating database…');
@@ -420,6 +439,44 @@ function resolvePgClientTool(exeName) {
 }
 const resolvePgDumpPath    = () => resolvePgClientTool('pg_dump.exe');
 const resolvePgRestorePath = () => resolvePgClientTool('pg_restore.exe');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pg_ctl-based cluster start/stop — used only when eHajiri itself is running
+// elevated. postgres.exe refuses an administrator token outright and
+// embedded-postgres spawns it directly, so its start() can never work in an
+// elevated process. pg_ctl.exe (like initdb.exe) instead re-executes itself
+// under a CreateRestrictedToken()-stripped token and launches postgres from
+// there, so routing start/stop through it makes the embedded DB work no
+// matter how the app was launched. The non-elevated path keeps using
+// embedded-postgres's own start() — battle-tested across the install base —
+// so this code only ever runs on machines that previously could not start
+// the database at all.
+// ─────────────────────────────────────────────────────────────────────────────
+function runPgCtl(args) {
+  return new Promise((resolve, reject) => {
+    const pgCtl = resolvePgClientTool('pg_ctl.exe');
+    if (!pgCtl) return reject(new Error('pg_ctl.exe not found in bundled PostgreSQL binaries'));
+    const { execFile } = require('child_process');
+    execFile(pgCtl, args, { windowsHide: true, timeout: 90000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`pg_ctl ${args[0]} failed: ${(stderr || stdout || err.message).trim()}`));
+      else resolve();
+    });
+  });
+}
+
+function startPostgresViaPgCtl(pgDataDir) {
+  // -w waits until the server actually accepts connections (the equivalent of
+  // embedded-postgres watching stderr for "ready to accept connections").
+  // postgres's own output goes to a log file because pg_ctl detaches it.
+  const pgLog = path.join(app.getPath('userData'), 'logs', 'postgres.log');
+  try { fs.mkdirSync(path.dirname(pgLog), { recursive: true }); } catch { /* best-effort */ }
+  return runPgCtl(['start', '-w', '-t', '60', '-D', pgDataDir, '-o', `-p ${PG_PORT}`, '-l', pgLog]);
+}
+
+function stopPostgresViaPgCtl() {
+  const pgDataDir = path.join(app.getPath('userData'), 'pgdata');
+  return runPgCtl(['stop', '-w', '-t', '30', '-D', pgDataDir, '-m', 'fast']);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server lifecycle
@@ -781,25 +838,12 @@ ipcMain.on('toggle-autostart',   () => {
 app.on('ready', async () => {
   initLogging();
 
-  // Refuse to run elevated (see isProcessElevated() above) — the embedded
-  // PostgreSQL cannot start under an administrator token, so explain and
-  // offer a normal relaunch instead of failing later with a cryptic error.
+  // Elevated launches (Run as administrator, built-in Administrator account,
+  // UAC disabled) can't use embedded-postgres's direct postgres.exe spawn —
+  // startDatabase() routes through pg_ctl instead (see runPgCtl()). Logged
+  // here so a pulled main.log makes the mode obvious at a glance.
   if (app.isPackaged && isProcessElevated()) {
-    console.error('[startup] Launched with administrator privileges — embedded PostgreSQL cannot run elevated.');
-    const choice = dialog.showMessageBoxSync({
-      type: 'error',
-      title: 'eHajiri — Administrator mode not supported',
-      message: 'eHajiri was started as Administrator.',
-      detail: 'The built-in database (PostgreSQL) does not allow running with ' +
-              'administrator privileges, so eHajiri cannot start in this mode.\n\n' +
-              'Click "Restart Normally" to relaunch eHajiri without administrator rights.',
-      buttons: ['Restart Normally', 'Exit'],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (choice === 0) relaunchDeElevated();
-    app.quit();
-    return;
+    console.log('[startup] Running with administrator privileges — embedded PostgreSQL will be started via pg_ctl with a restricted token.');
   }
 
   // Register for auto-startup on first launch (packaged only)
@@ -842,6 +886,11 @@ app.on('ready', async () => {
       // bundled at package time, or its silent install was denied elevation).
       // "Reinstall the application" can't fix that, so point at the real cure.
       const missingVCRuntime = message.includes('3221225781');
+      // Last resort for elevated launches: the pg_ctl path in startDatabase()
+      // failed too, so offer a de-elevated relaunch (which may fix it when
+      // the elevation came from Run-as-administrator, though not on UAC-off /
+      // built-in-Administrator machines — hence last resort, not first).
+      const elevatedFallback = !missingVCRuntime && isProcessElevated();
       const VC_REDIST_URL = 'https://aka.ms/vs/17/release/vc_redist.x64.exe';
       const choice = dialog.showMessageBoxSync({
         type: 'error',
@@ -851,15 +900,26 @@ app.on('ready', async () => {
           : 'eHajiri could not start the database.',
         detail: missingVCRuntime
           ? `Download and install it from:\n${VC_REDIST_URL}\n\nthen start eHajiri again.\n\n(Original error: ${message})`
-          : `Error: ${message}\n\nPlease try reinstalling the application.`,
+          : elevatedFallback
+            ? `eHajiri is running as Administrator and the database could not be started even with reduced privileges.\n\nClick "Restart Normally" to relaunch eHajiri without administrator rights.\n\n(Original error: ${message})`
+            : `Error: ${message}\n\nPlease try reinstalling the application.`,
         buttons: missingVCRuntime
           ? ['Download VC++ Redistributable', 'Open Log File', 'OK']
-          : ['Open Log File', 'OK'],
-        defaultId: missingVCRuntime ? 2 : 1,
-        cancelId: missingVCRuntime ? 2 : 1,
+          : elevatedFallback
+            ? ['Restart Normally', 'Open Log File', 'Exit']
+            : ['Open Log File', 'OK'],
+        defaultId: missingVCRuntime ? 2 : elevatedFallback ? 0 : 1,
+        cancelId: missingVCRuntime || elevatedFallback ? 2 : 1,
       });
-      if (missingVCRuntime && choice === 0) shell.openExternal(VC_REDIST_URL);
-      else if (choice === (missingVCRuntime ? 1 : 0)) shell.openPath(getLogFile());
+      if (missingVCRuntime) {
+        if (choice === 0) shell.openExternal(VC_REDIST_URL);
+        else if (choice === 1) shell.openPath(getLogFile());
+      } else if (elevatedFallback) {
+        if (choice === 0) relaunchDeElevated();
+        else if (choice === 1) shell.openPath(getLogFile());
+      } else if (choice === 0) {
+        shell.openPath(getLogFile());
+      }
       app.quit();
       return;
     }
@@ -910,8 +970,18 @@ app.on('before-quit', async (e) => {
   if (serverProcess) { serverProcess.kill(); serverProcess = null; }
   if (bridgeProcess) { bridgeProcess.kill(); bridgeProcess = null; }
 
-  // Stop embedded PostgreSQL gracefully before exit
-  if (embeddedPg) {
+  // Stop embedded PostgreSQL gracefully before exit. When it was started via
+  // pg_ctl (elevated mode), embeddedPg.stop() is a no-op — it never had a
+  // child process handle — so the cluster must be stopped through pg_ctl too,
+  // or postgres.exe survives as the exact orphan killStaleEmbeddedPostgres()
+  // exists to clean up.
+  if (pgViaPgCtl) {
+    try {
+      await stopPostgresViaPgCtl();
+    } catch (err) {
+      console.error('[db] pg_ctl stop error:', err.message);
+    }
+  } else if (embeddedPg) {
     try {
       await embeddedPg.stop();
     } catch (err) {

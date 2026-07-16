@@ -1697,6 +1697,18 @@ const MIGRATIONS = [
           ADD CONSTRAINT internal_messages_sender_id_fkey
             FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE;
 
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id          SERIAL       PRIMARY KEY,
+          actor_id    INTEGER      REFERENCES users(id),
+          actor_role  VARCHAR(30),
+          action      VARCHAR(50)  NOT NULL,
+          entity      VARCHAR(50)  NOT NULL,
+          entity_id   VARCHAR(50),
+          before      JSONB,
+          after       JSONB,
+          created_at  TIMESTAMPTZ  DEFAULT NOW()
+        );
+
         ALTER TABLE audit_log
           DROP CONSTRAINT IF EXISTS audit_log_actor_id_fkey,
           ADD CONSTRAINT audit_log_actor_id_fkey

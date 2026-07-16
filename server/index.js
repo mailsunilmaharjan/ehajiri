@@ -2,6 +2,7 @@
 import cors    from 'cors';
 import dotenv  from 'dotenv';
 import fs      from 'fs';
+import https   from 'https';
 import { fileURLToPath } from 'url';
 import { dirname, join }  from 'path';
 
@@ -50,6 +51,16 @@ import { requireRole }  from './middleware/roleGuard.js';
 
 const app  = express();
 const PORT = parseInt(process.env.PORT || '5000');
+
+// Optional TLS — server/certs/{cert,key}.pem, generated locally via
+// server/scripts/generate-cert.js (self-signed, for a bare-IP VPS) or dropped
+// in from a real CA/Let's Encrypt once a domain points here. Absent by
+// default (dev, or the packaged desktop app, never needs this).
+const CERT_DIR   = join(dirname(fileURLToPath(import.meta.url)), 'certs');
+const CERT_PATH  = join(CERT_DIR, 'cert.pem');
+const KEY_PATH   = join(CERT_DIR, 'key.pem');
+const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '443');
+const hasTls     = fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH);
 
 /* ── Middleware ── */
 app.use(cors({ origin: '*' }));
@@ -211,6 +222,21 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
       }
       throw err;
     });
+
+    if (hasTls) {
+      const tlsOptions = { cert: fs.readFileSync(CERT_PATH), key: fs.readFileSync(KEY_PATH) };
+      const httpsServer = https.createServer(tlsOptions, app);
+      httpsServer.listen(HTTPS_PORT, () => {
+        console.log(`✅ HTTPS listening →  https://localhost:${HTTPS_PORT}/api`);
+      });
+      httpsServer.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          logError(`❌ HTTPS port ${HTTPS_PORT} is already in use. Set a different HTTPS_PORT in server/.env.`, err);
+          return;
+        }
+        logError('❌ HTTPS server error:', err);
+      });
+    }
   } catch (err) {
     logError('❌ Server failed to start:', err);
     process.exit(1);
