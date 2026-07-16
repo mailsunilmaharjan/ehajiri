@@ -276,7 +276,7 @@ const LeaveApplyModal = () => {
 
         {/* Header */}
         <div className="modal-header"
-          style={{ background: 'linear-gradient(135deg,#eff6ff,#e0e7ff)', position: 'sticky', top: 0, zIndex: 10 }}>
+          style={{ background: 'linear-gradient(135deg,#f0fdf4,#e0e7ff)', position: 'sticky', top: 0, zIndex: 10 }}>
           <h2>📝 {t('Apply for Leave')}</h2>
           <button className="modal-close" onClick={handleClose}>✕</button>
         </div>
@@ -306,11 +306,11 @@ const LeaveApplyModal = () => {
 
                 {/* Step 1: Recommendation */}
                 <div style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:12 }}>
-                  <div style={{ width:26, height:26, borderRadius:'50%', background:'#eff6ff', border:'2px solid #1a56db',
-                    color:'#1a56db', display:'flex', alignItems:'center', justifyContent:'center',
+                  <div style={{ width:26, height:26, borderRadius:'50%', background:'#f0fdf4', border:'2px solid #52b02c',
+                    color:'#52b02c', display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:12, fontWeight:800, flexShrink:0 }}>1</div>
                   <div>
-                    <div style={{ fontWeight:700, color:'#1e40af', fontSize:13 }}>
+                    <div style={{ fontWeight:700, color:'#166534', fontSize:13 }}>
                       🔖 Recommendation Required
                     </div>
                     {submittedInfo.recoNames.length > 0 ? (
@@ -320,7 +320,7 @@ const LeaveApplyModal = () => {
                         </div>
                         <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginTop:5 }}>
                           {submittedInfo.recoNames.map((n, i) => (
-                            <span key={i} style={{ background:'#dbeafe', color:'#1e40af',
+                            <span key={i} style={{ background:'#dcfce7', color:'#166534',
                               borderRadius:10, padding:'3px 12px', fontSize:13, fontWeight:700 }}>
                               👤 {n}
                             </span>
@@ -428,7 +428,7 @@ const LeaveApplyModal = () => {
                   </span>
                   {ltc.reduceWeekend      && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Weekends deducted</span>}
                   {ltc.reducePublicHoliday && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Holidays deducted</span>}
-                  {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#eff6ff', color:'#1a56db' }}>Balance required</span>}
+                  {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#f0fdf4', color:'#52b02c' }}>Balance required</span>}
                   {ltc.isServicePeriod && ltc.timesPerService && (
                     <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10,
                       background: timesAlreadyTaken >= ltc.timesPerService ? '#fff1f2' : '#f5f3ff',
@@ -445,7 +445,7 @@ const LeaveApplyModal = () => {
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
                 <input type="checkbox" checked={form.halfDay}
                   onChange={e => handleChange('halfDay', e.target.checked)}
-                  style={{ width: 15, height: 15, accentColor: '#1a56db' }} />
+                  style={{ width: 15, height: 15, accentColor: '#52b02c' }} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Half Day</span>
                 {form.halfDay && <span style={{ fontSize: 11, color: '#6b7280' }}>(0.5 days will be deducted)</span>}
               </label>
@@ -479,10 +479,10 @@ const LeaveApplyModal = () => {
             {/* Days + Balance summary */}
             {(form.halfDay || (form.fromDate && form.toDate)) && (
               <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 120, background: '#eff6ff', border: '1px solid #bfdbfe',
+                <div style={{ flex: 1, minWidth: 120, background: '#f0fdf4', border: '1px solid #bbf7d0',
                   borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: '#1e40af', fontWeight: 600 }}>📅 No. of Days</span>
-                  <span style={{ fontSize: 20, fontWeight: 800, color: '#1a56db' }}>{days}</span>
+                  <span style={{ fontSize: 12, color: '#166534', fontWeight: 600 }}>📅 No. of Days</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: '#52b02c' }}>{days}</span>
                 </div>
                 {form.leaveTypeCode && (
                   <div style={{ flex: 1, minWidth: 120,
@@ -514,8 +514,8 @@ const LeaveApplyModal = () => {
                   </div>
                 )}
                 {form.reco.length === 1 && (
-                  <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                    <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                  <div style={{ background:'#f0f9ff', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
+                    <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
                       {getEmpName(form.reco[0])}
                     </span>
                   </div>
@@ -583,7 +583,7 @@ const LeaveApplyModal = () => {
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
                 border: '1.5px dashed #d1d5db', borderRadius: 8, cursor: 'pointer',
                 background: form.document ? '#f0fdf4' : '#fafafa', transition: 'border .15s' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = '#1a56db'}
+                onMouseEnter={e => e.currentTarget.style.borderColor = '#52b02c'}
                 onMouseLeave={e => e.currentTarget.style.borderColor = '#d1d5db'}>
                 <input type="file" accept="image/*,.pdf,.doc,.docx" style={{ display: 'none' }}
                   onChange={e => handleChange('document', e.target.files[0] || null)} />

@@ -22,7 +22,7 @@ function getCurrentFiscalYear(fiscalYears = []) {
 
 /* ── Tiny atoms ──────────────────────────────────────────────── */
 const Avatar = ({ name, size=36 }) => {
-  const colors = ['#1a56db','#059669','#7c3aed','#dc2626','#d97706','#0369a1'];
+  const colors = ['#52b02c','#059669','#7c3aed','#dc2626','#d97706','#0369a1'];
   const color  = colors[(name||'?').charCodeAt(0) % colors.length];
   return (
     <div style={{ width:size,height:size,borderRadius:'50%',background:color,
@@ -85,7 +85,7 @@ const RankCard = ({ icon, title, color, bg, border, items, valueKey, valueSuffix
 const InsightCard = ({ icon, text, type }) => {
   const styles = {
     positive : { bg:'#f0fdf4', border:'#86efac', color:'#065f46' },
-    neutral  : { bg:'#eff6ff', border:'#93c5fd', color:'#1e40af' },
+    neutral  : { bg:'#f0fdf4', border:'#86efac', color:'#166534' },
     warning  : { bg:'#fff7ed', border:'#fed7aa', color:'#c2410c' },
   };
   const s = styles[type] || styles.neutral;
@@ -145,8 +145,8 @@ const ViewReportsBtn = ({ year, month, useNP }) => {
     <div ref={ref} style={{ position:'relative' }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display:'inline-flex',alignItems:'center',gap:7,padding:'7px 16px',height:36,
-          background:open?'#1e40af':'#1a56db',color:'white',border:'none',borderRadius:8,
-          fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+          background:open?'#166534':'#52b02c',color:'white',border:'none',borderRadius:8,
+          fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
         <svg viewBox="0 0 20 20" fill="white" width="14" height="14">
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
@@ -172,7 +172,7 @@ const ViewReportsBtn = ({ year, month, useNP }) => {
                 padding:'7px 14px',background:'white',border:'none',
                 borderBottom:i<SUB_REPORTS.length-1?'1px solid #f0f0f0':'none',
                 textAlign:'left',cursor:'pointer',fontSize:13,color:'#374151' }}
-              onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
+              onMouseEnter={e=>e.currentTarget.style.background='#f0fdf4'}
               onMouseLeave={e=>e.currentTarget.style.background='white'}>
               <span style={{ fontSize:18,flexShrink:0 }}>{r.icon}</span>
               <span style={{ fontWeight:500 }}>{r.label}</span>
@@ -254,7 +254,7 @@ const MonthlyReport = () => {
           </h1>
           <p className="page-subtitle">
             {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -269,8 +269,8 @@ const MonthlyReport = () => {
         </div>
         <div style={{ display:'flex',gap:8,alignItems:'center' }}>
           <button onClick={()=>window.print()} style={{ display:'inline-flex',alignItems:'center',gap:5,
-            padding:'6px 14px',height:36,background:'#eff6ff',border:'1px solid #93c5fd',
-            color:'#1d4ed8',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
+            padding:'6px 14px',height:36,background:'#f0fdf4',border:'1px solid #86efac',
+            color:'#15803d',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
           <ViewReportsBtn year={year} month={month} useNP={useNP} />
@@ -326,7 +326,7 @@ const MonthlyReport = () => {
         <>
           {/* ── Month calendar stats row ── */}
           <div style={{ display:'flex',gap:10,marginBottom:20,flexWrap:'wrap',alignItems:'stretch' }}>
-            <StatPill label={L('जम्मा दिन','Total Days')}            value={period.totalDays ?? '—'}        color="#1a56db" bg="#eff6ff" />
+            <StatPill label={L('जम्मा दिन','Total Days')}            value={period.totalDays ?? '—'}        color="#52b02c" bg="#f0fdf4" />
             <StatPill label={L('कार्य दिन','No. of Working Days')}  value={period.totalWorkingDays ?? '—'} color="#059669" bg="#d1fae5" />
             <StatPill label={L('सप्ताहन्त','Weekend')}                value={period.weekendDays ?? '—'}      color="#6b7280" bg="#f3f4f6" />
             <StatPill label={L('सार्वजनिक बिदा','Public Holiday')}    value={period.holidayDays ?? '—'}      color="#d97706" bg="#fef3c7" />

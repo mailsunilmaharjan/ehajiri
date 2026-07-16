@@ -48,7 +48,7 @@
   min-width: 200px;
   transition: border-color .15s;
 }
-.dg-searchbox:focus-within { border-color: #1a56db; box-shadow: 0 0 0 2px rgba(26,86,219,.1); }
+.dg-searchbox:focus-within { border-color: #52b02c; box-shadow: 0 0 0 2px rgba(82,176,44,.1); }
 .dg-search-icon { width: 14px; height: 14px; color: #9ca3af; flex-shrink: 0; }
 .dg-search-input {
   border: none; outline: none; font-size: 14px;
@@ -74,17 +74,17 @@
 
 /* Selection bar */
 .dg-selection-bar {
-  background: #eff6ff;
+  background: #f0fdf4;
   border-bottom: 1px solid #dedede;
   padding: 7px 14px;
   display: flex; align-items: center; gap: 12px;
-  font-size: 14px; color: #1e40af;
+  font-size: 14px; color: #166534;
 }
 .dg-selection-bar button {
-  background: none; border: 1px solid #1a56db; border-radius: 4px;
-  color: #1a56db; font-size: 14px; padding: 2px 8px; cursor: pointer;
+  background: none; border: 1px solid #52b02c; border-radius: 4px;
+  color: #52b02c; font-size: 14px; padding: 2px 8px; cursor: pointer;
 }
-.dg-selection-bar button:hover { background: #dbeafe; }
+.dg-selection-bar button:hover { background: #dcfce7; }
 .dg-delete-all-btn {
   background: #fef2f2 !important;
   border: 1px solid #fca5a5 !important;
@@ -161,7 +161,7 @@
 .dg-th:last-child { border-right: none; }
 .dg-th.sortable { cursor: pointer; }
 .dg-th.sortable:hover { background: #e4e4e4; }
-.dg-th.sort-asc, .dg-th.sort-desc { background: #e0e7f0; color: #1a56db; }
+.dg-th.sort-asc, .dg-th.sort-desc { background: #e0e7f0; color: #52b02c; }
 .dg-th-inner { display: flex; align-items: center; gap: 4px; justify-content: inherit; }
 .dg-sort-icon { font-size: 10px; opacity: .7; }
 .dg-sort-both { opacity: .4; }
@@ -187,7 +187,7 @@ th.dg-sn-col {
   background: #efefef !important;
 }
 
-.dg-checkbox { width: 14px; height: 14px; accent-color: #1a56db; cursor: pointer; }
+.dg-checkbox { width: 14px; height: 14px; accent-color: #52b02c; cursor: pointer; }
 
 /* Filter row */
 .dg-filter-row .dg-filter-cell {
@@ -200,7 +200,7 @@ th.dg-sn-col {
   border: 1px solid #dedede; border-radius: 4px;
   font-size: 14px; color: #374151; background: #fff;
 }
-.dg-filter-input:focus { outline: none; border-color: #1a56db; }
+.dg-filter-input:focus { outline: none; border-color: #52b02c; }
 
 /* ── Body rows — white background, #dedede borders ── */
 .dg-td {
@@ -228,13 +228,13 @@ th.dg-sn-col {
 /* No striped alternating — all rows white as requested */
 .dg-table.striped .dg-row:nth-child(even) .dg-td { background: #ffffff; }
 .dg-row:hover .dg-td { background: #f5f5f5 !important; }
-.dg-row.selected .dg-td { background: #dbeafe !important; }
+.dg-row.selected .dg-td { background: #dcfce7 !important; }
 .dg-row.selected td.dg-checkbox-col,
 .dg-row.selected td.dg-sn-col { background: #c7d9f5 !important; }
 .dg-row:hover td.dg-checkbox-col,
 .dg-row:hover td.dg-sn-col { background: #e2e2e2 !important; }
 .dg-row.clickable { cursor: pointer; }
-.dg-row.clickable:hover .dg-first-col { color: #1a56db; }
+.dg-row.clickable:hover .dg-first-col { color: #52b02c; }
 
 /* Keyboard-focused row (↑ ↓ navigation) — very subtle warm tint */
 .dg-row.kb-focus .dg-td { background: #fffef5 !important; outline: none; }
@@ -277,7 +277,7 @@ th.dg-sn-col {
   transition: all .1s; padding: 0 5px;
 }
 .pg-btn:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; }
-.pg-btn.active { background: #1a56db; border-color: #1a56db; color: #fff; font-weight: 600; }
+.pg-btn.active { background: #52b02c; border-color: #52b02c; color: #fff; font-weight: 600; }
 .pg-btn:disabled { opacity: .4; cursor: not-allowed; }
 .pg-ellipsis { color: #9ca3af; font-size: 14px; padding: 0 3px; }
 
@@ -289,8 +289,8 @@ th.dg-sn-col {
   border-radius: 4px; border: 1px solid transparent;
   font-size: 14px; cursor: pointer; transition: all .1s;
 }
-.dg-action-btn.edit   { background: #eff6ff; color: #1a56db; border-color: #bfdbfe; }
-.dg-action-btn.edit:hover   { background: #dbeafe; }
+.dg-action-btn.edit   { background: #f0fdf4; color: #52b02c; border-color: #bbf7d0; }
+.dg-action-btn.edit:hover   { background: #dcfce7; }
 .dg-action-btn.delete { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
 .dg-action-btn.delete:hover { background: #fee2e2; }
 .dg-action-btn.view   { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }

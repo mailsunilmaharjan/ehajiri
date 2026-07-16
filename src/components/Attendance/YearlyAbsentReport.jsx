@@ -62,8 +62,8 @@ const ActionMenu = ({ row, navigate, L, onReason }) => {
     {
       label: L('कार्यालय भ्रमण','Office Visit'),
       icon: '🚗',
-      color: '#1e40af',
-      bg: '#dbeafe',
+      color: '#166534',
+      bg: '#dcfce7',
       onClick: () => {
         navigate('/office-visit/apply', { state: { prefillDate: row.date, prefillStaffId: row.id } });
         setOpen(false);
@@ -84,7 +84,7 @@ const ActionMenu = ({ row, navigate, L, onReason }) => {
         style={{
           display:'inline-flex', alignItems:'center', gap:4,
           padding:'4px 10px', height:28,
-          background:open?'#1e40af':'#1a56db',
+          background:open?'#166534':'#52b02c',
           color:'white', border:'none', borderRadius:6,
           fontSize:12, fontWeight:600, cursor:'pointer', transition:'background .12s',
         }}>
@@ -149,7 +149,7 @@ const ReasonModal = ({ row, onClose, onSave, L, fd }) => {
             placeholder={L('अनुपस्थितको कारण लेख्नुस...','Write the reason for absence...')}
             style={{ width:'100%', border:'1.5px solid #d1d5db', borderRadius:8, padding:'10px 12px',
               fontSize:13, resize:'vertical', outline:'none', boxSizing:'border-box' }}
-            onFocus={e => e.target.style.borderColor='#1a56db'}
+            onFocus={e => e.target.style.borderColor='#52b02c'}
             onBlur={e => e.target.style.borderColor='#d1d5db'}
             autoFocus
           />
@@ -164,7 +164,7 @@ const ReasonModal = ({ row, onClose, onSave, L, fd }) => {
           <button onClick={() => { onSave(row, reason); onClose(); }}
             disabled={!reason.trim()}
             style={{ padding:'8px 20px', border:'none', borderRadius:8,
-              background:reason.trim()?'#1a56db':'#93c5fd',
+              background:reason.trim()?'#52b02c':'#86efac',
               color:'white', fontSize:13, fontWeight:700,
               cursor:reason.trim()?'pointer':'not-allowed' }}>
             {L('सेभ गर्नुस','Save')}
@@ -408,7 +408,7 @@ const YearlyAbsentReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -424,7 +424,7 @@ const YearlyAbsentReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -460,7 +460,7 @@ const YearlyAbsentReport = () => {
               onClick={() => setStaffStatus(v)}
               style={{ padding:'5px 14px', border:'none', cursor:'pointer',
                 fontSize:13, fontWeight:600, transition:'background .15s',
-                background: staffStatus === v ? '#1a56db' : 'white',
+                background: staffStatus === v ? '#52b02c' : 'white',
                 color: staffStatus === v ? 'white' : '#374151' }}>
               {label}
             </button>

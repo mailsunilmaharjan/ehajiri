@@ -28,7 +28,7 @@ const STATUS_STYLE = {
   Weekend          : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
   Leave            : { bg:'#ede9fe', color:'#5b21b6', border:'#c4b5fd' },
   'Public Holiday' : { bg:'#fef3c7', color:'#92400e', border:'#fcd34d' },
-  'Office Visit'   : { bg:'#dbeafe', color:'#1e40af', border:'#93c5fd' },
+  'Office Visit'   : { bg:'#dcfce7', color:'#166534', border:'#86efac' },
 };
 const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
 
@@ -77,16 +77,16 @@ const StaffSelect = ({ employees, value, onChange }) => {
       {/* Trigger */}
       <div onClick={() => setOpen(p => !p)}
         style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-          height:36, padding:'0 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+          height:36, padding:'0 10px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer',
-          boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none', transition:'all .15s' }}>
+          boxShadow:open?'0 0 0 2px rgba(82,176,44,.1)':'none', transition:'all .15s' }}>
         <span style={{ fontSize:13, color:selected?'#1f2937':'#9ca3af',
           fontWeight:selected?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
           {selected
             ? `${selected.fullName}${selected.deviceId ? ` (${selected.deviceId})` : ''}`
             : '— Select Staff Member —'}
         </span>
-        <svg viewBox="0 0 20 20" fill={open?'#1a56db':'#9ca3af'} width="13" height="13"
+        <svg viewBox="0 0 20 20" fill={open?'#52b02c':'#9ca3af'} width="13" height="13"
           style={{ flexShrink:0, marginLeft:6, transform:open?'rotate(180deg)':'none', transition:'transform .2s' }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
         </svg>
@@ -124,18 +124,18 @@ const StaffSelect = ({ employees, value, onChange }) => {
                 <div key={e.id}
                   onMouseDown={ev=>{ ev.preventDefault(); onChange(String(e.id)); setOpen(false); setSearch(''); }}
                   style={{ display:'flex', alignItems:'center', gap:10, padding:'5px 14px',
-                    cursor:'pointer', background:active?'#eff6ff':'white',
+                    cursor:'pointer', background:active?'#f0fdf4':'white',
                     borderBottom:'1px solid #d1d5db', transition:'background .1s' }}
                   onMouseEnter={ev=>{ if(!active) ev.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':'white'; }}>
+                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#f0fdf4':'white'; }}>
                   {/* Rank badge */}
-                  <div style={{ width:22, height:22, borderRadius:'50%', background:active?'#1a56db':'#f3f4f6',
+                  <div style={{ width:22, height:22, borderRadius:'50%', background:active?'#52b02c':'#f3f4f6',
                     color:active?'white':'#9ca3af', fontSize:10, fontWeight:700, flexShrink:0,
                     display:'flex', alignItems:'center', justifyContent:'center' }}>
                     {idx+1}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:active?700:600, color:active?'#1e40af':'#1f2937',
+                    <div style={{ fontSize:13, fontWeight:active?700:600, color:active?'#166534':'#1f2937',
                       overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                       {e.fullName}
                     </div>
@@ -145,7 +145,7 @@ const StaffSelect = ({ employees, value, onChange }) => {
                     </div>
                   </div>
                   {active && (
-                    <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14" style={{ flexShrink:0 }}>
+                    <svg viewBox="0 0 20 20" fill="#52b02c" width="14" height="14" style={{ flexShrink:0 }}>
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
                     </svg>
                   )}
@@ -367,7 +367,7 @@ const StaffLedger = () => {
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         const warn=row.punches===1;
         return(
-          <span style={{ color:warn?'#d97706':'#1a56db', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}
+          <span style={{ color:warn?'#d97706':'#52b02c', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}
             title={warn?'Single punch only':''}>
             {fmtTime(v)}{warn&&' ⚠'}
           </span>
@@ -406,7 +406,7 @@ const StaffLedger = () => {
       render:v=>{
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         const isLateOut = v.startsWith('Late Out');
-        return <span style={{ color: isLateOut ? '#2563eb' : '#d97706', fontWeight:700, fontSize:13 }}>{v}</span>;
+        return <span style={{ color: isLateOut ? '#16a34a' : '#d97706', fontWeight:700, fontSize:13 }}>{v}</span>;
       },
     },
     {
@@ -414,7 +414,7 @@ const StaffLedger = () => {
       render:(v,row)=>{
         if (v === 'On Leave') {
           /* Badge only — no leave name below */
-          return <Pill bg="#eff6ff" color="#1e40af" border="#bfdbfe">{L('बिदामा','On Leave')}</Pill>;
+          return <Pill bg="#f0fdf4" color="#166534" border="#bbf7d0">{L('बिदामा','On Leave')}</Pill>;
         }
         const s=statusStyle(v);
         return <Pill bg={s.bg} color={s.color} border={s.border}>{v}</Pill>;
@@ -426,7 +426,7 @@ const StaffLedger = () => {
         if (row.leaveInfo) {
           const parts = [];
           if (row.leaveInfo.typeName) parts.push(
-            <span key="type" style={{ fontWeight:700, color:'#1e40af' }}>{row.leaveInfo.typeName}</span>
+            <span key="type" style={{ fontWeight:700, color:'#166534' }}>{row.leaveInfo.typeName}</span>
           );
           if (row.leaveInfo.reason) parts.push(
             <span key="reason" style={{ color:'#374151' }}>{row.leaveInfo.reason}</span>
@@ -481,7 +481,7 @@ const StaffLedger = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -536,13 +536,13 @@ const StaffLedger = () => {
                   <span>·</span>
                   <span>Leave: <strong style="color:#5b21b6">${s.leaveCount||0}</strong></span>
                   <span>·</span>
-                  <span>Office Visit: <strong style="color:#1e40af">${visitCount}</strong></span>
+                  <span>Office Visit: <strong style="color:#166534">${visitCount}</strong></span>
                   <span>·</span>
                   <span>Late In: <strong style="color:#dc2626">${s.lateCount||0}</strong></span>
                   <span>·</span>
                   <span>Early Out: <strong style="color:#d97706">${s.earlyCount||0}</strong></span>
                   <span>·</span>
-                  <span>Att. Rate: <strong style="color:#1a56db">${s.attendanceRate||0}%</strong></span>
+                  <span>Att. Rate: <strong style="color:#52b02c">${s.attendanceRate||0}%</strong></span>
                   <span>·</span>
                   <span>Present in Holiday: <strong style="color:#92400e">${presentInHoliday}</strong></span>
                   <span>·</span>
@@ -554,11 +554,11 @@ const StaffLedger = () => {
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;background:#efefef;color:#6b7280;font-weight:600">${i+1}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;font-weight:600">${fd(r.dateStr)||r.dateStr||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.dayFull?r.dayFull.slice(0,3):''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace;color:#1a56db;font-weight:700">${r.timeIn?fmtTime(r.timeIn):''}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace;color:#52b02c;font-weight:700">${r.timeIn?fmtTime(r.timeIn):''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.timeOut?fmtTime(r.timeOut):''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;color:#0369a1;font-weight:700">${r.totalFormatted||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;color:${r.lateFormatted?.startsWith('Late')?'#dc2626':'#059669'}">${r.lateFormatted||''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.earlyFormatted?.startsWith('Early Out')?'#d97706':'#2563eb'}">${r.earlyFormatted||''}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.earlyFormatted?.startsWith('Early Out')?'#d97706':'#16a34a'}">${r.earlyFormatted||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.status||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;font-size:9px">${r.remarks||''}</td>
               </tr>`).join('');
@@ -583,7 +583,7 @@ const StaffLedger = () => {
             }}
             title="Print"
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15">
               <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9h8v3H6v-3zm8-4a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd"/>
@@ -670,7 +670,7 @@ const StaffLedger = () => {
             {[1,2].map(h=>(
               <button key={h} onClick={()=>setHalf(h)}
                 style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                  background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',
+                  background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',
                   transition:'background .15s' }}>
                 {h===1 ? L('पहिलो अर्ध','1st Half') : L('दोस्रो अर्ध','2nd Half')}
               </button>
@@ -684,7 +684,7 @@ const StaffLedger = () => {
         {/* Staff selector — hidden for staff-role users (locked to their own record) */}
         {isStaffLogin ? (
           <span style={{ fontSize:13,fontWeight:600,color:'#1f2937',
-            background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,
+            background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,
             padding:'5px 14px',flexShrink:0 }}>
             👤 {sortedEmps.find(e=>String(e.id)===empId)?.fullName || '—'}
           </span>
@@ -695,7 +695,7 @@ const StaffLedger = () => {
               {[['working',L('कार्यरत','Working')],['notworking',L('अवकाश','Not Working')]].map(([v,label])=>(
                 <button key={v} onClick={()=>{ setStaffStatus(v); setEmpId(''); }}
                   style={{ padding:'5px 14px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,
-                    background:staffStatus===v?'#1a56db':'white',
+                    background:staffStatus===v?'#52b02c':'white',
                     color:staffStatus===v?'white':'#374151',transition:'background .15s' }}>
                   {label}
                 </button>
@@ -743,14 +743,14 @@ const StaffLedger = () => {
 
         {/* Staff info card */}
         <div style={{ flex:1, background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10,
-          padding:'10px 16px', borderLeft:'4px solid #1a56db' }}>
+          padding:'10px 16px', borderLeft:'4px solid #52b02c' }}>
           {/* Top row: name + FY badge + period */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
             flexWrap:'wrap', gap:8, marginBottom:6 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
               <span style={{ fontSize:15, fontWeight:800, color:'#1f2937' }}>{emp.fullName}</span>
               {emp.empCode && (
-                <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:6,
+                <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:6,
                   padding:'1px 8px', fontSize:11, fontWeight:700 }}>{emp.empCode}</span>
               )}
             </div>
@@ -799,7 +799,7 @@ const StaffLedger = () => {
                 { label:L('Leave','Leave'),             value:summary.leaveCount,             c:'#ede9fe', tc:'#5b21b6' },
                 { label:L('Late','Late'),               value:summary.lateCount,              c:'#fef3c7', tc:'#92400e' },
                 { label:L('Early Out','OUT Issues'),    value:summary.earlyCount,             c:'#fef3c7', tc:'#92400e' },
-                { label:L('Att. Rate','Att. Rate'),    value:`${summary.attendanceRate}%`,    c:'#eff6ff', tc:'#1a56db' },
+                { label:L('Att. Rate','Att. Rate'),    value:`${summary.attendanceRate}%`,    c:'#f0fdf4', tc:'#52b02c' },
                 { label:L('P in Holiday','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
                 { label:L('P in Weekend','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
               ].map(s=>(

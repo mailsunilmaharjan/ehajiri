@@ -69,10 +69,10 @@ const EmpMultiSelect = ({ value = [], onChange, employees, postMap, placeholder 
     <div style={{ position:'relative' }}>
       <button ref={trigRef} type="button" onClick={openDrop} style={{
         width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
-        padding:'9px 10px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
+        padding:'9px 10px', border:`1.5px solid ${open ? '#52b02c' : '#d1d5db'}`,
         borderRadius:6, background: selected.length > 0 ? '#f0f9ff' : '#fff',
         cursor:'pointer', fontSize:12, color: selected.length > 0 ? '#1f2937' : '#9ca3af',
-        fontFamily:'inherit', boxShadow: open ? '0 0 0 2px rgba(26,86,219,.1)' : 'none',
+        fontFamily:'inherit', boxShadow: open ? '0 0 0 2px rgba(82,176,44,.1)' : 'none',
         minHeight:38,
       }}>
         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, textAlign:'left' }}>
@@ -80,7 +80,7 @@ const EmpMultiSelect = ({ value = [], onChange, employees, postMap, placeholder 
         </span>
         <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:4 }}>
           {selected.length > 0 && (
-            <span style={{ background:'#1a56db', color:'#fff', borderRadius:10,
+            <span style={{ background:'#52b02c', color:'#fff', borderRadius:10,
               fontSize:10, fontWeight:700, padding:'1px 6px', minWidth:18, textAlign:'center' }}>
               {selected.length}
             </span>
@@ -102,7 +102,7 @@ const EmpMultiSelect = ({ value = [], onChange, employees, postMap, placeholder 
         <div ref={dropRef} style={{
           position:'fixed', zIndex:999999,
           top:rect.top, left:rect.left, width:rect.width,
-          background:'#fff', border:'1.5px solid #1a56db', borderRadius:8,
+          background:'#fff', border:'1.5px solid #52b02c', borderRadius:8,
           boxShadow:'0 8px 24px rgba(0,0,0,.2)', maxHeight:260, display:'flex', flexDirection:'column',
         }}>
           {/* search */}
@@ -130,15 +130,15 @@ const EmpMultiSelect = ({ value = [], onChange, employees, postMap, placeholder 
                     <div key={o.id} onMouseDown={e => { e.preventDefault(); toggle(o.id); }}
                       style={{ padding:'7px 10px', display:'flex', alignItems:'center', gap:8,
                         cursor:'pointer', fontSize:12,
-                        background: checked ? '#eff6ff' : 'transparent',
-                        borderLeft: checked ? '3px solid #1a56db' : '3px solid transparent' }}
+                        background: checked ? '#f0fdf4' : 'transparent',
+                        borderLeft: checked ? '3px solid #52b02c' : '3px solid transparent' }}
                       onMouseEnter={e => { if (!checked) e.currentTarget.style.background='#f8fafc'; }}
-                      onMouseLeave={e => { if (!checked) e.currentTarget.style.background=checked?'#eff6ff':'transparent'; }}>
+                      onMouseLeave={e => { if (!checked) e.currentTarget.style.background=checked?'#f0fdf4':'transparent'; }}>
                       {/* checkbox */}
                       <span style={{
                         width:14, height:14, borderRadius:3, flexShrink:0,
-                        border:`2px solid ${checked ? '#1a56db' : '#d1d5db'}`,
-                        background: checked ? '#1a56db' : '#fff',
+                        border:`2px solid ${checked ? '#52b02c' : '#d1d5db'}`,
+                        background: checked ? '#52b02c' : '#fff',
                         display:'flex', alignItems:'center', justifyContent:'center',
                       }}>
                         {checked && (
@@ -147,7 +147,7 @@ const EmpMultiSelect = ({ value = [], onChange, employees, postMap, placeholder 
                           </svg>
                         )}
                       </span>
-                      <span style={{ color: checked ? '#1a56db' : '#374151', fontWeight: checked ? 600 : 400 }}>
+                      <span style={{ color: checked ? '#52b02c' : '#374151', fontWeight: checked ? 600 : 400 }}>
                         {o.label}
                       </span>
                     </div>
@@ -161,7 +161,7 @@ const EmpMultiSelect = ({ value = [], onChange, employees, postMap, placeholder 
             justifyContent:'space-between', alignItems:'center', flexShrink:0, background:'#fafafa' }}>
             <span style={{ fontSize:11, color:'#6b7280' }}>{selected.length} selected</span>
             <button type="button" onMouseDown={e => { e.preventDefault(); setOpen(false); setSearch(''); }}
-              style={{ padding:'3px 12px', background:'#1a56db', color:'#fff', border:'none',
+              style={{ padding:'3px 12px', background:'#52b02c', color:'#fff', border:'none',
                 borderRadius:5, fontSize:12, fontWeight:600, cursor:'pointer' }}>Done</button>
           </div>
         </div>,
@@ -235,7 +235,7 @@ const DeptGroup = ({ deptName, branchName, members, assignments, onChange, emplo
           <label style={{ display:'flex', alignItems:'center', gap:5, marginBottom:4, cursor:'pointer' }}>
             <input type="checkbox" checked={applyReco}
               onChange={e => { setApplyReco(e.target.checked); if (!e.target.checked) setDeptRecos([]); }}
-              style={{ accentColor:'#1a56db', width:12, height:12 }} />
+              style={{ accentColor:'#52b02c', width:12, height:12 }} />
             <span style={{ fontSize:11, color:'#6b7280' }}>Apply Recommendator to all</span>
           </label>
           {applyReco && (
@@ -248,7 +248,7 @@ const DeptGroup = ({ deptName, branchName, members, assignments, onChange, emplo
           <label style={{ display:'flex', alignItems:'center', gap:5, marginBottom:4, cursor:'pointer' }}>
             <input type="checkbox" checked={applyApproval}
               onChange={e => { setApplyApproval(e.target.checked); if (!e.target.checked) setDeptApprovals([]); }}
-              style={{ accentColor:'#1a56db', width:12, height:12 }} />
+              style={{ accentColor:'#52b02c', width:12, height:12 }} />
             <span style={{ fontSize:11, color:'#6b7280' }}>Apply Approval to all</span>
           </label>
           {applyApproval && (
@@ -288,7 +288,7 @@ const DeptGroup = ({ deptName, branchName, members, assignments, onChange, emplo
             <TD style={{ minWidth:210 }}>
               <EmpMultiSelect value={apprIds} employees={employees} postMap={postMap}
                 onChange={v => onChange({ [emp.id]: { ...asgn, approval: v } })} />
-              {apprNames && <div style={{ fontSize:10, color:'#1a56db', marginTop:2 }}>✓ {apprNames}</div>}
+              {apprNames && <div style={{ fontSize:10, color:'#52b02c', marginTop:2 }}>✓ {apprNames}</div>}
             </TD>
           </tr>
         );
@@ -381,7 +381,7 @@ const RecoApprovalModal = ({ employees, onClose }) => {
 
         {/* Header */}
         <div style={{ padding:'14px 24px', borderBottom:'2px solid #e5e7eb',
-          background:'linear-gradient(135deg,#eff6ff,#f5f3ff)',
+          background:'linear-gradient(135deg,#f0fdf4,#f5f3ff)',
           borderRadius:'14px 14px 0 0', flexShrink:0 }}>
           <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
             <div>
@@ -390,7 +390,7 @@ const RecoApprovalModal = ({ employees, onClose }) => {
               </div>
               <div style={{ fontSize:13, color:'#374151', marginTop:2 }}>
                 Configure who recommends and approves leave &amp; office visits — select multiple people per staff member
-                {configured > 0 && <span style={{ marginLeft:8, background:'#dbeafe', color:'#1e40af',
+                {configured > 0 && <span style={{ marginLeft:8, background:'#dcfce7', color:'#166534',
                   borderRadius:10, padding:'1px 8px', fontWeight:700, fontSize:11 }}>{configured} configured</span>}
               </div>
             </div>
@@ -432,8 +432,8 @@ const RecoApprovalModal = ({ employees, onClose }) => {
                 padding:'7px 20px', border:'none', cursor:'pointer', fontFamily:'inherit',
                 fontSize:13, fontWeight: activeSection===s.key ? 700 : 500,
                 background: activeSection===s.key ? '#fff' : 'transparent',
-                color: activeSection===s.key ? '#1a56db' : '#6b7280',
-                borderBottom: activeSection===s.key ? '2px solid #1a56db' : '2px solid transparent',
+                color: activeSection===s.key ? '#52b02c' : '#6b7280',
+                borderBottom: activeSection===s.key ? '2px solid #52b02c' : '2px solid transparent',
                 borderRadius:'6px 6px 0 0',
               }}>{s.label}</button>
             ))}
@@ -488,8 +488,8 @@ const RecoApprovalModal = ({ employees, onClose }) => {
               Cancel
             </button>
             <button onClick={handleSave} title="Ctrl+S" style={{ padding:'8px 24px', border:'none', borderRadius:8,
-              background: saved ? '#059669' : '#1a56db', color:'#fff',
-              fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+              background: saved ? '#059669' : '#52b02c', color:'#fff',
+              fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
               {saved ? '✅ Saved!' : <>💾 <u>S</u>ave Configuration</>}
             </button>
           </div>

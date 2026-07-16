@@ -38,7 +38,7 @@ function formatPeriodLabel(year, month, half, settings, language) {
 
 /* ── Tiny atoms ──────────────────────────────────────────────── */
 const Avatar = ({ name, size=36 }) => {
-  const colors = ['#1a56db','#059669','#7c3aed','#dc2626','#d97706','#0369a1'];
+  const colors = ['#52b02c','#059669','#7c3aed','#dc2626','#d97706','#0369a1'];
   const color  = colors[(name||'?').charCodeAt(0) % colors.length];
   return (
     <div style={{ width:size,height:size,borderRadius:'50%',background:color,
@@ -114,7 +114,7 @@ const RankCard = ({ icon, title, color, bg, border, items, valueKey, valueSuffix
 const InsightCard = ({ icon, text, type }) => {
   const styles = {
     positive : { bg:'#f0fdf4', border:'#86efac', color:'#065f46' },
-    neutral  : { bg:'#eff6ff', border:'#93c5fd', color:'#1e40af' },
+    neutral  : { bg:'#f0fdf4', border:'#86efac', color:'#166534' },
     warning  : { bg:'#fff7ed', border:'#fed7aa', color:'#c2410c' },
   };
   const s = styles[type] || styles.neutral;
@@ -206,7 +206,7 @@ const HalfMonthlyReport = () => {
             🤖 {L('अर्धमासिक रिपोर्ट','Half Monthly Report')}
             <span style={{ fontSize:14, fontWeight:600, color:'#6b7280', marginLeft:10 }}>
               {currentFY && (
-                <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+                <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                   padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                   {currentFY.name}
                 </span>
@@ -222,8 +222,8 @@ const HalfMonthlyReport = () => {
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           <button onClick={()=>window.print()} style={{ display:'inline-flex',alignItems:'center',gap:5,
-            padding:'6px 14px',height:36,background:'#eff6ff',border:'1px solid #93c5fd',
-            color:'#1d4ed8',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
+            padding:'6px 14px',height:36,background:'#f0fdf4',border:'1px solid #86efac',
+            color:'#15803d',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
           <ViewHalfMonthlyBtn year={year} month={month} half={half} useNP={useNP}
@@ -270,7 +270,7 @@ const HalfMonthlyReport = () => {
           {[1,2].map(h=>(
             <button key={h} onClick={()=>setHalf(h)}
               style={{ padding:'6px 18px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151' }}>
+                background:half===h?'#52b02c':'white',color:half===h?'white':'#374151' }}>
               {h===1?L('पहिलो','1st Half'):L('दोस्रो','2nd Half')}
             </button>
           ))}
@@ -298,7 +298,7 @@ const HalfMonthlyReport = () => {
         <>
           {/* ── Period calendar stats row ── */}
           <div style={{ display:'flex',gap:10,marginBottom:20,flexWrap:'wrap',alignItems:'stretch' }}>
-            <StatPill label={L('जम्मा दिन','Total Days')}           value={period.totalDays ?? '—'}        color="#1a56db" bg="#eff6ff" />
+            <StatPill label={L('जम्मा दिन','Total Days')}           value={period.totalDays ?? '—'}        color="#52b02c" bg="#f0fdf4" />
             <StatPill label={L('कार्य दिन','No. of Working Days')} value={period.totalWorkingDays ?? '—'} color="#059669" bg="#d1fae5" />
             <StatPill label={L('सप्ताहन्त','Weekend')}               value={period.weekendDays ?? '—'}      color="#6b7280" bg="#f3f4f6" />
             <StatPill label={L('सार्वजनिक बिदा','Public Holiday')}   value={period.holidayDays ?? '—'}      color="#d97706" bg="#fef3c7" />

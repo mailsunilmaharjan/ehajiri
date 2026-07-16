@@ -100,7 +100,7 @@ const LeaveApproval = () => {
     )},
     { field:'fromDate',    header:t('From Date'),    width:110, render:v=>fd(v) },
     { field:'toDate',      header:t('To Date'),      width:110, render:v=>fd(v) },
-    { field:'days',        header:t('Days'),         width:60,  align:'center', render:v=><strong style={{ color:'#1a56db' }}>{v}</strong> },
+    { field:'days',        header:t('Days'),         width:60,  align:'center', render:v=><strong style={{ color:'#52b02c' }}>{v}</strong> },
     { field:'reason',      header:t('Reason'),       width:140 },
     { field:'appliedDate', header:t('Applied Date'), width:110, render:v=>fd(v) },
     { field:'status',      header:t('Status'),       width:120, render:(v, row)=>(

@@ -1,24 +1,24 @@
-﻿import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../api/client.js';
 import { useAuth } from './AuthContext.jsx';
 
 const DataContext = createContext(null);
 
-/* ── Fallback seed data (used when API is unavailable) ── */
+/* -- Fallback seed data (used when API is unavailable) -- */
 const FB_LEAVE_TYPES = [
-  { id:1, name:'वार्षिक बिदा', code:'AL', totalDays:20, color:'#0e9f6e', nameEn:'Annual Leave'   },
-  { id:2, name:'बिरामी बिदा',  code:'SL', totalDays:12, color:'#3f83f8', nameEn:'Sick Leave'      },
-  { id:3, name:'आकस्मिक बिदा',code:'CL', totalDays:6,  color:'#ff5a1f', nameEn:'Casual Leave'    },
-  { id:4, name:'मातृत्व बिदा', code:'ML', totalDays:98, color:'#e74694', nameEn:'Maternity Leave' },
-  { id:5, name:'पितृत्व बिदा', code:'PL', totalDays:15, color:'#7e3af2', nameEn:'Paternity Leave' },
+  { id:1, name:'??????? ????', code:'AL', totalDays:20, color:'#0e9f6e', nameEn:'Annual Leave'   },
+  { id:2, name:'?????? ????',  code:'SL', totalDays:12, color:'#3f83f8', nameEn:'Sick Leave'      },
+  { id:3, name:'??????? ????',code:'CL', totalDays:6,  color:'#ff5a1f', nameEn:'Casual Leave'    },
+  { id:4, name:'??????? ????', code:'ML', totalDays:98, color:'#e74694', nameEn:'Maternity Leave' },
+  { id:5, name:'??????? ????', code:'PL', totalDays:15, color:'#7e3af2', nameEn:'Paternity Leave' },
 ];
 const FB_SHIFTS = [
-  // isSystem:true  → protected system record, cannot be deleted
-  { id:1, name:'साझा सिफ्ट', nameEn:'Default Shift', code:'default_shift', startTime:'10:00', endTime:'17:00', workHours:7, gracePeriodStart:15, gracePeriodEnd:0, makeDefault:true, active:true, color:'#1a56db', isSystem:true, days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
-  { id:2, name:'बिहान सिफ्ट',  nameEn:'Morning Shift',  code:'morning',  startTime:'06:00', endTime:'14:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#e3a008', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
-  { id:3, name:'बेलुकी सिफ्ट', nameEn:'Evening Shift',  code:'evening',  startTime:'14:00', endTime:'22:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#7e3af2', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
+  // isSystem:true  ? protected system record, cannot be deleted
+  { id:1, name:'???? ?????', nameEn:'Default Shift', code:'default_shift', startTime:'10:00', endTime:'17:00', workHours:7, gracePeriodStart:15, gracePeriodEnd:0, makeDefault:true, active:true, color:'#52b02c', isSystem:true, days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
+  { id:2, name:'????? ?????',  nameEn:'Morning Shift',  code:'morning',  startTime:'06:00', endTime:'14:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#e3a008', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
+  { id:3, name:'?????? ?????', nameEn:'Evening Shift',  code:'evening',  startTime:'14:00', endTime:'22:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#7e3af2', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
 ];
-/* ── localStorage helpers ── */
+/* -- localStorage helpers -- */
 const lsGet = (key, fallback) => {
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 };
@@ -43,15 +43,15 @@ export const DataProvider = ({ children }) => {
   const [officeVisits, setOfficeVisits] = useState(() => lsGet('ls_officeVisits', []));
   const [apiOk,        setApiOk]        = useState(false);
 
-  /* Bumped whenever duty roster is mutated — attendance components watch this to auto-refetch */
+  /* Bumped whenever duty roster is mutated � attendance components watch this to auto-refetch */
   const [rosterVersion, setRosterVersion] = useState(0);
   const bumpRosterVersion = useCallback(() => setRosterVersion(v => v + 1), []);
 
-  /* ── Role-scoped views ─────────────────────────────────────────────────────
-     filteredEmployees  → employees visible to the current user's scope
-     filteredLeaves     → leaves belonging to those employees
-     filteredVisits     → office visits belonging to those employees
-  ── */
+  /* -- Role-scoped views -----------------------------------------------------
+     filteredEmployees  ? employees visible to the current user's scope
+     filteredLeaves     ? leaves belonging to those employees
+     filteredVisits     ? office visits belonging to those employees
+  -- */
   const filteredEmployees = useMemo(
     () => filterByRole(employees).filter(e => e.role !== 'superAdmin'),
     [employees, filterByRole],
@@ -78,7 +78,7 @@ export const DataProvider = ({ children }) => {
     [officeVisits, _scopeIds, currentUser],
   );
 
-  /* ── Persist state changes to localStorage ── */
+  /* -- Persist state changes to localStorage -- */
   useEffect(() => { lsSet('ls_employees',    employees);    }, [employees]);
   useEffect(() => { lsSet('ls_shifts',       shifts);       }, [shifts]);
   useEffect(() => { lsSet('ls_leaveTypes',   leaveTypes);   }, [leaveTypes]);
@@ -86,12 +86,12 @@ export const DataProvider = ({ children }) => {
   useEffect(() => { lsSet('ls_leaves',       leaves);       }, [leaves]);
   useEffect(() => { lsSet('ls_officeVisits', officeVisits); }, [officeVisits]);
 
-  /* ── Load all data from API on login (and on startup for an already
+  /* -- Load all data from API on login (and on startup for an already
      logged-in session). Every endpoint below is behind authGuard, so
-     fetching while logged out can only ever 401 — worse, the form login
+     fetching while logged out can only ever 401 � worse, the form login
      is an SPA navigation (no page reload), so a mount-only fetch that
      ran on the login screen would leave employees/leaves/visits empty
-     for the whole session until a manual refresh. ── */
+     for the whole session until a manual refresh. -- */
   useEffect(() => {
     if (!currentUser) return;
     (async () => {
@@ -121,7 +121,7 @@ export const DataProvider = ({ children }) => {
         });
         setApiOk(true);
       } catch {
-        // API unavailable — use localStorage data. Staff is real org data, so
+        // API unavailable � use localStorage data. Staff is real org data, so
         // unlike shifts there's no seeded fallback here: if there's nothing
         // cached, the UI shows an empty state rather than fake people.
         const localShifts = lsGet('ls_shifts', null);
@@ -131,8 +131,8 @@ export const DataProvider = ({ children }) => {
     })();
   }, [currentUser?.id]);
 
-  /* ── Employees ──
-     Always write through to the API — staff records must persist to the
+  /* -- Employees --
+     Always write through to the API � staff records must persist to the
      database. A local-only fallback here would silently "succeed" (and
      bump counts/toasts) without ever reaching the server whenever apiOk
      was stuck false from an unrelated startup hiccup, then vanish the
@@ -158,7 +158,7 @@ export const DataProvider = ({ children }) => {
     catch { /* keep existing */ }
   };
 
-  /* ── Shifts ── */
+  /* -- Shifts -- */
   const addShift = async (shift) => {
     if (apiOk) { const s = await api.post('/shifts', shift); setShifts(p => [...p, s]); return s; }
     const s = { ...shift, id: Date.now() }; setShifts(p => [...p, s]); return s;
@@ -178,7 +178,7 @@ export const DataProvider = ({ children }) => {
   const getShiftByCode   = (code) => shifts.find(s => s.code === code);
   const getShiftById     = (id)   => shifts.find(s => s.id   === id);
 
-  /* ── Leaves ── */
+  /* -- Leaves -- */
   const addLeave = async (leave) => {
     /* Always save locally first so the record is never lost */
     const localId = Date.now();
@@ -201,7 +201,7 @@ export const DataProvider = ({ children }) => {
       try {
         const saved = await api.post('/leaves', leave);
         if (saved?.id && saved.id !== localId) {
-          // Merge: API fields take priority EXCEPT status/approvedBy/approvedDate —
+          // Merge: API fields take priority EXCEPT status/approvedBy/approvedDate �
           // the local values win if they were explicitly set (e.g. manual posting as 'approved')
           setLeaves(p => p.map(x => x.id === localId
             ? { ...x, ...saved, status: saved.status || x.status }
@@ -209,7 +209,7 @@ export const DataProvider = ({ children }) => {
           ));
           return saved.id;
         }
-      } catch { /* API unavailable — local copy already saved */ }
+      } catch { /* API unavailable � local copy already saved */ }
     }
     return localId;
   };
@@ -246,7 +246,7 @@ export const DataProvider = ({ children }) => {
         // Merge API response (preserves local-only fields like isManual, recommendedBy)
         setLeaves(p => p.map(x => String(x.id) === String(id) ? { ...x, ...l } : x));
       } catch {
-        // API failed (e.g. local-only ID not in DB) — optimistic update already applied, keep it
+        // API failed (e.g. local-only ID not in DB) � optimistic update already applied, keep it
       }
     }
   };
@@ -262,7 +262,7 @@ export const DataProvider = ({ children }) => {
         const l = await api.patch(`/leaves/${id}/reject`, { approvedBy, comment });
         setLeaves(p => p.map(x => String(x.id) === String(id) ? { ...x, ...l } : x));
       } catch {
-        // API failed — optimistic update already applied, keep it
+        // API failed � optimistic update already applied, keep it
       }
     }
   };
@@ -281,7 +281,7 @@ export const DataProvider = ({ children }) => {
     ) || null;
   }, [leaves]);
 
-  /* ── Office Visits ── */
+  /* -- Office Visits -- */
   const addVisit = async (visit) => {
     /* Always save locally first so the record is never lost */
     const localId = Date.now();
@@ -307,7 +307,7 @@ export const DataProvider = ({ children }) => {
           setOfficeVisits(p => p.map(x => x.id === localId ? { ...x, ...saved } : x));
           return saved.id;
         }
-      } catch { /* API unavailable — local copy already saved */ }
+      } catch { /* API unavailable � local copy already saved */ }
     }
     return localId;
   };

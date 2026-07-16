@@ -138,7 +138,7 @@ const NepaliDatePicker = ({ value, onChange, error, maxToday = false }) => {
                 {BS_MONTHS_NP.map((mn, i) => <option key={i+1} value={i+1}>{mn}</option>)}
               </select>
               <select value={viewYear} onChange={e => setViewYear(Number(e.target.value))}
-                style={{ border:'none', fontWeight:700, fontSize:14, cursor:'pointer', outline:'none', background:'transparent', color:'#1a56db' }}>
+                style={{ border:'none', fontWeight:700, fontSize:14, cursor:'pointer', outline:'none', background:'transparent', color:'#52b02c' }}>
                 {Array.from({ length:91 }, (_, i) => 2000+i).map(y => (
                   <option key={y} value={y}>{fmt(y)}</option>
                 ))}
@@ -177,7 +177,7 @@ const NepaliDatePicker = ({ value, onChange, error, maxToday = false }) => {
                     border:'none', borderRadius:6, padding:'6px 2px',
                     fontSize:13, textAlign:'center', lineHeight:1,
                     cursor:     future ? 'not-allowed' : 'pointer',
-                    background: sel   ? '#1a56db' : today ? '#0e9f6e' : 'transparent',
+                    background: sel   ? '#52b02c' : today ? '#0e9f6e' : 'transparent',
                     color:      sel || today ? 'white'
                               : future       ? '#d1d5db'
                               : dow===0      ? '#e3a008'

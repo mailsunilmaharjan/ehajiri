@@ -137,16 +137,16 @@ const STYLES = `
     cursor:pointer; font-size:12px; font-weight:600; font-family:inherit;
     transition:all .18s;
   }
-  .db-seg-btn.on  { background:#fff; color:#3b82f6; box-shadow:0 1px 4px rgba(0,0,0,.10); }
+  .db-seg-btn.on  { background:#fff; color:#22c55e; box-shadow:0 1px 4px rgba(0,0,0,.10); }
   .db-seg-btn.off { background:transparent; color:#94a3b8; }
   .db-seg-btn.off:hover { color:#64748b; }
 
   .db-view-btn {
-    font-size:12px; font-weight:600; color:#3b82f6;
-    background:#eff6ff; border:1px solid #bfdbfe;
+    font-size:12px; font-weight:600; color:#22c55e;
+    background:#f0fdf4; border:1px solid #bbf7d0;
     border-radius:7px; padding:5px 13px; cursor:pointer; transition:all .18s;
   }
-  .db-view-btn:hover { background:#dbeafe; }
+  .db-view-btn:hover { background:#dcfce7; }
 
   .db-a0  { animation:dbFade .3s ease both 0s; }
   .db-a1  { animation:dbFade .3s ease both .05s; }
@@ -179,8 +179,8 @@ const StatCard = ({ solidColor, lightColor, icon, label, value, male, female, ot
         lineHeight: 1, letterSpacing: '-1px' }}>{value ?? 0}</p>
       {male !== undefined && (
         <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: '#2563eb', background: '#eff6ff',
-            padding: '1px 6px', borderRadius: 20, border: '1px solid #dbeafe' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#f0fdf4',
+            padding: '1px 6px', borderRadius: 20, border: '1px solid #dcfce7' }}>
             {L('पुरुष','Male')} {male}
           </span>
           <span style={{ fontSize: 10, fontWeight: 700, color: '#db2777', background: '#fdf2f8',
@@ -521,7 +521,7 @@ export default function Dashboard() {
     { key:'pres',   color:'#0d9488', light:'#f0fdfa', icon:'✅', label:L('उपस्थित','Present'),              value:presentR.length,      male:mf(presentR,'male'), female:mf(presentR,'female'), other:mo(presentR) },
     { key:'abs',    color:'#ef4444', light:'#fef2f2', icon:'❌', label:L('अनुपस्थित','Absent'),             value:absentR.length,       male:mf(absentR,'male'),  female:mf(absentR,'female'),  other:mo(absentR) },
     { key:'late',   color:'#f59e0b', light:'#fffbeb', icon:'⏰', label:L('ढिलो आगमन','Late Arrival'),      value:lateR.length,         male:mf(lateR,'male'),    female:mf(lateR,'female'),    other:mo(lateR) },
-    { key:'early',  color:'#3b82f6', light:'#eff6ff', icon:'🚶', label:L('चाँडो प्रस्थान','Early Departure'), value:earlyR.length,      male:mf(earlyR,'male'),   female:mf(earlyR,'female'),   other:mo(earlyR) },
+    { key:'early',  color:'#22c55e', light:'#f0fdf4', icon:'🚶', label:L('चाँडो प्रस्थान','Early Departure'), value:earlyR.length,      male:mf(earlyR,'male'),   female:mf(earlyR,'female'),   other:mo(earlyR) },
     { key:'leave',  color:'#6366f1', light:'#eef2ff', icon:'🌴', label:L('बिदामा','On Leave'),              value:leaveR.length,        male:mf(leaveR,'male'),   female:mf(leaveR,'female'),   other:mo(leaveR) },
     { key:'visit',  color:'#0ea5e9', light:'#f0f9ff', icon:'🚗', label:L('कार्यालय भ्रमण','Office Visit'),  value:visitR.length,        male:mf(visitR,'male'),   female:mf(visitR,'female'),   other:mo(visitR) },
   ];
@@ -544,7 +544,7 @@ export default function Dashboard() {
             </p>
             <h1 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800, color: '#1e293b' }}>
               {greeting(language)},{' '}
-              <span style={{ color: '#3b82f6' }}>
+              <span style={{ color: '#22c55e' }}>
                 {currentUser?.fullName?.split(' ')[0] || 'Admin'}
               </span>
             </h1>
@@ -650,7 +650,7 @@ export default function Dashboard() {
               {/* Row 2 — Late In & Early Out + Absent Days */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <LedgerSection
-                  bg="#eff6ff"
+                  bg="#f0fdf4"
                   title={`⏰ ${L('ढिलो र चाँडो','Late In & Early Out')}`}
                   rows={ledgerRows.lateEarly}
                   scroll
@@ -873,7 +873,7 @@ export default function Dashboard() {
                       { label: L('उपस्थित','Present'),        value: myOwnAnalysis?.summary?.totalPresent ?? 0, color: '#0d9488' },
                       { label: L('अनुपस्थित','Absent'),        value: myOwnAnalysis?.summary?.totalAbsent  ?? 0, color: '#ef4444' },
                       { label: L('ढिलो','Late'),               value: myOwnAnalysis?.summary?.totalLate    ?? 0, color: '#f59e0b' },
-                      { label: L('उपस्थिति दर','Att. Rate'),   value: `${myOwnAnalysis?.summary?.avgAttRate ?? 0}%`, color: '#3b82f6' },
+                      { label: L('उपस्थिति दर','Att. Rate'),   value: `${myOwnAnalysis?.summary?.avgAttRate ?? 0}%`, color: '#22c55e' },
                     ].map(s => (
                       <div key={s.label} style={{ textAlign: 'center' }}>
                         <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</p>
@@ -913,8 +913,8 @@ export default function Dashboard() {
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 14px', gap: 4 }}>
                 {weekDays.map(d => (
                   <div key={d.dateStr} style={{ flex: 1, textAlign: 'center', borderRadius: 8, padding: '6px 2px',
-                    background: d.isToday ? '#eff6ff' : 'transparent' }}>
-                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: d.isToday ? '#1d4ed8' : '#94a3b8' }}>{d.dayKey}</p>
+                    background: d.isToday ? '#f0fdf4' : 'transparent' }}>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: d.isToday ? '#15803d' : '#94a3b8' }}>{d.dayKey}</p>
                     <p style={{ margin: '2px 0 0', fontSize: 10, fontWeight: 600, color: d.off ? '#ef4444' : '#1e293b' }}>
                       {d.off ? L('बिदा','Off') : (d.shiftName || '—')}
                     </p>

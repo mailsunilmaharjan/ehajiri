@@ -98,8 +98,8 @@ const TypeBadge = ({ type }) => (
 const InfoBadge = ({ info }) => (
   <span style={{
     display:'inline-block', padding:'1px 9px', borderRadius:10, fontSize:11, fontWeight:700,
-    background: info==='company' ? '#dbeafe' : '#ede9fe',
-    color:      info==='company' ? '#1e40af'  : '#5b21b6',
+    background: info==='company' ? '#dcfce7' : '#ede9fe',
+    color:      info==='company' ? '#166534'  : '#5b21b6',
   }}>
     {info==='company' ? '🏢 Company' : '👤 Personal'}
   </span>
@@ -134,9 +134,9 @@ const RadioGroup = ({ label, name, value, onChange, options }) => (
         <label key={opt.value} style={{
           display:'flex', alignItems:'center', gap:7, cursor:'pointer',
           padding:'6px 14px', borderRadius:8, fontSize:13, fontWeight:500,
-          border:`2px solid ${value===opt.value ? '#1a56db' : '#d1d5db'}`,
-          background: value===opt.value ? '#eff6ff' : '#fff',
-          color:      value===opt.value ? '#1a56db'  : '#374151',
+          border:`2px solid ${value===opt.value ? '#52b02c' : '#d1d5db'}`,
+          background: value===opt.value ? '#f0fdf4' : '#fff',
+          color:      value===opt.value ? '#52b02c'  : '#374151',
           transition:'all .15s',
         }}>
           <input type="radio" name={name} value={opt.value} checked={value===opt.value}
@@ -281,8 +281,8 @@ const PersonsGrid = ({ persons, onAdd, onEdit, onDelete }) => {
         </div>
         <button onClick={onAdd}
           style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 13px',
-            borderRadius:7, border:'none', background:'#1a56db', color:'#fff',
-            fontSize:12, fontWeight:700, cursor:'pointer', boxShadow:'0 1px 4px rgba(26,86,219,.25)' }}>
+            borderRadius:7, border:'none', background:'#52b02c', color:'#fff',
+            fontSize:12, fontWeight:700, cursor:'pointer', boxShadow:'0 1px 4px rgba(82,176,44,.25)' }}>
           + Add New
         </button>
       </div>
@@ -316,7 +316,7 @@ const PersonsGrid = ({ persons, onAdd, onEdit, onDelete }) => {
             <tbody>
               {persons.map((p, idx) => {
                 const isSelected = sel.has(p.id);
-                const rowBg = isSelected ? '#eff6ff' : idx%2===0 ? '#fff' : '#f8fafc';
+                const rowBg = isSelected ? '#f0fdf4' : idx%2===0 ? '#fff' : '#f8fafc';
                 return (
                   <tr key={p.id}
                     style={{ background:rowBg, cursor:'pointer', userSelect:'none' }}
@@ -366,7 +366,7 @@ const PersonsGrid = ({ persons, onAdd, onEdit, onDelete }) => {
               }}
               onMouseEnter={e => {
                 e.currentTarget.style.background = item.danger ? '#fff5f5' : '#f0f7ff';
-                e.currentTarget.style.borderLeftColor = item.danger ? '#dc2626' : '#1a56db';
+                e.currentTarget.style.borderLeftColor = item.danger ? '#dc2626' : '#52b02c';
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.background = 'transparent';
@@ -445,7 +445,7 @@ const PersonModal = ({ initial, onClose, onSaved }) => {
           </button>
           <button onClick={save}
             style={{ padding:'8px 24px', borderRadius:8, border:'none',
-              background:'#1a56db', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+              background:'#52b02c', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
             {isEdit ? 'Update' : 'Add Person'}
           </button>
         </div>
@@ -714,7 +714,7 @@ const ContactModal = ({ initial, onClose, onSaved }) => {
             </button>
             <button onClick={save} disabled={saving}
               style={{ padding:'8px 24px', borderRadius:8, border:'none',
-                background: saving ? '#93c5fd' : '#1a56db', color:'#fff',
+                background: saving ? '#86efac' : '#52b02c', color:'#fff',
                 fontSize:13, fontWeight:700, cursor: saving ? 'not-allowed' : 'pointer' }}>
               {saving ? 'Saving…' : isEdit ? 'Update' : 'Save Contact'}
             </button>
@@ -755,8 +755,8 @@ const DRow = ({ icon, label, value }) => {
 const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
   const isPersonal  = contact.contactInfo === 'personal';
   const avatar      = isPersonal ? contact.personName?.charAt(0)?.toUpperCase()||'?' : contact.companyName?.charAt(0)?.toUpperCase()||'?';
-  const avatarBg    = isPersonal ? '#ede9fe' : '#dbeafe';
-  const avatarColor = isPersonal ? '#7c3aed' : '#1e40af';
+  const avatarBg    = isPersonal ? '#ede9fe' : '#dcfce7';
+  const avatarColor = isPersonal ? '#7c3aed' : '#166534';
 
   // Company contacts can hold multiple contact persons — show them here too.
   const [persons, setPersons] = useState([]);
@@ -998,10 +998,10 @@ const StaffContact = () => {
   const toolbar = (
     <button onClick={() => setModal({ initial:EMPTY })}
       style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 16px',
-        borderRadius:8, border:'none', background:'#1a56db', color:'#fff',
-        fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.25)' }}
-      onMouseEnter={e => e.currentTarget.style.background='#1e40af'}
-      onMouseLeave={e => e.currentTarget.style.background='#1a56db'}>
+        borderRadius:8, border:'none', background:'#52b02c', color:'#fff',
+        fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.25)' }}
+      onMouseEnter={e => e.currentTarget.style.background='#166534'}
+      onMouseLeave={e => e.currentTarget.style.background='#52b02c'}>
       <span style={{ fontSize:16, lineHeight:1 }}>+</span> Add New
     </button>
   );

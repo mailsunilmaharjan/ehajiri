@@ -306,9 +306,9 @@ const LeavePanel = () => {
         const isMan = v === true || String(row.employeeId) !== String(currentUser.id);
         return (
           <span style={{ fontSize:12, fontWeight:600, padding:'2px 9px', borderRadius:10, whiteSpace:'nowrap',
-            background: isMan ? '#fef3c7' : '#eff6ff',
-            color:      isMan ? '#92400e' : '#1e40af',
-            border:     `1px solid ${isMan ? '#fde68a' : '#bfdbfe'}` }}>
+            background: isMan ? '#fef3c7' : '#f0fdf4',
+            color:      isMan ? '#92400e' : '#166534',
+            border:     `1px solid ${isMan ? '#fde68a' : '#bbf7d0'}` }}>
             {isMan
               ? (language==='np' ? '✍️ म्यानुअल' : '✍️ Manual')
               : (language==='np' ? '📝 आवेदन'  : '📝 Application')}
@@ -318,7 +318,7 @@ const LeavePanel = () => {
     },
     { field: 'fromDate',      header: t('From Date'),    width: 110, render: v => fd(v) },
     { field: 'toDate',        header: t('To Date'),      width: 110, render: v => fd(v) },
-    { field: 'days',          header: t('Days'),         width: 60,  align:'center', render: v => <strong style={{ color:'#1a56db' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</strong> },
+    { field: 'days',          header: t('Days'),         width: 60,  align:'center', render: v => <strong style={{ color:'#52b02c' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</strong> },
     { field: 'reason',        header: t('Reason'),       width: 150, render: v => <span style={{ maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', display:'block', fontSize:14 }}>{v}</span> },
     { field: 'appliedDate',   header: t('Applied Date'), width: 110, render: v => fd(v) },
     { field: 'status',        header: t('Status'),       width: 110, render: v => <StatusBadge status={v} /> },
@@ -442,15 +442,15 @@ const LeavePanel = () => {
             <div ref={ref} style={{ position:'relative' }}>
               <div tabIndex={0} onClick={() => setOpen(p => !p)}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'5px 12px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+                  padding:'5px 12px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minWidth:200, minHeight:34,
-                  color: filterTypes.length > 0 ? '#1e40af' : '#374151',
+                  color: filterTypes.length > 0 ? '#166534' : '#374151',
                   fontWeight: filterTypes.length > 0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none' }}>
+                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline:'none', userSelect:'none' }}>
                 <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{selLabel}</span>
                 <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
                   {filterTypes.length > 0 && (
-                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>
+                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>
                       {filterTypes.length}
                     </span>
                   )}
@@ -465,7 +465,7 @@ const LeavePanel = () => {
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', minWidth:280, maxHeight:280,
                   display:'flex', flexDirection:'column' }}>
                   {/* Search */}
@@ -479,26 +479,26 @@ const LeavePanel = () => {
                   <div style={{ overflowY:'auto', flex:1 }}>
                     <div onMouseDown={e=>{e.preventDefault(); setFilterTypes([]);}}
                       style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                        background: filterTypes.length===0 ? '#eff6ff' : 'white', borderBottom:'1px solid #f1f5f9' }}>
+                        background: filterTypes.length===0 ? '#f0fdf4' : 'white', borderBottom:'1px solid #f1f5f9' }}>
                       <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
-                        border:`2px solid ${filterTypes.length===0?'#1a56db':'#d1d5db'}`, background:filterTypes.length===0?'#1a56db':'white' }}>
+                        border:`2px solid ${filterTypes.length===0?'#52b02c':'#d1d5db'}`, background:filterTypes.length===0?'#52b02c':'white' }}>
                         {filterTypes.length===0 && <svg viewBox="0 0 12 12" fill="none" width="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                       </span>
-                      <span style={{ fontSize:13, fontWeight:600, color:filterTypes.length===0?'#1e40af':'#374151' }}>All Types</span>
+                      <span style={{ fontSize:13, fontWeight:600, color:filterTypes.length===0?'#166534':'#374151' }}>All Types</span>
                     </div>
                     {visOpts.map(lt => {
                       const sel = filterTypes.includes(lt.shortName);
                       return (
                         <div key={lt.shortName} onMouseDown={e=>{e.preventDefault(); toggle(lt.shortName);}}
                           style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                            background: sel ? '#eff6ff' : 'white', borderBottom:'1px solid #f9fafb' }}
+                            background: sel ? '#f0fdf4' : 'white', borderBottom:'1px solid #f9fafb' }}
                           onMouseEnter={e=>{ if(!sel) e.currentTarget.style.background='#f8fafc'; }}
                           onMouseLeave={e=>{ if(!sel) e.currentTarget.style.background='white'; }}>
                           <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
-                            border:`2px solid ${sel?'#1a56db':'#d1d5db'}`, background:sel?'#1a56db':'white' }}>
+                            border:`2px solid ${sel?'#52b02c':'#d1d5db'}`, background:sel?'#52b02c':'white' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize:13, color:sel?'#1e40af':'#374151', fontWeight:sel?600:400 }}>
+                          <span style={{ fontSize:13, color:sel?'#166534':'#374151', fontWeight:sel?600:400 }}>
                             {lt.name}
                             {lt.carryForward !== undefined && (
                               <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:6,
@@ -551,9 +551,9 @@ const LeavePanel = () => {
                 <button key={opt.key} type="button"
                   onClick={() => { setFilterAccum(opt.key); setFilterTypes([]); }}
                   style={{ padding:'4px 12px', fontSize:12, borderRadius:20, cursor:'pointer',
-                    border:`1.5px solid ${filterAccum===opt.key?'#1a56db':'#d1d5db'}`,
-                    background: filterAccum===opt.key ? '#eff6ff' : 'white',
-                    color: filterAccum===opt.key ? '#1a56db' : '#374151',
+                    border:`1.5px solid ${filterAccum===opt.key?'#52b02c':'#d1d5db'}`,
+                    background: filterAccum===opt.key ? '#f0fdf4' : 'white',
+                    color: filterAccum===opt.key ? '#52b02c' : '#374151',
                     fontWeight: filterAccum===opt.key ? 700 : 400, transition:'all .12s' }}>
                   {opt.label}
                 </button>
@@ -635,7 +635,7 @@ const LeavePanel = () => {
                   style={{ fontSize:13 }} autoFocus />
               </div>
               {actionModal.type === 'approve' && (
-                <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#1e40af' }}>
+                <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#166534' }}>
                   📊 Approving this leave will automatically reduce the employee's leave balance by <strong>{actionModal.leave.days} day{actionModal.leave.days !== 1 ? 's' : ''}</strong>.
                 </div>
               )}
@@ -749,10 +749,10 @@ const LeavePanel = () => {
             <div ref={ref} style={{ position: 'relative' }}>
               <div tabIndex={0} onClick={() => setOpen(p => !p)}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 11px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+                  padding:'8px 11px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:40,
                   color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open?'0 0 0 2px #bfdbfe':'none', outline:'none', userSelect:'none' }}>
+                  boxShadow: open?'0 0 0 2px #bbf7d0':'none', outline:'none', userSelect:'none' }}>
                 <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                   {selLabel || placeholder}
                 </span>
@@ -760,7 +760,7 @@ const LeavePanel = () => {
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220, display:'flex', flexDirection:'column' }}>
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
@@ -771,14 +771,14 @@ const LeavePanel = () => {
                   <div style={{ overflowY:'auto', flex:1 }}>
                     <div onMouseDown={e=>{e.preventDefault(); onChange(''); setOpen(false); setSrch('');}}
                       style={{ padding:'8px 12px', fontSize:13, cursor:'pointer', borderBottom:'1px solid #f3f4f6',
-                        background: !value ? '#eff6ff' : 'white', color: !value ? '#1e40af' : '#6b7280' }}>
+                        background: !value ? '#f0fdf4' : 'white', color: !value ? '#166534' : '#6b7280' }}>
                       — None —
                     </div>
                     {filtered.map(opt => (
                       <div key={opt.value} onMouseDown={e=>{e.preventDefault(); onChange(opt.value); setOpen(false); setSrch('');}}
                         style={{ padding:'8px 12px', fontSize:13, cursor:'pointer', borderBottom:'1px solid #f3f4f6',
-                          background: String(value)===String(opt.value)?'#eff6ff':'white',
-                          color: String(value)===String(opt.value)?'#1e40af':'#374151',
+                          background: String(value)===String(opt.value)?'#f0fdf4':'white',
+                          color: String(value)===String(opt.value)?'#166534':'#374151',
                           fontWeight: String(value)===String(opt.value)?700:400 }}
                         onMouseEnter={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='#f8fafc'; }}
                         onMouseLeave={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='white'; }}>
@@ -797,7 +797,7 @@ const LeavePanel = () => {
           <div className="modal-overlay">
             <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
-              <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#e0e7ff)', position:'sticky', top:0, zIndex:10 }}>
+              <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#e0e7ff)', position:'sticky', top:0, zIndex:10 }}>
                 <h2>✏️ Edit Leave Application #{editLeave.id}</h2>
                 <button className="modal-close" onClick={() => setEditLeave(null)}>✕</button>
               </div>
@@ -831,7 +831,7 @@ const LeavePanel = () => {
                   <div style={{ marginBottom:14 }}>
                     <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none' }}>
                       <input type="checkbox" checked={editForm.halfDay} onChange={e => setEF('halfDay', e.target.checked)}
-                        style={{ width:15, height:15, accentColor:'#1a56db' }} />
+                        style={{ width:15, height:15, accentColor:'#52b02c' }} />
                       <span style={{ fontSize:13, fontWeight:600 }}>Half Day</span>
                     </label>
                   </div>
@@ -939,10 +939,10 @@ const LeavePanel = () => {
             <div ref={sRef} style={{ position:'relative' }}>
               <div tabIndex={0} onClick={() => setSOpen(p=>!p)}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 11px', border:`1.5px solid ${error?'#f87171':open?'#1a56db':'#d1d5db'}`,
+                  padding:'8px 11px', border:`1.5px solid ${error?'#f87171':open?'#52b02c':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:40,
                   color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open?'0 0 0 2px #bfdbfe':'none', outline:'none', userSelect:'none' }}>
+                  boxShadow: open?'0 0 0 2px #bbf7d0':'none', outline:'none', userSelect:'none' }}>
                 <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                   {selLabel || placeholder}
                 </span>
@@ -950,7 +950,7 @@ const LeavePanel = () => {
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:260, display:'flex', flexDirection:'column' }}>
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
@@ -963,8 +963,8 @@ const LeavePanel = () => {
                       <div key={opt.value} onMouseDown={e=>{e.preventDefault(); onChange(opt.value); setSOpen(false); setSrch('');}}
                         style={{ padding:'8px 12px', fontSize:13, cursor:'pointer',
                           borderBottom:'1px solid #f3f4f6',
-                          background: String(value)===String(opt.value) ? '#eff6ff' : 'white',
-                          color: String(value)===String(opt.value) ? '#1e40af' : '#374151',
+                          background: String(value)===String(opt.value) ? '#f0fdf4' : 'white',
+                          color: String(value)===String(opt.value) ? '#166534' : '#374151',
                           fontWeight: String(value)===String(opt.value) ? 700 : 400 }}
                         onMouseEnter={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='#f8fafc'; }}
                         onMouseLeave={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='white'; }}>
@@ -1187,7 +1187,7 @@ const LeavePanel = () => {
               onClick={e => e.stopPropagation()}>
 
               {/* Header */}
-              <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#e0e7ff)', position:'sticky', top:0, zIndex:10 }}>
+              <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#e0e7ff)', position:'sticky', top:0, zIndex:10 }}>
                 <h2>📝 {t('Apply for Leave')}</h2>
                 <button className="modal-close" onClick={() => setShowApply(false)}>✕</button>
               </div>
@@ -1251,7 +1251,7 @@ const LeavePanel = () => {
                         </span>
                         {ltc.reduceWeekend && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Weekends deducted</span>}
                         {ltc.reducePublicHoliday && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Holidays deducted</span>}
-                        {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#eff6ff', color:'#1a56db' }}>Balance required</span>}
+                        {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#f0fdf4', color:'#52b02c' }}>Balance required</span>}
                         {ltc.isServicePeriod && ltc.timesPerService && (
                           <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10,
                             background: timesAlreadyTaken >= ltc.timesPerService ? '#fff1f2' : '#f5f3ff',
@@ -1268,7 +1268,7 @@ const LeavePanel = () => {
                     <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none' }}>
                       <input type="checkbox" checked={applyForm.halfDay}
                         onChange={e => handleApplyChange('halfDay', e.target.checked)}
-                        style={{ width:15, height:15, accentColor:'#1a56db' }} />
+                        style={{ width:15, height:15, accentColor:'#52b02c' }} />
                       <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>Half Day</span>
                       {applyForm.halfDay && <span style={{ fontSize:11, color:'#6b7280' }}>(0.5 days will be deducted)</span>}
                     </label>
@@ -1306,11 +1306,11 @@ const LeavePanel = () => {
                   {(applyForm.halfDay || (applyForm.fromDate && applyForm.toDate)) && (
                     <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
                       {/* Days box */}
-                      <div style={{ flex:1, minWidth:120, background:'#eff6ff', border:'1px solid #bfdbfe',
+                      <div style={{ flex:1, minWidth:120, background:'#f0fdf4', border:'1px solid #bbf7d0',
                         borderRadius:8, padding:'10px 14px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                        <span style={{ fontSize:12, color:'#1e40af', fontWeight:600 }}>📅 No. of Days</span>
+                        <span style={{ fontSize:12, color:'#166534', fontWeight:600 }}>📅 No. of Days</span>
                         <input readOnly value={days} style={{ width:50, textAlign:'center', fontSize:18, fontWeight:800,
-                          color:'#1a56db', background:'transparent', border:'none', outline:'none' }} />
+                          color:'#52b02c', background:'transparent', border:'none', outline:'none' }} />
                       </div>
                       {/* Balance box */}
                       {applyForm.leaveTypeCode && (
@@ -1342,8 +1342,8 @@ const LeavePanel = () => {
                         </div>
                       )}
                       {applyForm.reco.length === 1 && (
-                        <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                          <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                        <div style={{ background:'#f0f9ff', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
+                          <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
                             {getEmpName(applyForm.reco[0])}
                           </span>
                         </div>
@@ -1410,7 +1410,7 @@ const LeavePanel = () => {
                       border:'1.5px dashed #d1d5db', borderRadius:8, cursor:'pointer',
                       background: applyForm.document ? '#f0fdf4' : '#fafafa',
                       transition:'border .15s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor='#1a56db'}
+                      onMouseEnter={e => e.currentTarget.style.borderColor='#52b02c'}
                       onMouseLeave={e => e.currentTarget.style.borderColor='#d1d5db'}>
                       <input type="file" accept="image/*,.pdf,.doc,.docx"
                         style={{ display:'none' }}
@@ -1449,7 +1449,7 @@ const LeavePanel = () => {
       {viewLeave && (
         <div className="modal-overlay">
           <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>📅 {t('Leave Application')} #{viewLeave.id}</h2>
               <button className="modal-close" onClick={() => setViewLeave(null)}>✕</button>
             </div>
@@ -1857,10 +1857,10 @@ const VisitPanel = () => {
             <div ref={sRef} style={{ position:'relative' }}>
               <div tabIndex={0} onClick={() => setSOpen(p=>!p)}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 11px', border:`1.5px solid ${error?'#f87171':open?'#1a56db':'#d1d5db'}`,
+                  padding:'8px 11px', border:`1.5px solid ${error?'#f87171':open?'#52b02c':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:40,
                   color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open?'0 0 0 2px #bfdbfe':'none', outline:'none', userSelect:'none' }}>
+                  boxShadow: open?'0 0 0 2px #bbf7d0':'none', outline:'none', userSelect:'none' }}>
                 <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                   {selLabel || placeholder}
                 </span>
@@ -1868,7 +1868,7 @@ const VisitPanel = () => {
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:260, display:'flex', flexDirection:'column' }}>
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
@@ -1881,8 +1881,8 @@ const VisitPanel = () => {
                       <div key={opt.value} onMouseDown={e=>{e.preventDefault(); onChange(opt.value); setSOpen(false); setSrch('');}}
                         style={{ padding:'8px 12px', fontSize:13, cursor:'pointer',
                           borderBottom:'1px solid #f3f4f6',
-                          background: String(value)===String(opt.value) ? '#eff6ff' : 'white',
-                          color: String(value)===String(opt.value) ? '#1e40af' : '#374151',
+                          background: String(value)===String(opt.value) ? '#f0fdf4' : 'white',
+                          color: String(value)===String(opt.value) ? '#166534' : '#374151',
                           fontWeight: String(value)===String(opt.value) ? 700 : 400 }}
                         onMouseEnter={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='#f8fafc'; }}
                         onMouseLeave={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='white'; }}>
@@ -1991,13 +1991,13 @@ const VisitPanel = () => {
                     <div style={{ display:'flex', gap:10 }}>
                       {['National','International'].map(vt => (
                         <label key={vt} style={{ display:'flex', alignItems:'center', gap:7, cursor:'pointer', userSelect:'none',
-                          padding:'7px 16px', border:`1.5px solid ${manualVForm.visitType===vt?'#1a56db':'#d1d5db'}`,
-                          borderRadius:8, background: manualVForm.visitType===vt?'#eff6ff':'white',
+                          padding:'7px 16px', border:`1.5px solid ${manualVForm.visitType===vt?'#52b02c':'#d1d5db'}`,
+                          borderRadius:8, background: manualVForm.visitType===vt?'#f0fdf4':'white',
                           fontSize:13, fontWeight: manualVForm.visitType===vt?700:400,
-                          color: manualVForm.visitType===vt?'#1a56db':'#374151' }}>
+                          color: manualVForm.visitType===vt?'#52b02c':'#374151' }}>
                           <input type="radio" name="mvVisitType" value={vt}
                             checked={manualVForm.visitType===vt} onChange={() => setMV('visitType', vt)}
-                            style={{ accentColor:'#1a56db' }} />
+                            style={{ accentColor:'#52b02c' }} />
                           {vt==='National'?'🇳🇵 National':'🌍 International'}
                         </label>
                       ))}
@@ -2135,17 +2135,17 @@ const VisitPanel = () => {
                 onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setOpen(p=>!p); } if (e.key==='Escape') setOpen(false); }}
                 style={{
                   display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'9px 12px', border:`1.5px solid ${error?'#f87171':open?'#1a56db':'#d1d5db'}`,
+                  padding:'9px 12px', border:`1.5px solid ${error?'#f87171':open?'#52b02c':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:42,
                   color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none',
+                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline:'none', userSelect:'none',
                 }}>
                 <span>{value || placeholder}</span>
                 <span style={{ fontSize:9, color:'#9ca3af', flexShrink:0 }}>{open?'▲':'▼'}</span>
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:240, display:'flex', flexDirection:'column' }}>
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
@@ -2157,8 +2157,8 @@ const VisitPanel = () => {
                     {filtered.map(opt => (
                       <div key={opt} onMouseDown={e=>{e.preventDefault(); onChange(opt); setOpen(false); setSrch('');}}
                         style={{ padding:'9px 12px', fontSize:13, cursor:'pointer', borderBottom:'1px solid #f3f4f6',
-                          background: value===opt ? '#eff6ff' : 'white',
-                          color: value===opt ? '#1e40af' : '#374151', fontWeight: value===opt ? 700 : 400 }}
+                          background: value===opt ? '#f0fdf4' : 'white',
+                          color: value===opt ? '#166534' : '#374151', fontWeight: value===opt ? 700 : 400 }}
                         onMouseEnter={e=>{ if(value!==opt) e.currentTarget.style.background='#f8fafc'; }}
                         onMouseLeave={e=>{ if(value!==opt) e.currentTarget.style.background='white'; }}>
                         {opt}
@@ -2220,14 +2220,14 @@ const VisitPanel = () => {
                     <div style={{ display:'flex', gap:10, marginTop:4 }}>
                       {['National','International'].map(vt => (
                         <label key={vt} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none',
-                          padding:'8px 18px', border:`1.5px solid ${applyForm.visitType===vt?'#1a56db':'#d1d5db'}`,
-                          borderRadius:8, background: applyForm.visitType===vt ? '#eff6ff' : 'white',
+                          padding:'8px 18px', border:`1.5px solid ${applyForm.visitType===vt?'#52b02c':'#d1d5db'}`,
+                          borderRadius:8, background: applyForm.visitType===vt ? '#f0fdf4' : 'white',
                           fontSize:13, fontWeight: applyForm.visitType===vt ? 700 : 400,
-                          color: applyForm.visitType===vt ? '#1a56db' : '#374151', transition:'all .12s' }}>
+                          color: applyForm.visitType===vt ? '#52b02c' : '#374151', transition:'all .12s' }}>
                           <input type="radio" name="visitTypeModal" value={vt}
                             checked={applyForm.visitType===vt}
                             onChange={() => handleApplyChange('visitType', vt)}
-                            style={{ accentColor:'#1a56db', width:14, height:14 }} />
+                            style={{ accentColor:'#52b02c', width:14, height:14 }} />
                           {vt==='National' ? '🇳🇵 National' : '🌍 International'}
                         </label>
                       ))}
@@ -2291,7 +2291,7 @@ const VisitPanel = () => {
                         {applyForm.reco.length > 0
                           ? <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                               {applyForm.reco.map(id => (
-                                <span key={id} style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 10px', fontSize:12, fontWeight:600 }}>
+                                <span key={id} style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:10, padding:'2px 10px', fontSize:12, fontWeight:600 }}>
                                   {getEmpNameForVisit(id)}
                                 </span>
                               ))}
@@ -2361,7 +2361,7 @@ const VisitPanel = () => {
       {viewVisit && (
         <div className="modal-overlay">
           <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#eff6ff)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>🏢 {t('Office Visit Application')} #{viewVisit.id}</h2>
               <button className="modal-close" onClick={() => setViewVisit(null)}>✕</button>
             </div>
@@ -2436,7 +2436,7 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   const tabs = [
-    { key:'leave', icon:'📅', label:t('Leave Management'), badge: isManager ? stats.pendingLeaves : 0, color:'#1a56db', bg:'#eff6ff', border:'#1a56db' },
+    { key:'leave', icon:'📅', label:t('Leave Management'), badge: isManager ? stats.pendingLeaves : 0, color:'#52b02c', bg:'#f0fdf4', border:'#52b02c' },
     { key:'visit', icon:'🏢', label:t('Office Visit'),     badge: isManager ? stats.pendingVisits : 0, color:'#059669', bg:'#ecfdf5', border:'#059669' },
   ];
 

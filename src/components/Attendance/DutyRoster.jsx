@@ -69,9 +69,9 @@ const RosterMenuBtn = ({ active, onSelect }) => {
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 16px',
-          height: 36, background: open ? '#1e40af' : '#1a56db', color: 'white', border: 'none',
+          height: 36, background: open ? '#166534' : '#52b02c', color: 'white', border: 'none',
           borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(26,86,219,.3)', transition: 'background .15s' }}>
+          boxShadow: '0 2px 8px rgba(82,176,44,.3)', transition: 'background .15s' }}>
         <svg viewBox="0 0 20 20" fill="white" width="14" height="14">
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
@@ -98,14 +98,14 @@ const RosterMenuBtn = ({ active, onSelect }) => {
                   padding: '8px 14px', border: 'none',
                   borderBottom: i < SUB_MENU.length - 1 ? '1px solid #f0f0f0' : 'none',
                   textAlign: 'left', cursor: 'pointer', fontSize: 13,
-                  background: isActive ? '#eff6ff' : 'white', color: isActive ? '#1e40af' : '#374151',
+                  background: isActive ? '#f0fdf4' : 'white', color: isActive ? '#166534' : '#374151',
                   fontWeight: isActive ? 700 : 500 }}
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
                 <span style={{ fontSize: 17, flexShrink: 0 }}>{item.icon}</span>
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {isActive
-                  ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                  ? <svg viewBox="0 0 20 20" fill="#52b02c" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
                   : <svg viewBox="0 0 20 20" fill="#d1d5db" width="12" height="12"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg>
                 }
               </button>
@@ -150,11 +150,11 @@ const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
         tabIndex={0}
         onClick={() => setOpen(p => !p)}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setOpen(p => !p); } }}
-        style={{ height: 36, border: `1.5px solid ${open ? '#1a56db' : '#d1d5db'}`, borderRadius: 7,
+        style={{ height: 36, border: `1.5px solid ${open ? '#52b02c' : '#d1d5db'}`, borderRadius: 7,
           padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer',
           background: 'white', fontSize: 13, color: selected ? '#1f2937' : '#9ca3af',
           userSelect: 'none', outline: 'none',
-          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none' }}>
+          boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none' }}>
         <span style={{ flex: 1 }}>
           {selected
             ? `${selected.fullName} — ${selected.department || '—'} — ${selected.deviceId || selected.employeeId || '—'}`
@@ -182,8 +182,8 @@ const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
               : filtered.map(emp => (
                 <div key={emp.id} onClick={() => { onChange(emp.id); setOpen(false); setSearch(''); }}
                   style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12,
-                    background: emp.id === value ? '#eff6ff' : 'white',
-                    color: emp.id === value ? '#1e40af' : '#374151',
+                    background: emp.id === value ? '#f0fdf4' : 'white',
+                    color: emp.id === value ? '#166534' : '#374151',
                     borderTop: '1px solid #f3f4f6' }}
                   onMouseEnter={e => { if (emp.id !== value) e.currentTarget.style.background = '#f9fafb'; }}
                   onMouseLeave={e => { if (emp.id !== value) e.currentTarget.style.background = 'white'; }}>
@@ -229,11 +229,11 @@ const ShiftDropdown = ({ shifts, value, onChange }) => {
         tabIndex={0}
         onClick={() => setOpen(p => !p)}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setOpen(p => !p); } }}
-        style={{ height: 36, border: `1.5px solid ${open ? '#1a56db' : '#d1d5db'}`, borderRadius: 7,
+        style={{ height: 36, border: `1.5px solid ${open ? '#52b02c' : '#d1d5db'}`, borderRadius: 7,
           padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer',
           background: 'white', fontSize: 13, color: selected ? '#1f2937' : '#9ca3af',
           userSelect: 'none', outline: 'none',
-          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none' }}>
+          boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none' }}>
         <span style={{ flex: 1 }}>
           {selected
             ? `${selected.name}  (${selected.startTime} – ${selected.endTime})`
@@ -276,8 +276,8 @@ const ShiftDropdown = ({ shifts, value, onChange }) => {
               return (
                 <div key={s.id} onClick={() => { onChange(s.id); setOpen(false); setSearch(''); }}
                   style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12,
-                    background: s.id === value ? '#eff6ff' : 'white',
-                    color: s.id === value ? '#1e40af' : '#374151',
+                    background: s.id === value ? '#f0fdf4' : 'white',
+                    color: s.id === value ? '#166534' : '#374151',
                     borderTop: '1px solid #f3f4f6' }}
                   onMouseEnter={e => { if (s.id !== value) e.currentTarget.style.background = '#f9fafb'; }}
                   onMouseLeave={e => { if (s.id !== value) e.currentTarget.style.background = 'white'; }}>
@@ -416,7 +416,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
         display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
-        <div style={{ background: '#1a56db', padding: '16px 20px',
+        <div style={{ background: '#52b02c', padding: '16px 20px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <svg viewBox="0 0 20 20" fill="white" width="18" height="18">
@@ -496,7 +496,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
                     style={{ display: 'flex', alignItems: 'center', gap: 6,
                       cursor: 'pointer', fontSize: 13, color: '#374151', userSelect: 'none' }}>
                     <input type="checkbox" checked={on} onChange={() => toggleDay(day)}
-                      style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#1a56db' }} />
+                      style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#52b02c' }} />
                     {day}
                   </label>
                 );
@@ -530,21 +530,21 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
 
           {/* Create & New / Close After toggle */}
           <div style={{ display: 'flex', borderRadius: 7, overflow: 'hidden',
-            border: '1.5px solid #1a56db', flexShrink: 0 }}>
+            border: '1.5px solid #52b02c', flexShrink: 0 }}>
             <button
               onClick={() => setSubmitMode('create_new')}
               style={{ padding: '6px 13px', border: 'none', fontSize: 12, fontWeight: 700,
                 cursor: 'pointer', transition: 'background .15s',
-                background: submitMode === 'create_new' ? '#1a56db' : 'white',
-                color: submitMode === 'create_new' ? 'white' : '#1a56db' }}>
+                background: submitMode === 'create_new' ? '#52b02c' : 'white',
+                color: submitMode === 'create_new' ? 'white' : '#52b02c' }}>
               Create &amp; New
             </button>
             <button
               onClick={() => setSubmitMode('create_close')}
-              style={{ padding: '6px 13px', border: 'none', borderLeft: '1.5px solid #1a56db',
+              style={{ padding: '6px 13px', border: 'none', borderLeft: '1.5px solid #52b02c',
                 fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'background .15s',
-                background: submitMode === 'create_close' ? '#1a56db' : 'white',
-                color: submitMode === 'create_close' ? 'white' : '#1a56db' }}>
+                background: submitMode === 'create_close' ? '#52b02c' : 'white',
+                color: submitMode === 'create_close' ? 'white' : '#52b02c' }}>
               Close After
             </button>
           </div>
@@ -559,7 +559,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
           </button>
           <button onClick={handleSubmit} disabled={saving}
             style={{ height: 36, padding: '0 20px', fontSize: 13, fontWeight: 700,
-              background: saving ? '#93c5fd' : '#1a56db', color: 'white',
+              background: saving ? '#86efac' : '#52b02c', color: 'white',
               border: 'none', borderRadius: 8, cursor: saving ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', gap: 6 }}>
             {saving ? '⏳ Saving…'
@@ -740,9 +740,9 @@ function analyzeRosters(rosters, employees) {
     type: 'summary',
     title: 'Roster Overview',
     icon: '📊',
-    color: '#1a56db',
-    bg: '#eff6ff',
-    border: '#bfdbfe',
+    color: '#52b02c',
+    bg: '#f0fdf4',
+    border: '#bbf7d0',
     items: [
       { label: 'Total Entries',   value: rosters.length,  note: '' },
       { label: 'Currently Active', value: current.length, note: '' },
@@ -936,7 +936,7 @@ const RosterAIAnalysis = ({ rosters, employees, onClose }) => {
         <div style={{
           padding: '18px 20px', borderBottom: '1px solid #e5e7eb',
           display: 'flex', alignItems: 'center', gap: 10,
-          background: 'linear-gradient(135deg,#0f172a,#1e3a8a)',
+          background: 'linear-gradient(135deg,#0f172a,#14532d)',
         }}>
           <div style={{
             width: 36, height: 36, borderRadius: 10,
@@ -964,7 +964,7 @@ const RosterAIAnalysis = ({ rosters, employees, onClose }) => {
               justifyContent: 'center', padding: '60px 20px', gap: 20 }}>
               <div style={{
                 width: 56, height: 56, borderRadius: '50%',
-                border: '3px solid #e5e7eb', borderTopColor: '#1a56db',
+                border: '3px solid #e5e7eb', borderTopColor: '#52b02c',
                 animation: 'spin 0.8s linear infinite',
               }} />
               <div style={{ textAlign: 'center' }}>
@@ -978,7 +978,7 @@ const RosterAIAnalysis = ({ rosters, employees, onClose }) => {
               <div style={{ display: 'flex', gap: 4 }}>
                 {[0,1,2].map(i => (
                   <div key={i} style={{
-                    width: 6, height: 6, borderRadius: '50%', background: '#1a56db',
+                    width: 6, height: 6, borderRadius: '50%', background: '#52b02c',
                     animation: `bounce 1.2s ${i * 0.2}s ease-in-out infinite`,
                   }} />
                 ))}
@@ -1282,7 +1282,7 @@ const DutyRoster = () => {
       render: v => v || <span style={{ color:'#d1d5db' }}>—</span> },
     { field: 'shiftName',    header: 'Shift',      width: 120,
       render: v => v
-        ? <span style={{ background:'#eff6ff', color:'#1a56db', border:'1px solid #93c5fd',
+        ? <span style={{ background:'#f0fdf4', color:'#52b02c', border:'1px solid #86efac',
             borderRadius:6, padding:'2px 8px', fontSize:12, fontWeight:600 }}>{v}</span>
         : <span style={{ color:'#d1d5db' }}>—</span> },
     { field: 'dateFrom',     header: 'From Date',  width: 118,
@@ -1304,7 +1304,7 @@ const DutyRoster = () => {
           {canEditRoster && (
             <button onClick={e => { e.stopPropagation(); setEditRoster(row); }}
               style={{ height:28, padding:'0 10px', fontSize:12, fontWeight:600,
-                background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8',
+                background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d',
                 borderRadius:6, cursor:'pointer', whiteSpace:'nowrap' }}>
               ✏️ Edit
             </button>
@@ -1339,9 +1339,9 @@ const DutyRoster = () => {
           {/* Advanced Search */}
           <button onClick={() => setShowAdvSearch(true)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 13px', height: 36,
-            background: activeFilterCount > 0 ? '#eff6ff' : '#f8fafc',
-            border: `1px solid ${activeFilterCount > 0 ? '#1a56db' : '#d1d5db'}`,
-            color: activeFilterCount > 0 ? '#1a56db' : '#374151',
+            background: activeFilterCount > 0 ? '#f0fdf4' : '#f8fafc',
+            border: `1px solid ${activeFilterCount > 0 ? '#52b02c' : '#d1d5db'}`,
+            color: activeFilterCount > 0 ? '#52b02c' : '#374151',
             borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', position: 'relative',
           }}>
             <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
@@ -1359,7 +1359,7 @@ const DutyRoster = () => {
           {/* AI Analysis */}
           <button onClick={() => setShowAIAnalysis(true)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 36,
-            background: 'linear-gradient(135deg,#1e3a8a,#7e3af2)',
+            background: 'linear-gradient(135deg,#14532d,#2f6e1a)',
             border: 'none', color: '#fff',
             borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
             boxShadow: '0 2px 10px rgba(126,58,242,.35)',
@@ -1376,7 +1376,7 @@ const DutyRoster = () => {
 
           <button onClick={() => window.print()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 14px',
-              height: 36, background: '#eff6ff', border: '1px solid #93c5fd', color: '#1d4ed8',
+              height: 36, background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d',
               borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             🖨️ Print
           </button>
@@ -1494,18 +1494,18 @@ const DutyRoster = () => {
                 onClick={() => setOpen(p => !p)}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '8px 10px', border: `1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
+                  padding: '8px 10px', border: `1.5px solid ${open ? '#52b02c' : '#d1d5db'}`,
                   borderRadius: 7, background: 'white', cursor: 'pointer', fontSize: 13,
-                  color: value.length > 0 ? '#1e40af' : '#9ca3af', minHeight: 42,
+                  color: value.length > 0 ? '#166534' : '#9ca3af', minHeight: 42,
                   fontWeight: value.length > 0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline: 'none', userSelect: 'none',
+                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline: 'none', userSelect: 'none',
                 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                   {selLabel}
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: 6 }}>
                   {value.length > 0 && (
-                    <span style={{ background: '#1a56db', color: 'white', borderRadius: 10,
+                    <span style={{ background: '#52b02c', color: 'white', borderRadius: 10,
                       fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
                       {value.length}
                     </span>
@@ -1522,7 +1522,7 @@ const DutyRoster = () => {
               {open && (
                 <div style={{
                   position: 'absolute', top: 'calc(100% + 3px)', left: 0, right: 0, zIndex: 9999,
-                  background: 'white', border: '1.5px solid #1a56db', borderRadius: 8,
+                  background: 'white', border: '1.5px solid #52b02c', borderRadius: 8,
                   boxShadow: '0 8px 24px rgba(0,0,0,.18)', maxHeight: 220,
                   display: 'flex', flexDirection: 'column',
                 }}>
@@ -1536,32 +1536,32 @@ const DutyRoster = () => {
                   <div style={{ overflowY: 'auto', flex: 1 }}>
                     <div onMouseDown={e => { e.preventDefault(); onChange([]); }}
                       style={{ padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 8,
-                        cursor: 'pointer', background: value.length === 0 ? '#eff6ff' : 'white',
+                        cursor: 'pointer', background: value.length === 0 ? '#f0fdf4' : 'white',
                         borderBottom: '1px solid #f1f5f9' }}>
                       <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                        border: `2px solid ${value.length === 0 ? '#1a56db' : '#d1d5db'}`,
-                        background: value.length === 0 ? '#1a56db' : 'white',
+                        border: `2px solid ${value.length === 0 ? '#52b02c' : '#d1d5db'}`,
+                        background: value.length === 0 ? '#52b02c' : 'white',
                         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {value.length === 0 && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                       </span>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: value.length === 0 ? '#1e40af' : '#374151' }}>All</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: value.length === 0 ? '#166534' : '#374151' }}>All</span>
                     </div>
                     {filtered.map(opt => {
                       const sel = value.includes(opt);
                       return (
                         <div key={opt} onMouseDown={e => { e.preventDefault(); toggle(opt); }}
                           style={{ padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 8,
-                            cursor: 'pointer', background: sel ? '#eff6ff' : 'white',
+                            cursor: 'pointer', background: sel ? '#f0fdf4' : 'white',
                             borderBottom: '1px solid #f9fafb' }}
                           onMouseEnter={e => { if (!sel) e.currentTarget.style.background = '#f8fafc'; }}
                           onMouseLeave={e => { if (!sel) e.currentTarget.style.background = 'white'; }}>
                           <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                            border: `2px solid ${sel ? '#1a56db' : '#d1d5db'}`,
-                            background: sel ? '#1a56db' : 'white',
+                            border: `2px solid ${sel ? '#52b02c' : '#d1d5db'}`,
+                            background: sel ? '#52b02c' : 'white',
                             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize: 13, color: sel ? '#1e40af' : '#374151', fontWeight: sel ? 600 : 400 }}>
+                          <span style={{ fontSize: 13, color: sel ? '#166534' : '#374151', fontWeight: sel ? 600 : 400 }}>
                             {displayFn ? displayFn(opt) : opt}
                           </span>
                         </div>
@@ -1589,14 +1589,14 @@ const DutyRoster = () => {
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '16px 24px', borderBottom: '2px solid #e5e7eb',
-                background: 'linear-gradient(135deg,#eff6ff,#f0f9ff)', flexShrink: 0 }}>
+                background: 'linear-gradient(135deg,#f0fdf4,#f0f9ff)', flexShrink: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <svg viewBox="0 0 20 20" fill="#1a56db" width="18" height="18">
+                  <svg viewBox="0 0 20 20" fill="#52b02c" width="18" height="18">
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   <span style={{ fontSize: 17, fontWeight: 800, color: '#111827' }}>Advanced Search</span>
                   {activeFilterCount > 0 && (
-                    <span style={{ background: '#1a56db', color: '#fff', borderRadius: 10,
+                    <span style={{ background: '#52b02c', color: '#fff', borderRadius: 10,
                       fontSize: 12, fontWeight: 700, padding: '2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active
                     </span>
@@ -1632,7 +1632,7 @@ const DutyRoster = () => {
                     autoFocus
                     style={{ width: '100%', boxSizing: 'border-box', padding: '11px 14px 11px 34px',
                       border: '1.5px solid #d1d5db', borderRadius: 8, fontSize: 14, outline: 'none', fontFamily: 'inherit' }}
-                    onFocus={e => e.target.style.borderColor = '#1a56db'}
+                    onFocus={e => e.target.style.borderColor = '#52b02c'}
                     onBlur={e => e.target.style.borderColor = '#d1d5db'}
                   />
                 </div>
@@ -1657,15 +1657,15 @@ const DutyRoster = () => {
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#1f2937', marginBottom: 5 }}>Status</div>
                     <label
                       style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-                        border: '1.5px solid #1a56db', borderRadius: 7, userSelect: 'none', minHeight: 42,
-                        background: '#eff6ff', cursor: 'not-allowed', opacity: 0.85 }}>
+                        border: '1.5px solid #52b02c', borderRadius: 7, userSelect: 'none', minHeight: 42,
+                        background: '#f0fdf4', cursor: 'not-allowed', opacity: 0.85 }}>
                       <input
                         type="checkbox"
                         checked={true}
                         disabled
-                        style={{ width: 16, height: 16, accentColor: '#1a56db', cursor: 'not-allowed' }}
+                        style={{ width: 16, height: 16, accentColor: '#52b02c', cursor: 'not-allowed' }}
                       />
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#1e40af' }}>Working only</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>Working only</span>
                     </label>
                   </div>
                 </div>
@@ -1679,8 +1679,8 @@ const DutyRoster = () => {
                       onChange={e => setAF('fiscalYearId', e.target.value ? parseInt(e.target.value) : null)}
                       style={{ width: '100%', height: 42, border: '1.5px solid #d1d5db', borderRadius: 7,
                         padding: '0 10px', fontSize: 13, outline: 'none', background: 'white', cursor: 'pointer',
-                        color: advFilters.fiscalYearId ? '#1e40af' : '#9ca3af', fontWeight: advFilters.fiscalYearId ? 600 : 400 }}
-                      onFocus={e => e.target.style.borderColor = '#1a56db'}
+                        color: advFilters.fiscalYearId ? '#166534' : '#9ca3af', fontWeight: advFilters.fiscalYearId ? 600 : 400 }}
+                      onFocus={e => e.target.style.borderColor = '#52b02c'}
                       onBlur={e => e.target.style.borderColor = '#d1d5db'}
                     >
                       <option value="">All Fiscal Years</option>
@@ -1716,7 +1716,7 @@ const DutyRoster = () => {
                   )}
                   <button onClick={() => setShowAdvSearch(false)}
                     style={{ height: 34, padding: '0 20px', fontSize: 13, fontWeight: 700,
-                      background: '#1a56db', color: 'white', border: 'none',
+                      background: '#52b02c', color: 'white', border: 'none',
                       borderRadius: 7, cursor: 'pointer' }}>
                     Close
                   </button>

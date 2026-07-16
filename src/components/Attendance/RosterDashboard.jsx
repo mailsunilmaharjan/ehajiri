@@ -52,7 +52,7 @@ function analyzeRosters(rosters, employees) {
   return { active, expired, current, expiring, future, shifts, depts, dayCount, unassigned, duplicates };
 }
 
-const SHIFT_COLORS = ['#1a56db','#059669','#7e3af2','#d97706','#dc2626','#0891b2','#be185d'];
+const SHIFT_COLORS = ['#52b02c','#059669','#7e3af2','#d97706','#dc2626','#0891b2','#be185d'];
 
 /* ── Stat Card ── */
 const StatCard = ({ icon, label, value, sub, accent, bg, border }) => (
@@ -93,9 +93,9 @@ const RosterMenuBtn = ({ active, onSelect }) => {
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 16px',
-          height: 36, background: open ? '#1e40af' : '#1a56db', color: 'white', border: 'none',
+          height: 36, background: open ? '#166534' : '#52b02c', color: 'white', border: 'none',
           borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(26,86,219,.3)', transition: 'background .15s' }}>
+          boxShadow: '0 2px 8px rgba(82,176,44,.3)', transition: 'background .15s' }}>
         <svg viewBox="0 0 20 20" fill="white" width="14" height="14">
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
@@ -122,14 +122,14 @@ const RosterMenuBtn = ({ active, onSelect }) => {
                   padding: '8px 14px', border: 'none',
                   borderBottom: i < ROSTER_SUB_MENU.length - 1 ? '1px solid #f0f0f0' : 'none',
                   textAlign: 'left', cursor: 'pointer', fontSize: 13,
-                  background: isActive ? '#eff6ff' : 'white', color: isActive ? '#1e40af' : '#374151',
+                  background: isActive ? '#f0fdf4' : 'white', color: isActive ? '#166534' : '#374151',
                   fontWeight: isActive ? 700 : 500 }}
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
                 <span style={{ fontSize: 17, flexShrink: 0 }}>{item.icon}</span>
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {isActive
-                  ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                  ? <svg viewBox="0 0 20 20" fill="#52b02c" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
                   : <svg viewBox="0 0 20 20" fill="#d1d5db" width="12" height="12"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg>
                 }
               </button>
@@ -232,7 +232,7 @@ const RosterDashboard = () => {
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: '80px 20px' }}>
-          <div style={{ width: 44, height: 44, border: '4px solid #e5e7eb', borderTopColor: '#1a56db',
+          <div style={{ width: 44, height: 44, border: '4px solid #e5e7eb', borderTopColor: '#52b02c',
             borderRadius: '50%', animation: 'spin .8s linear infinite', margin: '0 auto 16px' }} />
           <div style={{ fontSize: 14, color: '#9ca3af', fontWeight: 600 }}>Loading roster data…</div>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -246,7 +246,7 @@ const RosterDashboard = () => {
           {/* ── Row 1: Stat cards ── */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12 }}>
             <StatCard icon="🗓️" label="Total Entries"    value={rosters.length}       sub="all records"
-              accent="#1a56db" bg="#eff6ff" border="#bfdbfe" />
+              accent="#52b02c" bg="#f0fdf4" border="#bbf7d0" />
             <StatCard icon="✅" label="Currently Active" value={data.current.length}  sub="in date range"
               accent="#059669" bg="#f0fdf4" border="#86efac" />
             <StatCard icon="⏳" label="Expiring in 30d"  value={data.expiring.length} sub={data.expiring.length ? 'needs review' : 'none due'}
@@ -322,7 +322,7 @@ const RosterDashboard = () => {
               {DAYS.map(day => {
                 const count = data.dayCount[day];
                 const pct   = maxDay ? Math.round((count / maxDay) * 100) : 0;
-                const color = pct > 60 ? '#1a56db' : pct > 30 ? '#7dd3fc' : '#bfdbfe';
+                const color = pct > 60 ? '#52b02c' : pct > 30 ? '#7dd3fc' : '#bbf7d0';
                 return (
                   <div key={day} style={{ flex: 1, display: 'flex', flexDirection: 'column',
                     alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>

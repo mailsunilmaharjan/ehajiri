@@ -8,7 +8,7 @@ import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 ───────────────────────────────────────────────────────────────────────── */
 const ROLE_META = {
   admin:          { label: 'System Admin',   color: '#7e3af2', bg: '#ede9fe', icon: '👑' },
-  branchManager:  { label: 'Branch Manager', color: '#1a56db', bg: '#dbeafe', icon: '🏢' },
+  branchManager:  { label: 'Branch Manager', color: '#52b02c', bg: '#dcfce7', icon: '🏢' },
   departmentHead: { label: 'Dept. Head',     color: '#0e9f6e', bg: '#d1fae5', icon: '🏛️' },
   employee:       { label: 'Employee',       color: '#6b7280', bg: '#f3f4f6', icon: '👤' },
 };
@@ -94,7 +94,7 @@ const OVERRIDE_GROUPS = [
   },
   {
     group: 'Branches',
-    color: '#1a56db', bg: '#eff6ff',
+    color: '#52b02c', bg: '#f0fdf4',
     desc: 'Branch-level access & approvals',
     pages: [
       { key: 'leave',               label: 'Leave & Office Visit', icon: '📅' },
@@ -132,7 +132,7 @@ const OVERRIDE_GROUPS = [
 const ROLES_FOR_MATRIX = [
   { key: 'employee',       label: 'Employee',       color: '#6b7280', bg: '#f3f4f6' },
   { key: 'departmentHead', label: 'Dept. Head',     color: '#0e9f6e', bg: '#d1fae5' },
-  { key: 'branchManager',  label: 'Branch Manager', color: '#1a56db', bg: '#dbeafe' },
+  { key: 'branchManager',  label: 'Branch Manager', color: '#52b02c', bg: '#dcfce7' },
 ];
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -171,11 +171,11 @@ const PermCell = ({ perm, onChange, disabled, noDelete, disabledLabel = 'Admin o
 
   const fields = noDelete
     ? [
-        { key: 'view', label: 'View', color: '#1a56db' },
+        { key: 'view', label: 'View', color: '#52b02c' },
         { key: 'edit', label: 'Edit', color: '#059669' },
       ]
     : [
-        { key: 'view',   label: 'View',   color: '#1a56db' },
+        { key: 'view',   label: 'View',   color: '#52b02c' },
         { key: 'edit',   label: 'Edit',   color: '#059669' },
         { key: 'delete', label: 'Delete', color: '#dc2626' },
       ];
@@ -205,7 +205,7 @@ const PermCell = ({ perm, onChange, disabled, noDelete, disabledLabel = 'Admin o
    Staff Override Section
 ───────────────────────────────────────────────────────────────────────── */
 const StaffOverrideSection = ({ employees, saved, onSave }) => {
-  const ROLE_COLORS = { admin: '#7e3af2', branchManager: '#1a56db', departmentHead: '#0e9f6e', employee: '#6b7280' };
+  const ROLE_COLORS = { admin: '#7e3af2', branchManager: '#52b02c', departmentHead: '#0e9f6e', employee: '#6b7280' };
   const ROLE_LABELS = { admin: 'Admin', branchManager: 'Branch Mgr', departmentHead: 'Dept. Head', employee: 'Employee' };
 
   const [selEmpId,  setSelEmpId]  = useState('');
@@ -279,7 +279,7 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
                   onClick={() => { selectEmp(String(e.id)); setSearch(e.fullName); }}
                   style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13,
                     borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}
-                  onMouseEnter={el => el.currentTarget.style.background = '#eff6ff'}
+                  onMouseEnter={el => el.currentTarget.style.background = '#f0fdf4'}
                   onMouseLeave={el => el.currentTarget.style.background = 'white'}>
                   <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                     background: (ROLE_COLORS[e.role] || '#6b7280') + '22',
@@ -386,7 +386,7 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
 
           <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
             <button onClick={handleSave} title="Ctrl+S"
-              style={{ padding: '9px 26px', border: 'none', borderRadius: 8, background: '#1a56db',
+              style={{ padding: '9px 26px', border: 'none', borderRadius: 8, background: '#52b02c',
                 color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
               💾 <u>S</u>ave Overrides
             </button>
@@ -631,7 +631,7 @@ const RoleManagement = () => {
       {/* Legend */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         {[
-          { dot: '#1a56db', label: 'View — can open & read the page' },
+          { dot: '#52b02c', label: 'View — can open & read the page' },
           { dot: '#059669', label: 'Edit — can add or modify records' },
           { dot: '#dc2626', label: 'Delete — can delete records' },
           { dot: '#7e3af2', label: 'Admin — always full access (fixed)' },
@@ -744,9 +744,9 @@ const RoleManagement = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 18 }}>
               <button onClick={handleSaveMatrix} title="Ctrl+S"
-                style={{ padding: '10px 28px', border: 'none', borderRadius: 8, background: '#1a56db',
+                style={{ padding: '10px 28px', border: 'none', borderRadius: 8, background: '#52b02c',
                   color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(26,86,219,.3)' }}>
+                  boxShadow: '0 2px 8px rgba(82,176,44,.3)' }}>
                 💾 <u>S</u>ave Permission Matrix
               </button>
               {saveMsg && <span style={{ fontSize: 13, color: '#059669', fontWeight: 700 }}>✅ {saveMsg}</span>}

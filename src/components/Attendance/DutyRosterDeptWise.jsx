@@ -81,13 +81,13 @@ const MCS = ({ label, value, onChange, options, displayFn }) => {
       <div onClick={() => setOpen(p => !p)} tabIndex={0}
         onKeyDown={e => { if (e.key === 'Enter') setOpen(p => !p); if (e.key === 'Escape') setOpen(false); }}
         style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-          padding:'7px 9px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`, borderRadius:7,
-          background:'white', cursor:'pointer', fontSize:12, color: value.length > 0 ? '#1e40af' : '#9ca3af',
+          padding:'7px 9px', border:`1.5px solid ${open ? '#52b02c' : '#d1d5db'}`, borderRadius:7,
+          background:'white', cursor:'pointer', fontSize:12, color: value.length > 0 ? '#166534' : '#9ca3af',
           fontWeight: value.length > 0 ? 600 : 400, minHeight:36, outline:'none', userSelect:'none',
-          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none' }}>
+          boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none' }}>
         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
         <div style={{ display:'flex', alignItems:'center', gap:3, flexShrink:0, marginLeft:4 }}>
-          {value.length > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:10, fontSize:9, fontWeight:700, padding:'1px 5px' }}>{value.length}</span>}
+          {value.length > 0 && <span style={{ background:'#52b02c', color:'white', borderRadius:10, fontSize:9, fontWeight:700, padding:'1px 5px' }}>{value.length}</span>}
           {value.length > 0 && (
             <span onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onChange([]); }}
               style={{ color:'#9ca3af', fontSize:14, lineHeight:1, cursor:'pointer' }}>x</span>
@@ -97,7 +97,7 @@ const MCS = ({ label, value, onChange, options, displayFn }) => {
       </div>
       {open && (
         <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:9999,
-          background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+          background:'white', border:'1.5px solid #52b02c', borderRadius:8,
           boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:200, display:'flex', flexDirection:'column' }}>
           <div style={{ padding:'5px 7px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
             <input autoFocus type="text" value={srch} onChange={e => setSrch(e.target.value)}
@@ -112,14 +112,14 @@ const MCS = ({ label, value, onChange, options, displayFn }) => {
               return (
                 <div key={v ?? '__all'} onMouseDown={e => { e.preventDefault(); isAll ? onChange([]) : toggle(v); }}
                   style={{ padding:'6px 10px', display:'flex', alignItems:'center', gap:7, cursor:'pointer',
-                    background: sel ? '#eff6ff' : 'white', borderBottom:'1px solid #f9fafb' }}
+                    background: sel ? '#f0fdf4' : 'white', borderBottom:'1px solid #f9fafb' }}
                   onMouseEnter={e => { if (!sel) e.currentTarget.style.background = '#f8fafc'; }}
                   onMouseLeave={e => { if (!sel) e.currentTarget.style.background = 'white'; }}>
-                  <span style={{ width:13, height:13, borderRadius:3, flexShrink:0, border:`2px solid ${sel ? '#1a56db' : '#d1d5db'}`,
-                    background: sel ? '#1a56db' : 'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <span style={{ width:13, height:13, borderRadius:3, flexShrink:0, border:`2px solid ${sel ? '#52b02c' : '#d1d5db'}`,
+                    background: sel ? '#52b02c' : 'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                     {sel && <svg viewBox="0 0 12 12" fill="none" width="8" height="8"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                   </span>
-                  <span style={{ fontSize:12, color: sel ? '#1e40af' : '#374151', fontWeight: sel ? 600 : 400 }}>{lbl}</span>
+                  <span style={{ fontSize:12, color: sel ? '#166534' : '#374151', fontWeight: sel ? 600 : 400 }}>{lbl}</span>
                 </div>
               );
             })}
@@ -204,7 +204,7 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader }) => {
 
       {open && (
         <div style={{ position:'fixed', top: dropPos.top, left: dropPos.left, zIndex:99999,
-          background:'white', border:'1.5px solid #1a56db', borderRadius:10,
+          background:'white', border:'1.5px solid #52b02c', borderRadius:10,
           boxShadow:'0 8px 28px rgba(0,0,0,.18)', width:220,
           display:'flex', flexDirection:'column', maxHeight:280 }}>
 
@@ -214,7 +214,7 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader }) => {
               placeholder="Search shift..." onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}
               style={{ width:'100%', border:'1.5px solid #d1d5db', borderRadius:7, padding:'5px 9px',
                 fontSize:12, outline:'none', boxSizing:'border-box' }}
-              onFocus={e => e.target.style.borderColor = '#1a56db'}
+              onFocus={e => e.target.style.borderColor = '#52b02c'}
               onBlur={e => e.target.style.borderColor = '#d1d5db'} />
           </div>
 
@@ -252,13 +252,13 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader }) => {
                   onMouseDown={e => { e.preventDefault(); if (!isOff) toggleShift(s.id); }}
                   style={{ padding:'6px 12px', display:'flex', alignItems:'center', gap:8,
                     cursor: isOff ? 'not-allowed' : 'pointer',
-                    background: sel ? '#eff6ff' : 'white', borderBottom:'1px solid #f9fafb',
+                    background: sel ? '#f0fdf4' : 'white', borderBottom:'1px solid #f9fafb',
                     opacity: isOff ? .4 : 1 }}
                   onMouseEnter={e => { if (!sel && !isOff) e.currentTarget.style.background = '#f8fafc'; }}
-                  onMouseLeave={e => { if (!isOff) e.currentTarget.style.background = sel ? '#eff6ff' : 'white'; }}>
+                  onMouseLeave={e => { if (!isOff) e.currentTarget.style.background = sel ? '#f0fdf4' : 'white'; }}>
                   <input type="checkbox" checked={sel} readOnly
-                    style={{ width:13, height:13, cursor: isOff ? 'not-allowed' : 'pointer', accentColor:'#1a56db', flexShrink:0 }} />
-                  <span style={{ fontSize:13, fontWeight: sel ? 600 : 400, color: sel ? '#1e40af' : '#111827',
+                    style={{ width:13, height:13, cursor: isOff ? 'not-allowed' : 'pointer', accentColor:'#52b02c', flexShrink:0 }} />
+                  <span style={{ fontSize:13, fontWeight: sel ? 600 : 400, color: sel ? '#166534' : '#111827',
                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, textAlign:'left' }}>
                     {s.name}
                   </span>
@@ -352,9 +352,9 @@ const RosterMenuBtn = ({ active, onSelect }) => {
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 16px',
-          height: 36, background: open ? '#1e40af' : '#1a56db', color: 'white', border: 'none',
+          height: 36, background: open ? '#166534' : '#52b02c', color: 'white', border: 'none',
           borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(26,86,219,.3)', transition: 'background .15s' }}>
+          boxShadow: '0 2px 8px rgba(82,176,44,.3)', transition: 'background .15s' }}>
         <svg viewBox="0 0 20 20" fill="white" width="14" height="14">
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
@@ -381,14 +381,14 @@ const RosterMenuBtn = ({ active, onSelect }) => {
                   padding: '8px 14px', border: 'none',
                   borderBottom: i < ROSTER_SUB_MENU.length - 1 ? '1px solid #f0f0f0' : 'none',
                   textAlign: 'left', cursor: 'pointer', fontSize: 13,
-                  background: isActive ? '#eff6ff' : 'white', color: isActive ? '#1e40af' : '#374151',
+                  background: isActive ? '#f0fdf4' : 'white', color: isActive ? '#166534' : '#374151',
                   fontWeight: isActive ? 700 : 500 }}
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
                 <span style={{ fontSize: 17, flexShrink: 0 }}>{item.icon}</span>
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {isActive
-                  ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                  ? <svg viewBox="0 0 20 20" fill="#52b02c" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
                   : <svg viewBox="0 0 20 20" fill="#d1d5db" width="12" height="12"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg>
                 }
               </button>
@@ -838,7 +838,7 @@ const DutyRosterDeptWise = () => {
         <div>
           <h1 className="page-title">Create Roster — Department Wise</h1>
           {gridVisible && pageMode === 'create' && (
-            <p className="page-subtitle" style={{ color:'#1a56db', fontWeight:600 }}>
+            <p className="page-subtitle" style={{ color:'#52b02c', fontWeight:600 }}>
               {periodLabel} &nbsp;·&nbsp; {filteredEmployees.length} staff
             </p>
           )}
@@ -852,9 +852,9 @@ const DutyRosterDeptWise = () => {
           {/* Advanced Search toggle */}
           <button onClick={() => setShowAdvSearch(p => !p)}
             style={{ height:36, padding:'0 13px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:5,
-              background: showAdvSearch ? '#eff6ff' : '#f8fafc',
-              border: `1px solid ${showAdvSearch ? '#1a56db' : '#d1d5db'}`,
-              color: showAdvSearch ? '#1a56db' : '#374151', borderRadius:8, cursor:'pointer' }}>
+              background: showAdvSearch ? '#f0fdf4' : '#f8fafc',
+              border: `1px solid ${showAdvSearch ? '#52b02c' : '#d1d5db'}`,
+              color: showAdvSearch ? '#52b02c' : '#374151', borderRadius:8, cursor:'pointer' }}>
             <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
               <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
             </svg>
@@ -876,7 +876,7 @@ const DutyRosterDeptWise = () => {
           {pageMode === 'create' && gridVisible && canEditRoster && (
             <button onClick={handleSave} disabled={saving}
               style={{ height:36, padding:'0 18px', fontSize:13, fontWeight:700,
-                background: saving ? '#9ca3af' : '#1a56db', color:'white', border:'none',
+                background: saving ? '#9ca3af' : '#52b02c', color:'white', border:'none',
                 borderRadius:8, cursor: saving ? 'not-allowed' : 'pointer' }}>
               {saving ? 'Saving...' : 'Save Roster'}
             </button>
@@ -899,7 +899,7 @@ const DutyRosterDeptWise = () => {
                 onChange={e => setAS('fiscalYearId', e.target.value ? parseInt(e.target.value) : null)}
                 style={{ width:'100%', height:36, border:'1.5px solid #d1d5db', borderRadius:7, padding:'0 8px',
                   fontSize:13, outline:'none', background:'white', cursor:'pointer' }}
-                onFocus={e => e.target.style.borderColor = '#1a56db'}
+                onFocus={e => e.target.style.borderColor = '#52b02c'}
                 onBlur={e => e.target.style.borderColor = '#d1d5db'}>
                 <option value="">All Fiscal Years</option>
                 {(settings.fiscalYears || []).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
@@ -912,9 +912,9 @@ const DutyRosterDeptWise = () => {
               <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                 {BS_MONTHS_EN.map((m, i) => (
                   <button key={m} onClick={() => { setAS('bsMonth', i + 1); setViewBsMonth(i + 1); }}
-                    style={{ padding:'4px 9px', border:`1.5px solid ${advSearch.bsMonth === i+1 ? '#1a56db' : '#e5e7eb'}`,
+                    style={{ padding:'4px 9px', border:`1.5px solid ${advSearch.bsMonth === i+1 ? '#52b02c' : '#e5e7eb'}`,
                       borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600,
-                      background: advSearch.bsMonth === i+1 ? '#1a56db' : 'white',
+                      background: advSearch.bsMonth === i+1 ? '#52b02c' : 'white',
                       color:      advSearch.bsMonth === i+1 ? 'white'   : '#374151' }}>
                     {m}
                   </button>
@@ -955,9 +955,9 @@ const DutyRosterDeptWise = () => {
             {/* Working Only */}
             <div>
               <label style={{ display:'inline-flex', alignItems:'center', gap:7, cursor:'not-allowed',
-                padding:'8px 12px', background:'#eff6ff', border:'1.5px solid #1a56db', borderRadius:7,
-                fontSize:13, fontWeight:700, color:'#1e40af', userSelect:'none', height:36, boxSizing:'border-box' }}>
-                <input type="checkbox" checked={true} disabled style={{ accentColor:'#1a56db', cursor:'not-allowed' }} />
+                padding:'8px 12px', background:'#f0fdf4', border:'1.5px solid #52b02c', borderRadius:7,
+                fontSize:13, fontWeight:700, color:'#166534', userSelect:'none', height:36, boxSizing:'border-box' }}>
+                <input type="checkbox" checked={true} disabled style={{ accentColor:'#52b02c', cursor:'not-allowed' }} />
                 Working Only
               </label>
             </div>
@@ -971,8 +971,8 @@ const DutyRosterDeptWise = () => {
                 setShowAdvSearch(false);
               }}
               style={{ height:38, padding:'0 26px', fontSize:13, fontWeight:700,
-                background:'#1a56db', color:'white', border:'none', borderRadius:7, cursor:'pointer',
-                boxShadow:'0 2px 8px rgba(26,86,219,.3)', whiteSpace:'nowrap', flexShrink:0 }}>
+                background:'#52b02c', color:'white', border:'none', borderRadius:7, cursor:'pointer',
+                boxShadow:'0 2px 8px rgba(82,176,44,.3)', whiteSpace:'nowrap', flexShrink:0 }}>
               Search
             </button>
 
@@ -1003,7 +1003,7 @@ const DutyRosterDeptWise = () => {
             <button
               onClick={() => setPageMode('view')}
               style={{ height:38, padding:'0 16px', fontSize:13, fontWeight:700,
-                background: pageMode === 'view' ? '#1a56db' : 'white',
+                background: pageMode === 'view' ? '#52b02c' : 'white',
                 color:      pageMode === 'view' ? 'white'   : '#374151',
                 border:'1.5px solid #d1d5db', borderRadius:7, cursor:'pointer', flexShrink:0 }}>
               View Roster
@@ -1023,7 +1023,7 @@ const DutyRosterDeptWise = () => {
                 {[['monthly','Monthly'],['weekly','Weekly']].map(([k,lbl]) => (
                   <button key={k} onClick={() => { setViewType(k); setViewPeriodNum(1); }}
                     style={{ padding:'6px 16px', border:'none', cursor:'pointer', fontSize:13, fontWeight:700,
-                      background: viewType === k ? '#1a56db' : 'white',
+                      background: viewType === k ? '#52b02c' : 'white',
                       color:      viewType === k ? 'white'   : '#6b7280',
                       borderRight: k === 'monthly' ? '1px solid #d1d5db' : 'none' }}>
                     {lbl}
@@ -1050,8 +1050,8 @@ const DutyRosterDeptWise = () => {
                 Month
                 <span style={{ marginLeft:5, fontSize:10, color:'#9ca3af', fontWeight:400 }}>(from Adv. Search)</span>
               </div>
-              <div style={{ height:36, border:'1.5px solid #93c5fd', borderRadius:7, padding:'0 14px',
-                fontSize:13, fontWeight:700, color:'#1e40af', background:'#eff6ff',
+              <div style={{ height:36, border:'1.5px solid #86efac', borderRadius:7, padding:'0 14px',
+                fontSize:13, fontWeight:700, color:'#166534', background:'#f0fdf4',
                 display:'flex', alignItems:'center', userSelect:'none' }}>
                 {BS_MONTHS_EN[viewBsMonth - 1]}
               </div>
@@ -1065,20 +1065,20 @@ const DutyRosterDeptWise = () => {
                 {viewType === 'monthly' ? (
                   [1,2].map(h => (
                     <button key={h} onClick={() => setViewPeriodNum(h)}
-                      style={{ padding:'6px 14px', border:`2px solid ${viewPeriodNum === h ? '#1a56db' : '#e5e7eb'}`,
+                      style={{ padding:'6px 14px', border:`2px solid ${viewPeriodNum === h ? '#52b02c' : '#e5e7eb'}`,
                         borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700,
-                        background: viewPeriodNum === h ? '#eff6ff' : 'white',
-                        color:      viewPeriodNum === h ? '#1e40af' : '#374151' }}>
+                        background: viewPeriodNum === h ? '#f0fdf4' : 'white',
+                        color:      viewPeriodNum === h ? '#166534' : '#374151' }}>
                       {h === 1 ? '1st Half' : '2nd Half'}
                     </button>
                   ))
                 ) : (
                   [1,2,3,4].map(w => (
                     <button key={w} onClick={() => setViewPeriodNum(w)}
-                      style={{ padding:'6px 12px', border:`2px solid ${viewPeriodNum === w ? '#1a56db' : '#e5e7eb'}`,
+                      style={{ padding:'6px 12px', border:`2px solid ${viewPeriodNum === w ? '#52b02c' : '#e5e7eb'}`,
                         borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700,
-                        background: viewPeriodNum === w ? '#eff6ff' : 'white',
-                        color:      viewPeriodNum === w ? '#1e40af' : '#374151' }}>
+                        background: viewPeriodNum === w ? '#f0fdf4' : 'white',
+                        color:      viewPeriodNum === w ? '#166534' : '#374151' }}>
                       {['1st','2nd','3rd','4th'][w-1]} Wk
                     </button>
                   ))
@@ -1448,7 +1448,7 @@ const DutyRosterDeptWise = () => {
                         <td style={{ padding:'7px 12px', borderBottom:'1px solid #f3f4f6', borderRight:'1px solid #f3f4f6', fontWeight:600 }}>{g.branch}</td>
                         <td style={{ padding:'7px 12px', borderBottom:'1px solid #f3f4f6', borderRight:'1px solid #f3f4f6' }}>{g.department}</td>
                         <td style={{ padding:'7px 12px', borderBottom:'1px solid #f3f4f6', borderRight:'1px solid #f3f4f6', whiteSpace:'nowrap' }}>
-                          <span style={{ background:'#eff6ff', color:'#1e40af', borderRadius:5, padding:'2px 8px', fontSize:11, fontWeight:600 }}>
+                          <span style={{ background:'#f0fdf4', color:'#166534', borderRadius:5, padding:'2px 8px', fontSize:11, fontWeight:600 }}>
                             {savedResults.dateFrom} to {savedResults.dateTo}
                           </span>
                         </td>
@@ -1500,8 +1500,8 @@ const DutyRosterDeptWise = () => {
                       onChange={e => setC('fiscalYearId', e.target.value ? parseInt(e.target.value) : null)}
                       style={{ width:'100%', height:36, border:'1.5px solid #d1d5db', borderRadius:7,
                         padding:'0 8px', fontSize:12, outline:'none', background:'white', cursor:'pointer',
-                        color: config.fiscalYearId ? '#1e40af' : '#9ca3af', fontWeight: config.fiscalYearId ? 600 : 400 }}
-                      onFocus={e => e.target.style.borderColor = '#1a56db'}
+                        color: config.fiscalYearId ? '#166534' : '#9ca3af', fontWeight: config.fiscalYearId ? 600 : 400 }}
+                      onFocus={e => e.target.style.borderColor = '#52b02c'}
                       onBlur={e => e.target.style.borderColor = '#d1d5db'}>
                       <option value="">All Fiscal Years</option>
                       {(settings.fiscalYears || []).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
@@ -1515,9 +1515,9 @@ const DutyRosterDeptWise = () => {
                 </div>
                 <div style={{ marginTop:10 }}>
                   <label style={{ display:'inline-flex', alignItems:'center', gap:8, cursor:'not-allowed',
-                    padding:'7px 12px', background:'#eff6ff', border:'1.5px solid #1a56db', borderRadius:7,
-                    fontSize:12, fontWeight:700, color:'#1e40af', opacity:.85, userSelect:'none' }}>
-                    <input type="checkbox" checked={true} disabled style={{ width:15, height:15, accentColor:'#1a56db', cursor:'not-allowed' }} />
+                    padding:'7px 12px', background:'#f0fdf4', border:'1.5px solid #52b02c', borderRadius:7,
+                    fontSize:12, fontWeight:700, color:'#166534', opacity:.85, userSelect:'none' }}>
+                    <input type="checkbox" checked={true} disabled style={{ width:15, height:15, accentColor:'#52b02c', cursor:'not-allowed' }} />
                     Status: Working Only
                   </label>
                 </div>
@@ -1535,7 +1535,7 @@ const DutyRosterDeptWise = () => {
                     {[['weekly','Weekly'],['halfMonthly','Half Monthly']].map(([key, lbl]) => (
                       <button key={key} onClick={() => { setC('periodType', key); setC('weekOrHalf', 1); }}
                         style={{ padding:'8px 20px', border:'none', cursor:'pointer', fontSize:13, fontWeight:700,
-                          background: config.periodType === key ? '#1a56db' : 'white',
+                          background: config.periodType === key ? '#52b02c' : 'white',
                           color:      config.periodType === key ? 'white'   : '#6b7280',
                           transition:'background .15s',
                           borderRight: key === 'weekly' ? '1px solid #d1d5db' : 'none' }}>
@@ -1563,9 +1563,9 @@ const DutyRosterDeptWise = () => {
                     <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
                       {BS_MONTHS_EN.map((m, i) => (
                         <button key={m} onClick={() => setC('bsMonth', i + 1)}
-                          style={{ padding:'5px 10px', border:`1.5px solid ${config.bsMonth === i+1 ? '#1a56db' : '#e5e7eb'}`,
+                          style={{ padding:'5px 10px', border:`1.5px solid ${config.bsMonth === i+1 ? '#52b02c' : '#e5e7eb'}`,
                             borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600,
-                            background: config.bsMonth === i+1 ? '#1a56db' : 'white',
+                            background: config.bsMonth === i+1 ? '#52b02c' : 'white',
                             color:      config.bsMonth === i+1 ? 'white'   : '#374151' }}>
                           {m}
                         </button>
@@ -1584,10 +1584,10 @@ const DutyRosterDeptWise = () => {
                         const start = (w-1)*7+1, end = w===4 ? totalDays : Math.min(w*7, totalDays);
                         return (
                           <button key={w} onClick={() => setC('weekOrHalf', w)}
-                            style={{ padding:'8px 16px', border:`2px solid ${config.weekOrHalf === w ? '#1a56db' : '#e5e7eb'}`,
+                            style={{ padding:'8px 16px', border:`2px solid ${config.weekOrHalf === w ? '#52b02c' : '#e5e7eb'}`,
                               borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700,
-                              background: config.weekOrHalf === w ? '#eff6ff' : 'white',
-                              color:      config.weekOrHalf === w ? '#1e40af' : '#374151' }}>
+                              background: config.weekOrHalf === w ? '#f0fdf4' : 'white',
+                              color:      config.weekOrHalf === w ? '#166534' : '#374151' }}>
                             {['1st','2nd','3rd','4th'][w-1]} Week
                             <div style={{ fontSize:10, color:'#9ca3af', fontWeight:400 }}>Day {start}-{end}</div>
                           </button>
@@ -1607,10 +1607,10 @@ const DutyRosterDeptWise = () => {
                         const start = h===1 ? 1 : 16, end = h===1 ? Math.min(15, totalDays) : totalDays;
                         return (
                           <button key={h} onClick={() => setC('weekOrHalf', h)}
-                            style={{ padding:'8px 20px', border:`2px solid ${config.weekOrHalf === h ? '#1a56db' : '#e5e7eb'}`,
+                            style={{ padding:'8px 20px', border:`2px solid ${config.weekOrHalf === h ? '#52b02c' : '#e5e7eb'}`,
                               borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:700,
-                              background: config.weekOrHalf === h ? '#eff6ff' : 'white',
-                              color:      config.weekOrHalf === h ? '#1e40af' : '#374151' }}>
+                              background: config.weekOrHalf === h ? '#f0fdf4' : 'white',
+                              color:      config.weekOrHalf === h ? '#166534' : '#374151' }}>
                             {h===1 ? '1st Half' : '2nd Half'}
                             <div style={{ fontSize:10, color:'#9ca3af', fontWeight:400 }}>Day {start}-{end}</div>
                           </button>

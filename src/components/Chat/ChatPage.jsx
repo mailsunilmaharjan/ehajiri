@@ -22,8 +22,8 @@ const NewChatModal = ({ onClose, onStart, employees }) => {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#eff6ff,#dbeafe)' }}>
-          <h2 style={{ color: '#1e40af' }}>💬 New Chat</h2>
+        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
+          <h2 style={{ color: '#166534' }}>💬 New Chat</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
@@ -149,9 +149,9 @@ const ChatPage = () => {
 
           <div style={{ padding: '12px 14px 6px', display: 'flex', gap: 8, flexShrink: 0 }}>
             <button onClick={() => setShowNewChat(true)}
-              style={{ flex: 1, padding: '9px 0', background: '#1a56db', color: '#fff', border: 'none',
+              style={{ flex: 1, padding: '9px 0', background: '#52b02c', color: '#fff', border: 'none',
                 borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                boxShadow: '0 2px 6px rgba(26,86,219,.25)' }}>
+                boxShadow: '0 2px 6px rgba(82,176,44,.25)' }}>
               💬 New Chat
             </button>
             <button onClick={() => setShowNewGroup(true)}
@@ -186,7 +186,7 @@ const ChatPage = () => {
               <button key={f.key} onClick={() => setFilter(f.key)}
                 style={{ padding: '4px 10px', borderRadius: 14, fontSize: 11.5, fontWeight: 600,
                   border: 'none', cursor: 'pointer',
-                  background: filter === f.key ? '#1a56db' : '#eef0f2',
+                  background: filter === f.key ? '#52b02c' : '#eef0f2',
                   color:      filter === f.key ? '#fff'    : '#374151' }}>
                 {f.label}
               </button>

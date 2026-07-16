@@ -146,7 +146,7 @@ const MissingAttendanceApplyModal = () => {
       <div className="modal modal-lg" style={{ maxWidth: 620, maxHeight: '92vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}>
 
-        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#eff6ff,#e0e7ff)', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#f0fdf4,#e0e7ff)', position: 'sticky', top: 0, zIndex: 10 }}>
           <h2>📩 Request for Missing Attendance</h2>
           <button className="modal-close" onClick={handleClose}>✕</button>
         </div>
@@ -172,14 +172,14 @@ const MissingAttendanceApplyModal = () => {
                   📋 Approval Workflow
                 </div>
                 <div style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:12 }}>
-                  <div style={{ width:26, height:26, borderRadius:'50%', background:'#eff6ff', border:'2px solid #1a56db',
-                    color:'#1a56db', display:'flex', alignItems:'center', justifyContent:'center',
+                  <div style={{ width:26, height:26, borderRadius:'50%', background:'#f0fdf4', border:'2px solid #52b02c',
+                    color:'#52b02c', display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:12, fontWeight:800, flexShrink:0 }}>1</div>
                   <div>
-                    <div style={{ fontWeight:700, color:'#1e40af', fontSize:13 }}>🔖 Recommendation</div>
+                    <div style={{ fontWeight:700, color:'#166534', fontSize:13 }}>🔖 Recommendation</div>
                     {selectedReco || form.reco[0] ? (
                       <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginTop:5 }}>
-                        <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:10, padding:'3px 12px', fontSize:13, fontWeight:700 }}>
+                        <span style={{ background:'#dcfce7', color:'#166534', borderRadius:10, padding:'3px 12px', fontSize:13, fontWeight:700 }}>
                           👤 {getEmpName(selectedReco || form.reco[0])}
                         </span>
                       </div>
@@ -260,8 +260,8 @@ const MissingAttendanceApplyModal = () => {
                     </div>
                   )}
                   {form.reco.length === 1 && (
-                    <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                      <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                    <div style={{ background:'#f0f9ff', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
+                      <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
                         {getEmpName(form.reco[0])}
                       </span>
                     </div>

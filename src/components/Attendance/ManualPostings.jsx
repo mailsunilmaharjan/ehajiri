@@ -94,7 +94,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, settings, employees, sh
         {/* Header */}
         <div style={{ padding:'16px 22px 12px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)', backgroundSize:'300% 300%', animation:'headerShift 8s ease infinite', borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:16, fontWeight:700, color:'#1e40af' }}>Advance Search</span>
+          <span style={{ fontSize:16, fontWeight:700, color:'#166534' }}>Advance Search</span>
           <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#6b7280', fontSize:20, lineHeight:1 }}>✕</button>
         </div>
 
@@ -107,7 +107,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, settings, employees, sh
               {[['working','Working'],['notworking','Not Working']].map(([v,label]) => (
                 <button key={v} onClick={() => set('_status', v)}
                   style={{ flex:1, padding:'8px 12px', border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
-                    background:(local._status||'working')===v ? '#1a56db' : 'white',
+                    background:(local._status||'working')===v ? '#52b02c' : 'white',
                     color:(local._status||'working')===v ? 'white' : '#374151', transition:'background .15s' }}>
                   {label}
                 </button>
@@ -147,7 +147,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, settings, employees, sh
             Reset
           </button>
           <button onClick={() => { onApply(local); onClose(); }}
-            style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#1a56db', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+            style={{ padding:'8px 22px', border:'none', borderRadius:8, background:'#52b02c', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
             Search
           </button>
         </div>
@@ -328,7 +328,7 @@ const ManualPostings = () => {
       field: 'check_out', header: 'Check Out',
       width: 105, align: 'center',
       render: (v) => (
-        <span style={{ color: v ? '#1e40af' : '#9ca3af', fontWeight: v ? 600 : 400 }}>
+        <span style={{ color: v ? '#166534' : '#9ca3af', fontWeight: v ? 600 : 400 }}>
           {fmt(v)}
         </span>
       ),
@@ -440,16 +440,16 @@ const ManualPostings = () => {
               <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
             </svg>
             Advance Search
-            {activeFilterCount>0 && <span style={{ background:'#1a56db', color:'white', borderRadius:'50%', width:18, height:18, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>{activeFilterCount}</span>}
+            {activeFilterCount>0 && <span style={{ background:'#52b02c', color:'white', borderRadius:'50%', width:18, height:18, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>{activeFilterCount}</span>}
           </button>
           {canManageSystem && (
             <button
               onClick={openAdd}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '8px 18px', background: '#1a56db', color: '#fff',
+                padding: '8px 18px', background: '#52b02c', color: '#fff',
                 border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                cursor: 'pointer', boxShadow: '0 2px 8px rgba(26,86,219,.25)',
+                cursor: 'pointer', boxShadow: '0 2px 8px rgba(82,176,44,.25)',
               }}
             >
               + Add Manual Entry

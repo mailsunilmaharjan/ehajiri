@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
@@ -29,13 +29,13 @@ const LeaveApplication = () => {
     if (!form.leaveTypeCode) e.leaveTypeCode = t('Required field');
     if (!form.fromDate) e.fromDate = t('Required field');
     if (!form.toDate) e.toDate = t('Required field');
-    if (form.fromDate && form.toDate && form.toDate < form.fromDate) e.toDate = 'अन्त्य मिति सुरु मितिभन्दा पछाडि हुनुपर्छ';
+    if (form.fromDate && form.toDate && form.toDate < form.fromDate) e.toDate = '?????? ???? ???? ????????? ????? ????????';
     if (!form.reason.trim()) e.reason = t('Required field');
-    if (form.reason.trim().length < 5) e.reason = 'कम्तीमा ५ अक्षर लेख्नुस';
+    if (form.reason.trim().length < 5) e.reason = '??????? ? ????? ???????';
     const days = calcDays();
     if (form.leaveTypeCode && days > 0) {
       const avail = balance[form.leaveTypeCode] || 0;
-      if (days > avail) e.days = `अपर्याप्त ब्यालेन्स (उपलब्ध: ${avail} दिन)`;
+      if (days > avail) e.days = `????????? ????????? (??????: ${avail} ???)`;
     }
     return e;
   };
@@ -68,7 +68,7 @@ const LeaveApplication = () => {
             <div className="breadcrumb-item"><a href="#" onClick={e => { e.preventDefault(); navigate('/leave'); }}>{t('Leave Management')}</a></div>
             <div className="breadcrumb-item active">{t('Apply for Leave')}</div>
           </div>
-          <h1 className="page-title">📝 {t('Apply for Leave')}</h1>
+          <h1 className="page-title">?? {t('Apply for Leave')}</h1>
         </div>
       </div>
 
@@ -79,7 +79,7 @@ const LeaveApplication = () => {
           <div className="card-body">
             {success && (
               <div className="alert alert-success">
-                <span>✅</span> {t('Application submitted successfully')} — {t('Please wait...')}
+                <span>?</span> {t('Application submitted successfully')} � {t('Please wait...')}
               </div>
             )}
 
@@ -129,12 +129,12 @@ const LeaveApplication = () => {
 
               {/* Days display */}
               {days > 0 && (
-                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '8px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13, color: '#1e40af' }}>📅 कुल बिदा दिन:</span>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: '#1a56db' }}>{days} {t('Days')}</span>
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '8px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, color: '#166534' }}>?? ??? ???? ???:</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: '#52b02c' }}>{days} {t('Days')}</span>
                 </div>
               )}
-              {errors.days && <div className="alert alert-danger"><span>⚠️</span> {errors.days}</div>}
+              {errors.days && <div className="alert alert-danger"><span>??</span> {errors.days}</div>}
 
               {/* Reason */}
               <div className="form-group">
@@ -148,7 +148,7 @@ const LeaveApplication = () => {
               <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                 <button type="button" className="btn btn-outline" onClick={() => navigate('/leave')}>{t('Cancel')}</button>
                 <button type="submit" className="btn btn-primary" disabled={submitting || success}>
-                  {submitting ? `⏳ ${t('Please wait...')}` : `📤 ${t('Submit')}`}
+                  {submitting ? `? ${t('Please wait...')}` : `?? ${t('Submit')}`}
                 </button>
               </div>
             </form>
@@ -158,7 +158,7 @@ const LeaveApplication = () => {
         {/* Leave Balance Sidebar */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
-            <div className="card-header"><h3>📊 {t('Leave Balance')}</h3></div>
+            <div className="card-header"><h3>?? {t('Leave Balance')}</h3></div>
             <div className="card-body" style={{ padding: '14px 16px' }}>
               {leaveTypes.map(lt => {
                 const avail = balance[lt.code] || 0;
@@ -173,7 +173,7 @@ const LeaveApplication = () => {
                     <div style={{ height: 6, background: '#f3f4f6', borderRadius: 3 }}>
                       <div style={{ height: '100%', borderRadius: 3, background: lt.color, width: `${pct}%`, transition: 'width .3s' }}></div>
                     </div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('Used')}: {used} · {t('Available')}: {avail}</div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('Used')}: {used} � {t('Available')}: {avail}</div>
                   </div>
                 );
               })}

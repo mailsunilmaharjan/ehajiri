@@ -87,9 +87,9 @@ const BugFinder = () => {
       render: v => (
         <span style={{
           padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-          background: v === 'backend' ? '#fef2f2' : '#eff6ff',
-          color:      v === 'backend' ? '#991b1b' : '#1e40af',
-          border: `1px solid ${v === 'backend' ? '#fecaca' : '#bfdbfe'}`,
+          background: v === 'backend' ? '#fef2f2' : '#f0fdf4',
+          color:      v === 'backend' ? '#991b1b' : '#166534',
+          border: `1px solid ${v === 'backend' ? '#fecaca' : '#bbf7d0'}`,
         }}>
           {v === 'backend' ? '🖥️ Backend' : '💻 Frontend'}
         </span>
@@ -99,7 +99,7 @@ const BugFinder = () => {
       field: 'page', header: L('पेज','Page'), width: 200,
       render: (v, row) => (
         <div>
-          <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#1a56db', fontWeight: 600 }}>{v || '—'}</div>
+          <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#52b02c', fontWeight: 600 }}>{v || '—'}</div>
           {row.method && (
             <div style={{ fontSize: 11, color: '#6b7280' }}>
               {row.method} {row.statusCode ? `→ ${row.statusCode}` : ''}

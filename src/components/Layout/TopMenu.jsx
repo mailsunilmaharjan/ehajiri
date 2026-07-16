@@ -117,8 +117,8 @@ const TopMenu = () => {
   };
 
   const roleLabel = { admin: t('Admin'), branchManager: 'Branch Manager', departmentHead: 'Dept. Head', employee: t('Staff') };
-  const roleColor = { admin: '#7e3af2', branchManager: '#1a56db', departmentHead: '#0e9f6e', employee: '#6b7280' };
-  const avatarBg  = { admin: '#ede9fe', branchManager: '#dbeafe', departmentHead: '#d1fae5', employee: '#f3f4f6' };
+  const roleColor = { admin: '#7e3af2', branchManager: '#52b02c', departmentHead: '#0e9f6e', employee: '#6b7280' };
+  const avatarBg  = { admin: '#ede9fe', branchManager: '#dcfce7', departmentHead: '#d1fae5', employee: '#f3f4f6' };
 
   const pendingCount     = stats.pendingLeaves + stats.pendingVisits;
   const leaveActive      = isActive('/leave') || isActive('/office-visit');
@@ -151,7 +151,7 @@ const TopMenu = () => {
 
   /* scope chip shown next to brand for non-admin roles */
   const scopeChip = isBranchManager
-    ? { label: `🏢 ${currentUser?.branch || 'Branch'}`, color: '#1a56db', bg: '#dbeafe' }
+    ? { label: `🏢 ${currentUser?.branch || 'Branch'}`, color: '#52b02c', bg: '#dcfce7' }
     : isDeptHead
     ? { label: `${currentUser?.department || 'Dept'}`, color: '#0e9f6e', bg: '#d1fae5' }
     : null;
@@ -168,7 +168,7 @@ const TopMenu = () => {
         <div className="tm-brand-text">
           <span className="tm-brand-name">
             <span style={{ color: '#111827' }}>eHajiri</span>{' '}
-            <span style={{ color: '#1a56db' }}>TMS</span>
+            <span style={{ color: '#52b02c' }}>TMS</span>
           </span>
           <span className="tm-brand-sub" style={{ color: '#111827', fontWeight: 600 }}>{getCompanyName(language)}</span>
         </div>
@@ -322,7 +322,7 @@ const TopMenu = () => {
             {/* OT Approval — managers/admins (approve), Dept Heads (their dept), OT-eligible employees (own records, read-only) */}
             {(isManager || isDeptHead || (isEmployee && currentUser?.eligibleForOt)) && (
               <div className="tm-dropdown-item" onClick={() => navTo('/attendance/overtime')}
-                style={{ color: location.pathname === '/attendance/overtime' ? '#1a56db' : undefined }}>
+                style={{ color: location.pathname === '/attendance/overtime' ? '#52b02c' : undefined }}>
                 <span>⏱️</span> {t('Overtime (OT) Approval')}
                 {stats?.pendingOT > 0 && (
                   <span style={{ marginLeft:'auto', background:'#dc2626', color:'#fff',
@@ -335,14 +335,14 @@ const TopMenu = () => {
 
             {/* Missing Attendance Requests — everyone (submit own / act on assigned) */}
             <div className="tm-dropdown-item" onClick={() => navTo('/attendance/missing-requests')}
-              style={{ color: location.pathname === '/attendance/missing-requests' ? '#1a56db' : undefined }}>
+              style={{ color: location.pathname === '/attendance/missing-requests' ? '#52b02c' : undefined }}>
               <span>📩</span> {t('Missing Attendance Requests')}
             </div>
 
             {/* Duty Roster — anyone with dutyRoster view permission */}
             {canView('dutyRoster') && (
               <div className="tm-dropdown-item" onClick={() => navTo('/attendance/roster-dashboard')}
-                style={{ color: location.pathname.startsWith('/attendance/roster-dashboard') || location.pathname.startsWith('/attendance/duty-roster') ? '#1a56db' : undefined }}>
+                style={{ color: location.pathname.startsWith('/attendance/roster-dashboard') || location.pathname.startsWith('/attendance/duty-roster') ? '#52b02c' : undefined }}>
                 <span>🗓️</span> {t('Duty Roster')}
               </div>
             )}
@@ -421,7 +421,7 @@ const TopMenu = () => {
               fontSize:11, color:'#6b7280', fontWeight:600, letterSpacing:'.3px', textTransform:'uppercase' }}>
               {roleLabel[currentUser?.role] || currentUser?.role}
               {(isBranchManager && currentUser?.branch) && (
-                <span style={{ display:'block', color:'#1a56db', fontSize:10, fontWeight:700, marginTop:2 }}>
+                <span style={{ display:'block', color:'#52b02c', fontSize:10, fontWeight:700, marginTop:2 }}>
                   {currentUser.branch}
                 </span>
               )}

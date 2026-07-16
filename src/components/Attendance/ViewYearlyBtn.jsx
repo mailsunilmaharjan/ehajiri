@@ -28,8 +28,8 @@ const ViewYearlyBtn = ({ year, useNP, currentPath = '' }) => {
     <div ref={ref} style={{ position:'relative' }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display:'inline-flex',alignItems:'center',gap:7,padding:'7px 16px',height:36,
-          background:open?'#1e40af':'#1a56db',color:'white',border:'none',borderRadius:8,
-          fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(26,86,219,.3)',
+          background:open?'#166534':'#52b02c',color:'white',border:'none',borderRadius:8,
+          fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(82,176,44,.3)',
           transition:'background .15s' }}>
         <svg viewBox="0 0 20 20" fill="white" width="14" height="14">
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
@@ -57,12 +57,12 @@ const ViewYearlyBtn = ({ year, useNP, currentPath = '' }) => {
                 style={{ width:'100%',display:'flex',alignItems:'center',gap:9,padding:'8px 14px',
                   border:'none',borderBottom:i<YEARLY_REPORTS.length-1?'1px solid #f0f0f0':'none',
                   textAlign:'left',cursor:'pointer',fontSize:13,transition:'background .1s',
-                  background:isActive?'#eff6ff':'white',color:isActive?'#1e40af':'#374151',
+                  background:isActive?'#f0fdf4':'white',color:isActive?'#166534':'#374151',
                   fontWeight:isActive?700:500 }}>
                 <span style={{ fontSize:18,flexShrink:0 }}>{r.icon}</span>
                 <span style={{ flex:1,whiteSpace:'nowrap' }}>{r.label}</span>
                 {isActive
-                  ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                  ? <svg viewBox="0 0 20 20" fill="#52b02c" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
                   : <svg viewBox="0 0 20 20" fill="#d1d5db" width="12" height="12"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg>
                 }
               </button>

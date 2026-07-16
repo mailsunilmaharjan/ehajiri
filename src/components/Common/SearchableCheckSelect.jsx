@@ -23,15 +23,15 @@ const OptionRow = ({ label, checked, highlighted, onClick, onMouseEnter, itemRef
       style={{
         display:'flex', alignItems:'center', gap:8, padding:'5px 10px',
         cursor:'pointer', userSelect:'none',
-        background: checked ? '#eff6ff' : highlighted ? '#f5f8ff' : 'white',
+        background: checked ? '#f0fdf4' : highlighted ? '#f5f8ff' : 'white',
         borderBottom:'1px solid #e9ecef',
         transition:'background .1s',
       }}>
       {/* Custom checkbox */}
       <div style={{
         width:16, height:16, borderRadius:4, flexShrink:0,
-        border:`2px solid ${checked ? '#1a56db' : '#d1d5db'}`,
-        background: checked ? '#1a56db' : 'white',
+        border:`2px solid ${checked ? '#52b02c' : '#d1d5db'}`,
+        background: checked ? '#52b02c' : 'white',
         display:'flex', alignItems:'center', justifyContent:'center',
         transition:'border-color .12s, background .12s',
       }}>
@@ -43,7 +43,7 @@ const OptionRow = ({ label, checked, highlighted, onClick, onMouseEnter, itemRef
         )}
       </div>
       <span style={{
-        fontSize:13, color: checked ? '#1e40af' : '#374151',
+        fontSize:13, color: checked ? '#166534' : '#374151',
         fontWeight: checked ? 700 : 400,
       }}>
         {label}
@@ -154,10 +154,10 @@ const SearchableCheckSelect = ({
         onKeyDown={handleTriggerKeyDown}
         style={{
           display:'flex', alignItems:'center', justifyContent:'space-between',
-          padding:'8px 12px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
+          padding:'8px 12px', border:`1.5px solid ${open ? '#52b02c' : '#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer', fontSize:13,
-          color: value ? '#1e40af' : '#374151', height:40, userSelect:'none',
-          boxShadow: open ? '0 0 0 2px rgba(26,86,219,.1)' : 'none',
+          color: value ? '#166534' : '#374151', height:40, userSelect:'none',
+          boxShadow: open ? '0 0 0 2px rgba(82,176,44,.1)' : 'none',
           transition:'border-color .12s, box-shadow .12s',
           fontWeight: value ? 600 : 400, outline:'none',
         }}>

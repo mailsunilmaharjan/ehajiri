@@ -39,7 +39,7 @@ const fmtTime = (iso) => {
 
 /* Row configs */
 const ROWS = [
-  { key:'in',  label:'In',         color:'#1a56db' },
+  { key:'in',  label:'In',         color:'#52b02c' },
   { key:'out', label:'Out',        color:'#059669' },
   { key:'wh',  label:'WorkedHour', color:'#374151' },
   { key:'ot',  label:'OT',         color:'#7c3aed' },
@@ -65,16 +65,16 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
     <div ref={ref} style={{ minWidth:300, position:'relative' }}>
       <div onClick={() => setOpen(p=>!p)}
         style={{ display:'flex',alignItems:'center',justifyContent:'space-between',
-          height:36,padding:'0 10px',border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+          height:36,padding:'0 10px',border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
           borderRadius:8,background:'white',cursor:'pointer',
-          boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none',transition:'all .15s' }}>
+          boxShadow:open?'0 0 0 2px rgba(82,176,44,.1)':'none',transition:'all .15s' }}>
         <span style={{ fontSize:13,color:selected?'#1f2937':'#9ca3af',
           fontWeight:selected?600:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1 }}>
           {selected
             ? `${selected.fullName}${selected.position?` • ${abbrev(selected.position)}`:''}${selected.deviceId?` [${selected.deviceId}]`:''}`
             : `— ${L('कर्मचारी छान्नुस','Select Staff Member')} —`}
         </span>
-        <svg viewBox="0 0 20 20" fill={open?'#1a56db':'#9ca3af'} width="13" height="13"
+        <svg viewBox="0 0 20 20" fill={open?'#52b02c':'#9ca3af'} width="13" height="13"
           style={{ flexShrink:0,marginLeft:6,transform:open?'rotate(180deg)':'none',transition:'transform .2s' }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
         </svg>
@@ -105,21 +105,21 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
                 <div key={e.id}
                   onMouseDown={ev=>{ ev.preventDefault(); onChange(String(e.id)); setOpen(false); setSearch(''); }}
                   style={{ display:'flex',alignItems:'center',gap:10,padding:'8px 14px',cursor:'pointer',
-                    background:active?'#eff6ff':'white',borderBottom:'1px solid #f3f4f6',transition:'background .1s' }}
+                    background:active?'#f0fdf4':'white',borderBottom:'1px solid #f3f4f6',transition:'background .1s' }}
                   onMouseEnter={ev=>{ if(!active) ev.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':'white'; }}>
-                  <div style={{ width:22,height:22,borderRadius:'50%',background:active?'#1a56db':'#f3f4f6',
+                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#f0fdf4':'white'; }}>
+                  <div style={{ width:22,height:22,borderRadius:'50%',background:active?'#52b02c':'#f3f4f6',
                     color:active?'white':'#9ca3af',fontSize:10,fontWeight:700,flexShrink:0,
                     display:'flex',alignItems:'center',justifyContent:'center' }}>{idx+1}</div>
                   <div style={{ flex:1,minWidth:0 }}>
-                    <div style={{ fontSize:13,fontWeight:active?700:600,color:active?'#1e40af':'#1f2937',
+                    <div style={{ fontSize:13,fontWeight:active?700:600,color:active?'#166534':'#1f2937',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>{e.fullName}</div>
                     <div style={{ fontSize:11,color:'#9ca3af',display:'flex',gap:8 }}>
                       {e.position && <span style={{ color:'#0369a1',fontWeight:600 }}>{abbrev(e.position)}</span>}
                       {e.deviceId && <span style={{ fontFamily:'monospace' }}>[{e.deviceId}]</span>}
                     </div>
                   </div>
-                  {active && <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>}
+                  {active && <svg viewBox="0 0 20 20" fill="#52b02c" width="14" height="14"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>}
                 </div>
               );
             })}
@@ -235,7 +235,7 @@ const YearlyInOutReport = () => {
       if (rowKey==='in') return { text:(d.holidayName||'PH').slice(0,8), color:'#92400e', bg:'#fef3c7', mono:false, small:true };
       return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'#fef9e7', mono:false };
     }
-    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:'#1a56db',bg:'white',   mono:true} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
+    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:'#52b02c',bg:'white',   mono:true} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
     if (rowKey==='out') return d.timeOut   ? {text:d.timeOut,   color:'#059669',bg:'white',   mono:true} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
     if (rowKey==='wh')  return d.workedHrs ? {text:d.workedHrs, color:'#374151',bg:'#fafafa', mono:true} : {text:'—',color:'#e5e7eb',bg:'#fafafa', mono:false};
     if (rowKey==='ot')  return d.otHrs     ? {text:d.otHrs,     color:'#7c3aed',bg:'#faf5ff', mono:true} : {text:'—',color:'#e5e7eb',bg:'#faf5ff', mono:false};
@@ -260,7 +260,7 @@ const YearlyInOutReport = () => {
         <div>
           <h1 className="page-title">🔄 {L('वार्षिक IN & OUT लग रिपोर्ट','Yearly IN & OUT Log Report')}</h1>
           <p className="page-subtitle" style={{ margin:0 }}>
-            {currentFY && <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>{currentFY.name}</span>}
+            {currentFY && <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>{currentFY.name}</span>}
             {useNP ? `${settings.nepaliDigits?toNepaliDigits(year):year} BS` : String(year)}
             {selectedEmp && <span style={{ marginLeft:8,fontWeight:600,color:'#1f2937' }}>— {selectedEmp.fullName}</span>}
           </p>
@@ -307,7 +307,7 @@ const YearlyInOutReport = () => {
                 <tbody>${dataRows}</tbody>
               </table>`;
               openPrintWindow(buildPrintDoc({ settings, language, reportTitle: rptTitle, reportSub: rptSub, contentHtml, isLandscape: true }), true);
-            }} style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>🖨️ Print</button>
+            }} style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>🖨️ Print</button>
           <ViewYearlyBtn year={year} useNP={useNP} currentPath="/attendance/reports/yearly/in-out" />
         </div>
       </div>
@@ -331,9 +331,9 @@ const YearlyInOutReport = () => {
       {/* Staff info + Back/Next navigation */}
       {selectedEmp && (
         <div style={{ display:'flex',gap:12,marginBottom:14,alignItems:'stretch',flexWrap:'wrap' }}>
-          <div style={{ display:'flex',gap:12,flexWrap:'wrap',flex:1,minWidth:280,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:'10px 16px',alignItems:'center',borderLeft:'4px solid #1a56db' }}>
+          <div style={{ display:'flex',gap:12,flexWrap:'wrap',flex:1,minWidth:280,background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:'10px 16px',alignItems:'center',borderLeft:'4px solid #52b02c' }}>
             <span style={{ fontSize:14,fontWeight:800,color:'#1f2937' }}>{selectedEmp.fullName}</span>
-            {selectedEmp.employeeId && <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,padding:'1px 8px',fontSize:11,fontWeight:700 }}>{selectedEmp.employeeId}</span>}
+            {selectedEmp.employeeId && <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,padding:'1px 8px',fontSize:11,fontWeight:700 }}>{selectedEmp.employeeId}</span>}
             {[{icon:'🏢',v:selectedEmp.branch},{icon:'🎖️',v:selectedEmp.position},{icon:'🏗️',v:selectedEmp.department}].filter(f=>f.v).map((f,i,arr)=>(
               <React.Fragment key={i}>
                 <span style={{ display:'inline-flex',alignItems:'center',gap:4,fontSize:12,color:'#374151' }}><span>{f.icon}</span><strong>{f.v}</strong></span>

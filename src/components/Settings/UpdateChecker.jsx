@@ -173,16 +173,16 @@ export default function UpdateChecker() {
 
         {/* Progress while applying */}
         {applying && (
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '16px 18px' }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#1e40af', marginBottom: 12 }}>
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '16px 18px' }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#166534', marginBottom: 12 }}>
               🔄 Applying Update v{updateInfo?.latest}…
             </div>
             {/* Progress bar */}
-            <div style={{ background: '#dbeafe', borderRadius: 99, height: 12, marginBottom: 8, overflow: 'hidden' }}>
-              <div style={{ background: '#2563eb', height: '100%', borderRadius: 99,
+            <div style={{ background: '#dcfce7', borderRadius: 99, height: 12, marginBottom: 8, overflow: 'hidden' }}>
+              <div style={{ background: '#16a34a', height: '100%', borderRadius: 99,
                 width: `${progressPct}%`, transition: 'width 0.5s ease' }} />
             </div>
-            <div style={{ fontSize: 12, color: '#1e40af', marginBottom: 6 }}>{progressPct}%</div>
+            <div style={{ fontSize: 12, color: '#166534', marginBottom: 6 }}>{progressPct}%</div>
             <div style={{ fontSize: 13, color: '#374151' }}>{stateLabel || pollStatus?.message || 'Starting…'}</div>
             {pollStatus?.state === 'restarting' && (
               <div style={{ marginTop: 12, fontSize: 13, color: '#065f46', fontWeight: 600 }}>

@@ -677,8 +677,8 @@ const OvertimePage = () => {
       {/* ── Bulk action bar ── */}
       {canAct && selected.size > 0 && (
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12,
-          background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:8, padding:'8px 14px' }}>
-          <span style={{ fontSize:13, fontWeight:600, color:'#1d4ed8' }}>
+          background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'8px 14px' }}>
+          <span style={{ fontSize:13, fontWeight:600, color:'#15803d' }}>
             {selected.size} selected
           </span>
           <button onClick={() => handleBulk('approve')}
@@ -692,7 +692,7 @@ const OvertimePage = () => {
             ✗ Reject Selected
           </button>
           <button onClick={() => setSelected(new Set())}
-            style={{ background:'none', border:'1px solid #93c5fd', color:'#1d4ed8',
+            style={{ background:'none', border:'1px solid #86efac', color:'#15803d',
               borderRadius:6, padding:'5px 10px', fontSize:12, cursor:'pointer' }}>
             Clear
           </button>
@@ -703,7 +703,7 @@ const OvertimePage = () => {
       {canAct && counts.pending > 0 && (
         <div style={{ marginBottom:8 }}>
           <button onClick={toggleSelectAll}
-            style={{ background:'none', border:'none', color:'#1a56db', fontSize:12,
+            style={{ background:'none', border:'none', color:'#52b02c', fontSize:12,
               fontWeight:600, cursor:'pointer', padding:0 }}>
             {counts.pending === selected.size
               ? '☑ Deselect all pending'
@@ -742,16 +742,16 @@ const OvertimePage = () => {
               toolbar={
                 <button onClick={() => setShowAdvSearchModal(true)}
                   style={{ display:'flex', alignItems:'center', gap:6, height:34,
-                    padding:'0 14px', background: activeFilterCount>0 ? '#eff6ff' : '#f9fafb',
-                    border:`1.5px solid ${activeFilterCount>0 ? '#1a56db' : '#d1d5db'}`,
+                    padding:'0 14px', background: activeFilterCount>0 ? '#f0fdf4' : '#f9fafb',
+                    border:`1.5px solid ${activeFilterCount>0 ? '#52b02c' : '#d1d5db'}`,
                     borderRadius:7, fontSize:13, fontWeight:600,
-                    color: activeFilterCount>0 ? '#1a56db' : '#374151', cursor:'pointer' }}>
+                    color: activeFilterCount>0 ? '#52b02c' : '#374151', cursor:'pointer' }}>
                   <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   Advanced Search
                   {activeFilterCount > 0 && (
-                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10,
+                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10,
                       fontSize:10, fontWeight:700, padding:'1px 7px', marginLeft:2 }}>
                       {activeFilterCount}
                     </span>
@@ -803,9 +803,9 @@ const OvertimePage = () => {
 
                 {/* Editable Approved OT */}
                 {actionModal.type === 'approve' && (
-                  <div style={{ marginTop:10, padding:'8px 10px', background:'#eff6ff',
-                    border:'1px solid #bfdbfe', borderRadius:8 }}>
-                    <div style={{ fontSize:11, fontWeight:600, color:'#1d4ed8', marginBottom:4 }}>
+                  <div style={{ marginTop:10, padding:'8px 10px', background:'#f0fdf4',
+                    border:'1px solid #bbf7d0', borderRadius:8 }}>
+                    <div style={{ fontSize:11, fontWeight:600, color:'#15803d', marginBottom:4 }}>
                       Approved OT (editable — in HH:MM)
                     </div>
                     <input
@@ -819,8 +819,8 @@ const OvertimePage = () => {
                         setEditedOT(prev => ({ ...prev, [key]: Math.max(0, mins) }));
                       }}
                       style={{ width:'100%', fontFamily:'monospace', fontSize:15, fontWeight:800,
-                        textAlign:'center', border:'1px solid #93c5fd', borderRadius:6,
-                        padding:'4px 10px', color:'#1d4ed8', outline:'none' }}
+                        textAlign:'center', border:'1px solid #86efac', borderRadius:6,
+                        padding:'4px 10px', color:'#15803d', outline:'none' }}
                     />
                     <div style={{ fontSize:10, color:'#6b7280', marginTop:3 }}>
                       Enter HH:MM or minutes. This value will be recorded in reports.
@@ -861,7 +861,7 @@ const OvertimePage = () => {
             style={{ maxWidth:640, width:'96vw' }}>
 
             {/* Header */}
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0f9ff,#eff6ff)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0f9ff,#f0fdf4)' }}>
               <h2 style={{ display:'flex', alignItems:'center', gap:8 }}>
                 ⚙ OT Settings
               </h2>
@@ -944,7 +944,7 @@ const OvertimePage = () => {
                         <input type="radio" name={key} value="ot"
                           checked={otSettings[key] === 'ot'}
                           onChange={() => setOtSettings(p => ({ ...p, [key]: 'ot' }))}
-                          style={{ accentColor:'#1a56db', width:15, height:15 }} />
+                          style={{ accentColor:'#52b02c', width:15, height:15 }} />
                         <span style={{ fontSize:13, color:'#374151' }}>
                           Don't calculate shift — show only Working Hours as OT
                         </span>
@@ -953,7 +953,7 @@ const OvertimePage = () => {
                         <input type="radio" name={key} value="leave"
                           checked={otSettings[key] === 'leave'}
                           onChange={() => setOtSettings(p => ({ ...p, [key]: 'leave' }))}
-                          style={{ accentColor:'#1a56db', width:15, height:15 }} />
+                          style={{ accentColor:'#52b02c', width:15, height:15 }} />
                         <span style={{ fontSize:13, color:'#374151' }}>
                           Provide Next Day Leave
                         </span>
@@ -997,21 +997,21 @@ const OvertimePage = () => {
                 onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setOpen(p=>!p); } if (e.key==='Escape') setOpen(false); }}
                 onClick={() => setOpen(p=>!p)}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+                  padding:'8px 10px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
-                  color: value.length>0 ? '#1e40af' : '#9ca3af',
+                  color: value.length>0 ? '#166534' : '#9ca3af',
                   minHeight:42, fontWeight: value.length>0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none' }}>
+                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline:'none', userSelect:'none' }}>
                 <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
                 <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
-                  {value.length > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>{value.length}</span>}
+                  {value.length > 0 && <span style={{ background:'#52b02c', color:'white', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>{value.length}</span>}
                   {value.length > 0 && <span onMouseDown={e=>{e.preventDefault();e.stopPropagation();onChange([]);}} style={{ color:'#9ca3af', fontSize:16, lineHeight:1, cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.color='#ef4444'} onMouseLeave={e=>e.currentTarget.style.color='#9ca3af'}>×</span>}
                   <span style={{ fontSize:9, color:'#9ca3af' }}>{open?'▲':'▼'}</span>
                 </div>
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220, display:'flex', flexDirection:'column' }}>
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search..."
@@ -1020,23 +1020,23 @@ const OvertimePage = () => {
                   </div>
                   <div style={{ overflowY:'auto', flex:1 }}>
                     <div onMouseDown={e=>{e.preventDefault();onChange([]);}}
-                      style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer', background:value.length===0?'#eff6ff':'white', borderBottom:'1px solid #f1f5f9' }}>
-                      <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${value.length===0?'#1a56db':'#d1d5db'}`, background:value.length===0?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer', background:value.length===0?'#f0fdf4':'white', borderBottom:'1px solid #f1f5f9' }}>
+                      <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${value.length===0?'#52b02c':'#d1d5db'}`, background:value.length===0?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                         {value.length===0 && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                       </span>
-                      <span style={{ fontSize:13, fontWeight:600, color:value.length===0?'#1e40af':'#374151' }}>All</span>
+                      <span style={{ fontSize:13, fontWeight:600, color:value.length===0?'#166534':'#374151' }}>All</span>
                     </div>
                     {fo.map(opt => {
                       const sel = value.includes(opt);
                       return (
                         <div key={opt} onMouseDown={e=>{e.preventDefault();toggle(opt);}}
-                          style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer', background:sel?'#eff6ff':'white', borderBottom:'1px solid #f9fafb' }}
+                          style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer', background:sel?'#f0fdf4':'white', borderBottom:'1px solid #f9fafb' }}
                           onMouseEnter={e=>{if(!sel)e.currentTarget.style.background='#f8fafc';}}
                           onMouseLeave={e=>{if(!sel)e.currentTarget.style.background='white';}}>
-                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`, background:sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#52b02c':'#d1d5db'}`, background:sel?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize:13, color:sel?'#1e40af':'#374151', fontWeight:sel?600:400 }}>{opt}</span>
+                          <span style={{ fontSize:13, color:sel?'#166534':'#374151', fontWeight:sel?600:400 }}>{opt}</span>
                         </div>
                       );
                     })}
@@ -1068,14 +1068,14 @@ const OvertimePage = () => {
               {/* Header */}
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
                 padding:'16px 24px', borderBottom:'2px solid #e5e7eb',
-                background:'linear-gradient(135deg,#eff6ff,#f0f9ff)', flexShrink:0 }}>
+                background:'linear-gradient(135deg,#f0fdf4,#f0f9ff)', flexShrink:0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#1a56db' }}>
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#52b02c' }}>
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>Advanced Search</span>
                   {activeFilterCount > 0 && (
-                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
+                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount>1?'s':''} active
                     </span>
                   )}
@@ -1120,7 +1120,7 @@ const OvertimePage = () => {
                     Close
                   </button>
                   <button onClick={() => setShowAdvSearchModal(false)}
-                    style={{ padding:'8px 20px', background:'#1a56db', border:'none',
+                    style={{ padding:'8px 20px', background:'#52b02c', border:'none',
                       borderRadius:8, fontSize:13, fontWeight:700, color:'white', cursor:'pointer' }}>
                     ✔ Apply Filter
                   </button>

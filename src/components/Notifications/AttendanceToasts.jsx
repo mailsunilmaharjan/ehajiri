@@ -17,12 +17,12 @@ const AttendanceToast = ({ noti, onClose }) => {
       borderRadius: 12, overflow: 'hidden',
       boxShadow: '0 8px 32px rgba(0,0,0,.20)',
       border: '1px solid #e5e7eb',
-      borderLeft: `4px solid ${isLate ? '#dc2626' : isEarly ? '#059669' : '#1a56db'}`,
+      borderLeft: `4px solid ${isLate ? '#dc2626' : isEarly ? '#059669' : '#52b02c'}`,
       animation: 'slideIn .25s ease-out',
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:8,
         padding:'8px 10px 6px', background:'#f9fafb', borderBottom:'1px solid #f3f4f6' }}>
-        <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14">
+        <svg viewBox="0 0 20 20" fill="#52b02c" width="14" height="14">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd"/>
         </svg>
         <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', flex:1 }}>eHajiri · Live Attendance</span>
@@ -33,12 +33,12 @@ const AttendanceToast = ({ noti, onClose }) => {
       <div style={{ padding:'12px 14px 14px' }}>
         <div style={{ fontSize:17, fontWeight:800, color:'#111827', marginBottom:4 }}>{noti.staffName}</div>
         <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>
-          {noti.postShort   && <span style={{ fontSize:12, fontWeight:600, color:'#0369a1', background:'#eff6ff', borderRadius:5, padding:'1px 7px' }}>{noti.postShort}</span>}
+          {noti.postShort   && <span style={{ fontSize:12, fontWeight:600, color:'#0369a1', background:'#f0fdf4', borderRadius:5, padding:'1px 7px' }}>{noti.postShort}</span>}
           {noti.branchShort && <span style={{ fontSize:12, fontWeight:600, color:'#7c3aed', background:'#f5f3ff', borderRadius:5, padding:'1px 7px' }}>{noti.branchShort}</span>}
         </div>
         <div style={{ fontSize:13, color:'#374151', marginBottom: noti.remarks ? 6 : 0 }}>
           <span style={{ color:'#6b7280', fontWeight:500 }}>Time IN: </span>
-          <strong style={{ fontFamily:'monospace', fontSize:14, color:'#1a56db' }}>{noti.timeIn}</strong>
+          <strong style={{ fontFamily:'monospace', fontSize:14, color:'#52b02c' }}>{noti.timeIn}</strong>
         </div>
         {noti.remarks && (
           <div style={{ fontSize:12, fontWeight:700, color: isLate ? '#dc2626' : '#059669',

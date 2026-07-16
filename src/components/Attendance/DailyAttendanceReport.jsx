@@ -32,7 +32,7 @@ const STATUS_STYLE = {
   Weekend          : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
   Leave            : { bg:'#ede9fe', color:'#5b21b6', border:'#c4b5fd' },
   'Public Holiday' : { bg:'#fef3c7', color:'#92400e', border:'#fcd34d' },
-  'Office Visit'   : { bg:'#dbeafe', color:'#1e40af', border:'#93c5fd' },
+  'Office Visit'   : { bg:'#dcfce7', color:'#166534', border:'#86efac' },
 };
 const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
 
@@ -115,7 +115,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
         {/* ── Header ── */}
         <div style={{ padding:'20px 24px 16px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:18, fontWeight:700, color:'#1e40af', letterSpacing:'-.2px' }}>
+          <span style={{ fontSize:18, fontWeight:700, color:'#166534', letterSpacing:'-.2px' }}>
             {L('एडभान्स खोज','Advance Search')}
           </span>
           <button onClick={onClose}
@@ -191,10 +191,10 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
           <button
             onClick={() => { onApply(local); onClose(); }}
             style={{ padding:'9px 26px', border:'none', borderRadius:8,
-              background:'#1a56db', color:'white', fontSize:14, fontWeight:700,
-              cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)', transition:'all .15s' }}
-            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
-            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
+              background:'#52b02c', color:'white', fontSize:14, fontWeight:700,
+              cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)', transition:'all .15s' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#166534'}
+            onMouseLeave={e=>e.currentTarget.style.background='#52b02c'}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -390,7 +390,7 @@ const DailyAttendanceReport = () => {
         if (!v) return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>;
         const warn = row.punchCount === 1;
         return (
-          <span style={{ color:warn?'#d97706':'#1a56db', fontSize:14, fontWeight:700, whiteSpace:'nowrap' }}
+          <span style={{ color:warn?'#d97706':'#52b02c', fontSize:14, fontWeight:700, whiteSpace:'nowrap' }}
             title={warn?'Single punch only':''}>
             {fmtTime(v)}{warn&&' ⚠'}
           </span>
@@ -429,7 +429,7 @@ const DailyAttendanceReport = () => {
       render: v => {
         if (!v) return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>;
         const isLateOut = v.startsWith('Late Out');
-        return <span style={{ color: isLateOut ? '#2563eb' : '#d97706', fontWeight:700, fontSize:14, whiteSpace:'nowrap' }}>{v}</span>;
+        return <span style={{ color: isLateOut ? '#16a34a' : '#d97706', fontWeight:700, fontSize:14, whiteSpace:'nowrap' }}>{v}</span>;
       },
     },
     {
@@ -437,7 +437,7 @@ const DailyAttendanceReport = () => {
       render: (v, row) => {
         if (v === 'On Leave') {
           /* Badge only — no leave name below */
-          return <Pill bg="#eff6ff" color="#1e40af" border="#bfdbfe">🏖️ {L('बिदामा','On Leave')}</Pill>;
+          return <Pill bg="#f0fdf4" color="#166534" border="#bbf7d0">🏖️ {L('बिदामा','On Leave')}</Pill>;
         }
         const s = statusStyle(v);
         return <Pill bg={s.bg} color={s.color} border={s.border}>{v}</Pill>;
@@ -448,7 +448,7 @@ const DailyAttendanceReport = () => {
       render: (v, row) => {
         if (row.status === 'On Leave') {
           const parts = [];
-          if (row.leaveType)  parts.push(<span key="type" style={{ fontWeight:700, color:'#1e40af' }}>{row.leaveType}</span>);
+          if (row.leaveType)  parts.push(<span key="type" style={{ fontWeight:700, color:'#166534' }}>{row.leaveType}</span>);
           if (row.leaveReason) parts.push(<span key="reason" style={{ color:'#374151' }}>{row.leaveReason}</span>);
           if (row.recommendedBy) parts.push(
             <span key="reco" style={{ color:'#059669' }}>
@@ -567,7 +567,7 @@ const DailyAttendanceReport = () => {
                 ['Present',      s.present, '#065f46'],
                 ['Absent',       s.absent,  '#991b1b'],
                 ['Leave',        s.leave,   '#5b21b6'],
-                ['Office Visit', s.visit,   '#1e40af'],
+                ['Office Visit', s.visit,   '#166534'],
                 ['Weekend',      s.weekend, '#6b7280'],
                 ['Late In',      s.late,    '#dc2626'],
                 ['Early Out',    s.early,   '#d97706'],
@@ -577,7 +577,7 @@ const DailyAttendanceReport = () => {
               const rowsHtml = quickRows.map((r,i) => {
                 const stColor = {Present:'#065f46,#d1fae5',Absent:'#991b1b,#fee2e2',
                   Weekend:'#6b7280,#f3f4f6',Leave:'#5b21b6,#ede9fe','Public Holiday':'#92400e,#fef3c7',
-                  'Office Visit':'#1e40af,#dbeafe'}[r.status]||'#374151,#f9fafb';
+                  'Office Visit':'#166534,#dcfce7'}[r.status]||'#374151,#f9fafb';
                 const [sc,sb] = stColor.split(',');
                 const bg = i%2===0?'white':'#f9fafb';
                 const td = (v,c='#374151',fw=400) =>
@@ -589,11 +589,11 @@ const DailyAttendanceReport = () => {
                   ${td(r.deptShort,'#059669',700)}
                   ${td(r.branchShort,'#7c3aed',700)}
                   ${td(r.shiftName||'—','#7c3aed')}
-                  ${td(r.timeIn?fmtTime(r.timeIn):'—','#1a56db',700)}
+                  ${td(r.timeIn?fmtTime(r.timeIn):'—','#52b02c',700)}
                   ${td(r.timeOut?fmtTime(r.timeOut):'—','#374151',700)}
                   ${td(r.totalHrs||'—','#0369a1',700)}
                   ${td(r.lateIn||'—',r.lateIn?.startsWith('Late')?'#dc2626':'#059669')}
-                  ${td(r.earlyOut||'—',r.earlyOut?.startsWith('Early Out')?'#d97706':'#2563eb')}
+                  ${td(r.earlyOut||'—',r.earlyOut?.startsWith('Early Out')?'#d97706':'#16a34a')}
                   <td style="padding:4px 5px;border:1px solid #e5e7eb;background:${bg};text-align:center;">
                     <span style="background:${sb};color:${sc};border-radius:4px;padding:1px 5px;font-size:8px;font-weight:700;">${r.status}</span>
                   </td>
@@ -615,7 +615,7 @@ const DailyAttendanceReport = () => {
   .header-spacer{ grid-column:3; }
   .company-name { font-size:15px; font-weight:800; color:#1f2937; margin-bottom:2px; }
   .company-sub  { font-size:10px; color:#6b7280; margin-bottom:4px; }
-  .report-title { font-size:13px; font-weight:800; color:#1e40af; }
+  .report-title { font-size:13px; font-weight:800; color:#166534; }
   .report-date  { font-size:11px; color:#374151; font-weight:600; margin:2px 0; }
   /* Footer */
   .footer { margin-top:40px; display:flex; justify-content:space-between; gap:24px; }
@@ -676,7 +676,7 @@ const DailyAttendanceReport = () => {
               if (w) { w.document.write(html); w.document.close(); }
             }}
             style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 14px', height:34,
-              background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8',
+              background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d',
               borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
             🖨️ {L('प्रिन्ट','Print')}
           </button>
@@ -715,8 +715,8 @@ const DailyAttendanceReport = () => {
               alignItems:'center', justifyContent:'center', flexShrink:0 }}>→</button>
 
           <button onClick={() => setDate(todayISO())}
-            style={{ height:34, padding:'0 14px', border:'1px solid #bfdbfe', borderRadius:6,
-              background:'#eff6ff', color:'#1a56db', cursor:'pointer', fontSize:13, fontWeight:700 }}>
+            style={{ height:34, padding:'0 14px', border:'1px solid #bbf7d0', borderRadius:6,
+              background:'#f0fdf4', color:'#52b02c', cursor:'pointer', fontSize:13, fontWeight:700 }}>
             {L('आज','Today')}
           </button>
         </div>
@@ -825,7 +825,7 @@ const DailyAttendanceReport = () => {
               </svg>
               {L('एडभान्स खोज','Advance Search')}
               {activeCount > 0 && (
-                <span style={{ background:'#1a56db', color:'white', borderRadius:'50%',
+                <span style={{ background:'#52b02c', color:'white', borderRadius:'50%',
                   width:17, height:17, fontSize:10, fontWeight:700,
                   display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
                   {activeCount}

@@ -96,13 +96,13 @@ const ProfileTab = ({ currentUser, showToast }) => {
                 title={L('प्रोफाइल फोटो परिवर्तन','Change profile picture')}
                 style={{ cursor: photoSaving ? 'wait' : 'pointer', opacity: photoSaving ? 0.6 : 1 }}>
                 <Avatar photo={currentUser?.profilePhoto} name={currentUser?.fullName} size={72}
-                  style={{ border:'2px solid #dbeafe', boxShadow:'0 2px 8px rgba(26,86,219,.15)' }} />
+                  style={{ border:'2px solid #dcfce7', boxShadow:'0 2px 8px rgba(82,176,44,.15)' }} />
               </div>
               <button
                 onClick={() => !photoSaving && fileRef.current?.click()}
                 title={L('प्रोफाइल फोटो परिवर्तन','Change profile picture')}
                 style={{ position:'absolute', right:-2, bottom:-2, width:26, height:26,
-                  borderRadius:'50%', border:'2px solid #fff', background:'#1a56db', color:'#fff',
+                  borderRadius:'50%', border:'2px solid #fff', background:'#52b02c', color:'#fff',
                   fontSize:13, display:'flex', alignItems:'center', justifyContent:'center',
                   cursor: photoSaving ? 'wait' : 'pointer', padding:0 }}>
                 📷
@@ -117,7 +117,7 @@ const ProfileTab = ({ currentUser, showToast }) => {
               <div style={{ marginTop:6, display:'flex', gap:12 }}>
                 <span
                   onClick={() => !photoSaving && fileRef.current?.click()}
-                  style={{ fontSize:12, fontWeight:600, color:'#1a56db', cursor:'pointer' }}>
+                  style={{ fontSize:12, fontWeight:600, color:'#52b02c', cursor:'pointer' }}>
                   {photoSaving ? L('सेभ हुँदैछ…','Saving…') : `📷 ${L('फोटो परिवर्तन','Change Photo')}`}
                 </span>
                 {currentUser?.profilePhoto && !photoSaving && (

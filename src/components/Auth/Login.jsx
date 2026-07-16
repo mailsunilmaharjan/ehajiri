@@ -118,9 +118,9 @@ const SubscriptionExpiredScreen = ({ settings }) => {
             {/* Activation button */}
             <button
               onClick={() => { setMode('dealer'); setMsg(null); }}
-              style={{ width:'100%', padding:'13px', background:'#1a56db', color:'white',
+              style={{ width:'100%', padding:'13px', background:'#52b02c', color:'white',
                 border:'none', borderRadius:10, fontSize:14, fontWeight:700, cursor:'pointer',
-                boxShadow:'0 2px 8px rgba(26,86,219,.3)', display:'flex', alignItems:'center',
+                boxShadow:'0 2px 8px rgba(82,176,44,.3)', display:'flex', alignItems:'center',
                 justifyContent:'center', gap:8 }}>
               🔑 Activation
             </button>
@@ -154,7 +154,7 @@ const SubscriptionExpiredScreen = ({ settings }) => {
                 onChange={e => { setDealerName(e.target.value); setDealerErrors(p => ({ ...p, dealerName:null })); }}
                 placeholder="e.g. Planet Infosys"
                 style={fieldStyle(dealerErrors.dealerName)}
-                onFocus={e => e.target.style.borderColor='#1a56db'}
+                onFocus={e => e.target.style.borderColor='#52b02c'}
                 onBlur={e  => e.target.style.borderColor = dealerErrors.dealerName ? '#fca5a5' : '#d1d5db'}
               />
               {dealerErrors.dealerName && (
@@ -172,7 +172,7 @@ const SubscriptionExpiredScreen = ({ settings }) => {
                 onChange={e => { setDealerUser(e.target.value); setDealerErrors(p => ({ ...p, dealerUser:null })); }}
                 placeholder="Dealer username"
                 style={fieldStyle(dealerErrors.dealerUser)}
-                onFocus={e => e.target.style.borderColor='#1a56db'}
+                onFocus={e => e.target.style.borderColor='#52b02c'}
                 onBlur={e  => e.target.style.borderColor = dealerErrors.dealerUser ? '#fca5a5' : '#d1d5db'}
               />
               {dealerErrors.dealerUser && (
@@ -190,7 +190,7 @@ const SubscriptionExpiredScreen = ({ settings }) => {
                 onChange={e => { setDealerPass(e.target.value); setDealerErrors(p => ({ ...p, dealerPass:null })); }}
                 placeholder="Dealer password"
                 style={fieldStyle(dealerErrors.dealerPass)}
-                onFocus={e => e.target.style.borderColor='#1a56db'}
+                onFocus={e => e.target.style.borderColor='#52b02c'}
                 onBlur={e  => e.target.style.borderColor = dealerErrors.dealerPass ? '#fca5a5' : '#d1d5db'}
                 onKeyDown={e => { if (e.key === 'Enter') handleDealerActivate(); }}
               />
@@ -213,10 +213,10 @@ const SubscriptionExpiredScreen = ({ settings }) => {
               onClick={handleDealerActivate}
               disabled={activating}
               style={{ width:'100%', padding:'13px', border:'none', borderRadius:10,
-                background: activating ? '#93c5fd' : '#1a56db',
+                background: activating ? '#86efac' : '#52b02c',
                 color:'white', fontSize:14, fontWeight:700,
                 cursor: activating ? 'not-allowed' : 'pointer',
-                boxShadow:'0 2px 8px rgba(26,86,219,.3)', transition:'all .15s', marginBottom:12 }}>
+                boxShadow:'0 2px 8px rgba(82,176,44,.3)', transition:'all .15s', marginBottom:12 }}>
               {activating ? '⏳ Activating...' : '✅ Activate via Dealer'}
             </button>
 
@@ -254,9 +254,9 @@ const SubscriptionExpiredScreen = ({ settings }) => {
               placeholder="EHAJ-eyJ... paste your license key here"
               style={{ width:'100%', border:'1.5px solid #d1d5db', borderRadius:8,
                 padding:'10px 12px', fontSize:11, fontFamily:'monospace', resize:'vertical',
-                outline:'none', boxSizing:'border-box', color:'#1e40af', letterSpacing:'.3px',
+                outline:'none', boxSizing:'border-box', color:'#166534', letterSpacing:'.3px',
                 marginBottom:10 }}
-              onFocus={e => e.target.style.borderColor='#1a56db'}
+              onFocus={e => e.target.style.borderColor='#52b02c'}
               onBlur={e  => e.target.style.borderColor='#d1d5db'}
             />
             {msg && (
@@ -272,10 +272,10 @@ const SubscriptionExpiredScreen = ({ settings }) => {
               onClick={handleActivate}
               disabled={activating || !keyInput.trim()}
               style={{ width:'100%', padding:'13px', border:'none', borderRadius:10,
-                background: activating||!keyInput.trim() ? '#93c5fd' : '#1a56db',
+                background: activating||!keyInput.trim() ? '#86efac' : '#52b02c',
                 color:'white', fontSize:14, fontWeight:700,
                 cursor: activating||!keyInput.trim() ? 'not-allowed' : 'pointer',
-                boxShadow:'0 2px 8px rgba(26,86,219,.3)', transition:'all .15s' }}>
+                boxShadow:'0 2px 8px rgba(82,176,44,.3)', transition:'all .15s' }}>
               {activating ? '⏳ Activating...' : '✅ Activate License'}
             </button>
           </>
@@ -395,7 +395,7 @@ const ForgotPasswordModal = ({ onClose }) => {
                   border: '1.5px solid #d1d5db', borderRadius: 8, fontSize: 13,
                   outline: 'none', transition: 'border .15s',
                 }}
-                onFocus={e => e.target.style.borderColor = '#1a56db'}
+                onFocus={e => e.target.style.borderColor = '#52b02c'}
                 onBlur={e => e.target.style.borderColor = '#d1d5db'}
               />
             </div>
@@ -404,7 +404,7 @@ const ForgotPasswordModal = ({ onClose }) => {
               disabled={loading || !usernameInput.trim()}
               style={{
                 width: '100%', padding: '11px', border: 'none', borderRadius: 8,
-                background: loading || !usernameInput.trim() ? '#93c5fd' : '#1a56db',
+                background: loading || !usernameInput.trim() ? '#86efac' : '#52b02c',
                 color: '#fff', fontSize: 13, fontWeight: 700,
                 cursor: loading || !usernameInput.trim() ? 'not-allowed' : 'pointer',
               }}>
@@ -527,7 +527,7 @@ const Login = () => {
   if (!licenseChecked) {
     return (
       <div style={{ position: 'fixed', inset: 0,
-        background: 'linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1a56db 100%)',
+        background: 'linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#52b02c 100%)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
         <div style={{ width: 44, height: 44, border: '4px solid rgba(255,255,255,.2)',
           borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -690,7 +690,7 @@ const Login = () => {
                   type="checkbox"
                   checked={rememberMe}
                   onChange={e => setRememberMe(e.target.checked)}
-                  style={{ width: 15, height: 15, accentColor: '#1a56db', cursor: 'pointer' }}
+                  style={{ width: 15, height: 15, accentColor: '#52b02c', cursor: 'pointer' }}
                 />
                 <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>Remember Password</span>
               </label>
@@ -699,7 +699,7 @@ const Login = () => {
                 onClick={() => setShowForgot(true)}
                 style={{
                   background: 'none', border: 'none', padding: 0,
-                  fontSize: 12, color: '#1a56db', fontWeight: 600, cursor: 'pointer',
+                  fontSize: 12, color: '#52b02c', fontWeight: 600, cursor: 'pointer',
                   textDecoration: 'underline', textUnderlineOffset: 2,
                 }}>
                 Forgot Password?

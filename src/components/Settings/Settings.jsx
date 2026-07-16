@@ -47,7 +47,7 @@ const SHIFT_DAYS = [
   { key:'Fri', np:'शुक्र',en:'Fri' },
   { key:'Sat', np:'शनि',  en:'Sat' },
 ];
-const SHIFT_COLORS = ['#1a56db','#0e9f6e','#e3a008','#f05252','#7e3af2','#e74694','#111827'];
+const SHIFT_COLORS = ['#52b02c','#0e9f6e','#e3a008','#f05252','#7e3af2','#e74694','#111827'];
 
 /* ── shared table styles ── */
 const thStyle = {
@@ -117,12 +117,12 @@ const renderFormField = (field, form, setForm, errors, L, fd, calendar) => {
     return (
       <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:4 }}>
         <div
-          style={{ width:44, height:24, background:val?'#1a56db':'#d1d5db', borderRadius:12, position:'relative', transition:'background .2s', cursor:'pointer', flexShrink:0 }}
+          style={{ width:44, height:24, background:val?'#52b02c':'#d1d5db', borderRadius:12, position:'relative', transition:'background .2s', cursor:'pointer', flexShrink:0 }}
           onClick={() => setForm(p => ({ ...p, [field.key]: !p[field.key] }))}
         >
           <div style={{ position:'absolute', top:2, left:val?22:2, width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
         </div>
-        <span style={{ fontSize:13, color:val?'#1a56db':'#6b7280', fontWeight:val?600:400 }}>
+        <span style={{ fontSize:13, color:val?'#52b02c':'#6b7280', fontWeight:val?600:400 }}>
           {val ? L('हो — डिफल्ट','Yes — Default') : L('होइन','No')}
         </span>
       </div>
@@ -159,9 +159,9 @@ const DayBadge = ({ dayKeys, language }) => (
       return (
         <span key={d.key} style={{
           padding:'2px 7px', borderRadius:5, fontSize:11, fontWeight:600,
-          background: on ? '#dbeafe' : '#f3f4f6',
-          color:      on ? '#1e40af' : '#9ca3af',
-          border:`1px solid ${on ? '#bfdbfe' : '#e5e7eb'}`,
+          background: on ? '#dcfce7' : '#f3f4f6',
+          color:      on ? '#166534' : '#9ca3af',
+          border:`1px solid ${on ? '#bbf7d0' : '#e5e7eb'}`,
         }}>{language==='np' ? d.np : d.key}</span>
       );
     })}
@@ -239,11 +239,11 @@ const BSDatePicker = ({ value, onChange, error, allowedYears }) => {
   /* Each dropdown is highlighted independently based on whether it was explicitly touched */
   const sel = (hasValue) => ({
     flex: 1, padding: '7px 6px',
-    border: `1.5px solid ${error ? '#ef4444' : hasValue ? '#1a56db' : '#d1d5db'}`,
+    border: `1.5px solid ${error ? '#ef4444' : hasValue ? '#52b02c' : '#d1d5db'}`,
     borderRadius: 6, fontSize: 13, outline: 'none',
-    background: hasValue ? '#eff6ff' : 'white',
+    background: hasValue ? '#f0fdf4' : 'white',
     cursor: 'pointer',
-    color: hasValue ? '#1e40af' : '#1f2937',
+    color: hasValue ? '#166534' : '#1f2937',
     fontWeight: hasValue ? 600 : 400,
     transition: 'border-color .15s, background .15s',
   });
@@ -411,7 +411,7 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete }) => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>
                 {editId ? `✏️ ${L('सम्पादन','Edit')} — ${title}` : `+ ${L('नयाँ','New')} — ${title}`}
               </h2>
@@ -586,7 +586,7 @@ const ShiftInlineSection = () => {
   // Ctrl+N opens the Add Shift modal when not already open (ShiftInlineSection)
   useNewShortcut(!modal, openAdd);
 
-  const Toggle = ({ value, onChange, color='#1a56db' }) => (
+  const Toggle = ({ value, onChange, color='#52b02c' }) => (
     <div style={{ width:44, height:24, background:value?color:'#d1d5db', borderRadius:12, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
       onClick={() => onChange(!value)}>
       <div style={{ position:'absolute', top:2, left:value?22:2, width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
@@ -609,7 +609,7 @@ const ShiftInlineSection = () => {
     { field:'startTime', header:L('सुरु समय','Start Time'), width:100, render:v=><strong>{v}</strong> },
     { field:'endTime',   header:L('अन्त समय','End Time'),   width:100, render:v=><strong>{v}</strong> },
     { field:'workHours', header:L('घण्टा','Hours'), width:70, align:'center',
-      render:v=><span style={{fontWeight:700,color:'#1a56db'}}>{v}h</span>
+      render:v=><span style={{fontWeight:700,color:'#52b02c'}}>{v}h</span>
     },
     { field:'exceptionalDayEnabled', header:L('असाधारण','Exceptional'), width:105, sortable:false, filterable:false,
       render:v=>v
@@ -673,7 +673,7 @@ const ShiftInlineSection = () => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal modal-lg" style={{ maxHeight:'92vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', position:'sticky', top:0, zIndex:10 }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)', position:'sticky', top:0, zIndex:10 }}>
               <h2>{editId ? `✏️ ${L('सिफ्ट सम्पादन','Edit Shift')}` : `+ ${L('नयाँ सिफ्ट','New Shift')}`}</h2>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
@@ -735,10 +735,10 @@ const ShiftInlineSection = () => {
               </div>
 
               {/* Make Default */}
-              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'12px 16px', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'12px 16px', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <div>
-                  <div style={{ fontSize:14, fontWeight:600, color:'#1e40af' }}>⭐ {L('डिफल्ट सिफ्ट बनाउनुस','Make Default Shift')}</div>
-                  <div style={{ fontSize:12, color:'#3b82f6', marginTop:2 }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:'#166534' }}>⭐ {L('डिफल्ट सिफ्ट बनाउनुस','Make Default Shift')}</div>
+                  <div style={{ fontSize:12, color:'#22c55e', marginTop:2 }}>
                     {L('चेक गरेमा यो सिफ्ट सबै कर्मचारीमा लागू हुनेछ','If checked, this shift will be applied to all staff')}
                   </div>
                 </div>
@@ -752,7 +752,7 @@ const ShiftInlineSection = () => {
                     }
                   }
                   hc('makeDefault', v);
-                }} color="#1a56db" />
+                }} color="#52b02c" />
               </div>
 
               {/* Exceptional Day */}
@@ -1007,11 +1007,11 @@ const Toggle = ({ value, onChange, label }) => (
   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
     <div
       onClick={() => onChange(!value)}
-      style={{ width:40, height:22, background:value?'#1a56db':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', flexShrink:0, transition:'background .2s' }}
+      style={{ width:40, height:22, background:value?'#52b02c':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', flexShrink:0, transition:'background .2s' }}
     >
       <div style={{ position:'absolute', top:2, left:value?20:2, width:18, height:18, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}></div>
     </div>
-    {label && <span style={{ fontSize:13, color:value?'#1a56db':'#6b7280', fontWeight:value?600:400 }}>{label}</span>}
+    {label && <span style={{ fontSize:13, color:value?'#52b02c':'#6b7280', fontWeight:value?600:400 }}>{label}</span>}
   </div>
 );
 
@@ -1030,8 +1030,8 @@ const CheckGroup = ({ options, value = [], onChange, allKey = 'All' }) => {
         const active = has(opt.value);
         return (
           <label key={opt.value} style={{ display:'flex', alignItems:'center', gap:5, cursor:'pointer', userSelect:'none' }}>
-            <input type="checkbox" checked={active} onChange={() => toggle(opt.value)} style={{ accentColor:'#1a56db', width:15, height:15 }} />
-            <span style={{ fontSize:13, fontWeight:active?600:400, color:active?'#1e40af':'#374151' }}>{opt.label}</span>
+            <input type="checkbox" checked={active} onChange={() => toggle(opt.value)} style={{ accentColor:'#52b02c', width:15, height:15 }} />
+            <span style={{ fontSize:13, fontWeight:active?600:400, color:active?'#166534':'#374151' }}>{opt.label}</span>
           </label>
         );
       })}
@@ -1094,16 +1094,16 @@ const CheckDropdown = ({ options, value = [], onChange, allKey = 'All' }) => {
               <label key={opt.value} style={{
                 display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
                 cursor:'pointer', userSelect:'none',
-                background: checked ? '#eff6ff' : 'transparent',
+                background: checked ? '#f0fdf4' : 'transparent',
                 borderBottom: idx < options.length - 1 ? '1px solid #f3f4f6' : 'none',
                 fontWeight: isAllOpt ? 600 : 400,
               }}>
                 <input type="checkbox" checked={checked}
                   onChange={() => toggle(opt.value)}
-                  style={{ accentColor:'#1a56db', width:15, height:15, cursor:'pointer', flexShrink:0 }}
+                  style={{ accentColor:'#52b02c', width:15, height:15, cursor:'pointer', flexShrink:0 }}
                   onClick={e => e.stopPropagation()}
                 />
-                <span style={{ fontSize:13, color: checked ? '#1e40af' : '#374151', fontWeight: checked ? 600 : 400 }}>
+                <span style={{ fontSize:13, color: checked ? '#166534' : '#374151', fontWeight: checked ? 600 : 400 }}>
                   {opt.label}
                 </span>
               </label>
@@ -1116,7 +1116,7 @@ const CheckDropdown = ({ options, value = [], onChange, allKey = 'All' }) => {
 };
 
 const sectionBtnStyle = {
-  background:'#eff6ff', border:'1px solid #bfdbfe', color:'#1a56db',
+  background:'#f0fdf4', border:'1px solid #bbf7d0', color:'#52b02c',
   borderRadius:6, padding:'5px 12px', fontSize:13, fontWeight:600, cursor:'pointer',
 };
 
@@ -1197,7 +1197,7 @@ const LeaveTypeSection = () => {
       <DataGrid
         columns={[
           { field:'name',                header:L('बिदाको नाम','Leave Name'),      width:160, render:v=><span style={{fontWeight:600}}>{v}</span> },
-          { field:'shortName',           header:L('छोटो नाम','Short'),             width:70,  render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
+          { field:'shortName',           header:L('छोटो नाम','Short'),             width:70,  render:v=><span style={{background:'#f0fdf4',color:'#52b02c',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
           { field:'daysPerYear',         header:L('दिन/वर्ष','Days/Yr'),           width:80,  align:'center', render:v=><span style={{fontWeight:700,color:'#0369a1'}}>{v}</span> },
           { field:'genderFor',           header:L('लिङ्ग','Gender'),               width:90,  render:v=>(v||['All']).join(', ') },
           { field:'reduceWeekend',       header:L('विकेन्ड घटाउ','Red.Wknd'),     width:95,  align:'center', render:v=>v?'✅':'—' },
@@ -1226,7 +1226,7 @@ const LeaveTypeSection = () => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:680, width:'95%' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ बिदा प्रकार','New Leave Type')}`}</h2>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
@@ -1386,7 +1386,7 @@ const OfficeVisitTypeSection = () => {
       <DataGrid
         columns={[
           { field:'name',      header:L('भ्रमणको नाम','Office Visit Name'), width:220, render:v=><span style={{fontWeight:600}}>{v}</span> },
-          { field:'shortName', header:L('छोटो नाम','Short Name'),           width:110, render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
+          { field:'shortName', header:L('छोटो नाम','Short Name'),           width:110, render:v=><span style={{background:'#f0fdf4',color:'#52b02c',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
           { field:'actions', header:L('कार्य','Actions'), width:80, sortable:false, filterable:false, render:(_,row)=>(
             <div className="dg-actions">
               <button className="dg-action-btn edit"   onClick={e=>{e.stopPropagation();openEdit(row);}}>✏</button>
@@ -1407,7 +1407,7 @@ const OfficeVisitTypeSection = () => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ भ्रमण प्रकार','New Office Visit Type')}`}</h2>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
             </div>
@@ -1568,7 +1568,7 @@ const PublicHolidaySection = () => {
       {/* Current FY indicator */}
       <div style={{ marginBottom:10, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
         {activeFY ? (
-          <span style={{ background:'#eff6ff', border:'1px solid #bfdbfe', color:'#1e40af', borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:700 }}>
+          <span style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', color:'#166534', borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:700 }}>
             📆 {activeFY.name} &nbsp;·&nbsp; {fd(activeFY.startDate)} → {fd(activeFY.endDate)}
           </span>
         ) : fyExpired ? (
@@ -1637,7 +1637,7 @@ const PublicHolidaySection = () => {
 
               {/* Dates row — respects Default Calendar setting */}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:16, marginBottom:14, alignItems:'flex-start' }}>
-                <DateField field="startDate" label={L('सुरु मिति','Holiday Start From')} previewColor="#1a56db" required />
+                <DateField field="startDate" label={L('सुरु मिति','Holiday Start From')} previewColor="#52b02c" required />
                 <DateField field="endDate"   label={L('अन्त मिति','Holiday Ends')}       previewColor="#7c3aed" required />
                 <div className="form-group" style={{ marginBottom:0, minWidth:72 }}>
                   <label className="form-label">{L('दिन सङ्ख्या','No. of Days')}</label>
@@ -1691,7 +1691,7 @@ const PublicHolidaySection = () => {
                       padding:'7px 10px', border:'1.5px solid #d1d5db', borderRadius:6,
                       background:'white', cursor:'pointer', minHeight:36,
                     }}>
-                    <span style={{ fontSize:13, color: form.isFixedEveryYear ? '#1e40af' : '#6b7280', fontWeight: form.isFixedEveryYear ? 600 : 400 }}>
+                    <span style={{ fontSize:13, color: form.isFixedEveryYear ? '#166534' : '#6b7280', fontWeight: form.isFixedEveryYear ? 600 : 400 }}>
                       {form.isFixedEveryYear ? L('हो','Yes') : L('होइन','No')}
                     </span>
                     <Toggle value={form.isFixedEveryYear} onChange={v=>set('isFixedEveryYear',v)} />
@@ -1738,7 +1738,7 @@ const PublicHolidaySection = () => {
                 </div>
                 <div>
                   <strong>{L('छुट्टी नाम','Holiday Name')}:</strong>&nbsp;
-                  <span style={{ color:'#1a56db', fontWeight:600 }}>"{dupAlert.name}"</span>
+                  <span style={{ color:'#52b02c', fontWeight:600 }}>"{dupAlert.name}"</span>
                 </div>
               </div>
               <div style={{ fontSize:13, color:'#6b7280', marginTop:10 }}>
@@ -1824,7 +1824,7 @@ const LanguageSection = () => {
     <div className="card" style={{ overflow:'hidden' }}>
 
       {/* Header */}
-      <div className="card-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', borderBottom:'1px solid #e5e7eb' }}>
+      <div className="card-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)', borderBottom:'1px solid #e5e7eb' }}>
         <div>
           <h3>🌐 {L('भाषा तालिका','Language Translation Table')}</h3>
           <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>
@@ -1840,12 +1840,12 @@ const LanguageSection = () => {
       <div style={{ display:'flex', gap:16, padding:'10px 20px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', fontSize:12, flexWrap:'wrap', alignItems:'center' }}>
         <span>📝 {L('कुल','Total')}: <strong>{totalCount}</strong></span>
         <span>🤖 {L('स्वतः','Auto')}: <strong style={{ color:'#059669' }}>{totalCount - customCount}</strong></span>
-        <span>✏️ {L('सम्पादित','Edited')}: <strong style={{ color:'#1a56db' }}>{customCount}</strong></span>
+        <span>✏️ {L('सम्पादित','Edited')}: <strong style={{ color:'#52b02c' }}>{customCount}</strong></span>
         <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
           {['all','custom','missing'].map(m => (
             <button key={m} onClick={() => setFilterMode(m)} style={{
               padding:'2px 10px', borderRadius:10, fontSize:11, fontWeight:600, cursor:'pointer', border:'none',
-              background: filterMode===m ? '#1a56db' : '#e5e7eb',
+              background: filterMode===m ? '#52b02c' : '#e5e7eb',
               color:      filterMode===m ? 'white'   : '#374151',
             }}>
               {m==='all'     ? L('सबै','All') :
@@ -1863,7 +1863,7 @@ const LanguageSection = () => {
           { field:'isCustom', header:L('स्रोत','Source'), width:80, align:'center', sortable:false, filterable:false,
             render:v=>(
               <span style={v
-                ? {background:'#eff6ff',color:'#1a56db',fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,border:'1px solid #bfdbfe'}
+                ? {background:'#f0fdf4',color:'#52b02c',fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,border:'1px solid #bbf7d0'}
                 : {background:'#f0fdf4',color:'#059669',fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,border:'1px solid #a7f3d0'}}>
                 {v?'✏️':'🤖'}
               </span>
@@ -1872,7 +1872,7 @@ const LanguageSection = () => {
           { field:'actions', header:L('कार्य','Action'), width:70, sortable:false, filterable:false, render:(_,row)=>(
             <div style={{display:'flex',gap:4,justifyContent:'center'}}>
               <button title={L('सम्पादन','Edit')} onClick={e=>{e.stopPropagation();openEdit(row);}}
-                style={{background:'none',border:'none',cursor:'pointer',fontSize:14,padding:'2px 4px',color:'#1a56db'}}>✏️</button>
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:14,padding:'2px 4px',color:'#52b02c'}}>✏️</button>
               {row.isCustom && (
                 <button title={L('मूलमा फर्काउनुस','Reset to default')} onClick={e=>{e.stopPropagation();handleReset(row.english);}}
                   style={{background:'none',border:'none',cursor:'pointer',fontSize:14,padding:'2px 4px',color:'#6b7280'}}>↩️</button>
@@ -1890,7 +1890,7 @@ const LanguageSection = () => {
         toolbar={
           <div style={{display:'flex',gap:8,alignItems:'center'}}>
             <button onClick={()=>changeLanguage(language==='np'?'en':'np')}
-              style={{padding:'5px 14px',background:language==='np'?'#1a56db':'#059669',color:'white',border:'none',borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer'}}>
+              style={{padding:'5px 14px',background:language==='np'?'#52b02c':'#059669',color:'white',border:'none',borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer'}}>
               {language==='np'?'🇬🇧 EN':'🇳🇵 NP'}
             </button>
             <button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>
@@ -2060,7 +2060,7 @@ const EmailSetupTab = ({ showToast }) => {
         <div className="card-header" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <h3>📧 {L('SMTP कन्फिगरेसन','SMTP Configuration')}</h3>
           <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
-            <input type="checkbox" checked={!!emailCfg.enabled} onChange={e => set('enabled', e.target.checked)} style={{ width:16, height:16, accentColor:'#1a56db' }} />
+            <input type="checkbox" checked={!!emailCfg.enabled} onChange={e => set('enabled', e.target.checked)} style={{ width:16, height:16, accentColor:'#52b02c' }} />
             {L('इमेल सक्रिय','Enable Email')}
           </label>
         </div>
@@ -2127,7 +2127,7 @@ const EmailSetupTab = ({ showToast }) => {
                 <input type="checkbox" style={{ opacity:0, width:0, height:0 }}
                   checked={!!(emailCfg.notifications||{})[key]}
                   onChange={e => setNotif(key, e.target.checked)} />
-                <span style={{ position:'absolute', inset:0, borderRadius:24, transition:'.2s', background: (emailCfg.notifications||{})[key] ? '#1a56db' : '#d1d5db' }}>
+                <span style={{ position:'absolute', inset:0, borderRadius:24, transition:'.2s', background: (emailCfg.notifications||{})[key] ? '#52b02c' : '#d1d5db' }}>
                   <span style={{ position:'absolute', top:3, left: (emailCfg.notifications||{})[key] ? 23 : 3, width:18, height:18, borderRadius:'50%', background:'white', transition:'.2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }} />
                 </span>
               </label>
@@ -2761,9 +2761,9 @@ const Settings = () => {
             <div key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
               padding:'11px 18px', cursor:'pointer', fontSize:14, fontWeight:500,
               display:'flex', alignItems:'center', gap:9,
-              background:   activeTab===tab.key ? '#eff6ff' : 'transparent',
-              color:        activeTab===tab.key ? '#1a56db' : '#374151',
-              borderLeft:   activeTab===tab.key ? '3px solid #1a56db' : '3px solid transparent',
+              background:   activeTab===tab.key ? '#f0fdf4' : 'transparent',
+              color:        activeTab===tab.key ? '#52b02c' : '#374151',
+              borderLeft:   activeTab===tab.key ? '3px solid #52b02c' : '3px solid transparent',
               transition:'all .15s',
             }}>
               <span style={{ fontSize:16 }}>{tab.icon}</span>
@@ -2777,7 +2777,7 @@ const Settings = () => {
               🐘 PostgreSQL
             </div>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <span style={{ fontSize:12, fontWeight:700, color:'#1a56db' }}>v{APP_VERSION}</span>
+              <span style={{ fontSize:12, fontWeight:700, color:'#52b02c' }}>v{APP_VERSION}</span>
               <span style={{ fontSize:10, color:'#6b7280' }}>DB v{dbVersionInfo?.dbApplied ?? DB_VERSION}</span>
             </div>
           </div>
@@ -2792,7 +2792,7 @@ const Settings = () => {
               {/* ── Company Information — view card, double-click to edit ── */}
               <div className="card" onDoubleClick={openCompanyModal}
                 style={{ cursor:'pointer', transition:'box-shadow .15s' }}
-                onMouseEnter={e => e.currentTarget.style.boxShadow='0 0 0 2px #1a56db55'}
+                onMouseEnter={e => e.currentTarget.style.boxShadow='0 0 0 2px #52b02c55'}
                 onMouseLeave={e => e.currentTarget.style.boxShadow=''}>
                 <div className="card-header">
                   <div>
@@ -2808,12 +2808,12 @@ const Settings = () => {
                 </div>
 
                 {/* Letterhead preview (read-only) */}
-                <div style={{ background:'linear-gradient(135deg,#f8faff,#eff6ff)', borderBottom:'1px solid #e5e7eb', padding:'14px 24px', display:'flex', alignItems:'center', gap:20, minHeight:90 }}>
+                <div style={{ background:'linear-gradient(135deg,#f8faff,#f0fdf4)', borderBottom:'1px solid #e5e7eb', padding:'14px 24px', display:'flex', alignItems:'center', gap:20, minHeight:90 }}>
                   <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
                     {settings.companyLogo ? (
                       <img src={settings.companyLogo} alt="Logo" style={{ maxWidth:180, maxHeight:70, objectFit:'contain', borderRadius:4 }} />
                     ) : (
-                      <div style={{ width:120, height:52, border:'2px dashed #bfdbfe', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'white', gap:4 }}>
+                      <div style={{ width:120, height:52, border:'2px dashed #bbf7d0', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'white', gap:4 }}>
                         <span style={{ fontSize:20 }}>🖼️</span>
                         <span style={{ fontSize:11, color:'#94a3b8' }}>{L('लोगो छैन','No Logo')}</span>
                       </div>
@@ -2821,11 +2821,11 @@ const Settings = () => {
                     {settings.logoWidth && <span style={{ fontSize:10, color:'#9ca3af' }}>{settings.logoWidth}×{settings.logoHeight}px</span>}
                   </div>
                   <div style={{ flex:1, textAlign:'center' }}>
-                    <div style={{ fontSize:17, fontWeight:800, color:'#1e3a8a' }}>{language==='np' ? settings.companyNameNp : settings.companyNameEn}</div>
+                    <div style={{ fontSize:17, fontWeight:800, color:'#14532d' }}>{language==='np' ? settings.companyNameNp : settings.companyNameEn}</div>
                     <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{language==='np' ? settings.companyAddressNp : settings.companyAddressEn}</div>
                     <div style={{ fontSize:12, color:'#6b7280' }}>{settings.companyPhone}{settings.companyEmail && ` | ${settings.companyEmail}`}</div>
                     {settings.companyWebsite && <div style={{ fontSize:11, color:'#6b7280' }}>{settings.companyWebsite}</div>}
-                    <div style={{ borderTop:'2px solid #1a56db', marginTop:8 }}></div>
+                    <div style={{ borderTop:'2px solid #52b02c', marginTop:8 }}></div>
                   </div>
                 </div>
 
@@ -2866,7 +2866,7 @@ const Settings = () => {
                 </div>
                 <DataGrid
                   columns={[
-                    { field:'effectiveDate', header:L('प्रभावी मिति','Effective Date'),        width:160, render:v=><span style={{fontWeight:600,color:'#1a56db'}}>{fd(v)}</span> },
+                    { field:'effectiveDate', header:L('प्रभावी मिति','Effective Date'),        width:160, render:v=><span style={{fontWeight:600,color:'#52b02c'}}>{fd(v)}</span> },
                     { field:'weekends',      header:L('सप्ताहन्त दिनहरू','Weekend Days'),       width:560, minWidth:560, sortable:false, filterable:false, render:v=><DayBadge dayKeys={v||[]} language={language} /> },
                     { field:'changedDate',   header:L('परिवर्तन मिति','Changed On'),            width:160, render:v=><span style={{color:'#6b7280'}}>{fd(v)}</span> },
                     { field:'changedBy',     header:L('परिवर्तन गर्ने','Changed By'),           width:130, render:v=><span style={{fontWeight:500}}>{v}</span> },
@@ -2923,7 +2923,7 @@ const Settings = () => {
                             <div style={{ fontSize:12, fontWeight:600 }}>{L('नेपाली अंक (०,१,२...)','Nepali Digits')}</div>
                             <div style={{ fontSize:11, color:'#6b7280' }}>{L('उदाहरण','eg')}: {formatDate(PREVIEW_DATE,{calendar:'np',format:local.defaultDateFormat,nepaliDigits:true})}</div>
                           </div>
-                          <div style={{ width:40, height:22, background:local.nepaliDigits?'#1a56db':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                          <div style={{ width:40, height:22, background:local.nepaliDigits?'#52b02c':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
                             onClick={() => set('nepaliDigits', !local.nepaliDigits)}>
                             <div style={{ position:'absolute', top:2, left:local.nepaliDigits?20:2, width:18, height:18, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
                           </div>
@@ -2941,7 +2941,7 @@ const Settings = () => {
                         ))}
                       </select>
                       {/* Live preview pill */}
-                      <div style={{ marginTop:8, display:'inline-flex', alignItems:'center', gap:8, background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'6px 14px', fontSize:13, fontWeight:700, color:'#1e40af' }}>
+                      <div style={{ marginTop:8, display:'inline-flex', alignItems:'center', gap:8, background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'6px 14px', fontSize:13, fontWeight:700, color:'#166534' }}>
                         {livePreview(local.defaultDateFormat)}
                         <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>— {L('प्रिभ्यु','preview')}</span>
                       </div>
@@ -2970,20 +2970,20 @@ const Settings = () => {
                     {[{code:'en',flag:'🌍',title:L('अंग्रेजी (AD)','English (AD)'),sub:'Gregorian · Anno Domini'},{code:'np',flag:'🇳🇵',title:L('नेपाली (BS)','Nepali (BS)'),sub:'विक्रम सम्वत् · Bikram Sambat'}].map(cal => {
                       const active = local.defaultCalendar === cal.code;
                       return (
-                        <div key={cal.code} onClick={() => set('defaultCalendar', cal.code)} style={{ border:`2px solid ${active?'#1a56db':'#e5e7eb'}`, background:active?'#eff6ff':'#f9fafb', borderRadius:12, padding:'18px 20px', cursor:'pointer', transition:'all .15s' }}>
+                        <div key={cal.code} onClick={() => set('defaultCalendar', cal.code)} style={{ border:`2px solid ${active?'#52b02c':'#e5e7eb'}`, background:active?'#f0fdf4':'#f9fafb', borderRadius:12, padding:'18px 20px', cursor:'pointer', transition:'all .15s' }}>
                           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
                             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                               <span style={{ fontSize:26 }}>{cal.flag}</span>
                               <div>
-                                <div style={{ fontSize:15, fontWeight:700, color:active?'#1e40af':'#1f2937' }}>{cal.title}</div>
+                                <div style={{ fontSize:15, fontWeight:700, color:active?'#166534':'#1f2937' }}>{cal.title}</div>
                                 <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{cal.sub}</div>
                               </div>
                             </div>
-                            <div style={{ width:20, height:20, borderRadius:'50%', border:`2px solid ${active?'#1a56db':'#d1d5db'}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                              {active && <div style={{ width:10, height:10, borderRadius:'50%', background:'#1a56db' }}></div>}
+                            <div style={{ width:20, height:20, borderRadius:'50%', border:`2px solid ${active?'#52b02c':'#d1d5db'}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                              {active && <div style={{ width:10, height:10, borderRadius:'50%', background:'#52b02c' }}></div>}
                             </div>
                           </div>
-                          <div style={{ marginTop:12, background:active?'#dbeafe':'#f3f4f6', borderRadius:6, padding:'7px 12px', fontSize:14, fontWeight:700, color:active?'#1e40af':'#374151', textAlign:'center' }}>{livePreview(local.defaultDateFormat)}</div>
+                          <div style={{ marginTop:12, background:active?'#dcfce7':'#f3f4f6', borderRadius:6, padding:'7px 12px', fontSize:14, fontWeight:700, color:active?'#166534':'#374151', textAlign:'center' }}>{livePreview(local.defaultDateFormat)}</div>
                         </div>
                       );
                     })}
@@ -2994,7 +2994,7 @@ const Settings = () => {
                         <div style={{ fontSize:14, fontWeight:600 }}>{L('नेपाली अंक (०,१,२...)','Nepali Digits (०,१,२...)')}</div>
                         <div style={{ fontSize:12, color:'#6b7280' }}>{L('मितिमा देवनागरी अंक','Use Devanagari numerals in dates')} — {L('उदाहरण','Example')}: {formatDate(PREVIEW_DATE,{calendar:'np',format:local.defaultDateFormat,nepaliDigits:true})}</div>
                       </div>
-                      <div style={{ width:48, height:26, background:local.nepaliDigits?'#1a56db':'#d1d5db', borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s' }}
+                      <div style={{ width:48, height:26, background:local.nepaliDigits?'#52b02c':'#d1d5db', borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s' }}
                         onClick={() => set('nepaliDigits', !local.nepaliDigits)}>
                         <div style={{ position:'absolute', top:3, left:local.nepaliDigits?24:3, width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
                       </div>
@@ -3010,12 +3010,12 @@ const Settings = () => {
                     {FORMAT_OPTIONS.map(opt => {
                       const active = local.defaultDateFormat === opt.key;
                       return (
-                        <label key={opt.key} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'11px 16px', borderRadius:8, cursor:'pointer', border:`2px solid ${active?'#1a56db':'#e5e7eb'}`, background:active?'#eff6ff':'#f9fafb', transition:'all .15s' }}>
+                        <label key={opt.key} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'11px 16px', borderRadius:8, cursor:'pointer', border:`2px solid ${active?'#52b02c':'#e5e7eb'}`, background:active?'#f0fdf4':'#f9fafb', transition:'all .15s' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                            <input type="radio" name="dateFormat" checked={active} onChange={() => set('defaultDateFormat', opt.key)} style={{ accentColor:'#1a56db', width:15, height:15 }} />
-                            <span style={{ fontFamily:'monospace', fontSize:14, fontWeight:600, color:active?'#1e40af':'#374151' }}>{opt.label}</span>
+                            <input type="radio" name="dateFormat" checked={active} onChange={() => set('defaultDateFormat', opt.key)} style={{ accentColor:'#52b02c', width:15, height:15 }} />
+                            <span style={{ fontFamily:'monospace', fontSize:14, fontWeight:600, color:active?'#166534':'#374151' }}>{opt.label}</span>
                           </div>
-                          <span style={{ fontSize:14, fontWeight:active?700:500, color:active?'#1a56db':'#6b7280', background:active?'#dbeafe':'#f3f4f6', padding:'4px 12px', borderRadius:6 }}>{livePreview(opt.key)}</span>
+                          <span style={{ fontSize:14, fontWeight:active?700:500, color:active?'#52b02c':'#6b7280', background:active?'#dcfce7':'#f3f4f6', padding:'4px 12px', borderRadius:6 }}>{livePreview(opt.key)}</span>
                         </label>
                       );
                     })}
@@ -3302,7 +3302,7 @@ const Settings = () => {
               {
                 key:'branchManager', icon:'🏪',
                 name:L('शाखा प्रबन्धक','Branch Manager'),
-                color:'#1a56db', bg:'#eff6ff', border:'#bfdbfe',
+                color:'#52b02c', bg:'#f0fdf4', border:'#bbf7d0',
                 desc:L('आफ्नो शाखाका सम्पूर्ण कर्मचारीमा पूर्ण अधिकार मात्र','Full rights of all staff only within their assigned Branch'),
               },
               {
@@ -3504,14 +3504,14 @@ const Settings = () => {
                 {changeModal && (
                   <div className="modal-overlay">
                     <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-                      <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+                      <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
                         <h2>✏️ {L('भूमिका परिवर्तन','Change Role')}</h2>
                         <button className="modal-close" onClick={() => setChangeModal(null)}>✕</button>
                       </div>
                       <div className="modal-body">
                         {/* Staff info */}
                         <div style={{ display:'flex', alignItems:'center', gap:12, background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', marginBottom:16 }}>
-                          <div style={{ width:38,height:38,borderRadius:'50%',background:'#dbeafe',color:'#1a56db',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:16 }}>
+                          <div style={{ width:38,height:38,borderRadius:'50%',background:'#dcfce7',color:'#52b02c',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:16 }}>
                             {changeModal.emp.avatar}
                           </div>
                           <div>
@@ -3581,7 +3581,7 @@ const Settings = () => {
                   {/* Compact info strip */}
                   <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
                     {[
-                      { label:L('एप संस्करण','App Version'), value:`v${APP_VERSION}`,                             icon:'🏷️', color:'#1a56db', bg:'#eff6ff', border:'#bfdbfe' },
+                      { label:L('एप संस्करण','App Version'), value:`v${APP_VERSION}`,                             icon:'🏷️', color:'#52b02c', bg:'#f0fdf4', border:'#bbf7d0' },
                       { label:L('DB स्किमा','DB Schema'),    value:`v${dbVersionInfo?.dbApplied ?? DB_VERSION}`,   icon:'🗂️', color:'#0369a1', bg:'#e0f2fe', border:'#bae6fd' },
                       { label:L('भण्डारण','Storage'),        value: isOnline ? 'PostgreSQL' : 'localStorage',     icon: isOnline?'🐘':'💾', color: isOnline?'#336791':'#7e3af2', bg: isOnline?'#f0f9ff':'#f5f3ff', border: isOnline?'#bae6fd':'#ddd6fe' },
                     ].map(item => (
@@ -3751,9 +3751,9 @@ const Settings = () => {
                     { field:'source', header:L('स्रोत','Source'), width:150, render:v=>(
                       <span style={{
                         padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,
-                        background:v==='PostgreSQL'?'#dbeafe':'#f3e8ff',
-                        color:v==='PostgreSQL'?'#1e40af':'#7e3af2',
-                        border:`1px solid ${v==='PostgreSQL'?'#bfdbfe':'#ddd6fe'}`,
+                        background:v==='PostgreSQL'?'#dcfce7':'#f3e8ff',
+                        color:v==='PostgreSQL'?'#166534':'#7e3af2',
+                        border:`1px solid ${v==='PostgreSQL'?'#bbf7d0':'#ddd6fe'}`,
                       }}>
                         {v==='PostgreSQL'?'🐘':'💾'} {v}
                       </span>
@@ -3842,8 +3842,8 @@ const Settings = () => {
                   {ALL_DAYS.map(d => {
                     const on = wForm.weekends.includes(d.key);
                     return (
-                      <label key={d.key} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, cursor:'pointer', border:`2px solid ${on?'#1a56db':'#e5e7eb'}`, background:on?'#eff6ff':'#f9fafb', fontWeight:on?700:400, color:on?'#1e40af':'#374151', transition:'all .13s' }}>
-                        <input type="checkbox" checked={on} onChange={() => setWForm(p => ({ ...p, weekends: on ? p.weekends.filter(k=>k!==d.key) : [...p.weekends, d.key] }))} style={{ accentColor:'#1a56db', width:13, height:13 }} />
+                      <label key={d.key} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, cursor:'pointer', border:`2px solid ${on?'#52b02c':'#e5e7eb'}`, background:on?'#f0fdf4':'#f9fafb', fontWeight:on?700:400, color:on?'#166534':'#374151', transition:'all .13s' }}>
+                        <input type="checkbox" checked={on} onChange={() => setWForm(p => ({ ...p, weekends: on ? p.weekends.filter(k=>k!==d.key) : [...p.weekends, d.key] }))} style={{ accentColor:'#52b02c', width:13, height:13 }} />
                         {language==='np' ? d.np : d.en}
                       </label>
                     );
@@ -3897,7 +3897,7 @@ const Settings = () => {
       {companyModal && (
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:620, width:'95%' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>🏢 {L('कम्पनी जानकारी सम्पादन','Edit Company Information')}</h2>
               <button className="modal-close" onClick={() => setCompanyModal(false)}>✕</button>
             </div>
@@ -3905,7 +3905,7 @@ const Settings = () => {
               {/* Logo upload */}
               <div style={{ marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
                 <div
-                  style={{ width:150, height:64, border:'2px dashed #bfdbfe', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'#f8faff', cursor:'pointer', overflow:'hidden', flexShrink:0 }}
+                  style={{ width:150, height:64, border:'2px dashed #bbf7d0', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'#f8faff', cursor:'pointer', overflow:'hidden', flexShrink:0 }}
                   onClick={() => companyLogoInputRef.current?.click()}
                 >
                   {cForm.companyLogo

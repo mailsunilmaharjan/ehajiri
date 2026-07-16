@@ -65,16 +65,16 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
         onKeyDown={handleTriggerKey}
         style={{
           display:'flex', alignItems:'center', justifyContent:'space-between',
-          padding:'6px 10px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
+          padding:'6px 10px', border:`1.5px solid ${open ? '#52b02c' : '#d1d5db'}`,
           borderRadius:6, background:'white', cursor:'pointer', fontSize:13, color:'#1f2937',
-          minHeight:34, boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', transition:'border-color .15s',
+          minHeight:34, boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', transition:'border-color .15s',
           outline:'none',
         }}
       >
         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
           {isAll
             ? <span style={{ color:'#9ca3af' }}>{placeholder}</span>
-            : <span style={{ color:'#1e40af', fontWeight:600 }}>{display}</span>}
+            : <span style={{ color:'#166534', fontWeight:600 }}>{display}</span>}
         </span>
         <span style={{ fontSize:9, color:'#9ca3af', marginLeft:4, flexShrink:0 }}>{open ? '▲' : '▼'}</span>
       </div>
@@ -110,12 +110,12 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
               onClick={() => { onChange([]); setLocalSearch(''); }}
               style={{
                 display:'flex', alignItems:'center', gap:8, padding:'8px 12px', cursor:'pointer',
-                background: isAll ? '#eff6ff' : 'transparent',
+                background: isAll ? '#f0fdf4' : 'transparent',
                 borderBottom:'2px solid #e5e7eb', userSelect:'none',
               }}
             >
-              <input type="checkbox" checked={isAll} readOnly style={{ accentColor:'#1a56db' }} onClick={e => e.stopPropagation()} />
-              <span style={{ fontSize:13, fontWeight:600, color: isAll ? '#1e40af' : '#374151' }}>All</span>
+              <input type="checkbox" checked={isAll} readOnly style={{ accentColor:'#52b02c' }} onClick={e => e.stopPropagation()} />
+              <span style={{ fontSize:13, fontWeight:600, color: isAll ? '#166534' : '#374151' }}>All</span>
             </label>
             {filtered.map((opt, i) => {
               const checked = value.includes(opt.value);
@@ -124,13 +124,13 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
                   onClick={() => toggle(opt.value)}
                   style={{
                     display:'flex', alignItems:'center', gap:8, padding:'7px 12px', cursor:'pointer',
-                    background: checked ? '#eff6ff' : 'transparent',
+                    background: checked ? '#f0fdf4' : 'transparent',
                     borderBottom: i < filtered.length - 1 ? '1.5px solid #e5e7eb' : 'none',
                     userSelect:'none',
                   }}
                 >
-                  <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#1a56db' }} onClick={e => e.stopPropagation()} />
-                  <span style={{ fontSize:13, color: checked ? '#1e40af' : '#374151', fontWeight: checked ? 600 : 400, whiteSpace:'nowrap' }}>
+                  <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#52b02c' }} onClick={e => e.stopPropagation()} />
+                  <span style={{ fontSize:13, color: checked ? '#166534' : '#374151', fontWeight: checked ? 600 : 400, whiteSpace:'nowrap' }}>
                     {opt.label}
                   </span>
                 </label>
@@ -164,7 +164,7 @@ const LeaveAdvancedFilter = ({
 }) => {
   if (!isOpen) return null;
   const funnelIcon = (
-    <svg viewBox="0 0 20 20" fill="currentColor" width={16} height={16} style={{ color:'#1a56db' }}>
+    <svg viewBox="0 0 20 20" fill="currentColor" width={16} height={16} style={{ color:'#52b02c' }}>
       <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
     </svg>
   );
@@ -258,8 +258,8 @@ const LeaveAdvancedFilter = ({
                   <label key={opt.val} style={{ display:'flex', alignItems:'center', gap:7, cursor:'pointer', userSelect:'none' }}>
                     <input type="radio" name="leaveAccumFilter" checked={tempF.leaveAccum === opt.val}
                       onChange={() => setTF('leaveAccum', opt.val)}
-                      style={{ accentColor:'#1a56db', width:15, height:15, cursor:'pointer' }} />
-                    <span style={{ fontSize:13, fontWeight: tempF.leaveAccum===opt.val ? 700 : 400, color: tempF.leaveAccum===opt.val ? '#1e40af' : '#374151' }}>
+                      style={{ accentColor:'#52b02c', width:15, height:15, cursor:'pointer' }} />
+                    <span style={{ fontSize:13, fontWeight: tempF.leaveAccum===opt.val ? 700 : 400, color: tempF.leaveAccum===opt.val ? '#166534' : '#374151' }}>
                       {L(opt.np, opt.en)}
                     </span>
                   </label>
@@ -509,7 +509,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
           {activeFilterCount > 0 && (
             <span style={{
               position:'absolute', top:-7, right:-7,
-              background:'#1a56db', color:'white', fontSize:10, fontWeight:800,
+              background:'#52b02c', color:'white', fontSize:10, fontWeight:800,
               width:17, height:17, borderRadius:'50%',
               display:'flex', alignItems:'center', justifyContent:'center',
               lineHeight:1, boxShadow:'0 1px 3px rgba(0,0,0,.25)',
@@ -568,7 +568,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
                       onKeyDown={e => { if (e.key === 'Enter') { applyHeaderVal(lt); e.target.blur(); } }}
                       onClick={e => { e.stopPropagation(); e.target.select(); }}
                       title={`Fill ALL staff (max ${lt.daysPerYear} days)`}
-                      style={{ ...numInput, width:60, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1e40af' }}
+                      style={{ ...numInput, width:60, border:'1px solid #bbf7d0', background:'#f0fdf4', color:'#166534' }}
                     />
                   </th>
                 ))}
@@ -582,7 +582,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
                     <td className="dg-sn-col">{ri + 1}</td>
                     <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>{row.fullName}</td>
                     <td className="dg-td" style={{ padding:'4px 8px' }}>
-                      <span style={{ background:'#eff6ff', color:'#1e40af', padding:'2px 8px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.postShort}</span>
+                      <span style={{ background:'#f0fdf4', color:'#166534', padding:'2px 8px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.postShort}</span>
                     </td>
                     <td className="dg-td" style={{ padding:'4px 8px' }}>
                       <span style={{ background:'#f0fdf4', color:'#166534', padding:'2px 8px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.deptShort}</span>
@@ -842,7 +842,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
 
   /* company header for print/export */
   const companyHtml = `
-    <div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #1a56db;">
+    <div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #52b02c;">
       ${settings.logo ? `<img src="${settings.logo}" style="height:50px;margin-bottom:6px;display:block;margin-left:auto;margin-right:auto;" />` : ''}
       <div style="font-size:17px;font-weight:800;color:#1f2937;">${settings.companyName || settings.name || 'eHajiri TMS'}</div>
       ${settings.address ? `<div style="font-size:11px;color:#6b7280;">${settings.address}</div>` : ''}
@@ -942,7 +942,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
           style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/></svg>
           {L('फिल्टर','Filter')}
-          {tActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#1a56db', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>{tActiveCount}</span>}
+          {tActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#52b02c', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>{tActiveCount}</span>}
         </button>
 
         {/* edit/save/cancel */}
@@ -1000,7 +1000,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                   <th className="dg-th" style={{ width:80 }}>{L('शाखा','Branch')}</th>
                   {visibleLtConfigs.map(lt => (
                     <th key={lt.shortName} colSpan={2} className="dg-th"
-                      style={{ background:'#eff6ff', color:'#1a56db', fontSize:13, textAlign:'center', borderBottom:'1px solid #dce6f0' }}>
+                      style={{ background:'#f0fdf4', color:'#52b02c', fontSize:13, textAlign:'center', borderBottom:'1px solid #dce6f0' }}>
                       {lt.name} <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>({lt.shortName})</span>
                     </th>
                   ))}
@@ -1023,7 +1023,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                     <td className="dg-sn-col">{ri + 1}</td>
                     <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>{row.fullName}</td>
                     <td className="dg-td" style={{ textAlign:'center' }}>
-                      <span style={{ background:'#eff6ff', color:'#1e40af', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.postShort}</span>
+                      <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.postShort}</span>
                     </td>
                     <td className="dg-td" style={{ textAlign:'center' }}>
                       <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.deptShort}</span>
@@ -1164,13 +1164,13 @@ const buildPrintHeader = (settings, reportTitle, filters = []) => {
     : '';
 
   return `
-  <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:14px;padding-bottom:14px;border-bottom:3px solid #1a56db;">
+  <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:14px;padding-bottom:14px;border-bottom:3px solid #52b02c;">
     ${logo ? `<div style="flex-shrink:0"><img src="${logo}" style="height:60px;width:auto;object-fit:contain;" /></div>` : ''}
     <div style="flex:1;text-align:center;">
       <div style="font-size:20px;font-weight:900;color:#1f2937;letter-spacing:.5px;text-transform:uppercase;">${co}</div>
       ${addr  ? `<div style="font-size:11px;color:#6b7280;margin-top:3px;">${addr}</div>` : ''}
       ${(phone||email) ? `<div style="font-size:11px;color:#6b7280;">${[phone,email].filter(Boolean).join(' | ')}</div>` : ''}
-      <div style="display:inline-block;margin-top:8px;padding:4px 18px;background:#1a56db;color:white;font-size:13px;font-weight:700;border-radius:20px;letter-spacing:.5px;">${reportTitle}</div>
+      <div style="display:inline-block;margin-top:8px;padding:4px 18px;background:#52b02c;color:white;font-size:13px;font-weight:700;border-radius:20px;letter-spacing:.5px;">${reportTitle}</div>
     </div>
     <div style="flex-shrink:0;text-align:right;font-size:10px;color:#9ca3af;white-space:nowrap;">${today}</div>
   </div>
@@ -1412,7 +1412,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         <button className="btn btn-outline btn-filter" onClick={openBFilter} style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/></svg>
           {L('फिल्टर','Filter')}
-          {bActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#1a56db', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}>{bActiveCount}</span>}
+          {bActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#52b02c', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}>{bActiveCount}</span>}
         </button>
 
         {/* search */}
@@ -1457,7 +1457,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
               <th style={{ ...thS, width:75 }}>{L('विभाग','Dept')}</th>
               <th style={{ ...thS, width:75 }}>{L('शाखा','Branch')}</th>
               <th style={{ ...thS, width:110, background:'#f5f3ff', color:'#6d28d9' }}>{L('बिदा प्रकार','Leave Type')}</th>
-              <th style={{ ...thS, minWidth:130, background:'#eff6ff', color:'#1a56db' }}>{L('बिदा','Leave')}</th>
+              <th style={{ ...thS, minWidth:130, background:'#f0fdf4', color:'#52b02c' }}>{L('बिदा','Leave')}</th>
               <th style={{ ...thS, width:90, background:'#fef3c7', color:'#92400e' }}>{L('अघिल्लो वर्ष','Prev. Year')}</th>
               <th style={{ ...thS, width:90, background:'#d1fae5', color:'#065f46' }}>{L('चालु वर्ष','Curr. Year')}</th>
               <th style={{ ...thS, width:70, background:'#f1f5f9' }}>{L('जम्मा','Total')}</th>
@@ -1471,7 +1471,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                 <td style={{ ...tdS, color:'#9ca3af', fontSize:13 }}>{ri + 1}</td>
                 <td className="left" style={{ ...tdS, textAlign:'left', fontWeight:600, color:'#1f2937', paddingLeft:12 }}>{r.fullName}</td>
                 <td style={{ ...tdS }}>
-                  <span style={{ background:'#eff6ff', color:'#1e40af', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{r.postShort}</span>
+                  <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{r.postShort}</span>
                 </td>
                 <td style={{ ...tdS }}>
                   <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{r.deptShort}</span>
@@ -1562,8 +1562,8 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                   </div>
                   <div style={{ fontSize:13, color:'#6b7280', marginTop:5, display:'flex', gap:14, flexWrap:'wrap', alignItems:'center' }}>
                     <span style={{ fontWeight:600, color:'#1f2937' }}>👤 {usedPopup.empName}</span>
-                    <span style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8,
-                      padding:'2px 10px', color:'#1e40af', fontWeight:700, fontSize:12 }}>
+                    <span style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8,
+                      padding:'2px 10px', color:'#166534', fontWeight:700, fontSize:12 }}>
                       🌴 {usedPopup.ltName}
                     </span>
                     <span style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8,
@@ -1611,7 +1611,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                             <td style={{ ...tdS, fontWeight:600, color:'#111827' }}>{fd(l.fromDate)}</td>
                             <td style={{ ...tdS }}>{fd(l.toDate)}</td>
                             <td style={{ ...tdS, textAlign:'center' }}>
-                              <span style={{ display:'inline-block', background:'#dbeafe', color:'#1e40af',
+                              <span style={{ display:'inline-block', background:'#dcfce7', color:'#166534',
                                 borderRadius:8, padding:'2px 12px', fontWeight:800, fontSize:14 }}>
                                 {l.days}
                               </span>
@@ -1659,7 +1659,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                           {L('जम्मा','Total')}
                         </td>
                         <td style={{ padding:'10px 14px', textAlign:'center', borderTop:'2px solid #c8d6e5' }}>
-                          <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:8,
+                          <span style={{ background:'#dcfce7', color:'#166534', borderRadius:8,
                             padding:'2px 12px', fontWeight:800, fontSize:14 }}>
                             {totalDays}
                           </span>
@@ -1756,7 +1756,7 @@ const LeaveReportsTab = ({ employees, leaveTypes, leaves, L, fd }) => {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12 }}>
-        {statCard('📋', L('जम्मा आवेदन','Total Applications'),    totalLeaves,            '#1a56db', '#eff6ff')}
+        {statCard('📋', L('जम्मा आवेदन','Total Applications'),    totalLeaves,            '#52b02c', '#f0fdf4')}
         {statCard('✅', L('स्वीकृत','Approved'),                  approved,               '#0e9f6e', '#f0fdf4')}
         {statCard('⏳', L('विचाराधीन','Pending'),                 pending,                '#e3a008', '#fffbeb')}
         {statCard('❌', L('अस्वीकृत','Rejected'),                 rejected,               '#f05252', '#fff1f2')}
@@ -1787,7 +1787,7 @@ const LeaveReportsTab = ({ employees, leaveTypes, leaves, L, fd }) => {
                     </td>
                     <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4' }}>{lt.total}</td>
                     <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4', color:'#0e9f6e', fontWeight:600 }}>{lt.approved}</td>
-                    <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4', color:'#1a56db', fontWeight:700 }}>{lt.days.toFixed(1)}</td>
+                    <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4', color:'#52b02c', fontWeight:700 }}>{lt.days.toFixed(1)}</td>
                     <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4', color:'#e3a008', fontWeight:600 }}>{lt.pending||'—'}</td>
                   </tr>
                 ))}
@@ -1802,7 +1802,7 @@ const LeaveReportsTab = ({ employees, leaveTypes, leaves, L, fd }) => {
           <div style={{ maxHeight:360, overflowY:'auto' }}>
             {byEmployee.map((emp, i) => (
               <div key={emp.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 16px', borderBottom:'1px solid #f3f4f6', background:i%2===0?'white':'#f9fafb' }}>
-                <div style={{ width:32,height:32,borderRadius:'50%',background:'#dbeafe',color:'#1a56db',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,flexShrink:0 }}>
+                <div style={{ width:32,height:32,borderRadius:'50%',background:'#dcfce7',color:'#52b02c',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,flexShrink:0 }}>
                   {emp.avatar}
                 </div>
                 <div style={{ flex:1, minWidth:0 }}>
@@ -1810,7 +1810,7 @@ const LeaveReportsTab = ({ employees, leaveTypes, leaves, L, fd }) => {
                   <div style={{ fontSize:13, color:'#6b7280' }}>{emp.dept}</div>
                 </div>
                 <div style={{ textAlign:'right', flexShrink:0 }}>
-                  <div style={{ fontWeight:700, fontSize:14, color:'#1a56db' }}>{emp.days} {L('दिन','days')}</div>
+                  <div style={{ fontWeight:700, fontSize:14, color:'#52b02c' }}>{emp.days} {L('दिन','days')}</div>
                   <div style={{ fontSize:13, color:'#6b7280' }}>{emp.approved} {L('स्वीकृत','approved')}</div>
                 </div>
                 {emp.pending > 0 && (

@@ -86,7 +86,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
 
         <div style={{ padding:'16px 22px 12px',background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex',justifyContent:'space-between',alignItems:'center' }}>
-          <span style={{ fontSize:16,fontWeight:700,color:'#1e40af' }}>{L('एडभान्स खोज','Advance Search')}</span>
+          <span style={{ fontSize:16,fontWeight:700,color:'#166534' }}>{L('एडभान्स खोज','Advance Search')}</span>
           <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1 }}>✕</button>
         </div>
 
@@ -96,7 +96,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
               {[['working',L('कार्यरत','Working')],['notworking',L('अवकाश','Not Working')]].map(([v,label])=>(
                 <button key={v} onClick={()=>{ set('_status',v); set('staffId',''); }}
                   style={{ flex:1,padding:'8px 12px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                    background:(local._status||'working')===v?'#1a56db':'white',
+                    background:(local._status||'working')===v?'#52b02c':'white',
                     color:(local._status||'working')===v?'white':'#374151',transition:'background .15s' }}>
                   {label}
                 </button>
@@ -145,7 +145,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
             {L('रिसेट','Reset')}
           </button>
           <button onClick={() => { onApply(local); onClose(); }}
-            style={{ padding:'8px 22px',border:'none',borderRadius:8,background:'#1a56db',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+            style={{ padding:'8px 22px',border:'none',borderRadius:8,background:'#52b02c',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -182,7 +182,7 @@ const TD_FIX = {
 
 /* Row label configs */
 const ROWS = [
-  { key:'in',  label:'IN',  color:'#1a56db' },
+  { key:'in',  label:'IN',  color:'#52b02c' },
   { key:'out', label:'OUT', color:'#059669' },
   { key:'wh',  label:'WH',  color:'#374151' },
   { key:'ot',  label:'OT',  color:'#7c3aed' },
@@ -233,7 +233,7 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast }) => 
       const tip = [day.visit.purpose, day.visit.location].filter(Boolean).join(' | ');
       badge = (
         <span title={tip || 'Office Visit'}
-          style={{ background:'#dbeafe', color:'#1e40af', borderRadius:4,
+          style={{ background:'#dcfce7', color:'#166534', borderRadius:4,
             padding:'1px 5px', fontSize:10, fontWeight:800, cursor:'help' }}>
           OV
         </span>
@@ -488,7 +488,7 @@ const MonthlyInOutReport = () => {
           <h1 className="page-title">🔄 {L('मासिक IN & OUT रिपोर्ट','Monthly IN & OUT Report')}</h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -504,7 +504,7 @@ const MonthlyInOutReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -545,7 +545,7 @@ const MonthlyInOutReport = () => {
               onClick={() => setFilters(p => ({ ...p, _status:v, staffId:'' }))}
               style={{ padding:'5px 14px', border:'none', cursor:'pointer',
                 fontSize:13, fontWeight:600, transition:'background .15s',
-                background: staffStatus === v ? '#1a56db' : 'white',
+                background: staffStatus === v ? '#52b02c' : 'white',
                 color: staffStatus === v ? 'white' : '#374151' }}>
               {label}
             </button>
@@ -564,7 +564,7 @@ const MonthlyInOutReport = () => {
           </svg>
           {L('एडभान्स खोज','Advance Search')}
           {activeFilterCount > 0 && (
-            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
+            <span style={{ background:'#52b02c',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
               fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
           )}
@@ -723,7 +723,7 @@ const MonthlyInOutReport = () => {
           <span><span style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>W</span> = Weekend</span>
           <span><span style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>PH</span> = Public Holiday</span>
           <span><span style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>SL</span> = Leave</span>
-          <span><span style={{ background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>OV</span> = Office Visit</span>
+          <span><span style={{ background:'#dcfce7',color:'#166534',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>OV</span> = Office Visit</span>
           <span><strong style={{ color:'#d97706' }}>⚠</strong> = Single punch</span>
           <span style={{ marginLeft:'auto' }}>{employees.length} {L('कर्मचारी','staff')}</span>
         </div>

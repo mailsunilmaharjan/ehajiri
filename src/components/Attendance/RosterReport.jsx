@@ -29,9 +29,9 @@ const RosterMenuBtn = ({ active, onSelect }) => {
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 16px',
-          height: 36, background: open ? '#1e40af' : '#1a56db', color: 'white', border: 'none',
+          height: 36, background: open ? '#166534' : '#52b02c', color: 'white', border: 'none',
           borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(26,86,219,.3)', transition: 'background .15s' }}>
+          boxShadow: '0 2px 8px rgba(82,176,44,.3)', transition: 'background .15s' }}>
         <svg viewBox="0 0 20 20" fill="white" width="14" height="14">
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
@@ -58,14 +58,14 @@ const RosterMenuBtn = ({ active, onSelect }) => {
                   padding: '8px 14px', border: 'none',
                   borderBottom: i < ROSTER_SUB_MENU.length - 1 ? '1px solid #f0f0f0' : 'none',
                   textAlign: 'left', cursor: 'pointer', fontSize: 13,
-                  background: isActive ? '#eff6ff' : 'white', color: isActive ? '#1e40af' : '#374151',
+                  background: isActive ? '#f0fdf4' : 'white', color: isActive ? '#166534' : '#374151',
                   fontWeight: isActive ? 700 : 500 }}
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
                 <span style={{ fontSize: 17, flexShrink: 0 }}>{item.icon}</span>
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {isActive
-                  ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                  ? <svg viewBox="0 0 20 20" fill="#52b02c" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
                   : <svg viewBox="0 0 20 20" fill="#d1d5db" width="12" height="12"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg>
                 }
               </button>
@@ -112,7 +112,7 @@ const DayOffPills = ({ days }) => (
 
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-const SHIFT_COLORS = ['#1a56db','#059669','#7e3af2','#d97706','#dc2626','#0891b2','#be185d'];
+const SHIFT_COLORS = ['#52b02c','#059669','#7e3af2','#d97706','#dc2626','#0891b2','#be185d'];
 
 /* ══════════════════════════════════════════
    Department Week Calendar
@@ -210,9 +210,9 @@ const DeptWeekView = ({ rosters, department, weekStart, settings }) => {
               const { date, month } = fmtDayHeader(d);
               return (
                 <th key={i} style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700,
-                  fontSize: 12, color: isToday ? '#1a56db' : HDR_COLOR,
+                  fontSize: 12, color: isToday ? '#52b02c' : HDR_COLOR,
                   borderRight: i < 6 ? '1px solid #dedede' : 'none',
-                  background: isToday ? '#eff6ff' : '#efefef', minWidth: 100 }}>
+                  background: isToday ? '#f0fdf4' : '#efefef', minWidth: 100 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 2 }}>{DAYS[d.getDay()]}</div>
                   <div style={{ fontSize: 14, fontWeight: 800 }}>{date} {month}</div>
                 </th>
@@ -331,7 +331,7 @@ const StaffPickerModal = ({ open, onClose, onSelect, employees }) => {
               placeholder="Search by name, post, department or machine ID…"
               style={{ width: '100%', height: 38, border: '1.5px solid #d1d5db', borderRadius: 8,
                 padding: '0 12px 0 34px', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-              onFocus={e => e.target.style.borderColor = '#1a56db'}
+              onFocus={e => e.target.style.borderColor = '#52b02c'}
               onBlur={e  => e.target.style.borderColor = '#d1d5db'} />
           </div>
         </div>
@@ -359,13 +359,13 @@ const StaffPickerModal = ({ open, onClose, onSelect, employees }) => {
                   <tr key={s.id}
                     onClick={() => setSelected(isSel ? null : s)}
                     style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
-                      background: isSel ? '#eff6ff' : i % 2 === 0 ? '#fff' : '#fafafa',
-                      outline: isSel ? '2px solid #1a56db' : 'none', outlineOffset: -2,
+                      background: isSel ? '#f0fdf4' : i % 2 === 0 ? '#fff' : '#fafafa',
+                      outline: isSel ? '2px solid #52b02c' : 'none', outlineOffset: -2,
                       transition: 'background .1s' }}
                     onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = '#f0f9ff'; }}
                     onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = i % 2 === 0 ? '#fff' : '#fafafa'; }}>
                     <td style={{ padding: '9px 14px', fontWeight: isSel ? 700 : 500,
-                      color: isSel ? '#1e40af' : '#111827' }}>
+                      color: isSel ? '#166534' : '#111827' }}>
                       {s.fullName || '—'}
                       {s.employeeId && (
                         <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 6,
@@ -395,7 +395,7 @@ const StaffPickerModal = ({ open, onClose, onSelect, employees }) => {
           background: '#f9fafb' }}>
           <div style={{ fontSize: 12, color: '#6b7280' }}>
             {selected
-              ? <span>Selected: <strong style={{ color: '#1e40af' }}>{selected.fullName}</strong></span>
+              ? <span>Selected: <strong style={{ color: '#166534' }}>{selected.fullName}</strong></span>
               : <span>{filtered.length} staff listed — click a row to select</span>}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -409,11 +409,11 @@ const StaffPickerModal = ({ open, onClose, onSelect, employees }) => {
               disabled={!selected}
               onClick={() => selected && onSelect(selected)}
               style={{ height: 36, padding: '0 20px', fontSize: 13, fontWeight: 700,
-                background: selected ? '#1a56db' : '#e5e7eb',
+                background: selected ? '#52b02c' : '#e5e7eb',
                 color: selected ? '#fff' : '#9ca3af',
                 border: 'none', borderRadius: 8,
                 cursor: selected ? 'pointer' : 'not-allowed',
-                boxShadow: selected ? '0 2px 8px rgba(26,86,219,.3)' : 'none',
+                boxShadow: selected ? '0 2px 8px rgba(82,176,44,.3)' : 'none',
                 transition: 'all .15s' }}>
               🔍 Search
             </button>
@@ -519,9 +519,9 @@ const StaffCalendar = ({ staff, rosters, settings }) => {
       {/* Staff info + stats bar */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
         padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: '#eff6ff',
-          border: '1.5px solid #bfdbfe', display: 'flex', alignItems: 'center',
-          justifyContent: 'center', fontSize: 18, color: '#1a56db', fontWeight: 800, flexShrink: 0 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: '#f0fdf4',
+          border: '1.5px solid #bbf7d0', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', fontSize: 18, color: '#52b02c', fontWeight: 800, flexShrink: 0 }}>
           {(staff.fullName || '?')[0].toUpperCase()}
         </div>
         <div style={{ flex: 1 }}>
@@ -575,7 +575,7 @@ const StaffCalendar = ({ staff, rosters, settings }) => {
           {/* Legend */}
           <div style={{ display: 'flex', gap: 12 }}>
             {[
-              { bg: '#dbeafe', border: '#1a56db', label: 'Working' },
+              { bg: '#dcfce7', border: '#52b02c', label: 'Working' },
               { bg: '#fee2e2', border: '#dc2626', label: 'Day Off' },
               { bg: '#f3f4f6', border: '#d1d5db', label: 'No Roster' },
             ].map(l => (
@@ -625,14 +625,14 @@ const StaffCalendar = ({ staff, rosters, settings }) => {
                 borderBottom: '1px solid #e5e7eb',
                 borderRight: (idx + 1) % 7 !== 0 ? '1px solid #e5e7eb' : 'none',
                 padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 4,
-                outline: tod ? '2px solid #1a56db' : 'none', outlineOffset: -2
+                outline: tod ? '2px solid #52b02c' : 'none', outlineOffset: -2
               }}>
                 {/* Day number */}
                 <div style={{
                   alignSelf: 'flex-start', width: 26, height: 26, borderRadius: '50%',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 14, fontWeight: tod ? 800 : 500,
-                  background: tod ? '#1a56db' : 'transparent',
+                  background: tod ? '#52b02c' : 'transparent',
                   color: tod ? '#fff' : dow === 0 ? '#dc2626' : '#374151'
                 }}>{fmt(d)}</div>
 
@@ -643,7 +643,7 @@ const StaffCalendar = ({ staff, rosters, settings }) => {
                     OFF
                   </div>
                 ) : info ? (
-                  <div style={{ background: '#dbeafe', color: '#1e40af', borderRadius: 4,
+                  <div style={{ background: '#dcfce7', color: '#166534', borderRadius: 4,
                     fontSize: 12, fontWeight: 700, padding: '3px 6px', textAlign: 'center', lineHeight: 1.4 }}>
                     {info.shiftName || 'On Duty'}
                     {info.startTime && (
@@ -1005,7 +1005,7 @@ const RosterReport = () => {
           <button onClick={() => window.print()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 36,
               padding: '0 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              background: '#eff6ff', border: '1px solid #93c5fd', color: '#1d4ed8', borderRadius: 8 }}>
+              background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d', borderRadius: 8 }}>
             🖨️ Print
           </button>
           <RosterMenuBtn active="view" onSelect={key => {
@@ -1018,7 +1018,7 @@ const RosterReport = () => {
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: '70px 0' }}>
-          <div style={{ width: 42, height: 42, border: '4px solid #e5e7eb', borderTopColor: '#1a56db',
+          <div style={{ width: 42, height: 42, border: '4px solid #e5e7eb', borderTopColor: '#52b02c',
             borderRadius: '50%', animation: 'spin .8s linear infinite', margin: '0 auto 14px' }} />
           <div style={{ color: '#9ca3af', fontSize: 13, fontWeight: 600 }}>Loading roster data…</div>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -1044,10 +1044,10 @@ const RosterReport = () => {
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
                     height: 36, padding: '0 16px', fontSize: 13, fontWeight: 700,
                     cursor: 'pointer', borderRadius: 8, transition: 'all .15s',
-                    background: view === btn.key ? '#1a56db' : '#f8fafc',
+                    background: view === btn.key ? '#52b02c' : '#f8fafc',
                     color:      view === btn.key ? '#fff'    : '#374151',
                     border:     view === btn.key ? 'none'    : '1px solid #d1d5db',
-                    boxShadow:  view === btn.key ? '0 2px 8px rgba(26,86,219,.3)' : 'none',
+                    boxShadow:  view === btn.key ? '0 2px 8px rgba(82,176,44,.3)' : 'none',
                   }}>
                   {btn.icon} {btn.label}
                 </button>
@@ -1076,7 +1076,7 @@ const RosterReport = () => {
                     placeholder="Search name, shift…"
                     style={{ height: 36, width: 200, border: '1px solid #d1d5db', borderRadius: 8,
                       padding: '0 10px 0 32px', fontSize: 13, outline: 'none' }}
-                    onFocus={e => e.target.style.borderColor = '#1a56db'}
+                    onFocus={e => e.target.style.borderColor = '#52b02c'}
                     onBlur={e  => e.target.style.borderColor = '#d1d5db'} />
                 </div>
               )}
@@ -1133,7 +1133,7 @@ const RosterReport = () => {
                   <button onClick={() => window.print()}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 34,
                       padding: '0 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                      background: '#eff6ff', border: '1px solid #93c5fd', color: '#1d4ed8', borderRadius: 8 }}>
+                      background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d', borderRadius: 8 }}>
                     🖨️ Print
                   </button>
                   <button onClick={handleDeptExport}
@@ -1211,7 +1211,7 @@ const RosterReport = () => {
                         <td style={{ padding: '8px 14px', color: '#374151' }}>{r.department || '—'}</td>
                         <td style={{ padding: '8px 14px' }}>
                           {r.shiftName
-                            ? <Badge text={r.shiftName} color="#1a56db" bg="#eff6ff" />
+                            ? <Badge text={r.shiftName} color="#52b02c" bg="#f0fdf4" />
                             : <span style={{ color: '#d1d5db' }}>—</span>}
                         </td>
                         <td style={{ padding: '8px 14px', color: '#374151', fontSize: 12 }}>{fmtDate(r.dateFrom)}</td>

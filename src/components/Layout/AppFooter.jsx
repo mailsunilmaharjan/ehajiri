@@ -14,7 +14,7 @@ const AppFooter = () => (
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
           <div style={{
             width:40, height:40, borderRadius:10,
-            background:'linear-gradient(135deg,#1a56db,#7e3af2)',
+            background:'linear-gradient(135deg,#52b02c,#2f6e1a)',
             display:'flex', alignItems:'center', justifyContent:'center',
             color:'#fff', fontSize:16, fontWeight:800, flexShrink:0,
           }}>PI</div>
@@ -29,7 +29,7 @@ const AppFooter = () => (
           <div>
             🌐{' '}
             <a href="http://www.planetinfosys.com.np" target="_blank" rel="noreferrer"
-              style={{ color:'#1a56db', textDecoration:'none', fontWeight:500 }}
+              style={{ color:'#52b02c', textDecoration:'none', fontWeight:500 }}
               onMouseEnter={e => e.target.style.textDecoration='underline'}
               onMouseLeave={e => e.target.style.textDecoration='none'}>
               www.planetinfosys.com.np
@@ -52,7 +52,7 @@ const AppFooter = () => (
             { label:'Vite 5',         color:'#a855f7', bg:'#f5f3ff', desc:'Build Tool'       },
             { label:'Node.js',        color:'#3c873a', bg:'#ecfdf5', desc:'Backend Runtime'  },
             { label:'Express 4',      color:'#374151', bg:'#f3f4f6', desc:'REST API'         },
-            { label:'PostgreSQL 16',  color:'#336791', bg:'#eff6ff', desc:'Database'         },
+            { label:'PostgreSQL 16',  color:'#336791', bg:'#f0fdf4', desc:'Database'         },
             { label:'React Router 6', color:'#e11d48', bg:'#fff1f2', desc:'Routing'          },
             { label:'Concurrently',   color:'#f59e0b', bg:'#fffbeb', desc:'Dev Server'       },
           ].map(t => (

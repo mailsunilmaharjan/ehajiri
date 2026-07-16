@@ -39,7 +39,7 @@ const TH_SUB     = { ...TH_BASE, paddingTop:3, fontSize:11, color:'#6b7280' };
 const TH_WKD     = { ...TH_GRP, color:'#6b7280' };
 const TH_HOL     = { ...TH_GRP, background:'#fef3c7', color:'#92400e' };
 const TH_HOL_SUB = { ...TH_SUB, background:'#fef9e7', color:'#92400e' };
-const TH_OV      = { ...TH_BASE, background:'#eff6ff', color:'#1e40af' };
+const TH_OV      = { ...TH_BASE, background:'#f0fdf4', color:'#166534' };
 const TD_BASE    = {
   padding:'5px 8px', fontSize:12, color:'#374151',
   borderRight:'1px solid #e5e7eb', borderBottom:'1px solid #f3f4f6',
@@ -92,7 +92,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
 
         <div style={{ padding:'18px 24px 14px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:17, fontWeight:700, color:'#1e40af' }}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#166534' }}>
             {L('एडभान्स खोज','Advance Search')}
           </span>
           <button onClick={onClose}
@@ -113,7 +113,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
                     onClick={() => { set('_status', v); set('staffId', ''); }}
                     style={{ flex:1, padding:'8px 12px', border:'none', cursor:'pointer',
                       fontSize:13, fontWeight:600, transition:'background .15s',
-                      background: (local._status || 'working') === v ? '#1a56db' : 'white',
+                      background: (local._status || 'working') === v ? '#52b02c' : 'white',
                       color: (local._status || 'working') === v ? 'white' : '#374151' }}>
                     {label}
                   </button>
@@ -179,10 +179,10 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           </button>
           <button onClick={() => { onApply(local); onClose(); }}
             style={{ padding:'8px 24px', border:'none', borderRadius:8,
-              background:'#1a56db', color:'white', fontSize:14, fontWeight:700,
-              cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}
-            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
-            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
+              background:'#52b02c', color:'white', fontSize:14, fontWeight:700,
+              cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#166534'}
+            onMouseLeave={e=>e.currentTarget.style.background='#52b02c'}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -366,7 +366,7 @@ const HalfSummaryReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -386,7 +386,7 @@ const HalfSummaryReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -425,7 +425,7 @@ const HalfSummaryReport = () => {
           {[1,2].map(h=>(
             <button key={h} onClick={()=>setHalf(h)}
               style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',
+                background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',
                 transition:'background .15s' }}>
               {h===1?L('पहिलो अर्ध','1st Half'):L('दोस्रो अर्ध','2nd Half')}
             </button>
@@ -452,7 +452,7 @@ const HalfSummaryReport = () => {
           </svg>
           {L('एडभान्स खोज','Advance Search')}
           {activeFilterCount > 0 && (
-            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
+            <span style={{ background:'#52b02c',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
               fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
           )}
@@ -537,7 +537,7 @@ const HalfSummaryReport = () => {
               {rows.map((r, idx) => (
                 <tr key={r.id}
                   style={{ background: idx%2===0 ? 'white' : '#f9fafb' }}
-                  onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
+                  onMouseEnter={e=>e.currentTarget.style.background='#f0fdf4'}
                   onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f9fafb'}>
                   <td style={{ ...TD_BASE, background:'#efefef', fontWeight:700, color:'#6b7280', borderRight:'1px solid #dedede' }}>
                     {idx+1}
@@ -555,7 +555,7 @@ const HalfSummaryReport = () => {
                   <td style={{ ...TD_BASE, color:'#92400e', fontWeight:700 }}>{r.holidayDays||0}</td>
                   <td style={TD_BASE}><Pill v={r.holidayPresent||0} bg="#fef3c7" color="#92400e" /></td>
                   <td style={TD_BASE}><Pill v={r.leaveDays} bg="#ede9fe" color="#5b21b6" /></td>
-                  <td style={TD_BASE}><Pill v={r.officialVisitDays||0} bg="#dbeafe" color="#1e40af" /></td>
+                  <td style={TD_BASE}><Pill v={r.officialVisitDays||0} bg="#dcfce7" color="#166534" /></td>
                   <td style={{ ...TD_BASE, background:'#f0fdf4' }}><Pill v={r.presentDays} bg="#d1fae5" color="#065f46" /></td>
                   <td style={{ ...TD_BASE, background: r.absentDays>0?'#fff5f5':'inherit' }}><Pill v={r.absentDays} bg="#fee2e2" color="#991b1b" /></td>
                   <td style={TD_BASE}>

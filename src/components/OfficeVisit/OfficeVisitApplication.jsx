@@ -26,10 +26,10 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
         onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setOpen(p=>!p); } if (e.key==='Escape') setOpen(false); }}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '9px 12px', border: `1.5px solid ${error ? '#f87171' : open ? '#1a56db' : '#d1d5db'}`,
+          padding: '9px 12px', border: `1.5px solid ${error ? '#f87171' : open ? '#52b02c' : '#d1d5db'}`,
           borderRadius: 7, background: 'white', cursor: 'pointer', fontSize: 13, minHeight: 42,
           color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline: 'none', userSelect: 'none',
+          boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline: 'none', userSelect: 'none',
         }}>
         <span>{value || placeholder}</span>
         <span style={{ fontSize: 9, color: '#9ca3af', flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
@@ -37,7 +37,7 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 3px)', left: 0, right: 0, zIndex: 9999,
-          background: 'white', border: '1.5px solid #1a56db', borderRadius: 8,
+          background: 'white', border: '1.5px solid #52b02c', borderRadius: 8,
           boxShadow: '0 8px 24px rgba(0,0,0,.18)', maxHeight: 260, display: 'flex', flexDirection: 'column',
         }}>
           <div style={{ padding: '6px 8px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
@@ -56,12 +56,12 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
                 style={{
                   padding: '9px 12px', fontSize: 13, cursor: 'pointer',
                   borderBottom: '1px solid #f3f4f6',
-                  background: value === opt ? '#eff6ff' : 'white',
-                  color: value === opt ? '#1e40af' : '#374151',
+                  background: value === opt ? '#f0fdf4' : 'white',
+                  color: value === opt ? '#166534' : '#374151',
                   fontWeight: value === opt ? 700 : 400,
                 }}
                 onMouseEnter={e => { if (value !== opt) e.currentTarget.style.background = '#f8fafc'; }}
-                onMouseLeave={e => { if (value !== opt) e.currentTarget.style.background = value===opt?'#eff6ff':'white'; }}>
+                onMouseLeave={e => { if (value !== opt) e.currentTarget.style.background = value===opt?'#f0fdf4':'white'; }}>
                 {opt}
               </div>
             ))}
@@ -278,14 +278,14 @@ const OfficeVisitApplication = () => {
                   {['National', 'International'].map(vt => (
                     <label key={vt} style={{ display: 'flex', alignItems: 'center', gap: 8,
                       cursor: 'pointer', userSelect: 'none', padding: '8px 18px',
-                      border: `1.5px solid ${form.visitType === vt ? '#1a56db' : '#d1d5db'}`,
-                      borderRadius: 8, background: form.visitType === vt ? '#eff6ff' : 'white',
+                      border: `1.5px solid ${form.visitType === vt ? '#52b02c' : '#d1d5db'}`,
+                      borderRadius: 8, background: form.visitType === vt ? '#f0fdf4' : 'white',
                       fontSize: 13, fontWeight: form.visitType === vt ? 700 : 400,
-                      color: form.visitType === vt ? '#1a56db' : '#374151', transition: 'all .12s' }}>
+                      color: form.visitType === vt ? '#52b02c' : '#374151', transition: 'all .12s' }}>
                       <input type="radio" name="visitType" value={vt}
                         checked={form.visitType === vt}
                         onChange={() => handleChange('visitType', vt)}
-                        style={{ accentColor: '#1a56db', width: 14, height: 14 }} />
+                        style={{ accentColor: '#52b02c', width: 14, height: 14 }} />
                       {vt === 'National' ? '🇳🇵 National' : '🌍 International'}
                     </label>
                   ))}
@@ -359,7 +359,7 @@ const OfficeVisitApplication = () => {
                     {form.reco.length > 0
                       ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                           {form.reco.map(id => (
-                            <span key={id} style={{ background: '#eff6ff', color: '#1a56db',
+                            <span key={id} style={{ background: '#f0fdf4', color: '#52b02c',
                               borderRadius: 10, padding: '2px 11px', fontSize: 13, fontWeight: 600 }}>
                               {getEmpName(id)}
                             </span>
@@ -390,9 +390,9 @@ const OfficeVisitApplication = () => {
 
               {/* ── Summary preview ── */}
               {form.officialVisit && form.address && (
-                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe',
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0',
                   borderRadius: 8, padding: '12px 14px', marginBottom: 16, fontSize: 13 }}>
-                  <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 8 }}>📋 Summary</div>
+                  <div style={{ fontWeight: 700, color: '#166534', marginBottom: 8 }}>📋 Summary</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, color: '#374151' }}>
                     <div><span style={{ color: '#6b7280' }}>Official Visit:</span> <strong>{form.officialVisit}</strong></div>
                     <div><span style={{ color: '#6b7280' }}>Visit Type:</span>

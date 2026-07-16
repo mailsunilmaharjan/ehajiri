@@ -38,7 +38,7 @@ const STATUS = {
   H  : { color:'#111827', main:'W',   sup:null,  title:'Weekend'                   },
   L  : { color:'#7c3aed', main:'L',   sup:null,  title:'Leave'                     },
   LH : { color:'#a855f7', main:'L',   sup:'½',   title:'Half-day Leave'            },
-  OV : { color:'#2563eb', main:'OV',  sup:null,  title:'Office Visit'              },
+  OV : { color:'#16a34a', main:'OV',  sup:null,  title:'Office Visit'              },
   PH : { color:'#d97706', main:'H',   sup:null,  title:'Public Holiday'            },
 };
 
@@ -114,7 +114,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         {/* Header */}
         <div style={{ padding:'18px 24px 14px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:17, fontWeight:700, color:'#1e40af' }}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#166534' }}>
             {L('एडभान्स खोज','Advance Search')}
           </span>
           <button onClick={onClose}
@@ -210,10 +210,10 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           <button
             onClick={() => { onApply(local); onMonthChange(localMonth); onClose(); }}
             style={{ padding:'8px 24px', border:'none', borderRadius:8,
-              background:'#1a56db', color:'white', fontSize:14, fontWeight:700,
-              cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}
-            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
-            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
+              background:'#52b02c', color:'white', fontSize:14, fontWeight:700,
+              cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#166534'}
+            onMouseLeave={e=>e.currentTarget.style.background='#52b02c'}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -457,7 +457,7 @@ const PresentAbsentReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -477,7 +477,7 @@ const PresentAbsentReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -518,7 +518,7 @@ const PresentAbsentReport = () => {
           {[1,2].map(h=>(
             <button key={h} onClick={()=>setHalf(h)}
               style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
+                background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
               {h===1?L('पहिलो अर्ध','1st Half'):L('दोस्रो अर्ध','2nd Half')}
             </button>
           ))}
@@ -530,7 +530,7 @@ const PresentAbsentReport = () => {
             <button key={v}
               onClick={() => setFilters(p => ({ ...p, status:v, staffId:'' }))}
               style={{ padding:'5px 14px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,
-                background:filters.status===v?'#1a56db':'white',
+                background:filters.status===v?'#52b02c':'white',
                 color:filters.status===v?'white':'#374151',transition:'background .15s' }}>
               {label}
             </button>
@@ -562,7 +562,7 @@ const PresentAbsentReport = () => {
           </svg>
           {L('एडभान्स खोज','Advance Search')}
           {activeFilterCount > 0 && (
-            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
+            <span style={{ background:'#52b02c',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
               fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
           )}
@@ -647,7 +647,7 @@ const PresentAbsentReport = () => {
               {employees.map((emp, idx) => (
                 <tr key={emp.id}
                   style={{ background: idx%2===0 ? 'white' : '#f9fafb' }}
-                  onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
+                  onMouseEnter={e=>e.currentTarget.style.background='#f0fdf4'}
                   onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f9fafb'}>
 
                   <td style={{ ...tdBase, fontWeight:600, color:'#6b7280',
@@ -705,22 +705,22 @@ const PresentAbsentReport = () => {
 
               {/* Office Visit summary row */}
               {employees.length > 0 && grandOV > 0 && (
-                <tr style={{ background:'#eff6ff', borderTop:'1px solid #bfdbfe' }}>
-                  <td style={{ ...tdBase, background:'#dbeafe', color:'#6b7280', fontWeight:600,
+                <tr style={{ background:'#f0fdf4', borderTop:'1px solid #bbf7d0' }}>
+                  <td style={{ ...tdBase, background:'#dcfce7', color:'#6b7280', fontWeight:600,
                     position:'sticky', left:0, zIndex:1, borderRight:'1px solid #dedede' }}></td>
-                  <td colSpan={4} style={{ ...tdBase, fontWeight:700, color:'#1e40af',
-                    textAlign:'left', background:'#dbeafe',
+                  <td colSpan={4} style={{ ...tdBase, fontWeight:700, color:'#166534',
+                    textAlign:'left', background:'#dcfce7',
                     position:'sticky', left:34, zIndex:1 }}>
                     🚗 {L('कार्यालय भ्रमण जम्मा','Office Visit Total')}
                   </td>
                   {dateTotals.map((dt, i) => (
                     <td key={i} style={{ ...tdBase, textAlign:'center', fontWeight:700,
-                      color: dt.ov > 0 ? '#2563eb' : '#d1d5db' }}>
+                      color: dt.ov > 0 ? '#16a34a' : '#d1d5db' }}>
                       {dt.ov > 0 ? dt.ov : '—'}
                     </td>
                   ))}
                   <td style={{ ...tdBase, color:'#d1d5db', textAlign:'center' }}>—</td>
-                  <td style={{ ...tdBase, fontWeight:800, color:'#1e40af', background:'#dbeafe', textAlign:'center' }}>{grandOV}</td>
+                  <td style={{ ...tdBase, fontWeight:800, color:'#166534', background:'#dcfce7', textAlign:'center' }}>{grandOV}</td>
                 </tr>
               )}
 

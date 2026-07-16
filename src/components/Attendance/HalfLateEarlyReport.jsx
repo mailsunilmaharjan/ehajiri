@@ -68,7 +68,7 @@ const ReasonModal = ({ row, existingReason, onClose, onSave, L, fd }) => {
             placeholder={L('ढिला आउने / चाँडो जाने कारण लेख्नुस...','Reason for being late / leaving early...')}
             style={{ width:'100%',border:'1.5px solid #d1d5db',borderRadius:8,padding:'10px 12px',
               fontSize:13,resize:'vertical',outline:'none',boxSizing:'border-box' }}
-            onFocus={e=>e.target.style.borderColor='#1a56db'}
+            onFocus={e=>e.target.style.borderColor='#52b02c'}
             onBlur={e=>e.target.style.borderColor='#d1d5db'}
             autoFocus />
           <div style={{ marginTop:8,fontSize:12,color:'#6b7280',fontStyle:'italic' }}>
@@ -84,7 +84,7 @@ const ReasonModal = ({ row, existingReason, onClose, onSave, L, fd }) => {
           <button onClick={async () => { setSaving(true); await onSave(row, reason); setSaving(false); onClose(); }}
             disabled={!reason.trim() || saving}
             style={{ padding:'8px 20px',border:'none',borderRadius:8,
-              background:reason.trim()&&!saving?'#1a56db':'#93c5fd',
+              background:reason.trim()&&!saving?'#52b02c':'#86efac',
               color:'white',fontSize:13,fontWeight:700,cursor:reason.trim()&&!saving?'pointer':'not-allowed' }}>
             {saving ? L('सेभ हुँदैछ...','Saving...') : L('सेभ गर्नुस','Save')}
           </button>
@@ -107,7 +107,7 @@ const ActionBtn = ({ row, savedReasons, onGiveReason, L }) => {
     <div ref={ref} style={{ position:'relative',display:'inline-flex',alignItems:'center',gap:6 }}>
       <button onClick={() => setOpen(p=>!p)}
         style={{ display:'inline-flex',alignItems:'center',gap:4,padding:'4px 10px',height:28,
-          background:open?'#1e40af':'#1a56db',color:'white',border:'none',borderRadius:6,
+          background:open?'#166534':'#52b02c',color:'white',border:'none',borderRadius:6,
           fontSize:12,fontWeight:600,cursor:'pointer',transition:'background .12s' }}>
         {L('कार्य','Action')}
         <svg viewBox="0 0 20 20" fill="white" width="11" height="11"
@@ -177,7 +177,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         onClick={e=>e.stopPropagation()}>
         <div style={{ padding:'18px 24px 14px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:17, fontWeight:700, color:'#1e40af' }}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#166534' }}>
             {L('एडभान्स खोज','Advance Search')}
           </span>
           <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1,padding:'2px 6px',borderRadius:6 }}
@@ -194,7 +194,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
                     onClick={() => { set('_status', v); set('staffId', ''); }}
                     style={{ flex:1, padding:'8px 12px', border:'none', cursor:'pointer',
                       fontSize:13, fontWeight:600, transition:'background .15s',
-                      background: (local._status || 'working') === v ? '#1a56db' : 'white',
+                      background: (local._status || 'working') === v ? '#52b02c' : 'white',
                       color: (local._status || 'working') === v ? 'white' : '#374151' }}>
                     {label}
                   </button>
@@ -242,9 +242,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
             {L('रिसेट','Reset')}
           </button>
           <button onClick={() => { onApply(local); onClose(); }}
-            style={{ padding:'8px 24px', border:'none', borderRadius:8, background:'#1a56db', color:'white', fontSize:14, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}
-            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
-            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
+            style={{ padding:'8px 24px', border:'none', borderRadius:8, background:'#52b02c', color:'white', fontSize:14, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#166534'}
+            onMouseLeave={e=>e.currentTarget.style.background='#52b02c'}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -377,7 +377,7 @@ const HalfLateEarlyReport = () => {
       render: (v, row) => {
         const warn = row.punches === 1;
         return v
-          ? <strong style={{ fontFamily:'monospace', color: warn?'#d97706':'#1a56db', fontSize:14 }}
+          ? <strong style={{ fontFamily:'monospace', color: warn?'#d97706':'#52b02c', fontSize:14 }}
               title={warn?'Single punch':''}>
               {fmtTime(v)}{warn && ' ⚠'}
             </strong>
@@ -462,7 +462,7 @@ const HalfLateEarlyReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
+              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -478,7 +478,7 @@ const HalfLateEarlyReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -515,7 +515,7 @@ const HalfLateEarlyReport = () => {
           {[1,2].map(h=>(
             <button key={h} onClick={()=>setHalf(h)}
               style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
+                background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
               {h===1?L('पहिलो अर्ध','1st Half'):L('दोस्रो अर्ध','2nd Half')}
             </button>
           ))}
@@ -541,7 +541,7 @@ const HalfLateEarlyReport = () => {
           </svg>
           {L('एडभान्स खोज','Advance Search')}
           {activeFilterCount>0 && (
-            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
+            <span style={{ background:'#52b02c',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
               fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
           )}

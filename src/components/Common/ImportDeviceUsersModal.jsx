@@ -44,10 +44,10 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
 
         {/* Header */}
         <div className="modal-header"
-             style={{ background:'linear-gradient(135deg,#1e3a5f,#1a56db)', color:'white', position:'sticky', top:0, zIndex:10 }}>
+             style={{ background:'linear-gradient(135deg,#1e3a5f,#52b02c)', color:'white', position:'sticky', top:0, zIndex:10 }}>
           <div>
             <h2 style={{ color:'white', margin:0 }}>📥 Import Device Users to Staff</h2>
-            <div style={{ fontSize:12, color:'#bfdbfe', marginTop:2 }}>
+            <div style={{ fontSize:12, color:'#bbf7d0', marginTop:2 }}>
               Device Users → Staff Detail table
             </div>
           </div>
@@ -91,14 +91,14 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
                         {result.results.map((r, i) => {
                           const colors = {
                             created: { bg:'#d1fae5', color:'#065f46' },
-                            updated: { bg:'#dbeafe', color:'#1e40af' },
+                            updated: { bg:'#dcfce7', color:'#166534' },
                             linked:  { bg:'#e0f2fe', color:'#0369a1' },
                             error:   { bg:'#fee2e2', color:'#991b1b' },
                           };
                           const c = colors[r.action] || { bg:'#f3f4f6', color:'#374151' };
                           return (
                             <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'white':'#fafafa' }}>
-                              <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#1a56db' }}>{r.pin}</td>
+                              <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#52b02c' }}>{r.pin}</td>
                               <td style={{ padding:'5px 10px', fontWeight:600 }}>{r.name}</td>
                               <td style={{ padding:'5px 10px', fontFamily:'monospace', fontSize:11, color:'#6b7280' }}>{r.email}</td>
                               <td style={{ padding:'5px 10px', textAlign:'center' }}>
@@ -134,7 +134,7 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
               {!loading && (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:16 }}>
                   {[
-                    { label:'Total Device Users', value:deviceUsers.length,     color:'#1a56db', bg:'#eff6ff' },
+                    { label:'Total Device Users', value:deviceUsers.length,     color:'#52b02c', bg:'#f0fdf4' },
                     { label:'Will Create (new)',  value:unlinked.length,         color:'#059669', bg:'#d1fae5' },
                     { label:'Will Update (linked)',value:linked.length,          color:'#0369a1', bg:'#e0f2fe' },
                   ].map(s => (
@@ -162,7 +162,7 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
                   </thead>
                   <tbody>
                     {[
-                      { from:'PIN',       to:'Attendance Device ID', fromColor:'#1a56db', toColor:'#059669' },
+                      { from:'PIN',       to:'Attendance Device ID', fromColor:'#52b02c', toColor:'#059669' },
                       { from:'Name',      to:'Staff Name (Full Name)',fromColor:'#374151', toColor:'#374151' },
                       { from:'auto-gen',  to:`Email  (PIN@${emailDomain||'domain'})`, fromColor:'#6b7280', toColor:'#7c3aed' },
                     ].map(row => (
@@ -214,14 +214,14 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
                       <tbody>
                         {deviceUsers.map((u, i) => (
                           <tr key={u.id} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'white':'#fafafa' }}>
-                            <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#1a56db' }}>{u.pin}</td>
+                            <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#52b02c' }}>{u.pin}</td>
                             <td style={{ padding:'5px 10px', fontWeight:600 }}>{u.name || `Staff ${u.pin}`}</td>
                             <td style={{ padding:'5px 10px', fontFamily:'monospace', fontSize:11, color:'#059669' }}>
                               {u.pin}@{emailDomain||'planetinfosys.com.np'}
                             </td>
                             <td style={{ padding:'5px 10px', textAlign:'center' }}>
                               {u.employee_id
-                                ? <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:700 }}>UPDATE</span>
+                                ? <span style={{ background:'#dcfce7', color:'#166534', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:700 }}>UPDATE</span>
                                 : <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:700 }}>CREATE</span>
                               }
                             </td>

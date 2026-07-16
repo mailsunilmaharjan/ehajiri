@@ -44,8 +44,8 @@ export const Avatar = ({ label, photo, isGroup, online, size = 40 }) => (
     ) : (
       <div style={{
         width: size, height: size, borderRadius: '50%',
-        background: isGroup ? '#f5f3ff' : '#eff6ff',
-        color:      isGroup ? '#6d28d9' : '#1a56db',
+        background: isGroup ? '#f5f3ff' : '#f0fdf4',
+        color:      isGroup ? '#6d28d9' : '#52b02c',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontWeight: 700, fontSize: size * 0.4,
       }}>
@@ -156,7 +156,7 @@ const MessageBody = ({ body, compact, onToggle }) => {
         if (n) {
           return (
             <div key={i} style={{ display: 'flex', gap: 6, margin: '2.5px 0', alignItems: 'flex-start' }}>
-              <span style={{ fontWeight: 700, color: '#1a56db', flexShrink: 0 }}>{n[1]}.</span>
+              <span style={{ fontWeight: 700, color: '#52b02c', flexShrink: 0 }}>{n[1]}.</span>
               <span style={{ whiteSpace: 'pre-wrap' }}>{renderInline(n[2])}</span>
             </div>
           );
@@ -165,7 +165,7 @@ const MessageBody = ({ body, compact, onToggle }) => {
         if (b) {
           return (
             <div key={i} style={{ display: 'flex', gap: 8, margin: '2.5px 0', alignItems: 'flex-start' }}>
-              <span style={{ color: '#1a56db', fontWeight: 800, flexShrink: 0 }}>•</span>
+              <span style={{ color: '#52b02c', fontWeight: 800, flexShrink: 0 }}>•</span>
               <span style={{ whiteSpace: 'pre-wrap' }}>{renderInline(b[1])}</span>
             </div>
           );
@@ -222,9 +222,9 @@ const Bubble = ({ msg, mine, myId, showSender, onReply, onToggleCheck, onReact, 
                 onDoubleClick={(e) => e.stopPropagation()}
                 title={myReaction === em ? 'Remove reaction' : `React ${em}`}
                 style={{ fontSize: em === 'OK' ? 10.5 : (compact ? 14 : 16), fontWeight: em === 'OK' ? 800 : 400,
-                  color: em === 'OK' ? '#1a56db' : undefined,
+                  color: em === 'OK' ? '#52b02c' : undefined,
                   padding: em === 'OK' ? '3px 5px' : '1px 3px', borderRadius: 10, lineHeight: '18px',
-                  background: myReaction === em ? '#dbeafe' : 'transparent',
+                  background: myReaction === em ? '#dcfce7' : 'transparent',
                   cursor: 'pointer', userSelect: 'none', transition: 'transform .08s' }}
                 onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.25)'; }}
                 onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}>
@@ -257,13 +257,13 @@ const Bubble = ({ msg, mine, myId, showSender, onReply, onToggleCheck, onReact, 
           boxShadow: '0 1px 1px rgba(0,0,0,.05)',
         }}>
           {showSender && (
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#1a56db', marginBottom: 2 }}>{msg.sender_name}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#52b02c', marginBottom: 2 }}>{msg.sender_name}</div>
           )}
           {msg.reply_to_id && (
-            <div style={{ borderLeft: '3px solid #1a56db', background: 'rgba(0,0,0,.04)', borderRadius: 4,
+            <div style={{ borderLeft: '3px solid #52b02c', background: 'rgba(0,0,0,.04)', borderRadius: 4,
               padding: '3px 7px', marginBottom: 5, fontSize: 11.5 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <span style={{ fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontWeight: 700, color: '#52b02c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {msg.reply_to_sender_name || 'Message'}
                 </span>
                 {msg.reply_to_created_at && (
@@ -290,9 +290,9 @@ const Bubble = ({ msg, mine, myId, showSender, onReply, onToggleCheck, onReact, 
                 onDoubleClick={(e) => e.stopPropagation()}
                 title={g.names.join(', ')}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 3,
-                  background: '#fff', border: `1px solid ${myReaction === g.emoji ? '#93c5fd' : '#e5e7eb'}`,
+                  background: '#fff', border: `1px solid ${myReaction === g.emoji ? '#86efac' : '#e5e7eb'}`,
                   borderRadius: 12, padding: '1px 7px', fontSize: g.emoji === 'OK' ? 9.5 : 12,
-                  fontWeight: g.emoji === 'OK' ? 800 : 400, color: g.emoji === 'OK' ? '#1a56db' : undefined,
+                  fontWeight: g.emoji === 'OK' ? 800 : 400, color: g.emoji === 'OK' ? '#52b02c' : undefined,
                   boxShadow: '0 1px 3px rgba(0,0,0,.12)', cursor: 'pointer', userSelect: 'none' }}>
                 {g.emoji}{g.count > 1 && <span style={{ fontSize: 10, fontWeight: 700, color: '#6b7280' }}>{g.count}</span>}
               </span>
@@ -561,9 +561,9 @@ const ChatThread = ({ conversationId, compact = false, onClose, onMinimize }) =>
       {replyTo && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px',
           background: '#f3f4f6', borderTop: '1px solid #e5e7eb', flexShrink: 0 }}>
-          <div style={{ flex: 1, minWidth: 0, borderLeft: '3px solid #1a56db', paddingLeft: 8 }}>
+          <div style={{ flex: 1, minWidth: 0, borderLeft: '3px solid #52b02c', paddingLeft: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#52b02c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 ↩ Replying to {replyTo.sender_id === currentUser?.id ? 'yourself' : replyTo.sender_name}
               </span>
               <span style={{ fontSize: 10, color: '#9ca3af', flexShrink: 0 }}>{fmtQuoteTime(replyTo.created_at)}</span>
@@ -603,7 +603,7 @@ const ChatThread = ({ conversationId, compact = false, onClose, onMinimize }) =>
                 color: '#374151', fontSize: compact ? 11 : 13, fontWeight: 700,
                 cursor: 'pointer', padding: 0, lineHeight: 1,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', ...(b.style || {}) }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#e0e7f0'; e.currentTarget.style.color = '#1a56db'; }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#e0e7f0'; e.currentTarget.style.color = '#52b02c'; }}
               onMouseLeave={e => { e.currentTarget.style.background = '#f3f4f6'; e.currentTarget.style.color = '#374151'; }}>
               {b.label}
             </button>
@@ -625,7 +625,7 @@ const ChatThread = ({ conversationId, compact = false, onClose, onMinimize }) =>
               minHeight: input.includes('\n') ? (compact ? 60 : 76) : undefined }}
           />
           <button onClick={sendMessage} disabled={!input.trim() || sending}
-            style={{ background: input.trim() ? '#1a56db' : '#e5e7eb', color: input.trim() ? '#fff' : '#9ca3af',
+            style={{ background: input.trim() ? '#52b02c' : '#e5e7eb', color: input.trim() ? '#fff' : '#9ca3af',
               border: 'none', borderRadius: '50%', width: compact ? 32 : 38, height: compact ? 32 : 38,
               fontSize: compact ? 13 : 16, cursor: input.trim() ? 'pointer' : 'default', flexShrink: 0 }}>
             ➤

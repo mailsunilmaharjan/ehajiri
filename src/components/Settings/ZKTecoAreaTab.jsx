@@ -51,7 +51,7 @@ const NameComboBox = ({ suggestions = [], value, onChange, placeholder, hasError
     setOpen(false);
   };
 
-  const borderColor = open ? '#1a56db' : hasError ? '#ef4444' : '#d1d5db';
+  const borderColor = open ? '#52b02c' : hasError ? '#ef4444' : '#d1d5db';
 
   return (
     <div ref={ref} style={{ position:'relative' }}>
@@ -61,7 +61,7 @@ const NameComboBox = ({ suggestions = [], value, onChange, placeholder, hasError
         display:'flex', alignItems:'center',
         border:`1.5px solid ${borderColor}`, borderRadius:8,
         background:'white', overflow:'hidden',
-        boxShadow: open ? '0 0 0 2px rgba(26,86,219,.1)' : 'none',
+        boxShadow: open ? '0 0 0 2px rgba(82,176,44,.1)' : 'none',
         transition:'border-color .15s, box-shadow .15s',
       }}>
         <input
@@ -124,18 +124,18 @@ const NameComboBox = ({ suggestions = [], value, onChange, placeholder, hasError
                   style={{
                     display:'flex', alignItems:'center', gap:10, padding:'9px 14px',
                     cursor:'pointer',
-                    background: active ? '#eff6ff' : 'transparent',
+                    background: active ? '#f0fdf4' : 'transparent',
                     borderBottom: i < filtered.length-1 ? '1px solid #f9fafb' : 'none',
                     transition:'background .1s',
                   }}
                   onMouseEnter={e => { if(!active) e.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = active?'#eff6ff':'transparent'; }}>
+                  onMouseLeave={e => { e.currentTarget.style.background = active?'#f0fdf4':'transparent'; }}>
 
                   {/* Checkbox */}
                   <div style={{
                     width:16, height:16, borderRadius:4, flexShrink:0,
-                    border:`2px solid ${active?'#1a56db':'#d1d5db'}`,
-                    background: active?'#1a56db':'white',
+                    border:`2px solid ${active?'#52b02c':'#d1d5db'}`,
+                    background: active?'#52b02c':'white',
                     display:'flex', alignItems:'center', justifyContent:'center',
                     transition:'all .12s',
                   }}>
@@ -151,7 +151,7 @@ const NameComboBox = ({ suggestions = [], value, onChange, placeholder, hasError
 
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:active?700:s.bold?600:400,
-                      color:active?'#1e40af':'#1f2937', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      color:active?'#166534':'#1f2937', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                       {s.value}
                     </div>
                     {s.sub && (
@@ -161,7 +161,7 @@ const NameComboBox = ({ suggestions = [], value, onChange, placeholder, hasError
 
                   {s.badge && (
                     <span style={{ flexShrink:0, fontSize:10, fontWeight:700,
-                      padding:'1px 6px', borderRadius:4, background:'#eff6ff', color:'#1a56db' }}>
+                      padding:'1px 6px', borderRadius:4, background:'#f0fdf4', color:'#52b02c' }}>
                       {s.badge}
                     </span>
                   )}
@@ -203,10 +203,10 @@ const TreeSelect = ({ areas, value, onChange, excludeId, placeholder }) => {
       {/* Trigger */}
       <div onClick={() => setOpen(p=>!p)}
         style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-          padding:'8px 12px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+          padding:'8px 12px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer', fontSize:13,
-          color: value?'#1e40af':'#6b7280', fontWeight:value?600:400, height:40,
-          boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none' }}>
+          color: value?'#166534':'#6b7280', fontWeight:value?600:400, height:40,
+          boxShadow:open?'0 0 0 2px rgba(82,176,44,.1)':'none' }}>
         <div style={{ display:'flex', alignItems:'center', gap:6, flex:1, overflow:'hidden' }}>
           {value && selected ? (
             <>
@@ -245,11 +245,11 @@ const TreeSelect = ({ areas, value, onChange, excludeId, placeholder }) => {
           {/* None (root) */}
           <div onClick={()=>{ onChange(''); setOpen(false); setSearch(''); }}
             style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
-              cursor:'pointer', background:!value?'#eff6ff':'white',
+              cursor:'pointer', background:!value?'#f0fdf4':'white',
               borderBottom:'1px solid #f3f4f6', fontSize:13,
-              color:!value?'#1e40af':'#6b7280', fontStyle:'italic' }}>
-            <div style={{ width:16,height:16,borderRadius:4,border:`2px solid ${!value?'#1a56db':'#d1d5db'}`,
-              background:!value?'#1a56db':'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>
+              color:!value?'#166534':'#6b7280', fontStyle:'italic' }}>
+            <div style={{ width:16,height:16,borderRadius:4,border:`2px solid ${!value?'#52b02c':'#d1d5db'}`,
+              background:!value?'#52b02c':'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>
               {!value && <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
                 <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
             </div>
@@ -269,13 +269,13 @@ const TreeSelect = ({ areas, value, onChange, excludeId, placeholder }) => {
                 <div key={a.id}
                   onClick={()=>{ onChange(String(a.id)); setOpen(false); setSearch(''); }}
                   style={{ display:'flex', alignItems:'center', padding:'7px 12px', cursor:'pointer',
-                    background:isSelected?'#eff6ff':'transparent',
+                    background:isSelected?'#f0fdf4':'transparent',
                     borderBottom:'1px solid #f9fafb', transition:'background .1s' }}
                   onMouseEnter={e=>{ if(!isSelected) e.currentTarget.style.background='#f5f8ff'; }}
                   onMouseLeave={e=>{ if(!isSelected) e.currentTarget.style.background='transparent'; }}>
                   <div style={{ width:16,height:16,borderRadius:4,flexShrink:0,marginRight:8,
-                    border:`2px solid ${isSelected?'#1a56db':'#d1d5db'}`,
-                    background:isSelected?'#1a56db':'white',display:'flex',alignItems:'center',justifyContent:'center' }}>
+                    border:`2px solid ${isSelected?'#52b02c':'#d1d5db'}`,
+                    background:isSelected?'#52b02c':'white',display:'flex',alignItems:'center',justifyContent:'center' }}>
                     {isSelected && <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
                       <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                   </div>
@@ -287,7 +287,7 @@ const TreeSelect = ({ areas, value, onChange, excludeId, placeholder }) => {
                   <span style={{ fontSize:14, marginRight:6 }}>
                     {a.depth===0?'🏢':a.parent_id?'📍':'🏪'}
                   </span>
-                  <span style={{ fontSize:13, fontWeight:isSelected?700:400, color:isSelected?'#1e40af':'#374151' }}>
+                  <span style={{ fontSize:13, fontWeight:isSelected?700:400, color:isSelected?'#166534':'#374151' }}>
                     {a.name}
                   </span>
                   <span style={{ fontSize:10, color:'#9ca3af', marginLeft:6 }}>[{a.code}]</span>
@@ -396,7 +396,7 @@ const ZKTecoAreaTab = ({ areas, loading, onRefresh, L, language, showToast }) =>
   /* DataGrid columns */
   const columns = [
     { field:'code', header:'Area Code', width:120,
-      render: v => <span style={{ fontFamily:'monospace', fontSize:12, fontWeight:700, color:'#1a56db' }}>{v}</span>,
+      render: v => <span style={{ fontFamily:'monospace', fontSize:12, fontWeight:700, color:'#52b02c' }}>{v}</span>,
     },
     { field:'name', header:'Area Name',
       render: (v, row) => (
@@ -421,7 +421,7 @@ const ZKTecoAreaTab = ({ areas, loading, onRefresh, L, language, showToast }) =>
     },
     { field:'device_qty', header:'Device Qty', width:100, align:'center',
       render: v => v > 0
-        ? <span style={{ fontWeight:700, color:'#1a56db', fontSize:13 }}>{v}</span>
+        ? <span style={{ fontWeight:700, color:'#52b02c', fontSize:13 }}>{v}</span>
         : <span style={{ color:'#d1d5db' }}>0</span>,
     },
     { field:'employee_qty', header:'Employee Qty', width:115, align:'center',
@@ -454,7 +454,7 @@ const ZKTecoAreaTab = ({ areas, loading, onRefresh, L, language, showToast }) =>
             Click "Initialize" to auto-create areas from your Company and Branch names, or add manually.
           </div>
           <button onClick={handleSeed} disabled={seeding}
-            style={{ background:'#1a56db', color:'white', border:'none', borderRadius:8,
+            style={{ background:'#52b02c', color:'white', border:'none', borderRadius:8,
               padding:'10px 22px', fontSize:14, fontWeight:700, cursor:'pointer',
               display:'inline-flex', alignItems:'center', gap:8 }}>
             {seeding?'⏳':'🌱'} Initialize from Company & Branches
@@ -490,7 +490,7 @@ const ZKTecoAreaTab = ({ areas, loading, onRefresh, L, language, showToast }) =>
       {modal && (
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:500 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>{editId ? '✏️ Edit Area' : '+ Add Area'}</h2>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
             </div>
@@ -538,7 +538,7 @@ const ZKTecoAreaTab = ({ areas, loading, onRefresh, L, language, showToast }) =>
                     <span style={{ color:'#9ca3af' }}>Path:</span>
                     {form.parentId && (
                       <>
-                        <span style={{ color:'#1a56db', fontWeight:600 }}>
+                        <span style={{ color:'#52b02c', fontWeight:600 }}>
                           {areas.find(a=>a.id===parseInt(form.parentId))?.breadcrumb ||
                            areas.find(a=>a.id===parseInt(form.parentId))?.name}
                         </span>

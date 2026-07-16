@@ -16,13 +16,13 @@ import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import api              from '../../api/client.js';
 
 const ROLE_COLORS = {
-  admin:'#7e3af2', branchManager:'#1a56db', departmentHead:'#0e9f6e',
-  manager:'#1a56db',  // backward compat alias
+  admin:'#7e3af2', branchManager:'#52b02c', departmentHead:'#0e9f6e',
+  manager:'#52b02c',  // backward compat alias
   employee:'#6b7280',
 };
 const ROLE_BG = {
-  admin:'#ede9fe', branchManager:'#dbeafe', departmentHead:'#d1fae5',
-  manager:'#dbeafe',
+  admin:'#ede9fe', branchManager:'#dcfce7', departmentHead:'#d1fae5',
+  manager:'#dcfce7',
   employee:'#f3f4f6',
 };
 const ROLE_LABELS = {
@@ -92,7 +92,7 @@ const Fl = ({ children, required, onQA }) => (
     </span>
     {onQA && (
       <button type="button" onClick={onQA}
-        style={{ fontSize:11, color:'#1a56db', background:'#e8f0fe', border:'1px solid #bfdbfe', borderRadius:4, cursor:'pointer', padding:'1px 7px', fontWeight:600, lineHeight:'18px' }}>
+        style={{ fontSize:11, color:'#52b02c', background:'#e9f7e0', border:'1px solid #bbf7d0', borderRadius:4, cursor:'pointer', padding:'1px 7px', fontWeight:600, lineHeight:'18px' }}>
         + Quick Add
       </button>
     )}
@@ -301,7 +301,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
   const s = { label:{ fontSize:11, fontWeight:600, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.4px', marginBottom:4, display:'block' } };
   const inputStyle = { height:34, border:'1px solid #d1d5db', borderRadius:6, padding:'0 10px', fontSize:13, width:'100%', boxSizing:'border-box' };
   const selectStyle = { ...inputStyle };
-  const btn = (color='#1a56db') => ({
+  const btn = (color='#52b02c') => ({
     height:34, padding:'0 14px', background:color, color:'white', border:'none',
     borderRadius:6, fontSize:13, fontWeight:600, cursor: loading ? 'not-allowed' : 'pointer',
     opacity: loading ? 0.7 : 1, whiteSpace:'nowrap',
@@ -326,7 +326,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
 
       {/* PIN + Name + selection summary */}
       <div style={{ display:'flex', gap:12, alignItems:'center', background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13 }}>
-        <div><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Device PIN')}: </span><span style={{ fontWeight:700, fontFamily:'monospace', color:'#1a56db' }}>{devicePin}</span></div>
+        <div><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Device PIN')}: </span><span style={{ fontWeight:700, fontFamily:'monospace', color:'#52b02c' }}>{devicePin}</span></div>
         <div style={{ borderLeft:'1px solid #e5e7eb', paddingLeft:12 }}><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Staff')}: </span><span style={{ fontWeight:700 }}>{staffName || '—'}</span></div>
         <div style={{ borderLeft:'1px solid #e5e7eb', paddingLeft:12, flex:1, display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ color:'#6b7280', fontWeight:600 }}>
@@ -364,9 +364,9 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                 <div key={group.areaId} style={{ border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden' }}>
                   <div onClick={() => toggleArea(group.devices)}
                     style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px', cursor:'pointer',
-                      background: allSelected ? '#eff6ff' : '#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
+                      background: allSelected ? '#f0fdf4' : '#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
                     <input type="checkbox" checked={allSelected} readOnly
-                      style={{ opacity: someSelected ? 0.6 : 1, accentColor:'#1a56db', width:15, height:15 }} />
+                      style={{ opacity: someSelected ? 0.6 : 1, accentColor:'#52b02c', width:15, height:15 }} />
                     <span style={{ fontWeight:700, fontSize:13, color:'#1f2937' }}>📍 {group.areaName}</span>
                     <span style={{ fontSize:11, color:'#9ca3af' }}>({group.devices.length} {group.devices.length===1 ? t('device') : t('devices')})</span>
                   </div>
@@ -378,13 +378,13 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                       return (
                         <div key={d.id} onClick={() => toggleDevice(d.id)}
                           style={{ padding:'8px 12px', borderRadius:10, cursor:'pointer', minWidth:160,
-                            border: isSelected ? '2px solid #1a56db' : '2px solid #e5e7eb',
-                            background: isSelected ? '#eff6ff' : 'white',
-                            boxShadow: isSelected ? '0 2px 8px rgba(26,86,219,.12)' : 'none',
+                            border: isSelected ? '2px solid #52b02c' : '2px solid #e5e7eb',
+                            background: isSelected ? '#f0fdf4' : 'white',
+                            boxShadow: isSelected ? '0 2px 8px rgba(82,176,44,.12)' : 'none',
                             transition:'all .15s' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
-                            <input type="checkbox" checked={isSelected} readOnly style={{ accentColor:'#1a56db', width:13, height:13 }} />
-                            <span style={{ fontWeight:700, fontSize:13, color: isSelected ? '#1a56db' : '#1f2937' }}>
+                            <input type="checkbox" checked={isSelected} readOnly style={{ accentColor:'#52b02c', width:13, height:13 }} />
+                            <span style={{ fontWeight:700, fontSize:13, color: isSelected ? '#52b02c' : '#1f2937' }}>
                               {d.name || d.serial_number}
                             </span>
                           </div>
@@ -396,9 +396,9 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                               {online ? `● ${t('Online')}` : `○ ${t('Offline')}`}
                             </span>
                             <span style={{ fontSize:11, fontWeight:600, padding:'2px 7px', borderRadius:10,
-                              background: enr ? '#eff6ff' : '#fff7ed',
-                              color:      enr ? '#1d4ed8' : '#9a3412',
-                              border:     `1px solid ${enr ? '#bfdbfe' : '#fed7aa'}` }}>
+                              background: enr ? '#f0fdf4' : '#fff7ed',
+                              color:      enr ? '#15803d' : '#9a3412',
+                              border:     `1px solid ${enr ? '#bbf7d0' : '#fed7aa'}` }}>
                               {enr ? t('Enrolled') : t('Not Enrolled')}
                             </span>
                             {enr && enr.fp_slots_count > 0 && (
@@ -551,7 +551,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                     setStartDate(s.toISOString().split('T')[0]);
                     setEndDate(e.toISOString().split('T')[0]);
                   }} style={{ padding:'3px 9px', fontSize:11, fontWeight:700,
-                    background:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe',
+                    background:'#f0fdf4', color:'#15803d', border:'1px solid #bbf7d0',
                     borderRadius:5, cursor:'pointer' }}>{lbl}</button>
                 ))}
               </div>
@@ -565,7 +565,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                         padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
                         outline:'none', fontWeight:500, background:'#f9fafb',
                         cursor:'pointer' }}
-                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
+                      onFocus={e => { e.target.style.borderColor='#22c55e'; e.target.style.background='white'; }}
                       onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
                     <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
                       fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
@@ -580,7 +580,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                         padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
                         outline:'none', fontWeight:500, background:'#f9fafb',
                         cursor:'pointer' }}
-                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
+                      onFocus={e => { e.target.style.borderColor='#22c55e'; e.target.style.background='white'; }}
                       onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
                     <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
                       fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
@@ -599,7 +599,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                 style={{ width:'100%', maxWidth:160, height:38, border:'2px solid #e5e7eb', borderRadius:8,
                   padding:'0 12px', fontSize:13, boxSizing:'border-box', outline:'none', fontWeight:500,
                   background:'#f9fafb' }}
-                onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
+                onFocus={e => { e.target.style.borderColor='#22c55e'; e.target.style.background='white'; }}
                 onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
               <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>
                 {t('Access is denied once this many successful verifications have been used.')}
@@ -778,7 +778,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
   /* Status values get a green/red Working tint; other fields a neutral chip */
   const ValueChip = ({ name }) => {
     if (!name) return <span style={{ color:'#d1d5db' }}>—</span>;
-    let bg = '#eff6ff', color = '#1e40af', border = '#1e40af33';
+    let bg = '#f0fdf4', color = '#166534', border = '#16653433';
     if (fieldTab === 'status') {
       const working = statusType(name) ? statusType(name) === 'Working' : name === 'Active';
       bg = working ? '#f0fdf4' : '#fff5f5';
@@ -808,13 +808,13 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
           return (
             <button key={f.key} onClick={() => setFieldTab(f.key)} style={{
               padding:'8px 14px', background:'none', border:'none',
-              borderBottom: active ? '2px solid #1a56db' : '2px solid transparent',
-              color: active ? '#1a56db' : '#6b7280',
+              borderBottom: active ? '2px solid #52b02c' : '2px solid transparent',
+              color: active ? '#52b02c' : '#6b7280',
               fontWeight: active ? 700 : 400,
               cursor:'pointer', fontSize:12.5, display:'flex', alignItems:'center', gap:5, marginBottom:-2,
             }}>
               {f.icon} {t(f.label)}
-              {count > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
+              {count > 0 && <span style={{ background:'#52b02c', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
             </button>
           );
         })}
@@ -855,7 +855,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
               <td className="dg-td">{latestApplied ? fd(latestApplied.effectiveDate) : <span className="dg-null">—</span>}</td>
               <td className="dg-td" style={{ color:'#9ca3af', fontStyle:'italic' }}>{t('Current')} {fieldLabel}</td>
               <td className="dg-td" style={{ textAlign:'right' }}>
-                <span style={{ fontSize:11, fontWeight:700, color:'#1e40af', background:'#dbeafe', padding:'2px 8px', borderRadius:10 }}>
+                <span style={{ fontSize:11, fontWeight:700, color:'#166534', background:'#dcfce7', padding:'2px 8px', borderRadius:10 }}>
                   {t('Current')}
                 </span>
               </td>
@@ -916,7 +916,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
       {editor && (
         <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:440 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {fieldLabel} {t('Change')}</h2>
               <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
             </div>
@@ -1089,9 +1089,9 @@ const StaffIdentityTab = ({ employeeId }) => {
     const permanent = type === 'Permanent';
     return (
       <span style={{ fontSize:12, fontWeight:600, padding:'2px 10px', borderRadius:10, whiteSpace:'nowrap',
-        background: permanent ? '#eff6ff' : '#fef3c7',
-        color:      permanent ? '#1e40af' : '#92400e',
-        border:     `1px solid ${permanent ? '#1e40af33' : '#92400e33'}` }}>
+        background: permanent ? '#f0fdf4' : '#fef3c7',
+        color:      permanent ? '#166534' : '#92400e',
+        border:     `1px solid ${permanent ? '#16653433' : '#92400e33'}` }}>
         {t(type)}
       </span>
     );
@@ -1134,13 +1134,13 @@ const StaffIdentityTab = ({ employeeId }) => {
           return (
             <button key={s.key} onClick={() => setSection(s.key)} style={{
               padding:'8px 14px', background:'none', border:'none',
-              borderBottom: active ? '2px solid #1a56db' : '2px solid transparent',
-              color: active ? '#1a56db' : '#6b7280',
+              borderBottom: active ? '2px solid #52b02c' : '2px solid transparent',
+              color: active ? '#52b02c' : '#6b7280',
               fontWeight: active ? 700 : 400,
               cursor:'pointer', fontSize:12.5, display:'flex', alignItems:'center', gap:5, marginBottom:-2,
             }}>
               {s.icon} {t(s.label)}
-              {count > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
+              {count > 0 && <span style={{ background:'#52b02c', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
             </button>
           );
         })}
@@ -1202,7 +1202,7 @@ const StaffIdentityTab = ({ employeeId }) => {
       {editor && (
         <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:460 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {t(sectionDef.label)}</h2>
               <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
             </div>
@@ -1223,9 +1223,9 @@ const StaffIdentityTab = ({ employeeId }) => {
                         style={{
                           flex:1, padding:'8px 0', fontSize:13, borderRadius:6, cursor:'pointer',
                           fontWeight: siForm.addressType === type ? 700 : 400,
-                          border: siForm.addressType === type ? '2px solid #1a56db' : '1px solid #d1d5db',
-                          background: siForm.addressType === type ? '#eff6ff' : 'white',
-                          color: siForm.addressType === type ? '#1a56db' : '#374151',
+                          border: siForm.addressType === type ? '2px solid #52b02c' : '1px solid #d1d5db',
+                          background: siForm.addressType === type ? '#f0fdf4' : 'white',
+                          color: siForm.addressType === type ? '#52b02c' : '#374151',
                         }}>
                         {type === 'Permanent' ? '🏛️' : '🏕️'} {t(type)}
                       </button>
@@ -1684,7 +1684,7 @@ const UserManagement = () => {
       </tr>`).join('');
     const win = window.open('','_blank','width=1000,height=700');
     win.document.write(`<!DOCTYPE html><html><head><title>Staff List</title>
-      <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111827}h2{color:#1a56db;font-size:16px}
+      <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111827}h2{color:#52b02c;font-size:16px}
       table{width:100%;border-collapse:collapse}th{background:#efefef;padding:7px 10px;border:1px solid #dedede;text-align:left;font-size:11px;font-weight:700}
       td{padding:5px 10px;border:1px solid #dedede;font-size:12px}tr:nth-child(even)td{background:#f9fafb}
       @media print{body{margin:0}}</style></head><body>
@@ -1795,7 +1795,7 @@ const UserManagement = () => {
       render:v=><span style={{fontFamily:'monospace',fontSize:14,background:'#f3f4f6',padding:'2px 6px',borderRadius:4}}>{v}</span> },
     { field:'fullName',   header:'Full Name',  width:160,
       render:(v,row)=>(
-        <span style={{fontWeight:500, color:'#1a56db', cursor:'pointer'}}
+        <span style={{fontWeight:500, color:'#52b02c', cursor:'pointer'}}
           onClick={e=>{ e.stopPropagation(); if (canManageStaff) openEdit(row, true); }}>
           {v}
         </span>
@@ -1811,7 +1811,7 @@ const UserManagement = () => {
     { field:'phone',      header:'Mobile',     width:110,
       render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
     { field:'email',      header:'Email',      width:190,
-      render:v=>v?<span style={{color:'#1a56db',fontSize:14}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
+      render:v=>v?<span style={{color:'#52b02c',fontSize:14}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
     { field:'mode',       header:'Mode',       width:110,
       render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
     { field:'joinDate',   header:'Join Date',  width:120, render:v=>fd(v) },
@@ -1850,7 +1850,7 @@ const UserManagement = () => {
             {canManageStaff && (
               <button onClick={handleSyncNames} disabled={syncingNames}
                 title={t('Push each staff member\'s name to the attendance devices in their assigned Area')}
-                style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:6, fontSize:13, fontWeight:600, cursor: syncingNames ? 'wait' : 'pointer', whiteSpace:'nowrap', opacity: syncingNames ? .6 : 1 }}>
+                style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor: syncingNames ? 'wait' : 'pointer', whiteSpace:'nowrap', opacity: syncingNames ? .6 : 1 }}>
                 <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
                   <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"/>
                 </svg>
@@ -1861,7 +1861,7 @@ const UserManagement = () => {
               <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
               Export
             </button>
-            <button onClick={handlePrint} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+            <button onClick={handlePrint} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
               <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9h8v3H6v-3zm8-4a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd"/></svg>
               Print
             </button>
@@ -1873,11 +1873,11 @@ const UserManagement = () => {
             {[
               { label:t('Total Staff'), count:scopedEmployees.length,                                                bg:'#f3f4f6', color:'#374151' },
               { label:t('Active'),      count:scopedEmployees.filter(e=>e.active).length,                           bg:'#d1fae5', color:'#065f46' },
-              { label:t('Male'),        count:scopedEmployees.filter(e=>e.gender==='male').length,                  bg:'#dbeafe', color:'#1e40af' },
+              { label:t('Male'),        count:scopedEmployees.filter(e=>e.gender==='male').length,                  bg:'#dcfce7', color:'#166534' },
               { label:t('Female'),      count:scopedEmployees.filter(e=>e.gender==='female').length,                bg:'#fce7f3', color:'#9d174d' },
               { label:'Permanent',      count:scopedEmployees.filter(e=>e.mode==='Permanent').length,               bg:'#ecfdf5', color:'#065f46' },
               { label:'Temporary',      count:scopedEmployees.filter(e=>e.mode==='Temporary').length,               bg:'#fffbeb', color:'#92400e' },
-              { label:'Contract',       count:scopedEmployees.filter(e=>e.mode==='Contract').length,                bg:'#eff6ff', color:'#1e40af' },
+              { label:'Contract',       count:scopedEmployees.filter(e=>e.mode==='Contract').length,                bg:'#f0fdf4', color:'#166534' },
             ].map(({ label, count, bg, color }) => (
               <span key={label} style={{ display:'inline-flex', alignItems:'center', gap:6, background:bg, color, borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:600 }}>
                 {label}: <strong style={{ fontSize:14 }}>{count}</strong>
@@ -1891,7 +1891,7 @@ const UserManagement = () => {
               <button key={v} onClick={() => setStatusView(v)}
                 style={{ padding:'0 13px', border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
                   transition:'background .15s',
-                  background: statusView === v ? '#1a56db' : 'white',
+                  background: statusView === v ? '#52b02c' : 'white',
                   color: statusView === v ? 'white' : '#374151' }}>
                 {label}
               </button>
@@ -1900,9 +1900,9 @@ const UserManagement = () => {
           {/* Advanced Search — opens popup modal */}
           <button onClick={() => setShowAdvSearch(true)} style={{
             display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34,
-            background: activeFilterCount > 0 ? '#eff6ff' : '#f8fafc',
-            border: `1px solid ${activeFilterCount > 0 ? '#1a56db' : '#d1d5db'}`,
-            color: activeFilterCount > 0 ? '#1a56db' : '#374151',
+            background: activeFilterCount > 0 ? '#f0fdf4' : '#f8fafc',
+            border: `1px solid ${activeFilterCount > 0 ? '#52b02c' : '#d1d5db'}`,
+            color: activeFilterCount > 0 ? '#52b02c' : '#374151',
             borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer', position:'relative',
           }}>
             <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
@@ -1961,17 +1961,17 @@ const UserManagement = () => {
                 onClick={() => setOpen(p=>!p)}
                 style={{
                   display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+                  padding:'8px 10px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
-                  color: value.length>0 ? '#1e40af' : '#9ca3af',
+                  color: value.length>0 ? '#166534' : '#9ca3af',
                   minHeight:42, fontWeight: value.length>0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none',
+                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none',
                   outline:'none', userSelect:'none',
                 }}>
                 <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
                 <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
                   {value.length > 0 && (
-                    <span style={{ background:'#1a56db', color:'white', borderRadius:10,
+                    <span style={{ background:'#52b02c', color:'white', borderRadius:10,
                       fontSize:10, fontWeight:700, padding:'1px 6px', minWidth:18, textAlign:'center' }}>
                       {value.length}
                     </span>
@@ -1988,7 +1988,7 @@ const UserManagement = () => {
               {open && (
                 <div style={{
                   position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220,
                   display:'flex', flexDirection:'column',
                 }}>
@@ -2005,26 +2005,26 @@ const UserManagement = () => {
                     {/* "All" row */}
                     <div onMouseDown={e=>{e.preventDefault(); onChange([]);}}
                       style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                        background: value.length===0 ? '#eff6ff' : 'white', borderBottom:'1px solid #f1f5f9' }}>
-                      <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${value.length===0?'#1a56db':'#d1d5db'}`,
-                        background:value.length===0?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                        background: value.length===0 ? '#f0fdf4' : 'white', borderBottom:'1px solid #f1f5f9' }}>
+                      <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${value.length===0?'#52b02c':'#d1d5db'}`,
+                        background:value.length===0?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                         {value.length===0 && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                       </span>
-                      <span style={{ fontSize:13, fontWeight:600, color: value.length===0?'#1e40af':'#374151' }}>All</span>
+                      <span style={{ fontSize:13, fontWeight:600, color: value.length===0?'#166534':'#374151' }}>All</span>
                     </div>
                     {filtered.map(opt => {
                       const sel = value.includes(opt);
                       return (
                         <div key={opt} onMouseDown={e=>{e.preventDefault(); toggle(opt);}}
                           style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                            background: sel ? '#eff6ff' : 'white', borderBottom:'1px solid #f9fafb' }}
+                            background: sel ? '#f0fdf4' : 'white', borderBottom:'1px solid #f9fafb' }}
                           onMouseEnter={e=>{ if(!sel) e.currentTarget.style.background='#f8fafc'; }}
                           onMouseLeave={e=>{ if(!sel) e.currentTarget.style.background='white'; }}>
-                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`,
-                            background: sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#52b02c':'#d1d5db'}`,
+                            background: sel?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize:13, color: sel?'#1e40af':'#374151', fontWeight: sel?600:400 }}>{opt}</span>
+                          <span style={{ fontSize:13, color: sel?'#166534':'#374151', fontWeight: sel?600:400 }}>{opt}</span>
                         </div>
                       );
                     })}
@@ -2062,14 +2062,14 @@ const UserManagement = () => {
               {/* Header */}
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
                 padding:'16px 24px', borderBottom:'2px solid #e5e7eb',
-                background:'linear-gradient(135deg,#eff6ff,#f0f9ff)', flexShrink:0 }}>
+                background:'linear-gradient(135deg,#f0fdf4,#f0f9ff)', flexShrink:0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#1a56db' }}>
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#52b02c' }}>
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>Advanced Search</span>
                   {activeFilterCount > 0 && (
-                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
+                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active
                     </span>
                   )}
@@ -2097,7 +2097,7 @@ const UserManagement = () => {
                     placeholder="Search by Name / Staff ID / Email / Phone / Device ID..." autoFocus tabIndex={0}
                     style={{ width:'100%', boxSizing:'border-box', padding:'11px 14px 11px 34px',
                       border:'1.5px solid #d1d5db', borderRadius:8, fontSize:14, outline:'none', fontFamily:'inherit' }}
-                    onFocus={e => e.target.style.borderColor='#1a56db'}
+                    onFocus={e => e.target.style.borderColor='#52b02c'}
                     onBlur={e  => e.target.style.borderColor='#d1d5db'} />
                 </div>
 
@@ -2126,9 +2126,9 @@ const UserManagement = () => {
                       tabIndex={0}
                       style={{ width:'100%', padding:'8px 10px', border:'1.5px solid #d1d5db', borderRadius:7,
                         fontSize:13, outline:'none', fontFamily:'inherit', background:'white', cursor:'pointer',
-                        minHeight:42, color: advFilters.handicapped ? '#1e40af' : '#9ca3af',
+                        minHeight:42, color: advFilters.handicapped ? '#166534' : '#9ca3af',
                         fontWeight: advFilters.handicapped ? 600 : 400 }}
-                      onFocus={e => e.target.style.borderColor='#1a56db'}
+                      onFocus={e => e.target.style.borderColor='#52b02c'}
                       onBlur={e  => e.target.style.borderColor='#d1d5db'}>
                       <option value="">All</option>
                       <option value="yes">Yes — Handicapped</option>
@@ -2149,9 +2149,9 @@ const UserManagement = () => {
                       tabIndex={0}
                       style={{ width:'100%', padding:'8px 10px', border:'1.5px solid #d1d5db', borderRadius:7,
                         fontSize:13, outline:'none', fontFamily:'inherit', background:'white', cursor:'pointer',
-                        minHeight:42, color: advFilters.eligibleForOt ? '#1e40af' : '#9ca3af',
+                        minHeight:42, color: advFilters.eligibleForOt ? '#166534' : '#9ca3af',
                         fontWeight: advFilters.eligibleForOt ? 600 : 400 }}
-                      onFocus={e => e.target.style.borderColor='#1a56db'}
+                      onFocus={e => e.target.style.borderColor='#52b02c'}
                       onBlur={e  => e.target.style.borderColor='#d1d5db'}>
                       <option value="">All</option>
                       <option value="yes">Yes — OT Eligible</option>
@@ -2176,9 +2176,9 @@ const UserManagement = () => {
                     Close
                   </button>
                   <button onClick={() => setShowAdvSearch(false)}
-                    style={{ padding:'9px 24px', border:'none', borderRadius:8, background:'#1a56db',
+                    style={{ padding:'9px 24px', border:'none', borderRadius:8, background:'#52b02c',
                       color:'white', fontSize:13, fontWeight:700, cursor:'pointer',
-                      boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+                      boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
                     ✅ Apply Filter
                   </button>
                 </div>
@@ -2537,7 +2537,7 @@ const UserManagement = () => {
       {qaModal && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:400 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)' }}>
+            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
               <h2>+ Quick Add — {qaModal.label}</h2>
               <button className="modal-close" onClick={() => setQaModal(null)}>✕</button>
             </div>
@@ -2686,7 +2686,7 @@ const UserManagement = () => {
               <button className="modal-close" onClick={() => setResetPwdModal(false)}>✕</button>
             </div>
             <div className="modal-body">
-              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:13, color:'#1e40af' }}>
+              <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:13, color:'#166534' }}>
                 Resetting password for <strong>{selectedUserIds.length}</strong> selected staff member{selectedUserIds.length > 1 ? 's' : ''}.
               </div>
               <div className="form-group" style={{ marginBottom:14 }}>

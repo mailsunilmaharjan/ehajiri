@@ -162,7 +162,7 @@ const YearlyReport = () => {
           <h1 className="page-title">📊 {L('वार्षिक विश्लेषण','Yearly Staff Analytics')}</h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:6,
+              <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:6,
                 padding:'1px 8px', fontSize:12, fontWeight:600, marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -207,7 +207,7 @@ const YearlyReport = () => {
 
           {/* ── Year calendar stats row ── */}
           <div style={{ display:'flex', gap:10, marginBottom:20, flexWrap:'wrap', alignItems:'stretch' }}>
-            <Chip label={L('जम्मा दिन','Total No. of Days')}                value={fmt(s.totalDays||0)}        color="#1a56db" bg="#eff6ff" />
+            <Chip label={L('जम्मा दिन','Total No. of Days')}                value={fmt(s.totalDays||0)}        color="#52b02c" bg="#f0fdf4" />
             <Chip label={L('जम्मा सप्ताहन्त','Total Weekends')}              value={fmt(s.weekendDays||0)}      color="#6b7280" bg="#f3f4f6" />
             <Chip label={L('जम्मा सार्वजनिक बिदा','Total Public Holiday')}    value={fmt(s.holidayDays||0)}      color="#d97706" bg="#fef3c7" />
             <Chip label={L('उपस्थित हुनुपर्ने दिन','Total Need to be Present Days')} value={fmt(s.totalWorkingDays||0)} color="#065f46" bg="#d1fae5" />

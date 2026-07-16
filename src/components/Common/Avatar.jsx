@@ -36,7 +36,7 @@ const Avatar = ({ photo, name, size = 40, style = {} }) => {
   return (
     <div style={{
       ...base,
-      background: 'linear-gradient(135deg,#3b82f6,#1a56db)', color: '#fff',
+      background: 'linear-gradient(135deg,#22c55e,#52b02c)', color: '#fff',
       fontWeight: 700, fontSize: Math.round(size * 0.4),
     }}>
       {initial}

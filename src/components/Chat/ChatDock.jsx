@@ -19,7 +19,7 @@ const ContactsPopup = ({ onClose, employees, onlineIds, onPick }) => {
     <div style={{ position: 'absolute', bottom: '100%', right: 0, marginBottom: 8, width: 290, height: 400,
       background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,.18)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1a56db', flexShrink: 0 }}>
+      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#52b02c', flexShrink: 0 }}>
         <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>💬 Chat</span>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 15 }}>✕</button>
       </div>
@@ -134,7 +134,7 @@ const ChatDock = () => {
           />
         )}
         <button onClick={() => setShowContacts(p => !p)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1a56db', color: '#fff',
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#52b02c', color: '#fff',
             border: 'none', borderRadius: '10px 10px 0 0', padding: '9px 16px', cursor: 'pointer',
             fontSize: 13, fontWeight: 700, boxShadow: '0 -2px 10px rgba(0,0,0,.12)' }}>
           💬 Chat

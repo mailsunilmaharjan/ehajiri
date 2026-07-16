@@ -21,7 +21,7 @@ export function getPrintCSS(isLandscape = false) {
     .ph-space { grid-column:3; }
     .ph-info .co-name   { font-size:15px; font-weight:800; color:#1f2937; margin-bottom:2px; }
     .ph-info .co-sub    { font-size:10px; color:#6b7280; margin-bottom:4px; }
-    .ph-info .rpt-title { font-size:13px; font-weight:800; color:#1e40af; }
+    .ph-info .rpt-title { font-size:13px; font-weight:800; color:#166534; }
     .ph-info .rpt-sub   { font-size:11px; color:#374151; font-weight:600; margin:2px 0; }
 
     /* Footer */
