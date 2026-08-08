@@ -140,4 +140,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Replies now show a small avatar per user and a compact arrow send button instead of a text button. All dates in the Followup History panel (Date, Next Followup, reply timestamps) and the main Task grid (Task Date) now respect the company\'s default calendar setting (AD/BS) instead of always showing Gregorian.',
   },
+  {
+    appVersion : '1.0.33',
+    dbVersion  : 89,
+    releaseDate: '2026-08-08',
+    notes      : 'Task Notifications (Settings → Company Information, off by default): a live browser pop-up when a task is assigned to you, and when a task you created is marked complete. Reuses the same live-notification channel already used for attendance/messages, plus a native OS-level notification when the tab is in the background.',
+  },
 ];

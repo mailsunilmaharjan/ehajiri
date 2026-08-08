@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS = {
   logoWidth        : null,
   logoHeight       : null,
   liveAttendanceNotifications: true,
+  taskNotifications: false,
   defaultWeekends  : ['Sat'],
   weekendStartDate : _twoMonthsAgo,
   weekendHistory   : [{ id:1, weekends:['Sat'], effectiveDate:_twoMonthsAgo, changedDate:_today, changedBy:'System', reason:'Initial Setup' }],

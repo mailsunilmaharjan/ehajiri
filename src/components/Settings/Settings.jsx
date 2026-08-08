@@ -2404,6 +2404,7 @@ const Settings = () => {
       logoWidth:        settings.logoWidth        || null,
       logoHeight:       settings.logoHeight       || null,
       liveAttendanceNotifications: settings.liveAttendanceNotifications !== false,
+      taskNotifications: settings.taskNotifications !== false,
     });
     setLogoError('');
     setCompanyModal(true);
@@ -4265,6 +4266,25 @@ const Settings = () => {
                     borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
                   onClick={() => sc('liveAttendanceNotifications', !cForm.liveAttendanceNotifications)}>
                   <div style={{ position:'absolute', top:3, left: cForm.liveAttendanceNotifications ? 24 : 3,
+                    width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s',
+                    boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
+                </div>
+              </div>
+
+              <div style={{ marginTop:10, padding:'12px 16px', background:'#f9fafb', borderRadius:10,
+                border:'1px solid #e5e7eb', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <div>
+                  <div style={{ fontSize:14, fontWeight:600 }}>
+                    {L('कार्य सूचना सक्षम गर्नुहोस्','Enable Task Notifications')}
+                  </div>
+                  <div style={{ fontSize:12, color:'#6b7280' }}>
+                    {L('कार्य तोकिँदा वा पूरा हुँदा ब्राउजर पप-अप सूचना देखाउनुहोस्','Show a browser pop-up when a task is assigned to you or one you created is completed')}
+                  </div>
+                </div>
+                <div style={{ width:48, height:26, background: cForm.taskNotifications ? '#1a56db' : '#d1d5db',
+                    borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                  onClick={() => sc('taskNotifications', !cForm.taskNotifications)}>
+                  <div style={{ position:'absolute', top:3, left: cForm.taskNotifications ? 24 : 3,
                     width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s',
                     boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
                 </div>

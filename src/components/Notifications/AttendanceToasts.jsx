@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useBeepAlert } from '../../hooks/useBeepAlert.js';
@@ -109,6 +110,52 @@ const MessageToast = ({ noti, onClose }) => (
   </div>
 );
 
+/* ── Task Toast Card — task assigned to you, or one you created was completed ── */
+const TaskToast = ({ noti, onClose }) => {
+  const navigate = useNavigate();
+  const isCompleted = noti.event === 'completed';
+  return (
+    <div style={{
+      width: 320, background: 'white',
+      borderRadius: 12, overflow: 'hidden',
+      boxShadow: '0 8px 32px rgba(0,0,0,.20)',
+      border: '1px solid #e5e7eb',
+      borderLeft: `4px solid ${isCompleted ? '#16a34a' : '#1a56db'}`,
+      animation: 'slideIn .25s ease-out',
+    }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8,
+        padding:'8px 10px 6px', background: isCompleted ? '#f0fdf4' : '#eff6ff',
+        borderBottom: `1px solid ${isCompleted ? '#dcfce7' : '#dbeafe'}` }}>
+        <span style={{ fontSize:14 }}>{isCompleted ? '✅' : '📋'}</span>
+        <span style={{ fontSize:11, fontWeight:700, color: isCompleted ? '#16a34a' : '#1d4ed8', flex:1 }}>
+          {isCompleted ? 'Task Completed' : 'Task Assigned to You'}
+        </span>
+        <button onClick={() => onClose(noti.id)}
+          style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 4px',
+            color:'#9ca3af', fontSize:16, lineHeight:1 }}>✕</button>
+      </div>
+      <div style={{ padding:'12px 14px 14px' }}>
+        <div style={{ fontSize:14, fontWeight:700, color:'#1f2937', marginBottom:4 }}>{noti.title}</div>
+        <div style={{ fontSize:12, color:'#6b7280' }}>
+          {isCompleted ? 'Completed by ' : 'Assigned by '}<strong style={{ color:'#374151' }}>{noti.by}</strong>
+        </div>
+      </div>
+      <div style={{ padding:'0 14px 12px', display:'flex', gap:8 }}>
+        <button onClick={() => onClose(noti.id)}
+          style={{ flex:1, padding:'6px 0', border:'1px solid #e5e7eb',
+            borderRadius:7, background:'white', color:'#374151', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+          Dismiss
+        </button>
+        <button onClick={() => { onClose(noti.id); navigate('/staff/task'); }}
+          style={{ flex:1, padding:'6px 0', border:'none',
+            borderRadius:7, background: isCompleted ? '#16a34a' : '#1a56db', color:'white', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+          View
+        </button>
+      </div>
+    </div>
+  );
+};
+
 /* ── Chat Toast Card — pops up on the recipient's screen for a new chat message ── */
 const ChatToast = ({ noti, onClose }) => (
   <div style={{
@@ -170,6 +217,7 @@ const ToastContainer = ({ notifications, onClose }) => {
           <div key={n.id} style={{ pointerEvents:'all' }}>
             {n.type === 'new_message' ? <MessageToast noti={n} onClose={onClose} />
               : n.type === 'chat_message' ? <ChatToast noti={n} onClose={onClose} />
+              : n.type === 'task' ? <TaskToast noti={n} onClose={onClose} />
               : <AttendanceToast noti={n} onClose={onClose} />
             }
           </div>
@@ -202,6 +250,24 @@ export function AttendanceNotificationProvider({ children }) {
   useEffect(() => {
     liveAttendanceEnabledRef.current = settings.liveAttendanceNotifications !== false;
   }, [settings.liveAttendanceNotifications]);
+
+  // Settings → Company Information → "Enable Task Notifications" — unlike
+  // attendance/messages this defaults OFF (new capability, matches the
+  // moduleFlags.js convention: invasive things need an explicit opt-in).
+  // Task events also fire a native OS-level Notification() when enabled
+  // (Task Assigned / Task Completed are worth surfacing even if the tab is
+  // in the background), so permission is only requested once the setting
+  // is actually on — asking every user up front for a feature that's off
+  // by default would just be a confusing prompt for nothing.
+  const taskNotificationsEnabledRef = useRef(settings.taskNotifications === true);
+  useEffect(() => {
+    taskNotificationsEnabledRef.current = settings.taskNotifications === true;
+  }, [settings.taskNotifications]);
+  useEffect(() => {
+    if (settings.taskNotifications === true && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, [settings.taskNotifications]);
 
   const remove = useCallback((id) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
@@ -249,6 +315,20 @@ export function AttendanceNotificationProvider({ children }) {
               if (isRecipient) {
                 add(data);
                 setMsgCount(c => c + 1);
+              }
+            }
+          } else if (data.type === 'task') {
+            const uid = currentUser?.id;
+            const isRecipient = uid && Array.isArray(data.recipientIds) && data.recipientIds.includes(uid);
+            if (isRecipient && taskNotificationsEnabledRef.current) {
+              add(data);
+              if ('Notification' in window && Notification.permission === 'granted') {
+                const n = new Notification(data.event === 'completed' ? 'Task Completed' : 'Task Assigned to You', {
+                  body: data.title + (data.by ? `\n${data.event === 'completed' ? 'Completed' : 'Assigned'} by ${data.by}` : ''),
+                  icon: '/favicon.ico',
+                  tag: `task-${data.taskId}-${data.event}`,
+                });
+                n.onclick = () => { window.focus(); n.close(); };
               }
             }
           }

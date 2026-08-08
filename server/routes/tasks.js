@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireRole } from '../middleware/roleGuard.js';
+import { broadcastNotification } from '../services/liveNotifications.js';
 
 const router = Router();
 
@@ -65,6 +66,31 @@ const toAssigneeIds = (assignedTo) =>
     ? [...new Set(assignedTo.map(Number).filter(n => Number.isInteger(n) && n > 0))]
     : [];
 
+// Live browser notifications (Settings → Company Information → "Enable Task
+// Notifications") — reuses the same SSE broadcast + client-side recipientIds
+// filter the "new message" toast already uses (see AttendanceToasts.jsx),
+// so no new transport was needed. Both helpers silently no-op with an empty
+// recipient list rather than the caller having to check first.
+async function notifyAssignees(taskId, title, assigneeIds, actorId) {
+  const recipientIds = assigneeIds.filter(uid => uid !== actorId);
+  if (!recipientIds.length) return;
+  const { rows } = await pool.query('SELECT full_name FROM users WHERE id=$1', [actorId]);
+  broadcastNotification({
+    type: 'task', event: 'assigned', taskId, title,
+    by: rows[0]?.full_name || 'Someone',
+    recipientIds,
+  });
+}
+async function notifyCreatorOfCompletion(taskId, title, creatorId, actorId) {
+  if (!creatorId || creatorId === actorId) return;
+  const { rows } = await pool.query('SELECT full_name FROM users WHERE id=$1', [actorId]);
+  broadcastNotification({
+    type: 'task', event: 'completed', taskId, title,
+    by: rows[0]?.full_name || 'Someone',
+    recipientIds: [creatorId],
+  });
+}
+
 router.get('/', async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -95,6 +121,7 @@ router.post('/', async (req, res) => {
       await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [taskId, uid]);
     }
     await client.query('COMMIT');
+    await notifyAssignees(taskId, title.trim(), assigneeIds, req.user.id);
     const { rows: full } = await pool.query(`SELECT ${SEL} ${JOINS} WHERE t.id = $1`, [taskId]);
     res.status(201).json(full[0]);
   } catch (e) {
@@ -122,11 +149,16 @@ router.put('/:id', async (req, res) => {
        dueDate || null, status || null, id, req.user.id]
     );
     if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Task not found' }); }
+    const { rows: prevRows } = await client.query(`SELECT user_id FROM task_assignees WHERE task_id=$1`, [id]);
+    const prevAssigneeIds = new Set(prevRows.map(r => r.user_id));
     await client.query(`DELETE FROM task_assignees WHERE task_id=$1`, [id]);
     for (const uid of assigneeIds) {
       await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, uid]);
     }
     await client.query('COMMIT');
+    // Only the newly-added assignees — re-saving a task's existing assignee list on
+    // every edit shouldn't re-notify people who were already on it.
+    await notifyAssignees(id, title.trim(), assigneeIds.filter(uid => !prevAssigneeIds.has(uid)), req.user.id);
     const { rows: full } = await pool.query(`SELECT ${SEL} ${JOINS} WHERE t.id = $1`, [id]);
     res.json(full[0]);
   } catch (e) {
@@ -148,10 +180,13 @@ router.patch('/:id/status', async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE tasks SET status=$1, updated_at=NOW()
        WHERE id=$2 AND ${ASSIGNEE_OR_CREATOR('$2', '$3')}
-       RETURNING id`,
+       RETURNING id, title, created_by AS "createdBy"`,
       [status, id, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Task not found' });
+    if (status === 'completed') {
+      await notifyCreatorOfCompletion(id, rows[0].title, rows[0].createdBy, req.user.id);
+    }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
