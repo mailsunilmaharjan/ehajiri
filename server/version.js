@@ -98,4 +98,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Followup History panel: smaller section-header and pagination fonts, dropped the By/Notes grid columns (Notes already shown in the Description card), description values left-aligned with a scrollable max-height, client/contact info shown bigger in a highlighted green box.',
   },
+  {
+    appVersion : '1.0.26',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : 'Followup History panel is now a full-viewport-height overlay drawer with a dimming backdrop, matching the License Admin Company detail panel, instead of a fixed-height card sitting beside the task grid.',
+  },
 ];

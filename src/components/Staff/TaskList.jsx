@@ -530,10 +530,18 @@ const TaskList = () => {
           )}
         </div>
 
-        {/* Right — Followup History panel (click a task row to open) */}
+        {/* Right — Followup History panel (click a task row to open). Full-viewport-height
+            overlay drawer (fixed, not a flex sibling) with a dimming backdrop, matching the
+            Company detail panel on the License Admin app. */}
         {followupTask && (
-          <div style={{ width: 560, height: '100%', flexShrink: 0, background: '#fff', border: '1px solid #dedede', borderRadius: 10,
-            display: 'flex', flexDirection: 'column', minHeight: 0, boxShadow: '0 1px 3px rgba(0,0,0,.07)', overflow: 'hidden' }}>
+          <div onClick={closeFollowupPanel}
+            style={{ position: 'fixed', top: 60, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,.35)', zIndex: 50 }} />
+        )}
+        {followupTask && (
+          <div onClick={e => e.stopPropagation()}
+            style={{ position: 'fixed', top: 60, right: 0, bottom: 0, width: 560, zIndex: 51,
+              background: '#fff', boxShadow: '-6px 0 24px rgba(0,0,0,.15)',
+              display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
