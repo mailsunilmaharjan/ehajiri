@@ -179,16 +179,18 @@ router.delete('/:id', async (req, res) => {
 const FOLLOWUP_SEL = `
   f.id, f.task_id AS "taskId", f.mode,
   f.followup_date AS "followupDate",
-  f.description, f.task_note AS "taskNote",
+  f.description,
   f.next_followup_at AS "nextFollowupAt",
   f.followed_by AS "followedById", fu.full_name AS "followedByName",
   f.handed_over_to AS "handedOverToId", hu.full_name AS "handedOverToName",
+  f.next_category_id AS "nextCategoryId", ntc.name AS "nextCategoryName",
   f.created_at AS "createdAt"
 `;
 const FOLLOWUP_JOINS = `
   FROM task_followups f
   LEFT JOIN users fu ON fu.id = f.followed_by
   LEFT JOIN users hu ON hu.id = f.handed_over_to
+  LEFT JOIN task_categories ntc ON ntc.id = f.next_category_id
 `;
 const FOLLOWUP_MODES = ['phone', 'email', 'whatsapp', 'sms'];
 
@@ -212,9 +214,10 @@ router.get('/:taskId/followups', async (req, res) => {
 router.post('/:taskId/followups', async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   if (isNaN(taskId)) return res.status(400).json({ error: 'Invalid task id' });
-  const { mode, followupDate, description, taskNote, nextFollowupAt, handedOverTo } = req.body;
+  const { mode, followupDate, description, nextCategoryId, nextFollowupAt, handedOverTo } = req.body;
   if (!FOLLOWUP_MODES.includes(mode)) return res.status(400).json({ error: 'Invalid followup mode' });
   const handedOverId = handedOverTo ? Number(handedOverTo) : null;
+  const nextCategory = nextCategoryId ? Number(nextCategoryId) : null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -225,13 +228,17 @@ router.post('/:taskId/followups', async (req, res) => {
     if (!access.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Task not found' }); }
 
     const { rows } = await client.query(
-      `INSERT INTO task_followups (task_id, mode, followup_date, followed_by, description, task_note, next_followup_at, handed_over_to)
+      `INSERT INTO task_followups (task_id, mode, followup_date, followed_by, description, next_category_id, next_followup_at, handed_over_to)
        VALUES ($1,$2,COALESCE($3, CURRENT_DATE),$4,$5,$6,$7,$8) RETURNING id`,
       [taskId, mode, followupDate || null, req.user.id, description || null,
-       taskNote || null, nextFollowupAt || null, handedOverId]
+       nextCategory, nextFollowupAt || null, handedOverId]
     );
     if (handedOverId) {
       await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [taskId, handedOverId]);
+    }
+    // "Transfer for Next Task" actually reclassifies the task, same non-destructive-side-effect pattern as Hand Over -> task_assignees.
+    if (nextCategory) {
+      await client.query(`UPDATE tasks SET category_id=$1, updated_at=NOW() WHERE id=$2`, [nextCategory, taskId]);
     }
     await client.query('COMMIT');
     const { rows: full } = await pool.query(`SELECT ${FOLLOWUP_SEL} ${FOLLOWUP_JOINS} WHERE f.id = $1`, [rows[0].id]);
@@ -246,9 +253,10 @@ router.put('/:taskId/followups/:id', async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   const id = parseInt(req.params.id);
   if (isNaN(taskId) || isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-  const { mode, followupDate, description, taskNote, nextFollowupAt, handedOverTo } = req.body;
+  const { mode, followupDate, description, nextCategoryId, nextFollowupAt, handedOverTo } = req.body;
   if (!FOLLOWUP_MODES.includes(mode)) return res.status(400).json({ error: 'Invalid followup mode' });
   const handedOverId = handedOverTo ? Number(handedOverTo) : null;
+  const nextCategory = nextCategoryId ? Number(nextCategoryId) : null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -260,15 +268,18 @@ router.put('/:taskId/followups/:id', async (req, res) => {
 
     const { rows } = await client.query(
       `UPDATE task_followups
-       SET mode=$1, followup_date=COALESCE($2, followup_date), description=$3, task_note=$4,
+       SET mode=$1, followup_date=COALESCE($2, followup_date), description=$3, next_category_id=$4,
            next_followup_at=$5, handed_over_to=$6
        WHERE id=$7 AND task_id=$8
        RETURNING id`,
-      [mode, followupDate || null, description || null, taskNote || null, nextFollowupAt || null, handedOverId, id, taskId]
+      [mode, followupDate || null, description || null, nextCategory, nextFollowupAt || null, handedOverId, id, taskId]
     );
     if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Followup not found' }); }
     if (handedOverId) {
       await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [taskId, handedOverId]);
+    }
+    if (nextCategory) {
+      await client.query(`UPDATE tasks SET category_id=$1, updated_at=NOW() WHERE id=$2`, [nextCategory, taskId]);
     }
     await client.query('COMMIT');
     const { rows: full } = await pool.query(`SELECT ${FOLLOWUP_SEL} ${FOLLOWUP_JOINS} WHERE f.id = $1`, [id]);

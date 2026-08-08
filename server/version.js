@@ -116,4 +116,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Description card now shows only the selected followup\'s description — dropped the task-description row, which was usually empty ("—") and just added clutter.',
   },
+  {
+    appVersion : '1.0.29',
+    dbVersion  : 88,
+    releaseDate: '2026-08-08',
+    notes      : 'Followup form: the free-text "Task" field is now "Transfer for Next Task", a Task Category dropdown (defaults to the task\'s current category) moved to after Next Followup & Time — saving it reclassifies the task itself, same as Hand Over adds an assignee. Description textarea is taller.',
+  },
 ];

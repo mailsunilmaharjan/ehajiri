@@ -2021,6 +2021,16 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 88,
+    description: 'task_followups.next_category_id — the followup form\'s "Task" free-text field became "Transfer for Next Task", a Task Category dropdown defaulting to the task\'s current category. Saving a followup with this set now also updates the parent task\'s own category_id (same non-destructive-side-effect pattern "Hand Over" already uses for task_assignees). The old task_note text column is left in place, unused going forward, rather than dropped — preserves any free-text values already entered on live tenants between v87 and this release instead of silently discarding them.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE task_followups
+          ADD COLUMN IF NOT EXISTS next_category_id INTEGER REFERENCES task_categories(id) ON DELETE SET NULL;
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

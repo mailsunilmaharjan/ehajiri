@@ -55,7 +55,7 @@ const FOLLOWUP_MODES = [
   { value: 'sms',      label: 'SMS',      icon: '📱' },
 ];
 
-const emptyFollowup = { mode: 'phone', followupDate: todayISO(), description: '', taskNote: '', nextFollowupAt: '', handedOverTo: '' };
+const emptyFollowup = { mode: 'phone', followupDate: todayISO(), description: '', nextCategoryId: '', nextFollowupAt: '', handedOverTo: '' };
 
 // Converts a stored UTC timestamp into the "YYYY-MM-DDTHH:mm" shape a
 // <input type="datetime-local"> needs, in Nepal wall-clock time (UTC+5:45,
@@ -149,7 +149,7 @@ const TaskList = () => {
     const q = followupSearch.trim().toLowerCase();
     if (!q) return followups;
     return followups.filter(f =>
-      [f.mode, f.description, f.taskNote, f.followedByName, f.handedOverToName].some(v => v && v.toLowerCase().includes(q)));
+      [f.mode, f.description, f.nextCategoryName, f.followedByName, f.handedOverToName].some(v => v && v.toLowerCase().includes(q)));
   }, [followups, followupSearch]);
 
   const loadTasks = () => {
@@ -294,14 +294,21 @@ const TaskList = () => {
   };
   const openFollowupPanel = (row) => { setFollowupTask(row); setFollowupSearch(''); loadFollowups(row.id); };
   const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); setFollowupSearch(''); };
-  const openNewFollowup = () => { setEditingFollowupId(null); setFollowupForm(emptyFollowup); setFollowupErrors({}); setFollowupModal(true); };
+  const openNewFollowup = () => {
+    setEditingFollowupId(null);
+    // "Transfer for Next Task" defaults to the task's own current category — the form
+    // proposes changing FROM that, it doesn't start blank.
+    setFollowupForm({ ...emptyFollowup, nextCategoryId: followupTask?.categoryId ? String(followupTask.categoryId) : '' });
+    setFollowupErrors({});
+    setFollowupModal(true);
+  };
   const openEditFollowup = (row) => {
     setEditingFollowupId(row.id);
     setFollowupForm({
       mode: row.mode,
       followupDate: row.followupDate ? String(row.followupDate).split('T')[0] : todayISO(),
       description: row.description || '',
-      taskNote: row.taskNote || '',
+      nextCategoryId: row.nextCategoryId ? String(row.nextCategoryId) : (followupTask?.categoryId ? String(followupTask.categoryId) : ''),
       nextFollowupAt: isoToNepalLocalInput(row.nextFollowupAt),
       handedOverTo: row.handedOverToId ? String(row.handedOverToId) : '',
     });
@@ -329,7 +336,7 @@ const TaskList = () => {
       mode: followupForm.mode,
       followupDate: followupForm.followupDate || null,
       description: followupForm.description || null,
-      taskNote: followupForm.taskNote || null,
+      nextCategoryId: followupForm.nextCategoryId ? Number(followupForm.nextCategoryId) : null,
       nextFollowupAt: followupForm.nextFollowupAt || null,
       handedOverTo: followupForm.handedOverTo ? Number(followupForm.handedOverTo) : null,
     };
@@ -339,7 +346,11 @@ const TaskList = () => {
       showToast(editingFollowupId ? 'Followup updated' : 'Followup added');
       setFollowupModal(false);
       loadFollowups(followupTask.id);
-      loadTasks(); // a hand-over may have added a new assignee — refresh the grid's "Assigned To" column
+      loadTasks(); // a hand-over may have added a new assignee, and a category transfer changed the task itself
+      // Keep the open panel's own header/category in sync too — loadTasks() only refreshes the grid's copy.
+      if (payload.nextCategoryId) {
+        setFollowupTask(prev => prev ? { ...prev, categoryId: payload.nextCategoryId } : prev);
+      }
     } catch (err) {
       setFollowupErrors({ _submit: err.message || 'Save failed' });
     } finally {
@@ -370,7 +381,7 @@ const TaskList = () => {
       },
     },
     {
-      field: 'taskNote', header: 'Task', width: 130,
+      field: 'nextCategoryName', header: 'Task', width: 130,
       render: (v) => v ? <span style={{ fontSize: 12, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
@@ -851,14 +862,8 @@ const TaskList = () => {
 
               {field('Description', false, null,
                 <textarea value={followupForm.description} onChange={e => setFollowupForm(p => ({ ...p, description: e.target.value }))}
-                  rows={3} placeholder="What was discussed..."
+                  rows={6} placeholder="What was discussed..."
                   style={{ border: '1px solid #d1d5db', borderRadius: 7, padding: '8px 10px', fontSize: 13, resize: 'vertical', outline: 'none', fontFamily: 'inherit' }} />
-              )}
-
-              {field('Task', false, null,
-                <input value={followupForm.taskNote} onChange={e => setFollowupForm(p => ({ ...p, taskNote: e.target.value }))}
-                  placeholder="Next action / outcome..."
-                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
               )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -876,6 +881,14 @@ const TaskList = () => {
                   />
                 )}
               </div>
+
+              {field('Transfer for Next Task', false, null,
+                <select value={followupForm.nextCategoryId} onChange={e => setFollowupForm(p => ({ ...p, nextCategoryId: e.target.value }))}
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  <option value="">— Select —</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
             </div>
             <div className="modal-footer">
               {canManageSystem && editingFollowupId && (
