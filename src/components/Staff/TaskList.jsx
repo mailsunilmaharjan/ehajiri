@@ -370,14 +370,6 @@ const TaskList = () => {
       },
     },
     {
-      field: 'followedByName', header: 'By', width: 110,
-      render: (v) => v || <span style={{ color: '#d1d5db' }}>—</span>,
-    },
-    {
-      field: 'description', header: 'Notes', minWidth: 150,
-      render: (v) => v ? <span style={{ fontSize: 12, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
-    },
-    {
       field: 'taskNote', header: 'Task', width: 130,
       render: (v) => v ? <span style={{ fontSize: 12, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
@@ -548,15 +540,17 @@ const TaskList = () => {
                   <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center', gap: 6 }}>
                     📄 {followupTask.title}
                   </div>
-                  <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 2 }}>
-                    {followupTask.customerName || 'No client linked'}
-                    {followupTask.personName ? ` — ${followupTask.personName}` : ''}
-                  </div>
-                  {(followupTask.customerMobile || followupTask.customerPhone) && (
-                    <div style={{ fontSize: 11.5, color: '#9ca3af', marginTop: 1 }}>
-                      {[followupTask.customerMobile, followupTask.customerPhone].filter(Boolean).join(' | ')}
+                  <div style={{ marginTop: 6, padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 7, display: 'inline-block' }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#166534' }}>
+                      {followupTask.customerName || 'No client linked'}
+                      {followupTask.personName ? ` — ${followupTask.personName}` : ''}
                     </div>
-                  )}
+                    {(followupTask.customerMobile || followupTask.customerPhone) && (
+                      <div style={{ fontSize: 13, color: '#15803d', marginTop: 1 }}>
+                        {[followupTask.customerMobile, followupTask.customerPhone].filter(Boolean).join(' | ')}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <button onClick={closeFollowupPanel} title="Close"
                   style={{ border: 'none', background: 'transparent', fontSize: 16, cursor: 'pointer', color: '#9ca3af', flexShrink: 0 }}>✕</button>
@@ -574,8 +568,8 @@ const TaskList = () => {
                 border: '1px solid #dbeafe', borderRadius: 10, overflow: 'hidden' }}>
                 <div style={{ background: '#eff6ff', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7,
                   borderBottom: '1px solid #dbeafe', flexShrink: 0 }}>
-                  <span style={{ fontSize: 13 }}>📋</span>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px', whiteSpace: 'nowrap' }}>FOLLOWUP HISTORY</span>
+                  <span style={{ fontSize: 12 }}>📋</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px', whiteSpace: 'nowrap' }}>FOLLOWUP HISTORY</span>
                   <input type="text" value={followupSearch} onChange={e => setFollowupSearch(e.target.value)}
                     placeholder="Search followups…"
                     style={{ marginLeft: 'auto', height: 26, width: 160, border: '1px solid #bfdbfe', borderRadius: 6,
@@ -590,6 +584,7 @@ const TaskList = () => {
                         columns={followupColumns}
                         data={filteredFollowups}
                         rowKey="id"
+                        className="followup-history-grid"
                         showCheckbox={false}
                         showFilterButton={false}
                         showSearch={false}
@@ -605,14 +600,14 @@ const TaskList = () => {
               {/* Description — amber card, left: the task's own description, right: the selected followup's */}
               <div style={{ flexShrink: 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
                 <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
-                  <span style={{ fontSize: 13 }}>📝</span>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
+                  <span style={{ fontSize: 12 }}>📝</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                 </div>
                 <div style={{ padding: '10px 14px', background: '#fff', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                  <div style={{ fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 90, overflowY: 'auto' }}>
                     {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
                   </div>
-                  <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12, fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                  <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12, fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 90, overflowY: 'auto' }}>
                     {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
                   </div>
                 </div>

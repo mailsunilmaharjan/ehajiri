@@ -92,4 +92,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Followup History panel: removed the gap to the task grid, panel now stretches full height, search box moved into the Followup History card header, Description card shows values only (no redundant labels).',
   },
+  {
+    appVersion : '1.0.25',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : 'Followup History panel: smaller section-header and pagination fonts, dropped the By/Notes grid columns (Notes already shown in the Description card), description values left-aligned with a scrollable max-height, client/contact info shown bigger in a highlighted green box.',
+  },
 ];
