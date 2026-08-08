@@ -152,4 +152,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Removed the animated rainbow accent line from the top menu bar. Followup History Description card now shows roughly 2 replies before scrolling; clicking it opens a full popup with the description on the left and the complete reply thread on the right.',
   },
+  {
+    appVersion : '1.0.35',
+    dbVersion  : 90,
+    releaseDate: '2026-08-08',
+    notes      : 'Followup replies are now threaded — a "Reply" link under each reply lets you reply to that specific reply (unlimited depth), indented with a connector line, relative timestamps ("4d", "2h"), matching a standard nested-comment layout.',
+  },
 ];

@@ -344,7 +344,7 @@ router.delete('/:taskId/followups/:id', requireRole('admin', 'superAdmin'), asyn
 // admin, a branch manager, another staff member — whatever mix it is)
 // already has access via task_assignees/created_by.
 const REPLY_SEL = `
-  r.id, r.followup_id AS "followupId", r.message, r.created_at AS "createdAt",
+  r.id, r.followup_id AS "followupId", r.parent_reply_id AS "parentReplyId", r.message, r.created_at AS "createdAt",
   r.user_id AS "userId", u.full_name AS "userName", u.role AS "userRole", u.profile_photo AS "userPhoto"
 `;
 const REPLY_JOINS = `FROM task_followup_replies r LEFT JOIN users u ON u.id = r.user_id`;
@@ -371,7 +371,7 @@ router.post('/:taskId/followups/:followupId/replies', async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   const followupId = parseInt(req.params.followupId);
   if (isNaN(taskId) || isNaN(followupId)) return res.status(400).json({ error: 'Invalid id' });
-  const { message } = req.body;
+  const { message, parentReplyId } = req.body;
   if (!message?.trim()) return res.status(400).json({ error: 'Reply message is required' });
   try {
     const { rows: access } = await pool.query(
@@ -379,9 +379,22 @@ router.post('/:taskId/followups/:followupId/replies', async (req, res) => {
       [taskId, req.user.id]
     );
     if (!access.length) return res.status(404).json({ error: 'Task not found' });
+
+    let parentId = null;
+    if (parentReplyId) {
+      // Must belong to the same followup — otherwise a tampered id could graft a
+      // reply onto an unrelated (possibly inaccessible) followup's thread.
+      const { rows: parentRows } = await pool.query(
+        `SELECT 1 FROM task_followup_replies WHERE id=$1 AND followup_id=$2`,
+        [parentReplyId, followupId]
+      );
+      if (!parentRows.length) return res.status(400).json({ error: 'Invalid parent reply' });
+      parentId = Number(parentReplyId);
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO task_followup_replies (followup_id, user_id, message) VALUES ($1,$2,$3) RETURNING id`,
-      [followupId, req.user.id, message.trim()]
+      `INSERT INTO task_followup_replies (followup_id, user_id, message, parent_reply_id) VALUES ($1,$2,$3,$4) RETURNING id`,
+      [followupId, req.user.id, message.trim(), parentId]
     );
     const { rows: full } = await pool.query(`SELECT ${REPLY_SEL} ${REPLY_JOINS} WHERE r.id = $1`, [rows[0].id]);
     res.status(201).json(full[0]);

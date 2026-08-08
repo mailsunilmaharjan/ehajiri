@@ -89,6 +89,24 @@ const formatNepalDateTime = (isoUtc, fd) => {
   return `${fd(datePart)} ${hh12}:${String(mm).padStart(2, '0')} ${ampm}`;
 };
 
+// Compact relative timestamp for the reply thread ("4d", "2h", "just now") —
+// full date/time is still one click away via the title attribute.
+const timeAgo = (isoUtc) => {
+  if (!isoUtc) return '';
+  const diffMs = Date.now() - new Date(isoUtc).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w`;
+  const months = Math.floor(days / 30);
+  return months < 12 ? `${months}mo` : `${Math.floor(days / 365)}y`;
+};
+
 const DateInput = ({ value, onChange }) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') return <NepaliDatePicker value={value} onChange={onChange} />;
@@ -172,6 +190,7 @@ const TaskList = () => {
   const [newReplyText,           setNewReplyText]           = useState('');
   const [replySaving,            setReplySaving]             = useState(false);
   const [descriptionModalOpen,   setDescriptionModalOpen]    = useState(false); // click the compact card -> full Description + Replies popup
+  const [replyingTo,             setReplyingTo]              = useState(null); // { id, userName } — reply-to-a-specific-reply target, null = top-level
 
   useEffect(() => {
     if (!followupTask || !selectedFollowup) { setFollowupReplies([]); return; }
@@ -181,6 +200,7 @@ const TaskList = () => {
       .catch(() => setFollowupReplies([]))
       .finally(() => setFollowupRepliesLoading(false));
     setNewReplyText('');
+    setReplyingTo(null);
   }, [followupTask?.id, selectedFollowup?.id]);
 
   const sendReply = async () => {
@@ -188,9 +208,11 @@ const TaskList = () => {
     if (!message || !followupTask || !selectedFollowup) return;
     setReplySaving(true);
     try {
-      const reply = await api.post(`/tasks/${followupTask.id}/followups/${selectedFollowup.id}/replies`, { message });
+      const reply = await api.post(`/tasks/${followupTask.id}/followups/${selectedFollowup.id}/replies`,
+        { message, parentReplyId: replyingTo?.id || null });
       setFollowupReplies(prev => [...prev, reply]);
       setNewReplyText('');
+      setReplyingTo(null);
     } catch (e) {
       showToast(e.message || 'Reply failed', 'error');
     } finally {
@@ -199,44 +221,83 @@ const TaskList = () => {
   };
 
   // Shared between the compact Description card and the full-size popup it opens on click.
+  // Threaded: replies can reply to a specific reply (unlimited depth), grouped
+  // client-side from the flat list by parentReplyId and rendered recursively,
+  // each level indented with a connector line off the parent's avatar.
   const renderReplyBubbles = () => {
     if (followupRepliesLoading) return <div style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</div>;
     if (!followupReplies.length) return <div style={{ color: '#d1d5db', fontSize: 12 }}>No replies yet</div>;
-    return followupReplies.map(r => (
-      <div key={r.id} style={{ display: 'flex', gap: 8 }}>
-        <Avatar photo={r.userPhoto} name={r.userName} size={26} style={{ marginTop: 2, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0, background: '#fff', border: '1px solid #f1f5f9', borderRadius: 7, padding: '6px 10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
-            {r.userRole && (
-              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
-                {ROLE_LABELS[r.userRole] || r.userRole}
+
+    const byParent = new Map();
+    followupReplies.forEach(r => {
+      const key = r.parentReplyId || 'root';
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(r);
+    });
+
+    const renderNode = (r, depth) => (
+      <div key={r.id}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Avatar photo={r.userPhoto} name={r.userName} size={26} style={{ marginTop: 2, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ background: '#fff', border: '1px solid #f1f5f9', borderRadius: 10, padding: '6px 10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
+                {r.userRole && (
+                  <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
+                    {ROLE_LABELS[r.userRole] || r.userRole}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, color: '#374151', marginTop: 1 }}>{r.message}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 3, paddingLeft: 4 }}>
+              <button onClick={() => setReplyingTo({ id: r.id, userName: r.userName })}
+                style={{ background: 'none', border: 'none', padding: 0, fontSize: 11, fontWeight: 700, color: '#6b7280', cursor: 'pointer' }}>
+                Reply
+              </button>
+              <span title={formatNepalDateTime(r.createdAt, fd)} style={{ fontSize: 11, color: '#9ca3af' }}>
+                {timeAgo(r.createdAt)}
               </span>
-            )}
-            <span style={{ fontSize: 10.5, color: '#9ca3af', marginLeft: 'auto' }}>{formatNepalDateTime(r.createdAt, fd)}</span>
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: '#374151' }}>{r.message}</div>
         </div>
+        {(byParent.get(r.id) || []).length > 0 && (
+          <div style={{ marginLeft: 13, paddingLeft: 20, borderLeft: '2px solid #f1f5f9', marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {byParent.get(r.id).map(child => renderNode(child, depth + 1))}
+          </div>
+        )}
       </div>
-    ));
+    );
+
+    return (byParent.get('root') || []).map(r => renderNode(r, 0));
   };
 
   const renderReplyInput = () => selectedFollowup && (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink: 0 }}>
-      <Avatar photo={currentUser?.profilePhoto} name={currentUser?.fullName} size={26} />
-      <div style={{ position: 'relative', flex: 1 }} onClick={e => e.stopPropagation()}>
-        <input type="text" value={newReplyText} onChange={e => setNewReplyText(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !replySaving) sendReply(); }}
-          placeholder="Write a reply…"
-          style={{ height: 32, width: '100%', border: '1px solid #fde68a', borderRadius: 16, padding: '0 34px 0 12px',
-            fontSize: 12.5, outline: 'none', boxSizing: 'border-box' }} />
-        <button onClick={sendReply} disabled={replySaving || !newReplyText.trim()} title="Send"
-          style={{ position: 'absolute', top: 3, right: 3, width: 26, height: 26, display: 'flex',
-            alignItems: 'center', justifyContent: 'center', background: '#1a56db', color: '#fff',
-            border: 'none', borderRadius: '50%', fontSize: 13, cursor: replySaving ? 'default' : 'pointer',
-            opacity: replySaving || !newReplyText.trim() ? 0.5 : 1 }}>
-          {replySaving ? '…' : '➤'}
-        </button>
+    <div style={{ marginTop: 8, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+      {replyingTo && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#92400e', marginBottom: 4, paddingLeft: 34 }}>
+          Replying to <strong>{replyingTo.userName}</strong>
+          <button onClick={() => setReplyingTo(null)} title="Cancel"
+            style={{ background: 'none', border: 'none', padding: 0, color: '#b45309', fontSize: 12, cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Avatar photo={currentUser?.profilePhoto} name={currentUser?.fullName} size={26} />
+        <div style={{ position: 'relative', flex: 1 }}>
+          <input type="text" value={newReplyText} onChange={e => setNewReplyText(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !replySaving) sendReply(); }}
+            placeholder={replyingTo ? `Reply to ${replyingTo.userName}…` : 'Write a reply…'}
+            style={{ height: 32, width: '100%', border: '1px solid #fde68a', borderRadius: 16, padding: '0 34px 0 12px',
+              fontSize: 12.5, outline: 'none', boxSizing: 'border-box' }} />
+          <button onClick={sendReply} disabled={replySaving || !newReplyText.trim()} title="Send"
+            style={{ position: 'absolute', top: 3, right: 3, width: 26, height: 26, display: 'flex',
+              alignItems: 'center', justifyContent: 'center', background: '#1a56db', color: '#fff',
+              border: 'none', borderRadius: '50%', fontSize: 13, cursor: replySaving ? 'default' : 'pointer',
+              opacity: replySaving || !newReplyText.trim() ? 0.5 : 1 }}>
+            {replySaving ? '…' : '➤'}
+          </button>
+        </div>
       </div>
     </div>
   );

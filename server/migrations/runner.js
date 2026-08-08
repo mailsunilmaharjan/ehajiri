@@ -2047,6 +2047,17 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 90,
+    description: 'task_followup_replies.parent_reply_id — replies can now reply to a specific reply (unlimited depth), turning the flat reply list into a threaded comment tree like the Description card popup shows. Self-referencing FK, ON DELETE CASCADE so deleting a reply drops its whole sub-thread rather than orphaning it.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE task_followup_replies
+          ADD COLUMN IF NOT EXISTS parent_reply_id INTEGER REFERENCES task_followup_replies(id) ON DELETE CASCADE;
+        CREATE INDEX IF NOT EXISTS idx_tfr_parent ON task_followup_replies(parent_reply_id);
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════
