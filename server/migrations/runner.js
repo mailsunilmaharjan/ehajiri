@@ -2031,6 +2031,22 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 89,
+    description: 'task_followup_replies — a reply thread under a specific followup\'s Description card, so anyone with access to the task (creator or any assignee, whatever mix of HOD/admin/branch manager/other staff that happens to be) can discuss that one entry in place instead of only the person who logged it ever adding context.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS task_followup_replies (
+          id          SERIAL       PRIMARY KEY,
+          followup_id INTEGER      NOT NULL REFERENCES task_followups(id) ON DELETE CASCADE,
+          user_id     INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          message     TEXT         NOT NULL,
+          created_at  TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_tfr_followup ON task_followup_replies(followup_id);
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

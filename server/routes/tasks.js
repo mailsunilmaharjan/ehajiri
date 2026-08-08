@@ -303,4 +303,54 @@ router.delete('/:taskId/followups/:id', requireRole('admin', 'superAdmin'), asyn
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Replies on a single followup entry — anyone with access to the task
+// (creator or any assignee) can weigh in, same audience as the followup
+// log itself. Not role-gated: whoever is actually on the task (an HOD, an
+// admin, a branch manager, another staff member — whatever mix it is)
+// already has access via task_assignees/created_by.
+const REPLY_SEL = `
+  r.id, r.followup_id AS "followupId", r.message, r.created_at AS "createdAt",
+  r.user_id AS "userId", u.full_name AS "userName", u.role AS "userRole"
+`;
+const REPLY_JOINS = `FROM task_followup_replies r LEFT JOIN users u ON u.id = r.user_id`;
+
+router.get('/:taskId/followups/:followupId/replies', async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const followupId = parseInt(req.params.followupId);
+  if (isNaN(taskId) || isNaN(followupId)) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { rows: access } = await pool.query(
+      `SELECT 1 FROM tasks WHERE id=$1 AND ${ASSIGNEE_OR_CREATOR('$1', '$2')}`,
+      [taskId, req.user.id]
+    );
+    if (!access.length) return res.status(404).json({ error: 'Task not found' });
+    const { rows } = await pool.query(
+      `SELECT ${REPLY_SEL} ${REPLY_JOINS} WHERE r.followup_id = $1 ORDER BY r.created_at ASC`,
+      [followupId]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/:taskId/followups/:followupId/replies', async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const followupId = parseInt(req.params.followupId);
+  if (isNaN(taskId) || isNaN(followupId)) return res.status(400).json({ error: 'Invalid id' });
+  const { message } = req.body;
+  if (!message?.trim()) return res.status(400).json({ error: 'Reply message is required' });
+  try {
+    const { rows: access } = await pool.query(
+      `SELECT 1 FROM tasks WHERE id=$1 AND ${ASSIGNEE_OR_CREATOR('$1', '$2')}`,
+      [taskId, req.user.id]
+    );
+    if (!access.length) return res.status(404).json({ error: 'Task not found' });
+    const { rows } = await pool.query(
+      `INSERT INTO task_followup_replies (followup_id, user_id, message) VALUES ($1,$2,$3) RETURNING id`,
+      [followupId, req.user.id, message.trim()]
+    );
+    const { rows: full } = await pool.query(`SELECT ${REPLY_SEL} ${REPLY_JOINS} WHERE r.id = $1`, [rows[0].id]);
+    res.status(201).json(full[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

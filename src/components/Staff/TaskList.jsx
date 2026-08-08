@@ -57,6 +57,12 @@ const FOLLOWUP_MODES = [
 
 const emptyFollowup = { mode: 'phone', followupDate: todayISO(), description: '', nextCategoryId: '', nextFollowupAt: '', handedOverTo: '' };
 
+// Friendly labels for reply-thread author badges.
+const ROLE_LABELS = {
+  admin: 'Admin', superAdmin: 'Super Admin', branchManager: 'Branch Manager',
+  departmentHead: 'HOD', employee: 'Staff',
+};
+
 // Converts a stored UTC timestamp into the "YYYY-MM-DDTHH:mm" shape a
 // <input type="datetime-local"> needs, in Nepal wall-clock time (UTC+5:45,
 // no DST) — not the viewer's own OS timezone. Same fixed-offset technique as
@@ -144,6 +150,37 @@ const TaskList = () => {
 
   // Footer preview defaults to the most recent followup whenever the list (re)loads
   useEffect(() => { setSelectedFollowup(followups[0] || null); }, [followups]);
+
+  // Replies thread on the Description card's selected followup
+  const [followupReplies,        setFollowupReplies]        = useState([]);
+  const [followupRepliesLoading, setFollowupRepliesLoading] = useState(false);
+  const [newReplyText,           setNewReplyText]           = useState('');
+  const [replySaving,            setReplySaving]             = useState(false);
+
+  useEffect(() => {
+    if (!followupTask || !selectedFollowup) { setFollowupReplies([]); return; }
+    setFollowupRepliesLoading(true);
+    api.get(`/tasks/${followupTask.id}/followups/${selectedFollowup.id}/replies`)
+      .then(rows => setFollowupReplies(Array.isArray(rows) ? rows : []))
+      .catch(() => setFollowupReplies([]))
+      .finally(() => setFollowupRepliesLoading(false));
+    setNewReplyText('');
+  }, [followupTask?.id, selectedFollowup?.id]);
+
+  const sendReply = async () => {
+    const message = newReplyText.trim();
+    if (!message || !followupTask || !selectedFollowup) return;
+    setReplySaving(true);
+    try {
+      const reply = await api.post(`/tasks/${followupTask.id}/followups/${selectedFollowup.id}/replies`, { message });
+      setFollowupReplies(prev => [...prev, reply]);
+      setNewReplyText('');
+    } catch (e) {
+      showToast(e.message || 'Reply failed', 'error');
+    } finally {
+      setReplySaving(false);
+    }
+  };
 
   const filteredFollowups = useMemo(() => {
     const q = followupSearch.trim().toLowerCase();
@@ -622,8 +659,51 @@ const TaskList = () => {
                   <span style={{ fontSize: 12 }}>📝</span>
                   <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                 </div>
-                <div style={{ padding: '10px 14px', background: '#fff', fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 130, overflowY: 'auto' }}>
+                <div style={{ padding: '10px 14px', background: '#fff', fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 150, overflowY: 'auto' }}>
                   {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                </div>
+
+                {/* Replies — anyone with access to the task (creator or any assignee:
+                    HOD, admin, branch manager, whoever) can weigh in on this entry. */}
+                <div style={{ borderTop: '1px solid #fde68a', padding: '10px 14px', background: '#fffdf7' }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
+                    Replies
+                  </div>
+                  <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {followupRepliesLoading ? (
+                      <div style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</div>
+                    ) : followupReplies.length === 0 ? (
+                      <div style={{ color: '#d1d5db', fontSize: 12 }}>No replies yet</div>
+                    ) : followupReplies.map(r => (
+                      <div key={r.id} style={{ background: '#fff', border: '1px solid #f1f5f9', borderRadius: 7, padding: '6px 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
+                          {r.userRole && (
+                            <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
+                              {ROLE_LABELS[r.userRole] || r.userRole}
+                            </span>
+                          )}
+                          <span style={{ fontSize: 10.5, color: '#9ca3af', marginLeft: 'auto' }}>{new Date(r.createdAt).toLocaleString()}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#374151' }}>{r.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {selectedFollowup && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                      <input type="text" value={newReplyText} onChange={e => setNewReplyText(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !replySaving) sendReply(); }}
+                        placeholder="Write a reply…"
+                        style={{ flex: 1, height: 32, border: '1px solid #fde68a', borderRadius: 6, padding: '0 10px',
+                          fontSize: 12.5, outline: 'none', boxSizing: 'border-box' }} />
+                      <button onClick={sendReply} disabled={replySaving || !newReplyText.trim()}
+                        style={{ height: 32, padding: '0 14px', background: '#1a56db', color: '#fff', border: 'none',
+                          borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: replySaving ? 'default' : 'pointer',
+                          opacity: replySaving || !newReplyText.trim() ? 0.6 : 1 }}>
+                        {replySaving ? '…' : 'Reply'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -128,4 +128,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Fixed a bug where editing a staff member\'s Staff ID on the Staff Detail page appeared to save (no error, other fields updated fine) but the new value never actually persisted or showed up in the grid — the PUT /api/employees/:id route was missing employee_id from its UPDATE statement entirely.',
   },
+  {
+    appVersion : '1.0.31',
+    dbVersion  : 89,
+    releaseDate: '2026-08-08',
+    notes      : 'Description card in the Followup History panel is taller and now has a reply thread — anyone with access to the task (creator or any assignee: HOD, admin, branch manager, or whoever else it\'s assigned to) can reply to a specific followup entry.',
+  },
 ];
