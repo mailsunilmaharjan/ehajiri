@@ -110,4 +110,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : '"+ New" followup button moved into the Followup History card header; client/contact info box now spans the full panel width; Description card switched from a 2-column layout to a taller, left-aligned vertical stack.',
   },
+  {
+    appVersion : '1.0.28',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : 'Description card now shows only the selected followup\'s description — dropped the task-description row, which was usually empty ("—") and just added clutter.',
+  },
 ];

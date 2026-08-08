@@ -605,19 +605,14 @@ const TaskList = () => {
                 </div>
               </div>
 
-              {/* Description — amber card, left: the task's own description, right: the selected followup's */}
+              {/* Description — amber card, the selected followup's description */}
               <div style={{ flexShrink: 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
                 <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
                   <span style={{ fontSize: 12 }}>📝</span>
                   <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                 </div>
-                <div style={{ padding: '10px 14px', background: '#fff', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ fontSize: 12, color: '#374151', textAlign: 'left', width: '100%', maxHeight: 130, overflowY: 'auto' }}>
-                    {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
-                  </div>
-                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 10, fontSize: 12, color: '#374151', textAlign: 'left', width: '100%', maxHeight: 130, overflowY: 'auto' }}>
-                    {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
-                  </div>
+                <div style={{ padding: '10px 14px', background: '#fff', fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 130, overflowY: 'auto' }}>
+                  {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
                 </div>
               </div>
             </div>
