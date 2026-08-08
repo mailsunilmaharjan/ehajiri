@@ -74,4 +74,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Task page: Assign Task is now a multi-select staff checkbox grid (Name/Post/Department/Branch), Description is a rich-text editor, Contact Person picker uses checkboxes; new right-side Followup History panel per task (call/email/WhatsApp/SMS log, next-followup scheduling, hand-over to another staff member).',
   },
+  {
+    appVersion : '1.0.22',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : 'Followup History: double-click a row to edit it, delete (admin/superAdmin only), wider panel with a Task/Followup description footer. Email and WhatsApp followup buttons now open Gmail compose / a WhatsApp chat pre-filled with the linked customer\'s own contact info.',
+  },
 ];

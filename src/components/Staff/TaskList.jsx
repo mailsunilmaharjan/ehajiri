@@ -57,6 +57,18 @@ const FOLLOWUP_MODES = [
 
 const emptyFollowup = { mode: 'phone', followupDate: todayISO(), description: '', taskNote: '', nextFollowupAt: '', handedOverTo: '' };
 
+// Converts a stored UTC timestamp into the "YYYY-MM-DDTHH:mm" shape a
+// <input type="datetime-local"> needs, in Nepal wall-clock time (UTC+5:45,
+// no DST) — not the viewer's own OS timezone. Same fixed-offset technique as
+// getNepalNow() in src/utils/dateUtils.js: shift the epoch, then read it
+// back with UTC getters so the browser's own offset never enters into it.
+const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
+const isoToNepalLocalInput = (isoUtc) => {
+  if (!isoUtc) return '';
+  const d = new Date(new Date(isoUtc).getTime() + NEPAL_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+};
+
 const DateInput = ({ value, onChange }) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') return <NepaliDatePicker value={value} onChange={onChange} />;
@@ -125,6 +137,12 @@ const TaskList = () => {
   const [followupForm,    setFollowupForm]    = useState(emptyFollowup);
   const [followupSaving,  setFollowupSaving]  = useState(false);
   const [followupErrors,  setFollowupErrors]  = useState({});
+  const [editingFollowupId, setEditingFollowupId] = useState(null); // null = "+ New Followup"; set = editing that row
+  const [selectedFollowup,  setSelectedFollowup]  = useState(null); // single-click row -> panel footer preview
+  const [deleteFollowupConfirm, setDeleteFollowupConfirm] = useState(null);
+
+  // Footer preview defaults to the most recent followup whenever the list (re)loads
+  useEffect(() => { setSelectedFollowup(followups[0] || null); }, [followups]);
 
   const loadTasks = () => {
     setLoading(true);
@@ -267,8 +285,35 @@ const TaskList = () => {
       .finally(() => setFollowupsLoading(false));
   };
   const openFollowupPanel = (row) => { setFollowupTask(row); loadFollowups(row.id); };
-  const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); };
-  const openNewFollowup = () => { setFollowupForm(emptyFollowup); setFollowupErrors({}); setFollowupModal(true); };
+  const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); };
+  const openNewFollowup = () => { setEditingFollowupId(null); setFollowupForm(emptyFollowup); setFollowupErrors({}); setFollowupModal(true); };
+  const openEditFollowup = (row) => {
+    setEditingFollowupId(row.id);
+    setFollowupForm({
+      mode: row.mode,
+      followupDate: row.followupDate ? String(row.followupDate).split('T')[0] : todayISO(),
+      description: row.description || '',
+      taskNote: row.taskNote || '',
+      nextFollowupAt: isoToNepalLocalInput(row.nextFollowupAt),
+      handedOverTo: row.handedOverToId ? String(row.handedOverToId) : '',
+    });
+    setFollowupErrors({});
+    setFollowupModal(true);
+  };
+
+  // "Email"/"WhatsApp" pills on the followup form don't just pick a mode —
+  // they jump straight to composing, using the linked customer's own
+  // email/mobile (from the selected Contact, not typed by hand each time).
+  const openGmailCompose = (email) => {
+    if (!email) { showToast('No email on file for this customer', 'error'); return; }
+    window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`, '_blank', 'noopener');
+  };
+  const openWhatsAppChat = (mobile) => {
+    const digits = (mobile || '').replace(/\D/g, '');
+    if (!digits) { showToast('No mobile number on file for this customer', 'error'); return; }
+    // Nepal mobiles are stored as bare 10-digit local numbers — wa.me needs the country code.
+    window.open(`https://wa.me/${digits.length === 10 ? `977${digits}` : digits}`, '_blank', 'noopener');
+  };
 
   const saveFollowup = async () => {
     setFollowupSaving(true);
@@ -281,8 +326,9 @@ const TaskList = () => {
       handedOverTo: followupForm.handedOverTo ? Number(followupForm.handedOverTo) : null,
     };
     try {
-      await api.post(`/tasks/${followupTask.id}/followups`, payload);
-      showToast('Followup added');
+      if (editingFollowupId) await api.put(`/tasks/${followupTask.id}/followups/${editingFollowupId}`, payload);
+      else                   await api.post(`/tasks/${followupTask.id}/followups`, payload);
+      showToast(editingFollowupId ? 'Followup updated' : 'Followup added');
       setFollowupModal(false);
       loadFollowups(followupTask.id);
       loadTasks(); // a hand-over may have added a new assignee — refresh the grid's "Assigned To" column
@@ -291,6 +337,16 @@ const TaskList = () => {
     } finally {
       setFollowupSaving(false);
     }
+  };
+
+  const removeFollowup = async () => {
+    try {
+      await api.delete(`/tasks/${followupTask.id}/followups/${deleteFollowupConfirm.id}`);
+      showToast('Followup deleted');
+      setDeleteFollowupConfirm(null);
+      setFollowupModal(false);
+      loadFollowups(followupTask.id);
+    } catch (e) { showToast(e.message || 'Delete failed', 'error'); }
   };
 
   const followupColumns = useMemo(() => [
@@ -476,7 +532,7 @@ const TaskList = () => {
 
         {/* Right — Followup History panel (click a task row to open) */}
         {followupTask && (
-          <div style={{ width: 420, flexShrink: 0, background: '#fff', border: '1px solid #dedede', borderRadius: 10,
+          <div style={{ width: 560, flexShrink: 0, background: '#fff', border: '1px solid #dedede', borderRadius: 10,
             display: 'flex', flexDirection: 'column', minHeight: 0, boxShadow: '0 1px 3px rgba(0,0,0,.07)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
@@ -514,9 +570,32 @@ const TaskList = () => {
                     showFilterButton={false}
                     compact
                     searchPlaceholder="Search followups…"
+                    onRowClick={setSelectedFollowup}
+                    onRowDoubleClick={openEditFollowup}
                   />
                 </div>
               )}
+            </div>
+
+            {/* Footer — left: the task's own description, right: the selected followup's */}
+            <div style={{ borderTop: '1px solid #e5e7eb', padding: '10px 14px', flexShrink: 0,
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
+                  Task Description
+                </div>
+                <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                  {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
+                </div>
+              </div>
+              <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
+                  Followup Description
+                </div>
+                <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                  {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -706,7 +785,7 @@ const TaskList = () => {
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>+ New Followup</h2>
+              <h2>{editingFollowupId ? '✏️ Edit Followup' : '+ New Followup'}</h2>
               <button className="modal-close" onClick={() => setFollowupModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -724,7 +803,11 @@ const TaskList = () => {
               {field('Followup By', true, null,
                 <div style={{ display: 'flex', gap: 8 }}>
                   {FOLLOWUP_MODES.map(m => (
-                    <button key={m.value} type="button" onClick={() => setFollowupForm(p => ({ ...p, mode: m.value }))}
+                    <button key={m.value} type="button" onClick={() => {
+                        setFollowupForm(p => ({ ...p, mode: m.value }));
+                        if (m.value === 'email')    openGmailCompose(followupTask.customerEmail);
+                        if (m.value === 'whatsapp') openWhatsAppChat(followupTask.customerMobile || followupTask.customerMobile2);
+                      }}
                       style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '8px 6px',
                         border: `2px solid ${followupForm.mode === m.value ? '#1a56db' : '#e5e7eb'}`, borderRadius: 8, cursor: 'pointer',
                         background: followupForm.mode === m.value ? '#eff6ff' : '#fff' }}>
@@ -776,8 +859,34 @@ const TaskList = () => {
               </div>
             </div>
             <div className="modal-footer">
+              {canManageSystem && editingFollowupId && (
+                <button className="btn btn-danger" style={{ marginRight: 'auto' }}
+                  onClick={() => setDeleteFollowupConfirm({ id: editingFollowupId })}>
+                  🗑 Delete
+                </button>
+              )}
               <button className="btn btn-outline" onClick={() => setFollowupModal(false)}>Cancel</button>
-              <SaveButton onClick={saveFollowup} disabled={followupSaving} icon={followupSaving ? '⏳' : '💾'} label={followupSaving ? 'Saving…' : 'Save'} />
+              <SaveButton onClick={saveFollowup} disabled={followupSaving} icon={followupSaving ? '⏳' : '💾'}
+                label={followupSaving ? 'Saving…' : editingFollowupId ? 'Update' : 'Save'} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Followup Confirm — admin/superAdmin only, see canManageSystem gate above */}
+      {deleteFollowupConfirm && (
+        <div className="modal-overlay">
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⚠️ Delete Followup</h2>
+              <button className="modal-close" onClick={() => setDeleteFollowupConfirm(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 14, color: '#374151' }}>Are you sure you want to delete this followup entry?</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setDeleteFollowupConfirm(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={removeFollowup}>🗑 Delete</button>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import pool from '../db.js';
+import { requireRole } from '../middleware/roleGuard.js';
 
 const router = Router();
 
@@ -33,6 +34,7 @@ const SEL = `
   COALESCE(cp.mobile1, c.mobile1) AS "customerMobile",
   COALESCE(cp.mobile2, NULL) AS "customerMobile2",
   COALESCE(c.company_phone, c.office_phone) AS "customerPhone",
+  COALESCE(cp.email, c.email, c.company_email) AS "customerEmail",
   c.company_address AS "customerCompanyAddress",
   tc.name       AS "categoryName",
   tp.name       AS "priorityName",
@@ -167,10 +169,13 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ── Followup History (right-side panel on the Task page) ──────────────────
-// Append-only log of contact attempts against a task — who logged it is
-// always the session user (never trusted from the client), never editable
-// afterward. "Hand over" also adds that person to task_assignees so the
-// task actually shows up in their own list, not just in the log.
+// Log of contact attempts against a task — who logged it (followed_by) is
+// always the session user at creation time (never trusted from the client)
+// and never changes on edit. Editing is open to the same creator-or-assignee
+// audience as the task itself; deleting a followup is admin/superAdmin only
+// (requireRole below), same bar as other destructive admin actions. "Hand
+// over" also adds that person to task_assignees so the task actually shows
+// up in their own list, not just in the log.
 const FOLLOWUP_SEL = `
   f.id, f.task_id AS "taskId", f.mode,
   f.followup_date AS "followupDate",
@@ -235,6 +240,56 @@ router.post('/:taskId/followups', async (req, res) => {
     await client.query('ROLLBACK');
     res.status(500).json({ error: e.message });
   } finally { client.release(); }
+});
+
+router.put('/:taskId/followups/:id', async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const id = parseInt(req.params.id);
+  if (isNaN(taskId) || isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  const { mode, followupDate, description, taskNote, nextFollowupAt, handedOverTo } = req.body;
+  if (!FOLLOWUP_MODES.includes(mode)) return res.status(400).json({ error: 'Invalid followup mode' });
+  const handedOverId = handedOverTo ? Number(handedOverTo) : null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: access } = await client.query(
+      `SELECT 1 FROM tasks WHERE id=$1 AND ${ASSIGNEE_OR_CREATOR('$1', '$2')}`,
+      [taskId, req.user.id]
+    );
+    if (!access.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Task not found' }); }
+
+    const { rows } = await client.query(
+      `UPDATE task_followups
+       SET mode=$1, followup_date=COALESCE($2, followup_date), description=$3, task_note=$4,
+           next_followup_at=$5, handed_over_to=$6
+       WHERE id=$7 AND task_id=$8
+       RETURNING id`,
+      [mode, followupDate || null, description || null, taskNote || null, nextFollowupAt || null, handedOverId, id, taskId]
+    );
+    if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Followup not found' }); }
+    if (handedOverId) {
+      await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [taskId, handedOverId]);
+    }
+    await client.query('COMMIT');
+    const { rows: full } = await pool.query(`SELECT ${FOLLOWUP_SEL} ${FOLLOWUP_JOINS} WHERE f.id = $1`, [id]);
+    res.json(full[0]);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+router.delete('/:taskId/followups/:id', requireRole('admin', 'superAdmin'), async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const id = parseInt(req.params.id);
+  if (isNaN(taskId) || isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { rowCount } = await pool.query(
+      `DELETE FROM task_followups WHERE id=$1 AND task_id=$2`, [id, taskId]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Followup not found' });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;
