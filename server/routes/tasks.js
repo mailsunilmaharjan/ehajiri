@@ -345,7 +345,7 @@ router.delete('/:taskId/followups/:id', requireRole('admin', 'superAdmin'), asyn
 // already has access via task_assignees/created_by.
 const REPLY_SEL = `
   r.id, r.followup_id AS "followupId", r.parent_reply_id AS "parentReplyId", r.message, r.created_at AS "createdAt",
-  r.user_id AS "userId", u.full_name AS "userName", u.role AS "userRole", u.profile_photo AS "userPhoto"
+  r.user_id AS "userId", u.full_name AS "userName", u.role AS "userRole", u.position AS "userPost", u.profile_photo AS "userPhoto"
 `;
 const REPLY_JOINS = `FROM task_followup_replies r LEFT JOIN users u ON u.id = r.user_id`;
 

@@ -59,12 +59,6 @@ const FOLLOWUP_MODES = [
 
 const emptyFollowup = { mode: 'phone', followupDate: todayISO(), description: '', nextCategoryId: '', nextFollowupAt: '', handedOverTo: '' };
 
-// Friendly labels for reply-thread author badges.
-const ROLE_LABELS = {
-  admin: 'Admin', superAdmin: 'Super Admin', branchManager: 'Branch Manager',
-  departmentHead: 'HOD', employee: 'Staff',
-};
-
 // Converts a stored UTC timestamp into the "YYYY-MM-DDTHH:mm" shape a
 // <input type="datetime-local"> needs, in Nepal wall-clock time (UTC+5:45,
 // no DST) — not the viewer's own OS timezone. Same fixed-offset technique as
@@ -235,23 +229,19 @@ const TaskList = () => {
       byParent.get(key).push(r);
     });
 
+    // One flowing line per reply: avatar, then "Name (Post): message" as a single
+    // wrapping paragraph — no separate header row above the message.
     const renderNode = (r, depth) => (
       <div key={r.id}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Avatar photo={r.userPhoto} name={r.userName} size={26} style={{ marginTop: 2, flexShrink: 0 }} />
+          <Avatar photo={r.userPhoto} name={r.userName} size={24} style={{ marginTop: 1, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ background: '#fff', border: '1px solid #f1f5f9', borderRadius: 10, padding: '6px 10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
-                {r.userRole && (
-                  <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
-                    {ROLE_LABELS[r.userRole] || r.userRole}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 12, color: '#374151', marginTop: 1 }}>{r.message}</div>
+            <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>
+              <span style={{ fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
+              {r.userPost && <span style={{ color: '#9ca3af' }}> ({r.userPost})</span>}
+              {': '}{r.message}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 3, paddingLeft: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 1 }}>
               <button onClick={() => setReplyingTo({ id: r.id, userName: r.userName })}
                 style={{ background: 'none', border: 'none', padding: 0, fontSize: 11, fontWeight: 700, color: '#6b7280', cursor: 'pointer' }}>
                 Reply
@@ -263,7 +253,7 @@ const TaskList = () => {
           </div>
         </div>
         {(byParent.get(r.id) || []).length > 0 && (
-          <div style={{ marginLeft: 13, paddingLeft: 20, borderLeft: '2px solid #f1f5f9', marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ marginLeft: 12, paddingLeft: 18, borderLeft: '2px solid #f1f5f9', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {byParent.get(r.id).map(child => renderNode(child, depth + 1))}
           </div>
         )}
@@ -451,6 +441,23 @@ const TaskList = () => {
   };
   const openFollowupPanel = (row) => { setFollowupTask(row); setFollowupSearch(''); loadFollowups(row.id); };
   const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); setFollowupSearch(''); setDescriptionModalOpen(false); };
+
+  // Esc closes the followup drawer — but only when nothing else is already
+  // claiming it. Layout.jsx's own global Esc handler closes the topmost
+  // .modal-overlay (New/Edit Followup, Delete confirm, the Description &
+  // Replies popup); if one of those is open its element is still in the DOM
+  // at the moment both listeners run, so this one steps aside instead of
+  // also closing the drawer underneath it in the same keypress.
+  useEffect(() => {
+    if (!followupTask) return;
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('.modal-overlay')) return;
+      closeFollowupPanel();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [followupTask]);
   const openNewFollowup = () => {
     setEditingFollowupId(null);
     // "Transfer for Next Task" defaults to the task's own current category — the form
@@ -685,6 +692,7 @@ const TaskList = () => {
                 showFilterButton={false}
                 extraSearchFields={['customerPhone']}
                 onRowClick={openFollowupPanel}
+                onFocusChange={openFollowupPanel}
                 onRowDoubleClick={openEdit}
                 onDeleteKey={(row) => setDeleteConfirm(row.id)}
                 onDeleteSelected={removeSelected}
@@ -699,16 +707,12 @@ const TaskList = () => {
         </div>
 
         {/* Right — Followup History panel (click a task row to open). Full-viewport-height
-            overlay drawer (fixed, not a flex sibling) with a dimming backdrop, matching the
-            Company detail panel on the License Admin app. */}
+            drawer (fixed, not a flex sibling), no dimming backdrop — the left-side task
+            grid stays fully clickable and arrow-key navigable while it's open, switching
+            the drawer to whichever row you land on (see onRowClick/onFocusChange above). */}
         {followupTask && (
-          <div onClick={closeFollowupPanel}
-            style={{ position: 'fixed', top: 60, left: 0, right: 0, bottom: 0, background: 'rgba(15,23,42,.35)', zIndex: 50 }} />
-        )}
-        {followupTask && (
-          <div onClick={e => e.stopPropagation()}
-            style={{ position: 'fixed', top: 60, right: 0, bottom: 0, width: 560, zIndex: 51,
-              background: '#fff', boxShadow: '-6px 0 24px rgba(0,0,0,.15)',
+          <div style={{ position: 'fixed', top: 60, right: 0, bottom: 0, width: 560, zIndex: 51,
+              background: '#fff', boxShadow: '-6px 0 24px rgba(0,0,0,.15)', borderLeft: '1px solid #dedede',
               display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
@@ -773,34 +777,42 @@ const TaskList = () => {
                 </div>
               </div>
 
-              {/* Description — amber card, the selected followup's description. Click
-                  anywhere except the reply input to open the full popup (Description
-                  left, Replies right) — this compact version only shows ~2 replies. */}
+              {/* Description — amber card, two columns (Description | Replies) with an
+                  arrow connecting them, same layout as the popup this opens into. Click
+                  either side (except the reply input) to open the full popup — this
+                  compact version only shows ~2 replies before it needs scrolling. */}
               <div style={{ flexShrink: 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
-                <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
-                  style={{ cursor: selectedFollowup ? 'pointer' : 'default' }}>
-                  <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
-                    <span style={{ fontSize: 12 }}>📝</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
-                  </div>
-                  <div style={{ padding: '10px 14px', background: '#fff', fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 90, overflow: 'hidden' }}>
-                    {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
-                  </div>
-
-                  {/* Replies — anyone with access to the task (creator or any assignee:
-                      HOD, admin, branch manager, whoever) can weigh in on this entry.
-                      Fixed to roughly 2 bubbles tall, scrollable for more. */}
-                  <div style={{ borderTop: '1px solid #fde68a', padding: '10px 14px 0', background: '#fffdf7' }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
-                      Replies
-                    </div>
-                    <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {renderReplyBubbles()}
-                    </div>
-                  </div>
+                <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
+                  <span style={{ fontSize: 12 }}>📝</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                 </div>
-                <div style={{ padding: '8px 14px 10px', background: '#fffdf7' }}>
-                  {renderReplyInput()}
+                <div style={{ display: 'flex', background: '#fff' }}>
+                  <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
+                    style={{ flex: 1, minWidth: 0, padding: '10px 12px', cursor: selectedFollowup ? 'pointer' : 'default' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>
+                      Description
+                    </div>
+                    <div style={{ fontSize: 12, color: '#374151', maxHeight: 110, overflow: 'hidden' }}>
+                      {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', color: '#fbbf24', fontSize: 16, flexShrink: 0 }}>➜</div>
+                  <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #fef3c7', background: '#fffdf7', padding: '10px 12px' }}>
+                    <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
+                      style={{ cursor: selectedFollowup ? 'pointer' : 'default' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>
+                        Replies
+                      </div>
+                      {/* Anyone with access to the task (creator or any assignee: HOD,
+                          admin, branch manager, whoever) can weigh in on this entry. */}
+                      <div style={{ maxHeight: 100, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {renderReplyBubbles()}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      {renderReplyInput()}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -825,6 +837,7 @@ const TaskList = () => {
                   {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
                 </div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', color: '#fbbf24', fontSize: 20, flexShrink: 0 }}>➜</div>
               <div style={{ width: 340, flexShrink: 0, borderLeft: '1px solid #f1f5f9', paddingLeft: 20,
                 display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 8 }}>

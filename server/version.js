@@ -158,4 +158,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Followup replies are now threaded — a "Reply" link under each reply lets you reply to that specific reply (unlimited depth), indented with a connector line, relative timestamps ("4d", "2h"), matching a standard nested-comment layout.',
   },
+  {
+    appVersion : '1.0.36',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Task grid stays clickable and arrow-key navigable while the Followup History drawer is open, live-switching it to whichever row you land on. Esc closes the drawer. Description card is now two columns (Description → Replies) with a connector arrow, applied to both the compact card and its popup; each reply is a single line: avatar, Name (Post), then the message inline.',
+  },
 ];

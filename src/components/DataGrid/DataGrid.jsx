@@ -13,6 +13,7 @@ const DataGrid = ({
   toolbarLeft = null,
   onRowClick = null,
   onRowDoubleClick = null,
+  onFocusChange = null,       // (row) => void — fires as ArrowUp/ArrowDown moves the keyboard-focus highlight, live (no Enter needed)
   onDeleteKey = null,
   striped = true,
   compact = false,
@@ -134,10 +135,19 @@ const DataGrid = ({
   const handleKeyDown = (e) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setFocusedRowIdx(prev => { const next = Math.min(prev + 1, pageData.length - 1); return next < 0 ? 0 : next; });
+      setFocusedRowIdx(prev => {
+        const next = Math.min(prev + 1, pageData.length - 1);
+        const idx = next < 0 ? 0 : next;
+        if (onFocusChange && pageData[idx]) onFocusChange(pageData[idx]);
+        return idx;
+      });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setFocusedRowIdx(prev => Math.max(prev - 1, 0));
+      setFocusedRowIdx(prev => {
+        const idx = Math.max(prev - 1, 0);
+        if (onFocusChange && pageData[idx]) onFocusChange(pageData[idx]);
+        return idx;
+      });
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const idx = focusedRowIdx >= 0 ? focusedRowIdx : 0;
