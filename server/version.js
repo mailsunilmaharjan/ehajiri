@@ -146,4 +146,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Task Notifications (Settings → Company Information, off by default): a live browser pop-up when a task is assigned to you, and when a task you created is marked complete. Reuses the same live-notification channel already used for attendance/messages, plus a native OS-level notification when the tab is in the background.',
   },
+  {
+    appVersion : '1.0.34',
+    dbVersion  : 89,
+    releaseDate: '2026-08-08',
+    notes      : 'Removed the animated rainbow accent line from the top menu bar. Followup History Description card now shows roughly 2 replies before scrolling; clicking it opens a full popup with the description on the left and the complete reply thread on the right.',
+  },
 ];

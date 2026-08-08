@@ -171,6 +171,7 @@ const TaskList = () => {
   const [followupRepliesLoading, setFollowupRepliesLoading] = useState(false);
   const [newReplyText,           setNewReplyText]           = useState('');
   const [replySaving,            setReplySaving]             = useState(false);
+  const [descriptionModalOpen,   setDescriptionModalOpen]    = useState(false); // click the compact card -> full Description + Replies popup
 
   useEffect(() => {
     if (!followupTask || !selectedFollowup) { setFollowupReplies([]); return; }
@@ -196,6 +197,49 @@ const TaskList = () => {
       setReplySaving(false);
     }
   };
+
+  // Shared between the compact Description card and the full-size popup it opens on click.
+  const renderReplyBubbles = () => {
+    if (followupRepliesLoading) return <div style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</div>;
+    if (!followupReplies.length) return <div style={{ color: '#d1d5db', fontSize: 12 }}>No replies yet</div>;
+    return followupReplies.map(r => (
+      <div key={r.id} style={{ display: 'flex', gap: 8 }}>
+        <Avatar photo={r.userPhoto} name={r.userName} size={26} style={{ marginTop: 2, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0, background: '#fff', border: '1px solid #f1f5f9', borderRadius: 7, padding: '6px 10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
+            {r.userRole && (
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
+                {ROLE_LABELS[r.userRole] || r.userRole}
+              </span>
+            )}
+            <span style={{ fontSize: 10.5, color: '#9ca3af', marginLeft: 'auto' }}>{formatNepalDateTime(r.createdAt, fd)}</span>
+          </div>
+          <div style={{ fontSize: 12, color: '#374151' }}>{r.message}</div>
+        </div>
+      </div>
+    ));
+  };
+
+  const renderReplyInput = () => selectedFollowup && (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink: 0 }}>
+      <Avatar photo={currentUser?.profilePhoto} name={currentUser?.fullName} size={26} />
+      <div style={{ position: 'relative', flex: 1 }} onClick={e => e.stopPropagation()}>
+        <input type="text" value={newReplyText} onChange={e => setNewReplyText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !replySaving) sendReply(); }}
+          placeholder="Write a reply…"
+          style={{ height: 32, width: '100%', border: '1px solid #fde68a', borderRadius: 16, padding: '0 34px 0 12px',
+            fontSize: 12.5, outline: 'none', boxSizing: 'border-box' }} />
+        <button onClick={sendReply} disabled={replySaving || !newReplyText.trim()} title="Send"
+          style={{ position: 'absolute', top: 3, right: 3, width: 26, height: 26, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', background: '#1a56db', color: '#fff',
+            border: 'none', borderRadius: '50%', fontSize: 13, cursor: replySaving ? 'default' : 'pointer',
+            opacity: replySaving || !newReplyText.trim() ? 0.5 : 1 }}>
+          {replySaving ? '…' : '➤'}
+        </button>
+      </div>
+    </div>
+  );
 
   const filteredFollowups = useMemo(() => {
     const q = followupSearch.trim().toLowerCase();
@@ -345,7 +389,7 @@ const TaskList = () => {
       .finally(() => setFollowupsLoading(false));
   };
   const openFollowupPanel = (row) => { setFollowupTask(row); setFollowupSearch(''); loadFollowups(row.id); };
-  const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); setFollowupSearch(''); };
+  const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); setFollowupSearch(''); setDescriptionModalOpen(false); };
   const openNewFollowup = () => {
     setEditingFollowupId(null);
     // "Transfer for Next Task" defaults to the task's own current category — the form
@@ -668,70 +712,72 @@ const TaskList = () => {
                 </div>
               </div>
 
-              {/* Description — amber card, the selected followup's description */}
+              {/* Description — amber card, the selected followup's description. Click
+                  anywhere except the reply input to open the full popup (Description
+                  left, Replies right) — this compact version only shows ~2 replies. */}
               <div style={{ flexShrink: 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
-                  <span style={{ fontSize: 12 }}>📝</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
-                </div>
-                <div style={{ padding: '10px 14px', background: '#fff', fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 150, overflowY: 'auto' }}>
-                  {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
-                </div>
+                <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
+                  style={{ cursor: selectedFollowup ? 'pointer' : 'default' }}>
+                  <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
+                    <span style={{ fontSize: 12 }}>📝</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
+                  </div>
+                  <div style={{ padding: '10px 14px', background: '#fff', fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 90, overflow: 'hidden' }}>
+                    {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                  </div>
 
-                {/* Replies — anyone with access to the task (creator or any assignee:
-                    HOD, admin, branch manager, whoever) can weigh in on this entry. */}
-                <div style={{ borderTop: '1px solid #fde68a', padding: '10px 14px', background: '#fffdf7' }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
-                    Replies
-                  </div>
-                  <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {followupRepliesLoading ? (
-                      <div style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</div>
-                    ) : followupReplies.length === 0 ? (
-                      <div style={{ color: '#d1d5db', fontSize: 12 }}>No replies yet</div>
-                    ) : followupReplies.map(r => (
-                      <div key={r.id} style={{ display: 'flex', gap: 8 }}>
-                        <Avatar photo={r.userPhoto} name={r.userName} size={26} style={{ marginTop: 2 }} />
-                        <div style={{ flex: 1, minWidth: 0, background: '#fff', border: '1px solid #f1f5f9', borderRadius: 7, padding: '6px 10px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
-                            {r.userRole && (
-                              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
-                                {ROLE_LABELS[r.userRole] || r.userRole}
-                              </span>
-                            )}
-                            <span style={{ fontSize: 10.5, color: '#9ca3af', marginLeft: 'auto' }}>{formatNepalDateTime(r.createdAt, fd)}</span>
-                          </div>
-                          <div style={{ fontSize: 12, color: '#374151' }}>{r.message}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {selectedFollowup && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <Avatar photo={currentUser?.profilePhoto} name={currentUser?.fullName} size={26} />
-                      <div style={{ position: 'relative', flex: 1 }}>
-                        <input type="text" value={newReplyText} onChange={e => setNewReplyText(e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter' && !replySaving) sendReply(); }}
-                          placeholder="Write a reply…"
-                          style={{ height: 32, width: '100%', border: '1px solid #fde68a', borderRadius: 16, padding: '0 34px 0 12px',
-                            fontSize: 12.5, outline: 'none', boxSizing: 'border-box' }} />
-                        <button onClick={sendReply} disabled={replySaving || !newReplyText.trim()} title="Send"
-                          style={{ position: 'absolute', top: 3, right: 3, width: 26, height: 26, display: 'flex',
-                            alignItems: 'center', justifyContent: 'center', background: '#1a56db', color: '#fff',
-                            border: 'none', borderRadius: '50%', fontSize: 13, cursor: replySaving ? 'default' : 'pointer',
-                            opacity: replySaving || !newReplyText.trim() ? 0.5 : 1 }}>
-                          {replySaving ? '…' : '➤'}
-                        </button>
-                      </div>
+                  {/* Replies — anyone with access to the task (creator or any assignee:
+                      HOD, admin, branch manager, whoever) can weigh in on this entry.
+                      Fixed to roughly 2 bubbles tall, scrollable for more. */}
+                  <div style={{ borderTop: '1px solid #fde68a', padding: '10px 14px 0', background: '#fffdf7' }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
+                      Replies
                     </div>
-                  )}
+                    <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {renderReplyBubbles()}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding: '8px 14px 10px', background: '#fffdf7' }}>
+                  {renderReplyInput()}
                 </div>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* Description & Replies popup — opened by clicking the compact card above */}
+      {descriptionModalOpen && selectedFollowup && (
+        <div className="modal-overlay" onClick={() => setDescriptionModalOpen(false)}>
+          <div className="modal" style={{ maxWidth: 900 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📝 Description &amp; Replies</h2>
+              <button className="modal-close" onClick={() => setDescriptionModalOpen(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', gap: 20, minHeight: 360 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 8 }}>
+                  Description
+                </div>
+                <div style={{ fontSize: 13.5, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                  {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                </div>
+              </div>
+              <div style={{ width: 340, flexShrink: 0, borderLeft: '1px solid #f1f5f9', paddingLeft: 20,
+                display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 8 }}>
+                  Replies
+                </div>
+                <div style={{ flex: 1, minHeight: 0, maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {renderReplyBubbles()}
+                </div>
+                {renderReplyInput()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add / Edit Task */}
       {modal && (
