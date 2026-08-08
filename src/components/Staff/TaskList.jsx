@@ -9,8 +9,10 @@ import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import RichTextEditor from '../Common/RichTextEditor.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import ContactFormModal, { CONTACT_EMPTY } from './ContactFormModal.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import useDateFormat from '../../hooks/useDateFormat.js';
 
 /* Task tracker (Staff > Task) — standard DataGrid layout, matching every
    other list page in the app (Staff Detail, Manual Postings, etc.). Visible
@@ -75,6 +77,18 @@ const isoToNepalLocalInput = (isoUtc) => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 };
 
+// Date part goes through fd() (the company's AD/BS calendar setting), the
+// time part is just read straight off the same Nepal-shifted string so it
+// never needs a second timezone conversion.
+const formatNepalDateTime = (isoUtc, fd) => {
+  if (!isoUtc) return '—';
+  const [datePart, timePart] = isoToNepalLocalInput(isoUtc).split('T');
+  const [hh, mm] = timePart.split(':').map(Number);
+  const ampm = hh >= 12 ? 'PM' : 'AM';
+  const hh12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${fd(datePart)} ${hh12}:${String(mm).padStart(2, '0')} ${ampm}`;
+};
+
 const DateInput = ({ value, onChange }) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') return <NepaliDatePicker value={value} onChange={onChange} />;
@@ -110,6 +124,7 @@ const TaskList = () => {
   const navigate = useNavigate();
   const { canManageSystem, currentUser } = useAuth();
   const { filteredEmployees } = useData();
+  const fd = useDateFormat();
 
   const [tasks,      setTasks]      = useState([]);
   const [categories, setCategories] = useState([]);
@@ -407,8 +422,8 @@ const TaskList = () => {
 
   const followupColumns = useMemo(() => [
     {
-      field: 'followupDate', header: 'Date', width: 95,
-      render: (v) => v ? String(v).split('T')[0] : '—',
+      field: 'followupDate', header: 'Date', width: 110,
+      render: (v) => v ? fd(String(v).split('T')[0]) : '—',
     },
     {
       field: 'mode', header: 'Via', width: 60, align: 'center',
@@ -422,14 +437,14 @@ const TaskList = () => {
       render: (v) => v ? <span style={{ fontSize: 12, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
-      field: 'nextFollowupAt', header: 'Next Followup', width: 145,
-      render: (v) => v ? new Date(v).toLocaleString() : <span style={{ color: '#d1d5db' }}>—</span>,
+      field: 'nextFollowupAt', header: 'Next Followup', width: 165,
+      render: (v) => v ? formatNepalDateTime(v, fd) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'handedOverToName', header: 'Handed Over', width: 120,
       render: (v) => v || <span style={{ color: '#d1d5db' }}>—</span>,
     },
-  ], []);
+  ], [fd]);
 
   const columns = useMemo(() => [
     {
@@ -483,7 +498,7 @@ const TaskList = () => {
     },
     {
       field: 'dueDate', header: 'Task Date', width: 110,
-      render: (v) => v ? String(v).split('T')[0] : '—',
+      render: (v) => v ? fd(String(v).split('T')[0]) : '—',
     },
     {
       field: 'status', header: 'Status', width: 100, align: 'center',
@@ -508,7 +523,7 @@ const TaskList = () => {
         </div>
       ),
     },
-  ], []);
+  ], [fd]);
 
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
@@ -675,33 +690,40 @@ const TaskList = () => {
                     ) : followupReplies.length === 0 ? (
                       <div style={{ color: '#d1d5db', fontSize: 12 }}>No replies yet</div>
                     ) : followupReplies.map(r => (
-                      <div key={r.id} style={{ background: '#fff', border: '1px solid #f1f5f9', borderRadius: 7, padding: '6px 10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
-                          {r.userRole && (
-                            <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
-                              {ROLE_LABELS[r.userRole] || r.userRole}
-                            </span>
-                          )}
-                          <span style={{ fontSize: 10.5, color: '#9ca3af', marginLeft: 'auto' }}>{new Date(r.createdAt).toLocaleString()}</span>
+                      <div key={r.id} style={{ display: 'flex', gap: 8 }}>
+                        <Avatar photo={r.userPhoto} name={r.userName} size={26} style={{ marginTop: 2 }} />
+                        <div style={{ flex: 1, minWidth: 0, background: '#fff', border: '1px solid #f1f5f9', borderRadius: 7, padding: '6px 10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{r.userName || '—'}</span>
+                            {r.userRole && (
+                              <span style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', background: '#f1f5f9', borderRadius: 10, padding: '1px 7px' }}>
+                                {ROLE_LABELS[r.userRole] || r.userRole}
+                              </span>
+                            )}
+                            <span style={{ fontSize: 10.5, color: '#9ca3af', marginLeft: 'auto' }}>{formatNepalDateTime(r.createdAt, fd)}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#374151' }}>{r.message}</div>
                         </div>
-                        <div style={{ fontSize: 12, color: '#374151' }}>{r.message}</div>
                       </div>
                     ))}
                   </div>
                   {selectedFollowup && (
-                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                      <input type="text" value={newReplyText} onChange={e => setNewReplyText(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter' && !replySaving) sendReply(); }}
-                        placeholder="Write a reply…"
-                        style={{ flex: 1, height: 32, border: '1px solid #fde68a', borderRadius: 6, padding: '0 10px',
-                          fontSize: 12.5, outline: 'none', boxSizing: 'border-box' }} />
-                      <button onClick={sendReply} disabled={replySaving || !newReplyText.trim()}
-                        style={{ height: 32, padding: '0 14px', background: '#1a56db', color: '#fff', border: 'none',
-                          borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: replySaving ? 'default' : 'pointer',
-                          opacity: replySaving || !newReplyText.trim() ? 0.6 : 1 }}>
-                        {replySaving ? '…' : 'Reply'}
-                      </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <Avatar photo={currentUser?.profilePhoto} name={currentUser?.fullName} size={26} />
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input type="text" value={newReplyText} onChange={e => setNewReplyText(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter' && !replySaving) sendReply(); }}
+                          placeholder="Write a reply…"
+                          style={{ height: 32, width: '100%', border: '1px solid #fde68a', borderRadius: 16, padding: '0 34px 0 12px',
+                            fontSize: 12.5, outline: 'none', boxSizing: 'border-box' }} />
+                        <button onClick={sendReply} disabled={replySaving || !newReplyText.trim()} title="Send"
+                          style={{ position: 'absolute', top: 3, right: 3, width: 26, height: 26, display: 'flex',
+                            alignItems: 'center', justifyContent: 'center', background: '#1a56db', color: '#fff',
+                            border: 'none', borderRadius: '50%', fontSize: 13, cursor: replySaving ? 'default' : 'pointer',
+                            opacity: replySaving || !newReplyText.trim() ? 0.5 : 1 }}>
+                          {replySaving ? '…' : '➤'}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

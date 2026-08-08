@@ -134,4 +134,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Description card in the Followup History panel is taller and now has a reply thread — anyone with access to the task (creator or any assignee: HOD, admin, branch manager, or whoever else it\'s assigned to) can reply to a specific followup entry.',
   },
+  {
+    appVersion : '1.0.32',
+    dbVersion  : 89,
+    releaseDate: '2026-08-08',
+    notes      : 'Replies now show a small avatar per user and a compact arrow send button instead of a text button. All dates in the Followup History panel (Date, Next Followup, reply timestamps) and the main Task grid (Task Date) now respect the company\'s default calendar setting (AD/BS) instead of always showing Gregorian.',
+  },
 ];
