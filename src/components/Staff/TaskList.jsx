@@ -544,11 +544,11 @@ const TaskList = () => {
               display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center', gap: 6 }}>
                     📄 {followupTask.title}
                   </div>
-                  <div style={{ marginTop: 6, padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 7, display: 'inline-block' }}>
+                  <div style={{ marginTop: 6, padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 7 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#166534' }}>
                       {followupTask.customerName || 'No client linked'}
                       {followupTask.personName ? ` — ${followupTask.personName}` : ''}
@@ -563,11 +563,6 @@ const TaskList = () => {
                 <button onClick={closeFollowupPanel} title="Close"
                   style={{ border: 'none', background: 'transparent', fontSize: 16, cursor: 'pointer', color: '#9ca3af', flexShrink: 0 }}>✕</button>
               </div>
-              <button onClick={openNewFollowup}
-                style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: '#1a56db',
-                  color: '#fff', border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-                + New Followup
-              </button>
             </div>
 
             <div style={{ flex: 1, minHeight: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
@@ -578,10 +573,15 @@ const TaskList = () => {
                   borderBottom: '1px solid #dbeafe', flexShrink: 0 }}>
                   <span style={{ fontSize: 12 }}>📋</span>
                   <span style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px', whiteSpace: 'nowrap' }}>FOLLOWUP HISTORY</span>
+                  <button onClick={openNewFollowup}
+                    style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, height: 26, padding: '0 10px',
+                      background: '#1a56db', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+                    + New
+                  </button>
                   <input type="text" value={followupSearch} onChange={e => setFollowupSearch(e.target.value)}
                     placeholder="Search followups…"
-                    style={{ marginLeft: 'auto', height: 26, width: 160, border: '1px solid #bfdbfe', borderRadius: 6,
-                      padding: '0 9px', fontSize: 11.5, color: '#1e3a8a', background: '#fff', outline: 'none', boxSizing: 'border-box' }} />
+                    style={{ height: 26, width: 150, border: '1px solid #bfdbfe', borderRadius: 6,
+                      padding: '0 9px', fontSize: 11.5, color: '#1e3a8a', background: '#fff', outline: 'none', boxSizing: 'border-box', flexShrink: 0 }} />
                 </div>
                 <div style={{ flex: 1, minHeight: 0, padding: 8, background: '#fff' }}>
                   {followupsLoading ? (
@@ -611,11 +611,11 @@ const TaskList = () => {
                   <span style={{ fontSize: 12 }}>📝</span>
                   <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                 </div>
-                <div style={{ padding: '10px 14px', background: '#fff', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div style={{ fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 90, overflowY: 'auto' }}>
+                <div style={{ padding: '10px 14px', background: '#fff', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 12, color: '#374151', textAlign: 'left', width: '100%', maxHeight: 130, overflowY: 'auto' }}>
                     {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
                   </div>
-                  <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12, fontSize: 12, color: '#374151', textAlign: 'left', maxHeight: 90, overflowY: 'auto' }}>
+                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 10, fontSize: 12, color: '#374151', textAlign: 'left', width: '100%', maxHeight: 130, overflowY: 'auto' }}>
                     {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
                   </div>
                 </div>

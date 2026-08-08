@@ -104,4 +104,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Followup History panel is now a full-viewport-height overlay drawer with a dimming backdrop, matching the License Admin Company detail panel, instead of a fixed-height card sitting beside the task grid.',
   },
+  {
+    appVersion : '1.0.27',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : '"+ New" followup button moved into the Followup History card header; client/contact info box now spans the full panel width; Description card switched from a 2-column layout to a taller, left-aligned vertical stack.',
+  },
 ];
