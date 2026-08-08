@@ -8,21 +8,23 @@ import DataGrid        from '../DataGrid/DataGrid.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker, { adToISO } from '../Common/NepaliDatePicker.jsx';
 import ImportDeviceUsersModal from '../Common/ImportDeviceUsersModal.jsx';
+import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
 import ImportExcelModal       from './ImportExcelModal.jsx';
 import RecoApprovalModal from './RecoApprovalModal.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import SaveButton       from '../Common/SaveButton.jsx';
 import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
-import api              from '../../api/client.js';
+import api, { apiUrl }  from '../../api/client.js';
+import { staffRankCompare, branchRankOf } from '../../utils/branchUtils.js';
 
 const ROLE_COLORS = {
-  admin:'#7e3af2', branchManager:'#52b02c', departmentHead:'#0e9f6e',
-  manager:'#52b02c',  // backward compat alias
+  admin:'#7e3af2', branchManager:'#1a56db', departmentHead:'#0e9f6e',
+  manager:'#1a56db',  // backward compat alias
   employee:'#6b7280',
 };
 const ROLE_BG = {
-  admin:'#ede9fe', branchManager:'#dcfce7', departmentHead:'#d1fae5',
-  manager:'#dcfce7',
+  admin:'#ede9fe', branchManager:'#dbeafe', departmentHead:'#d1fae5',
+  manager:'#dbeafe',
   employee:'#f3f4f6',
 };
 const ROLE_LABELS = {
@@ -92,7 +94,7 @@ const Fl = ({ children, required, onQA }) => (
     </span>
     {onQA && (
       <button type="button" onClick={onQA}
-        style={{ fontSize:11, color:'#52b02c', background:'#e9f7e0', border:'1px solid #bbf7d0', borderRadius:4, cursor:'pointer', padding:'1px 7px', fontWeight:600, lineHeight:'18px' }}>
+        style={{ fontSize:11, color:'#1a56db', background:'#e8f0fe', border:'1px solid #bfdbfe', borderRadius:4, cursor:'pointer', padding:'1px 7px', fontWeight:600, lineHeight:'18px' }}>
         + Quick Add
       </button>
     )}
@@ -127,12 +129,57 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
   // expires mirrors the device's own Expires value: 0 none | 1 date range |
   // 2 use-count | 3 date range AND use-count (see Validity/Expiry panel below).
   const [expires,     setExpires]     = useState(0);
-  const [startDate,   setStartDate]   = useState(() => new Date().toISOString().split('T')[0]);
+  const [startDate,   setStartDate]   = useState(() => getNepalTodayISO());
   const [endDate,     setEndDate]     = useState(() => {
-    const d = new Date(); d.setFullYear(d.getFullYear() + 1); return d.toISOString().split('T')[0];
+    const d = getNepalNow(); d.setFullYear(d.getFullYear() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
   const [validCount,  setValidCount]  = useState(1);
   const faceFileInputRef = useRef(null);
+
+  // ZKTeco devices only PULL commands on their own poll cycle (no true
+  // server push) — a queued command can sit for anywhere from a few seconds
+  // to a few minutes before the device actually attempts it. This tracks
+  // each queued enroll command's live status (queued/sent/done/error) per
+  // device so the modal can show real progress instead of a fire-and-forget
+  // toast that leaves the admin guessing when to have the staff member
+  // present their finger/face at the terminal.
+  const [cmdWatch, setCmdWatch] = useState({}); // devId -> { status, label }
+  const watchTimers = useRef({});
+  useEffect(() => () => { Object.values(watchTimers.current).forEach(clearInterval); }, []);
+
+  const watchCommand = (devId, sn, cmdId, label) => {
+    if (watchTimers.current[devId]) clearInterval(watchTimers.current[devId]);
+    setCmdWatch(prev => ({ ...prev, [devId]: { status: 'queued', label } }));
+    let elapsed = 0;
+    const poll = async () => {
+      elapsed += 3;
+      try {
+        const rows = await api.get(`/zkteco/commands?sn=${encodeURIComponent(sn)}`);
+        const row = Array.isArray(rows) ? rows.find(r => r.id === cmdId) : null;
+        if (row?.status === 'DONE') {
+          clearInterval(watchTimers.current[devId]); delete watchTimers.current[devId];
+          setCmdWatch(prev => ({ ...prev, [devId]: { status: 'done', label } }));
+          loadEnrollments();
+          return;
+        }
+        if (row?.status === 'ERROR') {
+          clearInterval(watchTimers.current[devId]); delete watchTimers.current[devId];
+          setCmdWatch(prev => ({ ...prev, [devId]: { status: 'error', label } }));
+          return;
+        }
+        if (row?.status === 'SENT') {
+          setCmdWatch(prev => ({ ...prev, [devId]: { status: 'sent', label } }));
+        }
+      } catch { /* transient — keep polling */ }
+      if (elapsed >= 120) {
+        clearInterval(watchTimers.current[devId]); delete watchTimers.current[devId];
+        setCmdWatch(prev => ({ ...prev, [devId]: { status: 'timeout', label } }));
+      }
+    };
+    watchTimers.current[devId] = setInterval(poll, 3000);
+    poll();
+  };
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -249,13 +296,15 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
           endDatetime:   endDate   + ' 23:59:00',
           validCount: (expires === 2 || expires === 3) ? (Number(validCount) || 0) : null,
         });
-        await enrollFn(devId);
+        const r = await enrollFn(devId);
+        const dev = devices.find(d => String(d.id) === devId);
+        if (r?.id && dev?.serial_number) watchCommand(devId, dev.serial_number, r.id, label);
       }));
       const failed = results.filter(r => r.status === 'rejected');
       if (failed.length) {
         showToast(`${label}: ${failed.length}/${selDevIds.length} device(s) failed — ${failed[0].reason?.message || ''}`, 'error');
       } else {
-        showToast(`${label} queued on ${selDevIds.length} device${selDevIds.length>1?'s':''} — name synced`);
+        showToast(`${label} queued on ${selDevIds.length} device${selDevIds.length>1?'s':''} — name synced, watch status below`);
       }
       loadEnrollments();
     } finally {
@@ -301,7 +350,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
   const s = { label:{ fontSize:11, fontWeight:600, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.4px', marginBottom:4, display:'block' } };
   const inputStyle = { height:34, border:'1px solid #d1d5db', borderRadius:6, padding:'0 10px', fontSize:13, width:'100%', boxSizing:'border-box' };
   const selectStyle = { ...inputStyle };
-  const btn = (color='#52b02c') => ({
+  const btn = (color='#1a56db') => ({
     height:34, padding:'0 14px', background:color, color:'white', border:'none',
     borderRadius:6, fontSize:13, fontWeight:600, cursor: loading ? 'not-allowed' : 'pointer',
     opacity: loading ? 0.7 : 1, whiteSpace:'nowrap',
@@ -326,7 +375,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
 
       {/* PIN + Name + selection summary */}
       <div style={{ display:'flex', gap:12, alignItems:'center', background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13 }}>
-        <div><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Device PIN')}: </span><span style={{ fontWeight:700, fontFamily:'monospace', color:'#52b02c' }}>{devicePin}</span></div>
+        <div><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Device PIN')}: </span><span style={{ fontWeight:700, fontFamily:'monospace', color:'#1a56db' }}>{devicePin}</span></div>
         <div style={{ borderLeft:'1px solid #e5e7eb', paddingLeft:12 }}><span style={{ color:'#6b7280', fontWeight:600 }}>{t('Staff')}: </span><span style={{ fontWeight:700 }}>{staffName || '—'}</span></div>
         <div style={{ borderLeft:'1px solid #e5e7eb', paddingLeft:12, flex:1, display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ color:'#6b7280', fontWeight:600 }}>
@@ -364,9 +413,9 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                 <div key={group.areaId} style={{ border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden' }}>
                   <div onClick={() => toggleArea(group.devices)}
                     style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px', cursor:'pointer',
-                      background: allSelected ? '#f0fdf4' : '#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
+                      background: allSelected ? '#eff6ff' : '#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
                     <input type="checkbox" checked={allSelected} readOnly
-                      style={{ opacity: someSelected ? 0.6 : 1, accentColor:'#52b02c', width:15, height:15 }} />
+                      style={{ opacity: someSelected ? 0.6 : 1, accentColor:'#1a56db', width:15, height:15 }} />
                     <span style={{ fontWeight:700, fontSize:13, color:'#1f2937' }}>📍 {group.areaName}</span>
                     <span style={{ fontSize:11, color:'#9ca3af' }}>({group.devices.length} {group.devices.length===1 ? t('device') : t('devices')})</span>
                   </div>
@@ -378,13 +427,13 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                       return (
                         <div key={d.id} onClick={() => toggleDevice(d.id)}
                           style={{ padding:'8px 12px', borderRadius:10, cursor:'pointer', minWidth:160,
-                            border: isSelected ? '2px solid #52b02c' : '2px solid #e5e7eb',
-                            background: isSelected ? '#f0fdf4' : 'white',
-                            boxShadow: isSelected ? '0 2px 8px rgba(82,176,44,.12)' : 'none',
+                            border: isSelected ? '2px solid #1a56db' : '2px solid #e5e7eb',
+                            background: isSelected ? '#eff6ff' : 'white',
+                            boxShadow: isSelected ? '0 2px 8px rgba(26,86,219,.12)' : 'none',
                             transition:'all .15s' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
-                            <input type="checkbox" checked={isSelected} readOnly style={{ accentColor:'#52b02c', width:13, height:13 }} />
-                            <span style={{ fontWeight:700, fontSize:13, color: isSelected ? '#52b02c' : '#1f2937' }}>
+                            <input type="checkbox" checked={isSelected} readOnly style={{ accentColor:'#1a56db', width:13, height:13 }} />
+                            <span style={{ fontWeight:700, fontSize:13, color: isSelected ? '#1a56db' : '#1f2937' }}>
                               {d.name || d.serial_number}
                             </span>
                           </div>
@@ -396,9 +445,9 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                               {online ? `● ${t('Online')}` : `○ ${t('Offline')}`}
                             </span>
                             <span style={{ fontSize:11, fontWeight:600, padding:'2px 7px', borderRadius:10,
-                              background: enr ? '#f0fdf4' : '#fff7ed',
-                              color:      enr ? '#15803d' : '#9a3412',
-                              border:     `1px solid ${enr ? '#bbf7d0' : '#fed7aa'}` }}>
+                              background: enr ? '#eff6ff' : '#fff7ed',
+                              color:      enr ? '#1d4ed8' : '#9a3412',
+                              border:     `1px solid ${enr ? '#bfdbfe' : '#fed7aa'}` }}>
                               {enr ? t('Enrolled') : t('Not Enrolled')}
                             </span>
                             {enr && enr.fp_slots_count > 0 && (
@@ -450,6 +499,27 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
               onClick={() => runEnroll('Enroll Face', (devId) => post(`/devices/${devId}/enroll-face`, { pin:devicePin, name:staffName }))}>
               {t('Enroll Face')}
             </button>
+
+            {/* Live status of the most recent enroll command on the first
+                selected device — the device only picks up commands on its own
+                poll cycle (seconds to a few minutes), so this tells the admin
+                exactly when to have the staff member present at the terminal,
+                instead of a fire-and-forget "queued" toast. */}
+            {cmdWatch[selDevIds[0]] && (() => {
+              const w = cmdWatch[selDevIds[0]];
+              const style = {
+                queued:  { bg:'#f3f4f6', fg:'#6b7280', text:`⏳ ${w.label}: waiting for device to check in…` },
+                sent:    { bg:'#fef3c7', fg:'#92400e', text:`📡 ${w.label}: device is attempting it now — ask the staff member to present their finger/face!` },
+                done:    { bg:'#d1fae5', fg:'#065f46', text:`✅ ${w.label}: completed` },
+                error:   { bg:'#fee2e2', fg:'#991b1b', text:`❌ ${w.label}: device rejected the command` },
+                timeout: { bg:'#fee2e2', fg:'#991b1b', text:`⚠️ ${w.label}: no response from device after 2 minutes — it may be offline` },
+              }[w.status];
+              return (
+                <div style={{ fontSize:12, fontWeight:600, padding:'6px 10px', borderRadius:6, background:style.bg, color:style.fg }}>
+                  {style.text}
+                </div>
+              );
+            })()}
 
             {/* Face sample status + delete/upload */}
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
@@ -546,12 +616,13 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
               <div style={{ display:'flex', justifyContent:'flex-end', gap:5, marginBottom:8 }}>
                 {[['1M',1],['3M',3],['6M',6],['1Y',12]].map(([lbl,mo]) => (
                   <button key={lbl} onClick={() => {
-                    const s = new Date(); const e = new Date();
+                    const s = getNepalNow(); const e = getNepalNow();
                     e.setMonth(e.getMonth() + mo);
-                    setStartDate(s.toISOString().split('T')[0]);
-                    setEndDate(e.toISOString().split('T')[0]);
+                    const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    setStartDate(toISO(s));
+                    setEndDate(toISO(e));
                   }} style={{ padding:'3px 9px', fontSize:11, fontWeight:700,
-                    background:'#f0fdf4', color:'#15803d', border:'1px solid #bbf7d0',
+                    background:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe',
                     borderRadius:5, cursor:'pointer' }}>{lbl}</button>
                 ))}
               </div>
@@ -565,7 +636,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                         padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
                         outline:'none', fontWeight:500, background:'#f9fafb',
                         cursor:'pointer' }}
-                      onFocus={e => { e.target.style.borderColor='#22c55e'; e.target.style.background='white'; }}
+                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
                       onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
                     <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
                       fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
@@ -580,7 +651,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                         padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
                         outline:'none', fontWeight:500, background:'#f9fafb',
                         cursor:'pointer' }}
-                      onFocus={e => { e.target.style.borderColor='#22c55e'; e.target.style.background='white'; }}
+                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
                       onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
                     <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
                       fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
@@ -599,7 +670,7 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                 style={{ width:'100%', maxWidth:160, height:38, border:'2px solid #e5e7eb', borderRadius:8,
                   padding:'0 12px', fontSize:13, boxSizing:'border-box', outline:'none', fontWeight:500,
                   background:'#f9fafb' }}
-                onFocus={e => { e.target.style.borderColor='#22c55e'; e.target.style.background='white'; }}
+                onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
                 onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
               <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>
                 {t('Access is denied once this many successful verifications have been used.')}
@@ -733,7 +804,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
   };
 
   const openAddNew = () => {
-    setScForm({ toValue:'', effectiveDate: new Date().toISOString().split('T')[0], remarks:'' });
+    setScForm({ toValue:'', effectiveDate: getNepalTodayISO(), remarks:'' });
     setScErrors({});
     setEditor({});
   };
@@ -778,7 +849,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
   /* Status values get a green/red Working tint; other fields a neutral chip */
   const ValueChip = ({ name }) => {
     if (!name) return <span style={{ color:'#d1d5db' }}>—</span>;
-    let bg = '#f0fdf4', color = '#166534', border = '#16653433';
+    let bg = '#eff6ff', color = '#1e40af', border = '#1e40af33';
     if (fieldTab === 'status') {
       const working = statusType(name) ? statusType(name) === 'Working' : name === 'Active';
       bg = working ? '#f0fdf4' : '#fff5f5';
@@ -808,13 +879,13 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
           return (
             <button key={f.key} onClick={() => setFieldTab(f.key)} style={{
               padding:'8px 14px', background:'none', border:'none',
-              borderBottom: active ? '2px solid #52b02c' : '2px solid transparent',
-              color: active ? '#52b02c' : '#6b7280',
+              borderBottom: active ? '2px solid #1a56db' : '2px solid transparent',
+              color: active ? '#1a56db' : '#6b7280',
               fontWeight: active ? 700 : 400,
               cursor:'pointer', fontSize:12.5, display:'flex', alignItems:'center', gap:5, marginBottom:-2,
             }}>
               {f.icon} {t(f.label)}
-              {count > 0 && <span style={{ background:'#52b02c', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
+              {count > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
             </button>
           );
         })}
@@ -855,7 +926,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
               <td className="dg-td">{latestApplied ? fd(latestApplied.effectiveDate) : <span className="dg-null">—</span>}</td>
               <td className="dg-td" style={{ color:'#9ca3af', fontStyle:'italic' }}>{t('Current')} {fieldLabel}</td>
               <td className="dg-td" style={{ textAlign:'right' }}>
-                <span style={{ fontSize:11, fontWeight:700, color:'#166534', background:'#dcfce7', padding:'2px 8px', borderRadius:10 }}>
+                <span style={{ fontSize:11, fontWeight:700, color:'#1e40af', background:'#dbeafe', padding:'2px 8px', borderRadius:10 }}>
                   {t('Current')}
                 </span>
               </td>
@@ -916,7 +987,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
       {editor && (
         <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:440 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {fieldLabel} {t('Change')}</h2>
               <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
             </div>
@@ -1089,9 +1160,9 @@ const StaffIdentityTab = ({ employeeId }) => {
     const permanent = type === 'Permanent';
     return (
       <span style={{ fontSize:12, fontWeight:600, padding:'2px 10px', borderRadius:10, whiteSpace:'nowrap',
-        background: permanent ? '#f0fdf4' : '#fef3c7',
-        color:      permanent ? '#166534' : '#92400e',
-        border:     `1px solid ${permanent ? '#16653433' : '#92400e33'}` }}>
+        background: permanent ? '#eff6ff' : '#fef3c7',
+        color:      permanent ? '#1e40af' : '#92400e',
+        border:     `1px solid ${permanent ? '#1e40af33' : '#92400e33'}` }}>
         {t(type)}
       </span>
     );
@@ -1134,13 +1205,13 @@ const StaffIdentityTab = ({ employeeId }) => {
           return (
             <button key={s.key} onClick={() => setSection(s.key)} style={{
               padding:'8px 14px', background:'none', border:'none',
-              borderBottom: active ? '2px solid #52b02c' : '2px solid transparent',
-              color: active ? '#52b02c' : '#6b7280',
+              borderBottom: active ? '2px solid #1a56db' : '2px solid transparent',
+              color: active ? '#1a56db' : '#6b7280',
               fontWeight: active ? 700 : 400,
               cursor:'pointer', fontSize:12.5, display:'flex', alignItems:'center', gap:5, marginBottom:-2,
             }}>
               {s.icon} {t(s.label)}
-              {count > 0 && <span style={{ background:'#52b02c', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
+              {count > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:9, padding:'0px 5px', fontSize:10, fontWeight:700 }}>{count}</span>}
             </button>
           );
         })}
@@ -1202,7 +1273,7 @@ const StaffIdentityTab = ({ employeeId }) => {
       {editor && (
         <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:460 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {t(sectionDef.label)}</h2>
               <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
             </div>
@@ -1223,9 +1294,9 @@ const StaffIdentityTab = ({ employeeId }) => {
                         style={{
                           flex:1, padding:'8px 0', fontSize:13, borderRadius:6, cursor:'pointer',
                           fontWeight: siForm.addressType === type ? 700 : 400,
-                          border: siForm.addressType === type ? '2px solid #52b02c' : '1px solid #d1d5db',
-                          background: siForm.addressType === type ? '#f0fdf4' : 'white',
-                          color: siForm.addressType === type ? '#52b02c' : '#374151',
+                          border: siForm.addressType === type ? '2px solid #1a56db' : '1px solid #d1d5db',
+                          background: siForm.addressType === type ? '#eff6ff' : 'white',
+                          color: siForm.addressType === type ? '#1a56db' : '#374151',
                         }}>
                         {type === 'Permanent' ? '🏛️' : '🏕️'} {t(type)}
                       </button>
@@ -1409,6 +1480,44 @@ const UserManagement = () => {
      (active === false) are hidden from the default list; flip the toggle to see them */
   const [statusView, setStatusView] = useState('working');
 
+  /* License Staff/Device limits — fetched once so "+ Add New Staff" can be
+     disabled proactively instead of only reacting to the server's STAFF_LIMIT
+     error after a failed save (see handleSave below). Both counts come from
+     /employees/license-usage (canManageStaff: admin/branchManager/
+     superAdmin) rather than being derived client-side:
+       - staffCount mirrors exactly what the server's STAFF_LIMIT check
+         counts (getActiveStaffCount in employees.js). The Staff grid's own
+         list (GET /, sql.list) excludes superAdmin accounts from what's
+         displayed, so counting off `employees` instead would silently
+         undercount whenever an active superAdmin exists — the button would
+         stay enabled right up until the real save got rejected.
+       - deviceCount combines ZKTeco + StandAlone devices since the
+         license's maxDevices covers both; /zkteco/devices and
+         /standalone/devices are locked to admin/superAdmin only (they
+         return device credentials/IPs), so a branchManager could add
+         staff/devices but never actually see this block fire. */
+  const [licStatus,   setLicStatus]   = useState(null);
+  const [licUsage,     setLicUsage]   = useState(null); // { staffCount, deviceCount }
+  useEffect(() => {
+    api.get('/license/status').then(setLicStatus).catch(() => {});
+    api.get('/employees/license-usage').then(setLicUsage).catch(() => {});
+  }, []);
+  const activeStaffCount = licUsage?.staffCount ?? employees.filter(e => e.active).length;
+  const deviceCount      = licUsage?.deviceCount ?? null;
+  const overStaffLimit  = licStatus?.maxStaff   != null && activeStaffCount >= licStatus.maxStaff;
+  const overDeviceLimit = licStatus?.maxDevices != null && deviceCount     != null && deviceCount >= licStatus.maxDevices;
+  // Device count caps how many ZKTeco/standalone devices the license allows —
+  // it has no 1:1 relationship with staff records (many staff can share one
+  // device), so reaching it must never block adding staff on its own. Only
+  // the staff count gates "Add New Staff"; overDeviceLimit is kept around to
+  // add context to the tooltip/alert when both happen to be maxed together.
+  const staffLimitBlocked = overStaffLimit;
+  const staffLimitTooltip = overStaffLimit
+    ? (overDeviceLimit
+        ? `Users limit max is only ${licStatus.maxStaff} (device limit ${licStatus.maxDevices} also reached)`
+        : `Users limit max is only ${licStatus.maxStaff}`)
+    : '';
+
   const showToast = (msg, type='success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2500);
@@ -1459,7 +1568,7 @@ const UserManagement = () => {
 
   const buildDefaults = () => {
     const s     = settings;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getNepalTodayISO();
     const def   = (arr) => (arr || []).find(x => x.isDefault)?.name || (arr || [])[0]?.name || '';
 
     /* First day of current/default fiscal year */
@@ -1487,6 +1596,16 @@ const UserManagement = () => {
   };
 
   const openAdd = () => {
+    // The toolbar button is disabled once a license limit is hit, but this
+    // is also reachable via the row context menu (which has no disabled
+    // state of its own) — guard here too so both entry points are blocked.
+    if (staffLimitBlocked) {
+      setLicLimitAlert({
+        reason: overDeviceLimit ? 'both' : 'staff',
+        maxStaff: licStatus?.maxStaff, maxDevices: licStatus?.maxDevices, durationDays: licStatus?.durationDays,
+      });
+      return;
+    }
     setForm({ ...defaultForm, ...buildDefaults(), employeeId:`EMP${String(employees.length+1).padStart(3,'0')}` });
     setErrors({}); setEditId(null); setActiveTab('Staff Detail'); setQuickDeviceView(false); setModal(true);
   };
@@ -1559,7 +1678,7 @@ const UserManagement = () => {
       if (e?.data?.code === 'STAFF_LIMIT') {
         const max = e?.data?.maxStaff || 25;
         setModal(false);
-        setLicLimitAlert({ max, msg: e.message });
+        setLicLimitAlert({ reason:'staff', maxStaff: max, maxDevices: licStatus?.maxDevices, durationDays: licStatus?.durationDays });
       } else {
         showToast(e?.message || t('Save failed'), 'error');
       }
@@ -1610,7 +1729,7 @@ const UserManagement = () => {
   const resetToDefault = async (row) => {
     if (!window.confirm(`Reset login password for "${row.fullName}" to default (123456)?`)) return;
     try {
-      const res = await fetch(`/api/employees/${row.id}/reset-password`, {
+      const res = await fetch(apiUrl(`/employees/${row.id}/reset-password`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
         body: JSON.stringify({ password: '123456' }),
@@ -1628,7 +1747,7 @@ const UserManagement = () => {
     setResetPwdLoading(true);
     try {
       await Promise.all(selectedUserIds.map(id =>
-        fetch(`/api/employees/${id}/reset-password`, {
+        fetch(apiUrl(`/employees/${id}/reset-password`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: resetPwdInput.trim() }),
@@ -1684,12 +1803,12 @@ const UserManagement = () => {
       </tr>`).join('');
     const win = window.open('','_blank','width=1000,height=700');
     win.document.write(`<!DOCTYPE html><html><head><title>Staff List</title>
-      <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111827}h2{color:#52b02c;font-size:16px}
+      <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111827}h2{color:#1a56db;font-size:16px}
       table{width:100%;border-collapse:collapse}th{background:#efefef;padding:7px 10px;border:1px solid #dedede;text-align:left;font-size:11px;font-weight:700}
       td{padding:5px 10px;border:1px solid #dedede;font-size:12px}tr:nth-child(even)td{background:#f9fafb}
       @media print{body{margin:0}}</style></head><body>
       <h2>👥 Staff Detail</h2>
-      <p style="color:#6b7280;font-size:11px">Total: ${filteredEmployees.length} staff | Printed: ${new Date().toLocaleDateString()}</p>
+      <p style="color:#6b7280;font-size:11px">Total: ${filteredEmployees.length} staff | Printed: ${getNepalNow().toLocaleDateString()}</p>
       <table><thead><tr><th>SN</th><th>Staff ID</th><th>Full Name</th><th>Device ID</th>
       <th>Post</th><th>Department</th><th>Branch</th><th>Mobile</th><th>Email</th><th>Mode</th><th>Join Date</th>
       </tr></thead><tbody>${rows}</tbody></table></body></html>`);
@@ -1709,7 +1828,7 @@ const UserManagement = () => {
     const blob = new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'});
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href=url; a.download=`staff_${new Date().toISOString().split('T')[0]}.csv`;
+    a.href=url; a.download=`staff_${getNepalTodayISO()}.csv`;
     document.body.appendChild(a); a.click();
     document.body.removeChild(a); URL.revokeObjectURL(url);
   };
@@ -1717,12 +1836,8 @@ const UserManagement = () => {
   /* ── Scope: filter employees to what this user is allowed to see ── */
   const scopedEmployees = filterByRole(employees);
 
-  /* ── Sort employees by rankingOrder (nulls last) ── */
-  const sortedEmployees = [...scopedEmployees].sort((a, b) => {
-    const ra = a.rankingOrder > 0 ? a.rankingOrder : Infinity;
-    const rb = b.rankingOrder > 0 ? b.rankingOrder : Infinity;
-    return ra - rb;
-  });
+  /* ── Sort employees by branch Ranking Order, then their own within it ── */
+  const sortedEmployees = [...scopedEmployees].sort((a, b) => staffRankCompare(a, b, settings));
 
   /* ── Advanced filter helpers ── */
   const setAF = (field, val) => setAdvFilters(p => ({ ...p, [field]: val }));
@@ -1792,16 +1907,11 @@ const UserManagement = () => {
   /* ── DataGrid columns ── */
   const columns = [
     { field:'employeeId', header:'Staff ID',   width:90,
-      render:v=><span style={{fontFamily:'monospace',fontSize:14,background:'#f3f4f6',padding:'2px 6px',borderRadius:4}}>{v}</span> },
+      render:v=><span style={{fontFamily:'monospace',background:'#f3f4f6',padding:'2px 6px',borderRadius:4}}>{v}</span> },
     { field:'fullName',   header:'Full Name',  width:160,
-      render:(v,row)=>(
-        <span style={{fontWeight:500, color:'#52b02c', cursor:'pointer'}}
-          onClick={e=>{ e.stopPropagation(); if (canManageStaff) openEdit(row, true); }}>
-          {v}
-        </span>
-      ) },
+      render:v=><span style={{color:'#1f2937'}}>{v}</span> },
     { field:'deviceId',   header:'Device ID',  width:90,
-      render:v=>v?<span style={{fontFamily:'monospace',fontSize:14,color:'#0369a1'}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
+      render:v=>v?<span style={{fontFamily:'monospace',color:'#1f2937'}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
     { field:'position',   header:'Post',       width:140,
       render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
     { field:'department', header:'Department', width:120,
@@ -1811,7 +1921,7 @@ const UserManagement = () => {
     { field:'phone',      header:'Mobile',     width:110,
       render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
     { field:'email',      header:'Email',      width:190,
-      render:v=>v?<span style={{color:'#52b02c',fontSize:14}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
+      render:v=>v?<span style={{color:'#1f2937'}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
     { field:'mode',       header:'Mode',       width:110,
       render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
     { field:'joinDate',   header:'Join Date',  width:120, render:v=>fd(v) },
@@ -1837,11 +1947,11 @@ const UserManagement = () => {
       <div className="page-header" style={{ flexDirection:'column', alignItems:'stretch' }}>
         {/* Row 1: title left — Export / Print right */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-          <h1 className="page-title">👥 Staff Detail</h1>
+          <h1 className="page-title" style={{ fontSize:15 }}>👥 Staff Detail</h1>
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             {canManageStaff && (
-              <button onClick={() => setExcelImport(true)} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
-                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+              <button onClick={() => setExcelImport(true)} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'5px 11px', height:30, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
+                <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
                   <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 9.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 8.414V13a1 1 0 11-2 0V8.414L7.707 9.707a1 1 0 01-1.414 0z" clipRule="evenodd"/>
                 </svg>
                 Import Excel
@@ -1850,19 +1960,19 @@ const UserManagement = () => {
             {canManageStaff && (
               <button onClick={handleSyncNames} disabled={syncingNames}
                 title={t('Push each staff member\'s name to the attendance devices in their assigned Area')}
-                style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor: syncingNames ? 'wait' : 'pointer', whiteSpace:'nowrap', opacity: syncingNames ? .6 : 1 }}>
-                <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'5px 11px', height:30, background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:6, fontSize:12, fontWeight:600, cursor: syncingNames ? 'wait' : 'pointer', whiteSpace:'nowrap', opacity: syncingNames ? .6 : 1 }}>
+                <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
                   <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd"/>
                 </svg>
                 {syncingNames ? t('Syncing…') : t('Sync Name in Device')}
               </button>
             )}
-            <button onClick={handleExport} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
-              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
+            <button onClick={handleExport} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'5px 11px', height:30, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer' }}>
+              <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd"/></svg>
               Export
             </button>
-            <button onClick={handlePrint} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34, background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
-              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9h8v3H6v-3zm8-4a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd"/></svg>
+            <button onClick={handlePrint} style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'5px 11px', height:30, background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer' }}>
+              <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9h8v3H6v-3zm8-4a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd"/></svg>
               Print
             </button>
           </div>
@@ -1873,11 +1983,11 @@ const UserManagement = () => {
             {[
               { label:t('Total Staff'), count:scopedEmployees.length,                                                bg:'#f3f4f6', color:'#374151' },
               { label:t('Active'),      count:scopedEmployees.filter(e=>e.active).length,                           bg:'#d1fae5', color:'#065f46' },
-              { label:t('Male'),        count:scopedEmployees.filter(e=>e.gender==='male').length,                  bg:'#dcfce7', color:'#166534' },
+              { label:t('Male'),        count:scopedEmployees.filter(e=>e.gender==='male').length,                  bg:'#dbeafe', color:'#1e40af' },
               { label:t('Female'),      count:scopedEmployees.filter(e=>e.gender==='female').length,                bg:'#fce7f3', color:'#9d174d' },
               { label:'Permanent',      count:scopedEmployees.filter(e=>e.mode==='Permanent').length,               bg:'#ecfdf5', color:'#065f46' },
               { label:'Temporary',      count:scopedEmployees.filter(e=>e.mode==='Temporary').length,               bg:'#fffbeb', color:'#92400e' },
-              { label:'Contract',       count:scopedEmployees.filter(e=>e.mode==='Contract').length,                bg:'#f0fdf4', color:'#166534' },
+              { label:'Contract',       count:scopedEmployees.filter(e=>e.mode==='Contract').length,                bg:'#eff6ff', color:'#1e40af' },
             ].map(({ label, count, bg, color }) => (
               <span key={label} style={{ display:'inline-flex', alignItems:'center', gap:6, background:bg, color, borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:600 }}>
                 {label}: <strong style={{ fontSize:14 }}>{count}</strong>
@@ -1886,12 +1996,12 @@ const UserManagement = () => {
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', justifyContent:'flex-end', marginLeft:'auto' }}>
           {/* Working / Not Working list toggle */}
-          <div style={{ display:'flex', border:'1px solid #d1d5db', borderRadius:6, overflow:'hidden', height:34 }}>
+          <div style={{ display:'flex', border:'1px solid #d1d5db', borderRadius:6, overflow:'hidden', height:30 }}>
             {[['working', t('Working')], ['notworking', t('Not Working')]].map(([v, label]) => (
               <button key={v} onClick={() => setStatusView(v)}
-                style={{ padding:'0 13px', border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                style={{ padding:'0 11px', border:'none', cursor:'pointer', fontSize:12, fontWeight:600,
                   transition:'background .15s',
-                  background: statusView === v ? '#52b02c' : 'white',
+                  background: statusView === v ? '#1a56db' : 'white',
                   color: statusView === v ? 'white' : '#374151' }}>
                 {label}
               </button>
@@ -1899,13 +2009,13 @@ const UserManagement = () => {
           </div>
           {/* Advanced Search — opens popup modal */}
           <button onClick={() => setShowAdvSearch(true)} style={{
-            display:'inline-flex', alignItems:'center', gap:5, padding:'6px 13px', height:34,
-            background: activeFilterCount > 0 ? '#f0fdf4' : '#f8fafc',
-            border: `1px solid ${activeFilterCount > 0 ? '#52b02c' : '#d1d5db'}`,
-            color: activeFilterCount > 0 ? '#52b02c' : '#374151',
-            borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer', position:'relative',
+            display:'inline-flex', alignItems:'center', gap:5, padding:'5px 11px', height:30,
+            background: activeFilterCount > 0 ? '#eff6ff' : '#f8fafc',
+            border: `1px solid ${activeFilterCount > 0 ? '#1a56db' : '#d1d5db'}`,
+            color: activeFilterCount > 0 ? '#1a56db' : '#374151',
+            borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer', position:'relative',
           }}>
-            <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
               <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
             </svg>
             Advanced Search
@@ -1919,19 +2029,38 @@ const UserManagement = () => {
           {canManageStaff && (
             <button
               onClick={() => setImportModal(true)}
-              style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'6px 14px', height:34,
+              style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'5px 12px', height:30,
                 background:'linear-gradient(135deg,#059669,#047857)', border:'none',
-                color:'white', borderRadius:6, fontSize:13, fontWeight:700, cursor:'pointer',
+                color:'white', borderRadius:6, fontSize:12, fontWeight:700, cursor:'pointer',
                 boxShadow:'0 1px 4px rgba(5,150,105,.3)' }}
             >
               📥 Import Device Users
             </button>
           )}
             {canManageStaff && (
-              <button className="btn btn-primary" onClick={openAdd}>+ {t('Add New Staff')}</button>
+              <button
+                className="btn btn-primary"
+                onClick={openAdd}
+                disabled={staffLimitBlocked}
+                title={staffLimitBlocked ? staffLimitTooltip : undefined}
+                style={{ padding:'5px 14px', height:30, fontSize:12,
+                  opacity: staffLimitBlocked ? 0.5 : 1,
+                  cursor: staffLimitBlocked ? 'not-allowed' : 'pointer' }}
+              >
+                + {t('Add New Staff')}
+              </button>
             )}
           </div>
         </div>
+        {staffLimitBlocked && (
+          <div style={{ marginTop:10, display:'flex', alignItems:'center', gap:8,
+            background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:8,
+            padding:'8px 14px', fontSize:12.5, color:'#92400e', fontWeight:600 }}>
+            🔒 Maximum Users Limit — License: {licStatus?.durationDays ?? '—'} days,
+            Staff {activeStaffCount}/{licStatus?.maxStaff ?? '—'}, Device {deviceCount ?? '—'}/{licStatus?.maxDevices ?? '—'}.
+            Add New Staff is disabled — contact your distributor to upgrade.
+          </div>
+        )}
       </div>
 
       {/* ── Advanced Search Modal Popup ── */}
@@ -1940,38 +2069,76 @@ const UserManagement = () => {
         const MCS = ({ label, value, onChange, options }) => {
           const [open, setOpen] = React.useState(false);
           const [srch, setSrch] = React.useState('');
+          const [activeIndex, setActiveIndex] = React.useState(-1);
           const ref  = React.useRef(null);
+          const itemRefs = React.useRef([]);
           React.useEffect(() => {
             const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
             document.addEventListener('mousedown', h);
             return () => document.removeEventListener('mousedown', h);
           }, []);
           const filtered = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
+          // "All" is always row 0 in the navigable list, followed by the filtered options
+          const navItems = [null, ...filtered];
+          itemRefs.current = [];
           const toggle   = v  => onChange(value.includes(v) ? value.filter(x=>x!==v) : [...value, v]);
+          const selectNav = v => v === null ? onChange([]) : toggle(v);
           const selLabel = value.length === 0 ? 'All'
             : value.length === 1 ? value[0]
             : `${value.length} selected`;
+          const openWithHighlight = () => {
+            const idx = value.length === 1 ? navItems.findIndex(v => v === value[0]) : 0;
+            setActiveIndex(idx >= 0 ? idx : 0);
+            setOpen(true);
+          };
+          const handleTriggerKeyDown = e => {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              open ? setOpen(false) : openWithHighlight();
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          };
+          const handleSearchKeyDown = e => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setOpen(false);
+            }
+          };
+          React.useEffect(() => {
+            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+          }, [activeIndex, open]);
+          React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
 
           return (
             <div ref={ref} style={{ position:'relative' }}>
               <div style={{ fontSize:12, fontWeight:700, color:'#1f2937', marginBottom:5 }}>{label}</div>
               <div
                 tabIndex={0}
-                onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setOpen(p=>!p); } if (e.key==='Escape') setOpen(false); }}
-                onClick={() => setOpen(p=>!p)}
+                onKeyDown={handleTriggerKeyDown}
+                onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
                 style={{
                   display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 10px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
+                  padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
-                  color: value.length>0 ? '#166534' : '#9ca3af',
+                  color: value.length>0 ? '#1e40af' : '#9ca3af',
                   minHeight:42, fontWeight: value.length>0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none',
+                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none',
                   outline:'none', userSelect:'none',
                 }}>
                 <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
                 <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
                   {value.length > 0 && (
-                    <span style={{ background:'#52b02c', color:'white', borderRadius:10,
+                    <span style={{ background:'#1a56db', color:'white', borderRadius:10,
                       fontSize:10, fontWeight:700, padding:'1px 6px', minWidth:18, textAlign:'center' }}>
                       {value.length}
                     </span>
@@ -1988,7 +2155,7 @@ const UserManagement = () => {
               {open && (
                 <div style={{
                   position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
+                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220,
                   display:'flex', flexDirection:'column',
                 }}>
@@ -1997,34 +2164,27 @@ const UserManagement = () => {
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
                       placeholder="Search..."
                       onClick={e=>e.stopPropagation()}
-                      onKeyDown={e=>e.stopPropagation()}
+                      onKeyDown={handleSearchKeyDown}
                       style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px',
                         fontSize:12, outline:'none', boxSizing:'border-box' }} />
                   </div>
                   <div style={{ overflowY:'auto', flex:1 }}>
-                    {/* "All" row */}
-                    <div onMouseDown={e=>{e.preventDefault(); onChange([]);}}
-                      style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                        background: value.length===0 ? '#f0fdf4' : 'white', borderBottom:'1px solid #f1f5f9' }}>
-                      <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${value.length===0?'#52b02c':'#d1d5db'}`,
-                        background:value.length===0?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                        {value.length===0 && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
-                      </span>
-                      <span style={{ fontSize:13, fontWeight:600, color: value.length===0?'#166534':'#374151' }}>All</span>
-                    </div>
-                    {filtered.map(opt => {
-                      const sel = value.includes(opt);
+                    {navItems.map((v, i) => {
+                      const isAll = v === null;
+                      const sel   = isAll ? value.length === 0 : value.includes(v);
+                      const highlighted = i === activeIndex;
                       return (
-                        <div key={opt} onMouseDown={e=>{e.preventDefault(); toggle(opt);}}
+                        <div key={v ?? '__all'} ref={el => itemRefs.current[i] = el}
+                          onMouseDown={e=>{e.preventDefault(); selectNav(v);}}
+                          onMouseEnter={() => setActiveIndex(i)}
                           style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                            background: sel ? '#f0fdf4' : 'white', borderBottom:'1px solid #f9fafb' }}
-                          onMouseEnter={e=>{ if(!sel) e.currentTarget.style.background='#f8fafc'; }}
-                          onMouseLeave={e=>{ if(!sel) e.currentTarget.style.background='white'; }}>
-                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#52b02c':'#d1d5db'}`,
-                            background: sel?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                            background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
+                            borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
+                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`,
+                            background: sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize:13, color: sel?'#166534':'#374151', fontWeight: sel?600:400 }}>{opt}</span>
+                          <span style={{ fontSize:13, color: sel?'#1e40af':'#374151', fontWeight: sel?600:400 }}>{isAll ? 'All' : v}</span>
                         </div>
                       );
                     })}
@@ -2062,14 +2222,14 @@ const UserManagement = () => {
               {/* Header */}
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
                 padding:'16px 24px', borderBottom:'2px solid #e5e7eb',
-                background:'linear-gradient(135deg,#f0fdf4,#f0f9ff)', flexShrink:0 }}>
+                background:'#ffffff', flexShrink:0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#52b02c' }}>
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#1a56db' }}>
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>Advanced Search</span>
                   {activeFilterCount > 0 && (
-                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
+                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active
                     </span>
                   )}
@@ -2097,7 +2257,7 @@ const UserManagement = () => {
                     placeholder="Search by Name / Staff ID / Email / Phone / Device ID..." autoFocus tabIndex={0}
                     style={{ width:'100%', boxSizing:'border-box', padding:'11px 14px 11px 34px',
                       border:'1.5px solid #d1d5db', borderRadius:8, fontSize:14, outline:'none', fontFamily:'inherit' }}
-                    onFocus={e => e.target.style.borderColor='#52b02c'}
+                    onFocus={e => e.target.style.borderColor='#1a56db'}
                     onBlur={e  => e.target.style.borderColor='#d1d5db'} />
                 </div>
 
@@ -2126,9 +2286,9 @@ const UserManagement = () => {
                       tabIndex={0}
                       style={{ width:'100%', padding:'8px 10px', border:'1.5px solid #d1d5db', borderRadius:7,
                         fontSize:13, outline:'none', fontFamily:'inherit', background:'white', cursor:'pointer',
-                        minHeight:42, color: advFilters.handicapped ? '#166534' : '#9ca3af',
+                        minHeight:42, color: advFilters.handicapped ? '#1e40af' : '#9ca3af',
                         fontWeight: advFilters.handicapped ? 600 : 400 }}
-                      onFocus={e => e.target.style.borderColor='#52b02c'}
+                      onFocus={e => e.target.style.borderColor='#1a56db'}
                       onBlur={e  => e.target.style.borderColor='#d1d5db'}>
                       <option value="">All</option>
                       <option value="yes">Yes — Handicapped</option>
@@ -2149,9 +2309,9 @@ const UserManagement = () => {
                       tabIndex={0}
                       style={{ width:'100%', padding:'8px 10px', border:'1.5px solid #d1d5db', borderRadius:7,
                         fontSize:13, outline:'none', fontFamily:'inherit', background:'white', cursor:'pointer',
-                        minHeight:42, color: advFilters.eligibleForOt ? '#166534' : '#9ca3af',
+                        minHeight:42, color: advFilters.eligibleForOt ? '#1e40af' : '#9ca3af',
                         fontWeight: advFilters.eligibleForOt ? 600 : 400 }}
-                      onFocus={e => e.target.style.borderColor='#52b02c'}
+                      onFocus={e => e.target.style.borderColor='#1a56db'}
                       onBlur={e  => e.target.style.borderColor='#d1d5db'}>
                       <option value="">All</option>
                       <option value="yes">Yes — OT Eligible</option>
@@ -2176,9 +2336,9 @@ const UserManagement = () => {
                     Close
                   </button>
                   <button onClick={() => setShowAdvSearch(false)}
-                    style={{ padding:'9px 24px', border:'none', borderRadius:8, background:'#52b02c',
+                    style={{ padding:'9px 24px', border:'none', borderRadius:8, background:'#1a56db',
                       color:'white', fontSize:13, fontWeight:700, cursor:'pointer',
-                      boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
+                      boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
                     ✅ Apply Filter
                   </button>
                 </div>
@@ -2191,7 +2351,7 @@ const UserManagement = () => {
       <DataGrid
         columns={columns}
         data={filteredEmployees}
-        defaultPageSize={10}
+        defaultPageSize={25}
         showSearch={true}
         showFilterButton={false}
         searchPlaceholder={t('Search')+'...'}
@@ -2226,10 +2386,10 @@ const UserManagement = () => {
           canManageStaff && (
             <button onClick={() => setRecoModal(true)} style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '6px 14px', height: 34,
+              padding: '5px 12px', height: 30,
               background: '#ede9fe',
               border: '1px solid #c4b5fd', color: '#6d28d9', borderRadius: 6,
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
               whiteSpace: 'nowrap',
             }}>
               👥 Set Recommendator &amp; Approval
@@ -2438,7 +2598,11 @@ const UserManagement = () => {
                         value={form.rankingOrder}
                         onChange={e => handleChange('rankingOrder', e.target.value === '' ? '' : e.target.value.replace(/[^0-9]/g, ''))}
                       />
-                      <div className="form-hint">Staff are listed in this order in the table</div>
+                      <div className="form-hint">
+                        Staff are listed in this order within their branch.
+                        {(form.branch && form.rankingOrder) &&
+                          ` Full Rank: ${branchRankOf(form.branch, settings) ?? '—'}.${form.rankingOrder}`}
+                      </div>
                     </Fg>
                     <Fg idx={5}>
                       <Fl>User Role</Fl>
@@ -2537,7 +2701,7 @@ const UserManagement = () => {
       {qaModal && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:400 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>+ Quick Add — {qaModal.label}</h2>
               <button className="modal-close" onClick={() => setQaModal(null)}>✕</button>
             </div>
@@ -2576,7 +2740,7 @@ const UserManagement = () => {
       {dupAlert && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:420 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fff7ed,#fef3c7)' }}>
+            <div className="modal-header">
               <h2 style={{ color:'#92400e' }}>⚠️ Duplicate Data Found</h2>
               <button className="modal-close" onClick={() => setDupAlert(null)}>✕</button>
             </div>
@@ -2602,20 +2766,28 @@ const UserManagement = () => {
       {licLimitAlert && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:460 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fef2f2,#fee2e2)' }}>
-              <h2 style={{ color:'#991b1b' }}>🔒 License Limit Reached</h2>
+            <div className="modal-header">
+              <h2 style={{ color:'#991b1b' }}>🔒 Maximum Users Limit</h2>
               <button className="modal-close" onClick={() => setLicLimitAlert(null)}>✕</button>
             </div>
             <div className="modal-body" style={{ textAlign:'center', padding:'24px 28px' }}>
               <div style={{ fontSize:48, marginBottom:12 }}>🔒</div>
               <div style={{ fontSize:16, fontWeight:700, color:'#991b1b', marginBottom:8 }}>
-                Staff Limit Reached
+                {licLimitAlert.reason === 'device' ? 'Device Limit Reached'
+                  : licLimitAlert.reason === 'both' ? 'Staff & Device Limit Reached'
+                  : 'Staff Limit Reached'}
               </div>
               <div style={{ fontSize:14, color:'#374151', marginBottom:16, lineHeight:1.6 }}>
-                Your license allows only <strong>{licLimitAlert.max} staff members</strong>.<br/>
-                To add more staff, please upgrade your license.
+                {licLimitAlert.reason !== 'device' && (
+                  <>Your license allows only <strong>{licLimitAlert.maxStaff} staff members</strong>.<br/></>
+                )}
+                {licLimitAlert.reason !== 'staff' && (
+                  <>Your license allows only <strong>{licLimitAlert.maxDevices} device{licLimitAlert.maxDevices===1?'':'s'}</strong>.<br/></>
+                )}
+                Add New Staff is disabled until you upgrade your license.
               </div>
               <div style={{ background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:10, padding:'12px 16px', fontSize:13, color:'#92400e' }}>
+                License: {licLimitAlert.durationDays ?? '—'} days · Staff limit {licLimitAlert.maxStaff ?? '—'} · Device limit {licLimitAlert.maxDevices ?? '—'}<br/>
                 📞 Contact your distributor to upgrade your license plan.
               </div>
             </div>
@@ -2681,12 +2853,12 @@ const UserManagement = () => {
       {resetPwdModal && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:420 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f5f3ff,#ede9fe)' }}>
+            <div className="modal-header">
               <h2 style={{ color:'#6d28d9' }}>🔑 Reset Password</h2>
               <button className="modal-close" onClick={() => setResetPwdModal(false)}>✕</button>
             </div>
             <div className="modal-body">
-              <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:13, color:'#166534' }}>
+              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:13, color:'#1e40af' }}>
                 Resetting password for <strong>{selectedUserIds.length}</strong> selected staff member{selectedUserIds.length > 1 ? 's' : ''}.
               </div>
               <div className="form-group" style={{ marginBottom:14 }}>

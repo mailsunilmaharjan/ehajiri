@@ -6,6 +6,7 @@ import path from 'path';
 import pool from '../db.js';
 import { APP_VERSION, DB_VERSION } from '../version.js';
 import { migrateBackupData, runMigrations } from '../migrations/runner.js';
+import { ensureLicenseTable } from './license.js';
 
 const router = Router();
 
@@ -226,6 +227,21 @@ router.get('/sql', (_req, res) => {
   });
 });
 
+// Re-inserts previously SELECT *'d rows into `table`, using whatever
+// columns each row actually has (JSONB columns need re-stringifying —
+// node-postgres round-trips them as parsed JS objects/arrays on the way
+// out, not as text). Table must already exist with a superset of those
+// columns — true here since ensureLicenseTable()/migrations just ran.
+async function reinsertRows(client, table, rows, jsonbCols = []) {
+  await client.query(`DELETE FROM ${table}`);
+  for (const row of rows) {
+    const cols = Object.keys(row).filter((c) => c !== 'id'); // let SERIAL ids reassign
+    const vals = cols.map((c) => jsonbCols.includes(c) && row[c] != null ? JSON.stringify(row[c]) : row[c]);
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
+    await client.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`, vals);
+  }
+}
+
 // ══════════════════════════════════════════════════════════
 //  POST /api/backup/restore-native — restore a pg_dump custom-format
 //  (-Fc, "PGDMP" magic) dump produced by GET /sql above, via pg_restore.
@@ -234,6 +250,15 @@ router.get('/sql', (_req, res) => {
 //  anything fails, the database is left untouched. Afterwards the schema
 //  migrations re-run, so a dump taken on an older app version still ends
 //  up at the current schema (app_schema_version is part of the dump).
+//
+//  license/app_settings are the exception: pg_restore has no per-table
+//  exclude option (--exclude-table exists on pg_dump, NOT pg_restore —
+//  table filters there only support "include"), so instead this snapshots
+//  both tables immediately before the restore and puts the exact same rows
+//  back immediately after. This installation's own license and company
+//  identity (Settings → Company Info) must never come from someone else's
+//  dump — this restore is for bringing THIS tenant's own data back, not
+//  for cloning another tenant's install onto this one.
 // ══════════════════════════════════════════════════════════
 router.post('/restore-native',
   express.raw({ type: 'application/octet-stream', limit: '2gb' }),
@@ -250,6 +275,11 @@ router.post('/restore-native',
 
     try {
       fs.writeFileSync(tmpFile, buf);
+
+      const [licenseSnapshot, appSettingsSnapshot] = await Promise.all([
+        pool.query('SELECT * FROM license').then((r) => r.rows).catch(() => []),
+        pool.query('SELECT * FROM app_settings').then((r) => r.rows).catch(() => []),
+      ]);
 
       const stderr = await new Promise((resolve, reject) => {
         const child = spawn(pgRestorePath, [
@@ -274,11 +304,21 @@ router.post('/restore-native',
           : reject(new Error(err.split('\n').slice(-8).join('\n') || `pg_restore exited with code ${code}`)));
       });
 
-      // The dump may be from an older app version — bring the schema forward.
+      // The dump may be from an older app version — bring the schema forward,
+      // including license's own columns (not part of the numbered migration
+      // sequence), before restoring the pre-restore snapshot into them.
       await runMigrations();
+      await ensureLicenseTable();
+      const client = await pool.connect();
+      try {
+        await reinsertRows(client, 'license', licenseSnapshot, ['payload']);
+        await reinsertRows(client, 'app_settings', appSettingsSnapshot, ['value']);
+      } finally {
+        client.release();
+      }
 
       res.json({
-        message: 'Database restored from PostgreSQL dump (all tables).',
+        message: 'Database restored from PostgreSQL dump (all tables except license and Company Info, which stay this installation\'s own).',
         warnings: stderr.trim() || null,
       });
     } catch (e) {
@@ -418,7 +458,7 @@ router.post('/restore', async (req, res) => {
     // Restore setup tables
     const setupInserts = [
       { rows: d.fiscalYears,       table: 'fiscal_years',      seq: 'fiscal_years_id_seq',       q: `INSERT INTO fiscal_years (id,name,start_date,end_date,is_default,is_system) VALUES ($1,$2,$3,$4,$5,$6)`,   vals: r => [r.id,r.name,r.start_date,r.end_date,r.is_default,r.is_system] },
-      { rows: d.branches,          table: 'branches',           seq: 'branches_id_seq',           q: `INSERT INTO branches (id,name,short_name,address,phone) VALUES ($1,$2,$3,$4,$5)`,                          vals: r => [r.id,r.name,r.short_name,r.address,r.phone] },
+      { rows: d.branches,          table: 'branches',           seq: 'branches_id_seq',           q: `INSERT INTO branches (id,name,short_name,address,phone,ranking_order) VALUES ($1,$2,$3,$4,$5,$6)`,        vals: r => [r.id,r.name,r.short_name,r.address,r.phone,r.ranking_order] },
       { rows: d.departments,       table: 'departments',        seq: 'departments_id_seq',        q: `INSERT INTO departments (id,name,short_name,ranking_order,is_default,is_system) VALUES ($1,$2,$3,$4,$5,$6)`, vals: r => [r.id,r.name,r.short_name,r.ranking_order,r.is_default,r.is_system] },
       { rows: d.posts,             table: 'posts',              seq: 'posts_id_seq',              q: `INSERT INTO posts (id,name,short_name,ranking_order,is_default,is_system) VALUES ($1,$2,$3,$4,$5,$6)`,      vals: r => [r.id,r.name,r.short_name,r.ranking_order,r.is_default,r.is_system] },
       { rows: d.grades,            table: 'grades',             seq: 'grades_id_seq',             q: `INSERT INTO grades (id,name) VALUES ($1,$2)`,                                                               vals: r => [r.id,r.name] },

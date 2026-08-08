@@ -185,7 +185,7 @@ const OfficeVisitManagement = () => {
       {recoConfirm && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background: 'linear-gradient(135deg,#ecfdf5,#d1fae5)' }}>
+            <div className="modal-header">
               <h2 style={{ color: '#065f46' }}>👍 Recommend Office Visit</h2>
               <button className="modal-close" onClick={() => setRecoConfirm(null)}>✕</button>
             </div>

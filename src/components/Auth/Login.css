@@ -2,7 +2,7 @@
   min-height: 100vh;
   min-height: 100dvh;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #0f172a 0%, #14532d 50%, #312e81 100%);
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #312e81 100%);
   padding: 20px; padding-top: 40px; align-items: flex-start; position: relative; overflow: hidden;
 }
 .login-bg { position: absolute; inset: 0; pointer-events: none; }
@@ -20,24 +20,49 @@
   background: #fff;
   border-radius: 20px;
   width: 100%;
-  max-width: 900px;
-  min-height: 520px;
+  max-width: 1040px;
+  min-height: 560px;
   box-shadow: 0 30px 60px rgba(0,0,0,.35);
   position: relative; z-index: 1;
   animation: slideUp .3s ease;
   overflow: hidden;
 }
 
-/* ── Left panel: advertisement ── */
+/* ── Left panel: advertisement — majority of the card (was a fixed 400px,
+   then an even ~46/54 split) so an uploaded image reads as a real full-bleed
+   photo; the form side was shrunk to 42% since its fields don't need nearly
+   that much width and were sitting in a lot of excess whitespace. Shaped to
+   a 1280:1350 aspect ratio (matches the recommended ad-image dimensions) so
+   an image of that exact size shows with no cropping — align-self: flex-start
+   is what lets aspect-ratio actually drive the height instead of the row's
+   default flex stretch overriding it; .login-card grows to match since it
+   has no fixed height, and .login-right (still stretch) fills that same
+   height with its content vertically centered. ── */
 .login-left {
-  flex: 0 0 400px;
-  background: linear-gradient(160deg, #0f172a 0%, #14532d 55%, #312e81 100%);
+  flex: 1 1 64%;
+  aspect-ratio: 1280 / 1350;
+  align-self: flex-start;
+  background: linear-gradient(160deg, #0f172a 0%, #1e3a8a 55%, #312e81 100%);
   padding: 44px 40px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   position: relative;
   overflow: hidden;
+}
+
+/* Bottom gradient behind the overlay title (image mode only) — keeps white
+   text readable regardless of what's in the uploaded photo. */
+.login-left-scrim {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 45%, rgba(0,0,0,.6) 100%);
+  pointer-events: none;
+}
+.login-left-overlay-text {
+  position: absolute; left: 32px; right: 32px; bottom: 52px; z-index: 1;
+  color: #fff; font-size: 38px; font-weight: 800; line-height: 1.15;
+  letter-spacing: -.5px;
+  text-shadow: 0 2px 16px rgba(0,0,0,.4);
 }
 .login-left::before {
   content: '';
@@ -53,7 +78,7 @@
   position: absolute;
   width: 240px; height: 240px;
   border-radius: 50%;
-  background: rgba(82,176,44,.12);
+  background: rgba(26,86,219,.12);
   bottom: -80px; right: -60px;
   pointer-events: none;
 }
@@ -66,7 +91,7 @@
   letter-spacing: -.3px;
   position: relative; z-index: 1;
 }
-.adv-tagline span { color: #86efac; }
+.adv-tagline span { color: #93c5fd; }
 
 .adv-desc {
   font-size: 13px; color: rgba(255,255,255,.6);
@@ -115,7 +140,7 @@
 
 /* ── Right panel: logo + company + form ── */
 .login-right {
-  flex: 1;
+  flex: 1 1 36%;
   padding: 36px 40px;
   display: flex;
   flex-direction: column;
@@ -134,11 +159,11 @@
 
 .login-logo {
   width: 64px; height: 64px; border-radius: 16px;
-  background: linear-gradient(135deg, #52b02c, #2f6e1a);
+  background: linear-gradient(135deg, #1a56db, #7e3af2);
   color: white; font-size: 22px; font-weight: 800;
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 12px;
-  box-shadow: 0 4px 14px rgba(82,176,44,.35);
+  box-shadow: 0 4px 14px rgba(26,86,219,.35);
 }
 .login-logo-wrap {
   display: flex; align-items: center; justify-content: center;
@@ -169,13 +194,13 @@
 
 .login-app-badge {
   display: inline-flex; align-items: center; gap: 6px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
   border-radius: 20px;
   padding: 4px 14px;
   margin-top: 10px;
 }
-.login-app-badge .badge-name { font-size: 12px; font-weight: 700; color: #52b02c; }
+.login-app-badge .badge-name { font-size: 12px; font-weight: 700; color: #1a56db; }
 .login-app-badge .badge-tms  { font-size: 12px; font-weight: 800; color: #7e3af2; }
 .login-app-badge .badge-sep  { font-size: 11px; color: #9ca3af; }
 .login-app-badge .badge-sub  { font-size: 11px; color: #6b7280; }
@@ -195,10 +220,11 @@
 /* ── Responsive: stack on small screens ── */
 @media (max-width: 680px) {
   .login-card { flex-direction: column; max-width: 420px; }
-  .login-left  { flex: none; padding: 28px 24px; }
+  .login-left  { flex: none; aspect-ratio: auto; align-self: stretch; padding: 28px 24px; min-height: 220px; }
   .login-left::before, .login-left::after { display: none; }
   .login-right { padding: 28px 24px; }
   .adv-tagline { font-size: 22px; }
+  .login-left-overlay-text { font-size: 26px; left: 20px; right: 20px; bottom: 24px; }
 }
 
 /* ── Small phones: hide ad panel, full-screen form ── */
@@ -225,7 +251,7 @@
   font-size: 12px; font-weight: 600; cursor: pointer;
   background: transparent; color: #6b7280; transition: all .15s;
 }
-.login-lang button.active { background: white; color: #52b02c; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.login-lang button.active { background: white; color: #1a56db; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
 
 .login-error {
   background: #fef2f2; color: #9b1c1c;
@@ -265,7 +291,7 @@
   padding: 10px 6px; border: 1px solid #e5e7eb; border-radius: 8px;
   background: #f9fafb; cursor: pointer; transition: all .15s;
 }
-.demo-user-btn:hover { border-color: #52b02c; background: #f0fdf4; }
+.demo-user-btn:hover { border-color: #1a56db; background: #eff6ff; }
 .demo-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;

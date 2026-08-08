@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client.js';
 import { useAuth }     from '../../context/AuthContext.jsx';
@@ -6,10 +7,24 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker, { adToISO } from '../Common/NepaliDatePicker.jsx';
+import StaffDropdown   from '../Common/StaffDropdown.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
-import { adToBS, bsToAD, getBSDays } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, getNepalNow, getNepalTodayISO, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Local-time YYYY-MM-DD (never UTC — avoids day-shift near midnight).
+const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Among roster entries that all directly cover the same date, the most
+// specific (narrowest span) one wins — mirrors the backend's
+// pickMostSpecificEntry in server/routes/attendance.js, so what this
+// calendar previews matches what reports will actually show.
+const pickMostSpecificRoster = (candidates) => {
+  if (candidates.length <= 1) return candidates[0] || null;
+  const span = (r) => (new Date(r.dateTo) - new Date(r.dateFrom));
+  return candidates.slice().sort((a, b) => span(a) - span(b) || (b.id || 0) - (a.id || 0))[0];
+};
 
 /* ── Date input: Nepali calendar or AD based on company setting ── */
 const DateInput = ({ value, onChange }) => {
@@ -69,9 +84,9 @@ const RosterMenuBtn = ({ active, onSelect }) => {
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 16px',
-          height: 36, background: open ? '#166534' : '#52b02c', color: 'white', border: 'none',
+          height: 36, background: open ? '#1e40af' : '#1a56db', color: 'white', border: 'none',
           borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(82,176,44,.3)', transition: 'background .15s' }}>
+          boxShadow: '0 2px 8px rgba(26,86,219,.3)', transition: 'background .15s' }}>
         <svg viewBox="0 0 20 20" fill="white" width="14" height="14">
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
@@ -98,14 +113,14 @@ const RosterMenuBtn = ({ active, onSelect }) => {
                   padding: '8px 14px', border: 'none',
                   borderBottom: i < SUB_MENU.length - 1 ? '1px solid #f0f0f0' : 'none',
                   textAlign: 'left', cursor: 'pointer', fontSize: 13,
-                  background: isActive ? '#f0fdf4' : 'white', color: isActive ? '#166534' : '#374151',
+                  background: isActive ? '#eff6ff' : 'white', color: isActive ? '#1e40af' : '#374151',
                   fontWeight: isActive ? 700 : 500 }}
                 onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f9fafb'; }}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'white'; }}>
                 <span style={{ fontSize: 17, flexShrink: 0 }}>{item.icon}</span>
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {isActive
-                  ? <svg viewBox="0 0 20 20" fill="#52b02c" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                  ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
                   : <svg viewBox="0 0 20 20" fill="#d1d5db" width="12" height="12"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg>
                 }
               </button>
@@ -117,83 +132,53 @@ const RosterMenuBtn = ({ active, onSelect }) => {
   );
 };
 
-/* ── Searchable Staff Dropdown ───────────────────────────────── */
-const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
-  const [open,   setOpen]   = useState(autoOpen);
-  const [search, setSearch] = useState('');
-  const ref    = useRef();
-  const inpRef = useRef();
+/* ── "+ Create Roster" dropdown — Date Range vs Calendar View ─── */
+const CREATE_ROSTER_MENU = [
+  { key: 'range',    icon: '📅', label: 'Date Range Staff Wise' },
+  { key: 'calendar', icon: '🗓️', label: 'Calendar View Staff Wise' },
+];
 
+const CreateRosterMenuBtn = ({ onSelect }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
-
-  useEffect(() => { if (open && inpRef.current) inpRef.current.focus(); }, [open]);
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return employees.filter(e =>
-      !q || e.fullName?.toLowerCase().includes(q) ||
-      e.department?.toLowerCase().includes(q) ||
-      e.deviceId?.toLowerCase().includes(q) ||
-      e.employeeId?.toLowerCase().includes(q)
-    );
-  }, [employees, search]);
-
-  const selected = employees.find(e => e.id === value);
-
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <div
-        tabIndex={0}
-        onClick={() => setOpen(p => !p)}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setOpen(p => !p); } }}
-        style={{ height: 36, border: `1.5px solid ${open ? '#52b02c' : '#d1d5db'}`, borderRadius: 7,
-          padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer',
-          background: 'white', fontSize: 13, color: selected ? '#1f2937' : '#9ca3af',
-          userSelect: 'none', outline: 'none',
-          boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none' }}>
-        <span style={{ flex: 1 }}>
-          {selected
-            ? `${selected.fullName} — ${selected.department || '—'} — ${selected.deviceId || selected.employeeId || '—'}`
-            : 'Search and select staff…'}
-        </span>
-        <svg viewBox="0 0 20 20" fill="#9ca3af" width="14" height="14"
-          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>
+      <button onClick={() => setOpen(p => !p)}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 36,
+          padding: '0 16px', background: open ? '#047857' : '#059669', color: 'white', border: 'none',
+          borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          boxShadow: '0 2px 8px rgba(5,150,105,.25)', transition: 'background .15s' }}>
+        + Create Roster
+        <svg viewBox="0 0 20 20" fill="white" width="12" height="12"
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
         </svg>
-      </div>
+      </button>
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 600,
-          background: 'white', border: '1px solid #e5e7eb', borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,.12)', overflow: 'hidden' }}>
-          <div style={{ padding: '8px' }}>
-            <input ref={inpRef} value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by name, department, attendance ID…"
-              onKeyDown={e => e.stopPropagation()}
-              style={{ width: '100%', height: 32, border: '1px solid #d1d5db', borderRadius: 6,
-                padding: '0 10px', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 500,
+          background: 'white', border: '1px solid #e5e7eb', borderRadius: 10,
+          boxShadow: '0 8px 28px rgba(0,0,0,.13)', overflow: 'hidden', minWidth: 240 }}>
+          <div style={{ padding: '8px 14px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6',
+            fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+            Create Roster
           </div>
-          <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-            {filtered.length === 0
-              ? <div style={{ padding: '10px 12px', fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>No staff found</div>
-              : filtered.map(emp => (
-                <div key={emp.id} onClick={() => { onChange(emp.id); setOpen(false); setSearch(''); }}
-                  style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12,
-                    background: emp.id === value ? '#f0fdf4' : 'white',
-                    color: emp.id === value ? '#166534' : '#374151',
-                    borderTop: '1px solid #f3f4f6' }}
-                  onMouseEnter={e => { if (emp.id !== value) e.currentTarget.style.background = '#f9fafb'; }}
-                  onMouseLeave={e => { if (emp.id !== value) e.currentTarget.style.background = 'white'; }}>
-                  <span style={{ fontWeight: 600 }}>{emp.fullName}</span>
-                  <span style={{ color: '#6b7280', marginLeft: 6 }}>
-                    {emp.department || '—'} · {emp.deviceId || emp.employeeId || '—'}
-                  </span>
-                </div>
-              ))}
-          </div>
+          {CREATE_ROSTER_MENU.map((item, i) => (
+            <button key={item.key} onClick={() => { onSelect(item.key); setOpen(false); }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+                padding: '8px 14px', border: 'none',
+                borderBottom: i < CREATE_ROSTER_MENU.length - 1 ? '1px solid #f0f0f0' : 'none',
+                textAlign: 'left', cursor: 'pointer', fontSize: 13, background: 'white', color: '#374151', fontWeight: 500 }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+              <span style={{ fontSize: 17, flexShrink: 0 }}>{item.icon}</span>
+              <span style={{ flex: 1 }}>{item.label}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -201,65 +186,176 @@ const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
 };
 
 /* ── Searchable Shift Dropdown ───────────────────────────────── */
-const ShiftDropdown = ({ shifts, value, onChange }) => {
+// Multi-select shift picker — value is an array of shift ids in the order
+// checked, which IS the rotation order (day 0 of the roster gets value[0],
+// day 1 gets value[1], ... cycling). Checking one more shift just appends;
+// unchecking removes it and closes the gap in the rotation automatically.
+const MultiShiftDropdown = ({ shifts, value, onChange }) => {
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
   const [defMsg, setDefMsg] = useState(false);
-  const ref    = useRef();
+  const [rect,   setRect]   = useState(null); // raw trigger rect — { top, bottom, left, width }
+  const [panelH, setPanelH] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const ref     = useRef();  // trigger
+  const dropRef = useRef();  // portalled panel
+
   const inpRef = useRef();
+  const itemRefs = useRef([]);
 
+  // Panel is portalled to document.body (position:fixed) so it isn't
+  // clipped by an ancestor's overflow:hidden — e.g. this dropdown sits
+  // inside a modal with overflow:hidden for its rounded corners, which
+  // silently truncated the absolutely-positioned panel and made shifts
+  // near/after the fold unclickable.
   useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
+    if (!open) return;
+    const close = (e) => {
+      if (ref.current?.contains(e.target) || dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const scroll = (e) => {
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    window.addEventListener('scroll', scroll, true);
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', scroll, true); };
+  }, [open]);
 
-  useEffect(() => { if (open && inpRef.current) inpRef.current.focus(); }, [open]);
+  useEffect(() => { if (open && inpRef.current) setTimeout(() => inpRef.current?.focus(), 20); }, [open]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return shifts.filter(s => !q || s.name?.toLowerCase().includes(q) || s.code?.toLowerCase().includes(q));
   }, [shifts, search]);
+  itemRefs.current = [];
 
-  const selected = shifts.find(s => s.id === value);
+  const selectedShifts = value.map(id => shifts.find(s => s.id === id)).filter(Boolean);
+
+  const toggle = (id) => {
+    onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
+  };
+
+  const shiftLabel = (s) => (s.isOff ? s.name : `${s.name} (${s.startTime} – ${s.endTime})`);
+
+  // "Default" shift rows are inert placeholders, not selectable — arrow-key
+  // navigation must skip over them.
+  const isNavigable = (s) => !(s.makeDefault || s.make_default);
+  const stepIndex = (from, dir) => {
+    if (!filtered.length) return -1;
+    let i = from;
+    for (let n = 0; n < filtered.length; n++) {
+      i = (i + dir + filtered.length) % filtered.length;
+      if (isNavigable(filtered[i])) return i;
+    }
+    return -1;
+  };
+
+  const toggleOpen = () => {
+    if (!ref.current) return;
+    if (open) { setOpen(false); return; }
+    const r = ref.current.getBoundingClientRect();
+    setRect({ top: r.top, bottom: r.bottom, left: r.left, width: r.width });
+    setActiveIndex(stepIndex(-1, 1));
+    setOpen(true);
+  };
+
+  // Measure the panel's real height so we can decide whether it fits below
+  // the trigger — flips upward when it doesn't fit below but does fit
+  // above (same technique as NepaliDatePicker / ShiftCell).
+  useLayoutEffect(() => {
+    if (open && dropRef.current) {
+      const h = dropRef.current.offsetHeight;
+      if (h && h !== panelH) setPanelH(h);
+    }
+  }, [open, rect]);
+
+  const openUpward = !!(rect && panelH &&
+    (rect.bottom + 4 + panelH > window.innerHeight - 8) &&
+    (rect.top - panelH - 4 >= 8));
+  const panelTop = rect ? (openUpward ? rect.top - panelH - 4 : rect.bottom + 4) : 0;
+  const handleTriggerKeyDown = e => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); e.stopPropagation();
+      toggleOpen();
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+  const handleSearchKeyDown = e => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => stepIndex(i, 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => stepIndex(i, -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && filtered[activeIndex]) toggle(filtered[activeIndex].id);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+  useEffect(() => {
+    if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+  useEffect(() => { if (open) setActiveIndex(stepIndex(-1, 1)); }, [search]);
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <div
         tabIndex={0}
-        onClick={() => setOpen(p => !p)}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setOpen(p => !p); } }}
-        style={{ height: 36, border: `1.5px solid ${open ? '#52b02c' : '#d1d5db'}`, borderRadius: 7,
-          padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer',
-          background: 'white', fontSize: 13, color: selected ? '#1f2937' : '#9ca3af',
-          userSelect: 'none', outline: 'none',
-          boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none' }}>
-        <span style={{ flex: 1 }}>
-          {selected
-            ? `${selected.name}  (${selected.startTime} – ${selected.endTime})`
-            : 'Search and select shift…'}
-        </span>
+        onClick={toggleOpen}
+        onKeyDown={handleTriggerKeyDown}
+        style={{ minHeight: 36, border: `1.5px solid ${open ? '#1a56db' : '#d1d5db'}`, borderRadius: 7,
+          padding: '4px 10px', display: 'flex', alignItems: 'center', cursor: 'pointer',
+          background: 'white', fontSize: 13, color: selectedShifts.length ? '#1f2937' : '#9ca3af',
+          userSelect: 'none', outline: 'none', flexWrap: 'wrap', gap: 4,
+          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none' }}>
+        {selectedShifts.length === 0 && <span style={{ flex: 1 }}>Search and select shift(s)…</span>}
+        {selectedShifts.length === 1 && <span style={{ flex: 1 }}>{shiftLabel(selectedShifts[0])}</span>}
+        {selectedShifts.length > 1 && (
+          <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {selectedShifts.map((s, i) => (
+              <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe',
+                borderRadius: 5, padding: '2px 7px', fontSize: 11.5, fontWeight: 600 }}>
+                <span style={{ background: '#1e40af', color: 'white', borderRadius: '50%',
+                  width: 14, height: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 9, fontWeight: 700 }}>{i + 1}</span>
+                {s.name}
+              </span>
+            ))}
+          </div>
+        )}
         <svg viewBox="0 0 20 20" fill="#9ca3af" width="14" height="14"
           style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
         </svg>
       </div>
-      {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 600,
+      {open && rect && createPortal(
+        <div ref={dropRef} style={{ position: 'fixed', top: panelTop, left: rect.left, width: rect.width, zIndex: 999999,
           background: 'white', border: '1px solid #e5e7eb', borderRadius: 8,
           boxShadow: '0 8px 24px rgba(0,0,0,.12)', overflow: 'hidden' }}>
           <div style={{ padding: '8px' }}>
             <input ref={inpRef} value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Search shift…"
-              onKeyDown={e => e.stopPropagation()}
+              onKeyDown={handleSearchKeyDown}
               style={{ width: '100%', height: 32, border: '1px solid #d1d5db', borderRadius: 6,
                 padding: '0 10px', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
           </div>
-          <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-            {filtered.map(s => {
+          {selectedShifts.length > 1 && (
+            <div style={{ padding: '4px 12px 8px', fontSize: 11, color: '#6b7280' }}>
+              Rotates day-by-day in the order checked (1 → {selectedShifts.length} → repeats).
+            </div>
+          )}
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {filtered.map((s, idx) => {
               const isDefault = s.makeDefault || s.make_default;
               if (isDefault) return (
-                <div key={s.id}
+                <div key={s.id} ref={el => itemRefs.current[idx] = el}
                   onClick={() => { setDefMsg(true); setTimeout(() => setDefMsg(false), 3500); }}
                   style={{ padding: '8px 12px', cursor: 'not-allowed', fontSize: 12,
                     background: '#f9fafb', color: '#9ca3af',
@@ -273,17 +369,31 @@ const ShiftDropdown = ({ shifts, value, onChange }) => {
                   </span>
                 </div>
               );
+              const checked = value.includes(s.id);
+              const order   = checked ? value.indexOf(s.id) + 1 : null;
+              const highlighted = idx === activeIndex;
               return (
-                <div key={s.id} onClick={() => { onChange(s.id); setOpen(false); setSearch(''); }}
+                <label key={s.id} ref={el => itemRefs.current[idx] = el}
+                  onClick={e => e.stopPropagation()}
+                  onMouseEnter={() => setActiveIndex(idx)}
                   style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12,
-                    background: s.id === value ? '#f0fdf4' : 'white',
-                    color: s.id === value ? '#166534' : '#374151',
-                    borderTop: '1px solid #f3f4f6' }}
-                  onMouseEnter={e => { if (s.id !== value) e.currentTarget.style.background = '#f9fafb'; }}
-                  onMouseLeave={e => { if (s.id !== value) e.currentTarget.style.background = 'white'; }}>
+                    background: checked ? '#eff6ff' : (highlighted ? '#f9fafb' : 'white'),
+                    color: checked ? '#1e40af' : '#374151',
+                    borderTop: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggle(s.id)}
+                    style={{ width: 14, height: 14, cursor: 'pointer', accentColor: '#1a56db', flexShrink: 0 }} />
+                  {order && <span style={{ background: '#1e40af', color: 'white', borderRadius: '50%',
+                    width: 15, height: 15, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 9.5, fontWeight: 700, flexShrink: 0 }}>{order}</span>}
                   <span style={{ fontWeight: 600 }}>{s.name}</span>
-                  <span style={{ color: '#6b7280', marginLeft: 6 }}>{s.startTime} – {s.endTime} · {s.workHours}h</span>
-                </div>
+                  {s.isOff ? (
+                    <span style={{ background: '#f3f4f6', color: '#6b7280', border: '1px solid #e5e7eb',
+                      borderRadius: 4, padding: '1px 6px', fontSize: 9.5, fontWeight: 700,
+                      textTransform: 'uppercase', letterSpacing: '.3px' }}>Off</span>
+                  ) : (
+                    <span style={{ color: '#6b7280' }}>{s.startTime} – {s.endTime} · {s.workHours}h</span>
+                  )}
+                </label>
               );
             })}
           </div>
@@ -297,7 +407,8 @@ const ShiftDropdown = ({ shifts, value, onChange }) => {
               The Default shift is applied automatically. Please select a specific shift to assign from the Roster.
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -316,7 +427,7 @@ const disStyle = {
 };
 
 /* ── Fiscal year helper ── */
-const todayStr = () => new Date().toISOString().split('T')[0];
+const todayStr = () => getNepalTodayISO();
 
 function getCurrentFY(fiscalYears = []) {
   const today = todayStr();
@@ -330,7 +441,7 @@ function getCurrentFY(fiscalYears = []) {
 // Uses BS month when useNepali=true, AD month otherwise.
 function getDefaultDateRange(useNepali) {
   if (useNepali) {
-    const bs = adToBS(new Date());
+    const bs = adToBS(getNepalTodayISO());
     if (bs) {
       const days  = getBSDays(bs.year, bs.month);
       const first = bsToAD(bs.year, bs.month, 1);
@@ -338,12 +449,13 @@ function getDefaultDateRange(useNepali) {
       if (first && last) return { dateFrom: adToISO(first), dateTo: adToISO(last) };
     }
   }
-  const t = new Date();
+  const t = getNepalNow();
   const first = new Date(t.getFullYear(), t.getMonth(), 1);
   const last  = new Date(t.getFullYear(), t.getMonth() + 1, 0);
+  const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   return {
-    dateFrom: first.toISOString().split('T')[0],
-    dateTo:   last.toISOString().split('T')[0],
+    dateFrom: toISO(first),
+    dateTo:   toISO(last),
   };
 }
 
@@ -357,7 +469,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
 
   const [submitMode, setSubmitMode] = useState('create_new'); // 'create_new' | 'create_close'
   const [empId,    setEmpId]    = useState(null);
-  const [shiftId,  setShiftId]  = useState(null);
+  const [shiftIds, setShiftIds] = useState([]); // order checked = rotation order
   const [dateFrom, setDateFrom] = useState(defaultRange.dateFrom);
   const [dateTo,   setDateTo]   = useState(defaultRange.dateTo);
   const [offDays,  setOffDays]  = useState(settings.defaultWeekends || []);
@@ -371,7 +483,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
 
   const resetForm = useCallback(() => {
     setEmpId(null);
-    setShiftId(null);
+    setShiftIds([]);
     const range = getDefaultDateRange(settings.defaultCalendar === 'np');
     setDateFrom(range.dateFrom);
     setDateTo(range.dateTo);
@@ -381,7 +493,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
 
   const handleSubmit = async () => {
     if (!empId)   return setError('Please select a staff member.');
-    if (!shiftId) return setError('Please select a shift.');
+    if (!shiftIds.length) return setError('Please select at least one shift.');
     if (!dateFrom || !dateTo) return setError('Please set date range.');
     if (dateTo < dateFrom)    return setError('Date To must be on or after Date From.');
     setError('');
@@ -389,7 +501,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
     try {
       await api.post('/duty-roster', {
         employeeId: empId,
-        shiftId,
+        shiftIds,
         dateFrom,
         dateTo,
         offDays,
@@ -416,20 +528,16 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
         display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
-        <div style={{ background: '#52b02c', padding: '16px 20px',
+        <div style={{ background: '#ffffff', padding: '16px 20px', borderBottom: '1px solid #e5e7eb',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <svg viewBox="0 0 20 20" fill="white" width="18" height="18">
+            <svg viewBox="0 0 20 20" fill="#1e40af" width="18" height="18">
               <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
               <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
             </svg>
-            <span style={{ fontWeight: 700, fontSize: 15, color: 'white' }}>Create Roster</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: '#1e40af' }}>Create Roster</span>
           </div>
-          <button onClick={onClose}
-            style={{ background: 'rgba(255,255,255,.18)', border: 'none', borderRadius: 6,
-              width: 30, height: 30, cursor: 'pointer', color: 'white', fontSize: 18, lineHeight: 1 }}>
-            ×
-          </button>
+          <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
         {/* Body */}
@@ -470,7 +578,10 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
           {/* Change Shift */}
           <div>
             <Label>Change Shift <span style={{ color: '#dc2626' }}>*</span></Label>
-            <ShiftDropdown shifts={shifts} value={shiftId} onChange={setShiftId} />
+            <MultiShiftDropdown shifts={shifts} value={shiftIds} onChange={setShiftIds} />
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>
+              Check more than one to rotate through them day-by-day across the date range. Day Off/Night Off count as a rotation slot too.
+            </div>
           </div>
 
           {/* Date Range */}
@@ -496,7 +607,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
                     style={{ display: 'flex', alignItems: 'center', gap: 6,
                       cursor: 'pointer', fontSize: 13, color: '#374151', userSelect: 'none' }}>
                     <input type="checkbox" checked={on} onChange={() => toggleDay(day)}
-                      style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#52b02c' }} />
+                      style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#1a56db' }} />
                     {day}
                   </label>
                 );
@@ -530,21 +641,21 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
 
           {/* Create & New / Close After toggle */}
           <div style={{ display: 'flex', borderRadius: 7, overflow: 'hidden',
-            border: '1.5px solid #52b02c', flexShrink: 0 }}>
+            border: '1.5px solid #1a56db', flexShrink: 0 }}>
             <button
               onClick={() => setSubmitMode('create_new')}
               style={{ padding: '6px 13px', border: 'none', fontSize: 12, fontWeight: 700,
                 cursor: 'pointer', transition: 'background .15s',
-                background: submitMode === 'create_new' ? '#52b02c' : 'white',
-                color: submitMode === 'create_new' ? 'white' : '#52b02c' }}>
+                background: submitMode === 'create_new' ? '#1a56db' : 'white',
+                color: submitMode === 'create_new' ? 'white' : '#1a56db' }}>
               Create &amp; New
             </button>
             <button
               onClick={() => setSubmitMode('create_close')}
-              style={{ padding: '6px 13px', border: 'none', borderLeft: '1.5px solid #52b02c',
+              style={{ padding: '6px 13px', border: 'none', borderLeft: '1.5px solid #1a56db',
                 fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'background .15s',
-                background: submitMode === 'create_close' ? '#52b02c' : 'white',
-                color: submitMode === 'create_close' ? 'white' : '#52b02c' }}>
+                background: submitMode === 'create_close' ? '#1a56db' : 'white',
+                color: submitMode === 'create_close' ? 'white' : '#1a56db' }}>
               Close After
             </button>
           </div>
@@ -559,7 +670,7 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
           </button>
           <button onClick={handleSubmit} disabled={saving}
             style={{ height: 36, padding: '0 20px', fontSize: 13, fontWeight: 700,
-              background: saving ? '#86efac' : '#52b02c', color: 'white',
+              background: saving ? '#93c5fd' : '#1a56db', color: 'white',
               border: 'none', borderRadius: 8, cursor: saving ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', gap: 6 }}>
             {saving ? '⏳ Saving…'
@@ -576,7 +687,9 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
    Edit Roster Modal
 ══════════════════════════════════════════════════════════════ */
 const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
-  const [shiftId,  setShiftId]  = useState(roster.shiftId  || null);
+  const [shiftIds, setShiftIds] = useState(
+    (Array.isArray(roster.shiftIds) && roster.shiftIds.length) ? roster.shiftIds : (roster.shiftId ? [roster.shiftId] : [])
+  );
   const [dateFrom, setDateFrom] = useState(roster.dateFrom?.slice(0, 10) || '');
   const [dateTo,   setDateTo]   = useState(roster.dateTo?.slice(0, 10)   || '');
   const [offDays,  setOffDays]  = useState(roster.offDays  || []);
@@ -587,13 +700,13 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
     setOffDays(p => p.includes(day) ? p.filter(d => d !== day) : [...p, day]);
 
   const handleSubmit = async () => {
-    if (!shiftId) return setError('Please select a shift.');
+    if (!shiftIds.length) return setError('Please select at least one shift.');
     if (!dateFrom || !dateTo) return setError('Please set date range.');
     if (dateTo < dateFrom)    return setError('Date To must be on or after Date From.');
     setError('');
     setSaving(true);
     try {
-      await api.put(`/duty-roster/${roster.id}`, { shiftId, dateFrom, dateTo, offDays });
+      await api.put(`/duty-roster/${roster.id}`, { shiftIds, dateFrom, dateTo, offDays });
       onSaved();
       onClose();
     } catch (e) {
@@ -611,19 +724,15 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
         display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
-        <div style={{ background: '#0e9f6e', padding: '16px 20px',
+        <div style={{ background: '#ffffff', padding: '16px 20px', borderBottom: '1px solid #e5e7eb',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <svg viewBox="0 0 20 20" fill="white" width="18" height="18">
+            <svg viewBox="0 0 20 20" fill="#065f46" width="18" height="18">
               <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/>
             </svg>
-            <span style={{ fontWeight: 700, fontSize: 15, color: 'white' }}>Edit Roster</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: '#065f46' }}>Edit Roster</span>
           </div>
-          <button onClick={onClose}
-            style={{ background: 'rgba(255,255,255,.18)', border: 'none', borderRadius: 6,
-              width: 30, height: 30, cursor: 'pointer', color: 'white', fontSize: 18, lineHeight: 1 }}>
-            ×
-          </button>
+          <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
         {/* Body */}
@@ -656,7 +765,10 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
           {/* Change Shift */}
           <div>
             <Label>Change Shift <span style={{ color: '#dc2626' }}>*</span></Label>
-            <ShiftDropdown shifts={shifts} value={shiftId} onChange={setShiftId} />
+            <MultiShiftDropdown shifts={shifts} value={shiftIds} onChange={setShiftIds} />
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>
+              Check more than one to rotate through them day-by-day across the date range. Day Off/Night Off count as a rotation slot too.
+            </div>
           </div>
 
           {/* Date Range */}
@@ -724,7 +836,7 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
    AI Analysis Engine
 ══════════════════════════════════════════════════════════════ */
 function analyzeRosters(rosters, employees) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = getNepalNow(); today.setHours(0, 0, 0, 0);
   const in30  = new Date(today); in30.setDate(today.getDate() + 30);
   const insights = [];
 
@@ -740,9 +852,9 @@ function analyzeRosters(rosters, employees) {
     type: 'summary',
     title: 'Roster Overview',
     icon: '📊',
-    color: '#52b02c',
-    bg: '#f0fdf4',
-    border: '#bbf7d0',
+    color: '#1a56db',
+    bg: '#eff6ff',
+    border: '#bfdbfe',
     items: [
       { label: 'Total Entries',   value: rosters.length,  note: '' },
       { label: 'Currently Active', value: current.length, note: '' },
@@ -889,6 +1001,378 @@ function analyzeRosters(rosters, employees) {
   return insights;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   Calendar View Roster Modal — pick a staff member, click/select day(s)
+   on a month calendar, assign a shift / Day Off / Night Off to the whole
+   selection at once. Approved-leave days are shown but not selectable.
+══════════════════════════════════════════════════════════════ */
+const CalendarRosterModal = ({ employees, shifts, rosters, currentUser, initialStaffId, initialDate, onClose, onSaved }) => {
+  const { settings } = useSettings();
+  const { getApprovedLeaveForDate, getLeaveTypeColor } = useData();
+  const useNP   = settings.defaultCalendar === 'np';
+  const useNPDg = useNP && settings.nepaliDigits;
+  const fmtN    = n => useNPDg ? toNepaliDigits(n) : String(n);
+  const today   = getNepalNow();
+  const todayBS = adToBS(getNepalTodayISO());
+  const initDateBS = useNP && initialDate ? adToBS(initialDate) : null;
+  const initDateAD = !useNP && initialDate ? new Date(initialDate) : null;
+
+  const staffList = useMemo(
+    () => employees.slice().sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')),
+    [employees]
+  );
+
+  const [selectedStaffId, setSelectedStaffId] = useState(initialStaffId ?? staffList[0]?.id ?? null);
+  const [navYear,  setNavYear]  = useState(() => useNP
+    ? (initDateBS?.year  || todayBS?.year  || today.getFullYear())
+    : (initDateAD?.getFullYear() ?? today.getFullYear()));
+  const [navMonth, setNavMonth] = useState(() => useNP
+    ? (initDateBS?.month || todayBS?.month || today.getMonth() + 1)
+    : (initDateAD?.getMonth() ?? today.getMonth())); // BS: 1-12, AD: 0-11
+  const [selectedDates,  setSelectedDates]  = useState(() => new Set());
+  const [lastClicked,    setLastClicked]    = useState(null);
+  const [pendingChoiceIds, setPendingChoiceIds] = useState([]);
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState('');
+  const [okMsg,    setOkMsg]    = useState('');
+
+  const staff = staffList.find(e => e.id === selectedStaffId) || null;
+  const staffIdx = staffList.findIndex(e => e.id === selectedStaffId);
+
+  /* Switching staff or month invalidates any in-progress selection */
+  useEffect(() => { setSelectedDates(new Set()); setLastClicked(null); setPendingChoiceIds([]); setError(''); }, [selectedStaffId, navYear, navMonth]);
+
+  const goStaff = (delta) => {
+    const idx = staffIdx + delta;
+    if (idx < 0 || idx >= staffList.length) return;
+    setSelectedStaffId(staffList[idx].id);
+  };
+
+  const scopeLabel =
+    currentUser?.role === 'departmentHead' ? `Department: ${currentUser.department || '—'}` :
+    currentUser?.role === 'branchManager'  ? `Branch: ${currentUser.branch || '—'}` :
+    (currentUser?.role === 'admin' || currentUser?.role === 'superAdmin') ? 'All Staff' :
+    'My Roster';
+
+  const goPrevMonth = () => {
+    if (useNP) { if (navMonth <= 1) { setNavMonth(12); setNavYear(y => y - 1); } else setNavMonth(m => m - 1); }
+    else       { if (navMonth <= 0) { setNavMonth(11); setNavYear(y => y - 1); } else setNavMonth(m => m - 1); }
+  };
+  const goNextMonth = () => {
+    if (useNP) { if (navMonth >= 12) { setNavMonth(1);  setNavYear(y => y + 1); } else setNavMonth(m => m + 1); }
+    else       { if (navMonth >= 11) { setNavMonth(0);  setNavYear(y => y + 1); } else setNavMonth(m => m + 1); }
+  };
+
+  let daysInMonth, firstDay, monthLabel;
+  if (useNP) {
+    daysInMonth = getBSDays(navYear, navMonth) || 30;
+    const firstAD = bsToAD(navYear, navMonth, 1);
+    firstDay = firstAD ? firstAD.getDay() : 0;
+    monthLabel = `${BS_MONTHS_EN[navMonth - 1] || ''} ${fmtN(navYear)} BS`;
+  } else {
+    daysInMonth = new Date(navYear, navMonth + 1, 0).getDate();
+    firstDay    = new Date(navYear, navMonth, 1).getDay();
+    monthLabel  = new Date(navYear, navMonth, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }
+  const getADDate = (d) => useNP ? bsToAD(navYear, navMonth, d) : new Date(navYear, navMonth, d);
+  const isToday = (d) => useNP
+    ? (todayBS && navYear === todayBS.year && navMonth === todayBS.month && d === todayBS.day)
+    : (d === today.getDate() && navMonth === today.getMonth() && navYear === today.getFullYear());
+
+  const staffRosters = useMemo(
+    () => rosters.filter(r => r.employeeDbId === selectedStaffId),
+    [rosters, selectedStaffId]
+  );
+
+  const getDayInfo = useCallback((adDate) => {
+    if (!adDate || !staff) return null;
+    const dayStart = new Date(adDate); dayStart.setHours(0, 0, 0, 0);
+    const dateStr  = toISODate(dayStart);
+
+    const leave = getApprovedLeaveForDate(staff.id, dateStr);
+    if (leave) return { leave: { code: leave.leaveTypeCode, color: getLeaveTypeColor(leave.leaveTypeCode) } };
+
+    const dayEnd = new Date(adDate); dayEnd.setHours(23, 59, 59, 999);
+    const covering = staffRosters.filter(r => {
+      const from = r.dateFrom ? new Date(r.dateFrom) : null;
+      const to   = r.dateTo   ? new Date(r.dateTo)   : null;
+      return (!from || from <= dayEnd) && (!to || to >= dayStart);
+    });
+    const r = pickMostSpecificRoster(covering);
+    if (!r) return null;
+    const dayName = DAYS[dayStart.getDay()];
+    const isOff = (r.offDays || []).includes(dayName);
+    return { isOff, shiftName: r.shiftName, dateStr };
+  }, [staff, staffRosters, getApprovedLeaveForDate, getLeaveTypeColor]);
+
+  /* ── Cell click: plain click toggles; shift+click extends a contiguous
+     range from the last-clicked day (skipping leave days either way) ── */
+  const handleDayClick = (d, e) => {
+    const info = getDayInfo(getADDate(d));
+    if (info?.leave) return; // not editable while on approved leave
+    const dateStr = toISODate(getADDate(d));
+
+    if (e.shiftKey && lastClicked !== null) {
+      const lo = Math.min(lastClicked, d), hi = Math.max(lastClicked, d);
+      setSelectedDates(prev => {
+        const next = new Set(prev);
+        for (let x = lo; x <= hi; x++) {
+          const xInfo = getDayInfo(getADDate(x));
+          if (!xInfo?.leave) next.add(toISODate(getADDate(x)));
+        }
+        return next;
+      });
+    } else {
+      setSelectedDates(prev => {
+        const next = new Set(prev);
+        if (next.has(dateStr)) next.delete(dateStr); else next.add(dateStr);
+        return next;
+      });
+    }
+    setLastClicked(d);
+  };
+
+  const pickableShifts = shifts.filter(s => !s.makeDefault && s.active !== false);
+
+  const applyToSelectedDates = async (shiftIds) => {
+    setError(''); setOkMsg(''); setSaving(true);
+    try {
+      await api.post('/duty-roster/bulk-days', {
+        employeeId: selectedStaffId,
+        dates: [...selectedDates],
+        shiftIds,
+        createdBy: currentUser?.fullName || currentUser?.username || 'Admin',
+      });
+      onSaved();
+      setOkMsg(shiftIds.length ? `Applied to ${selectedDates.size} day(s).` : `Cleared override on ${selectedDates.size} day(s).`);
+      setSelectedDates(new Set());
+      setLastClicked(null);
+      setPendingChoiceIds([]);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApply = () => {
+    if (!pendingChoiceIds.length) return setError('Pick at least one shift, Day Off, or Night Off.');
+    applyToSelectedDates(pendingChoiceIds);
+  };
+  const handleClear = () => applyToSelectedDates([]);
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div style={{ background: 'white', borderRadius: 14, width: '100%', maxWidth: 840,
+        boxShadow: '0 20px 60px rgba(0,0,0,.25)', overflow: 'hidden', maxHeight: '94vh',
+        display: 'flex', flexDirection: 'column' }}>
+
+        {/* Header */}
+        <div style={{ background: '#ffffff', padding: '16px 20px', borderBottom: '1px solid #e5e7eb',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 18 }}>🗓️</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: '#1e40af' }}>
+              {initialStaffId ? 'Calendar View — Staff Roster' : 'Calendar View — Create Roster'}
+            </span>
+          </div>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div style={{ padding: '18px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* ── Staff navigation ── */}
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+            padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => goStaff(-1)} disabled={staffIdx <= 0}
+              style={{ width: 32, height: 32, border: '1px solid #d1d5db', borderRadius: 7,
+                background: '#fff', cursor: staffIdx <= 0 ? 'not-allowed' : 'pointer',
+                color: staffIdx <= 0 ? '#d1d5db' : '#374151', fontSize: 15, fontWeight: 700 }}>‹</button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: '#eff6ff',
+                border: '1.5px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 15, color: '#1a56db', fontWeight: 800, flexShrink: 0 }}>
+                {(staff?.fullName || '?')[0].toUpperCase()}
+              </div>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: '#111827' }}>{staff?.fullName || '—'}</div>
+                <div style={{ fontSize: 11, color: '#6b7280' }}>
+                  {[staff?.department, staff?.position].filter(Boolean).join(' · ') || '—'}
+                </div>
+              </div>
+            </div>
+
+            <button onClick={() => goStaff(1)} disabled={staffIdx >= staffList.length - 1}
+              style={{ width: 32, height: 32, border: '1px solid #d1d5db', borderRadius: 7,
+                background: '#fff', cursor: staffIdx >= staffList.length - 1 ? 'not-allowed' : 'pointer',
+                color: staffIdx >= staffList.length - 1 ? '#d1d5db' : '#374151', fontSize: 15, fontWeight: 700 }}>›</button>
+
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', background: '#eef2ff',
+              border: '1px solid #c7d2fe', borderRadius: 6, padding: '3px 9px' }}>{scopeLabel}</span>
+
+            <div style={{ marginLeft: 'auto', minWidth: 260 }}>
+              <StaffDropdown employees={staffList} value={selectedStaffId} onChange={setSelectedStaffId} />
+            </div>
+          </div>
+
+          {/* ── Month nav + legend ── */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={goPrevMonth}
+                style={{ width: 30, height: 30, border: '1px solid #d1d5db', borderRadius: 7,
+                  background: '#fff', cursor: 'pointer', color: '#374151', fontSize: 14 }}>‹</button>
+              <span style={{ fontSize: 13, fontWeight: 800, color: '#111827', minWidth: 150, textAlign: 'center' }}>
+                📅 {monthLabel}
+              </span>
+              <button onClick={goNextMonth}
+                style={{ width: 30, height: 30, border: '1px solid #d1d5db', borderRadius: 7,
+                  background: '#fff', cursor: 'pointer', color: '#374151', fontSize: 14 }}>›</button>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11.5, color: '#6b7280' }}>
+              {[
+                { bg: '#dbeafe', border: '#1a56db', label: 'Working' },
+                { bg: '#fee2e2', border: '#dc2626', label: 'Day/Night Off' },
+                { bg: '#fef3c7', border: '#d97706', label: 'Leave' },
+                { bg: '#dbeafe', border: '#1a56db', label: 'Selected', ring: true },
+              ].map(l => (
+                <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 11, height: 11, borderRadius: 3, flexShrink: 0, background: l.bg,
+                    border: l.ring ? '2px solid #1a56db' : `1.5px solid ${l.border}` }} />
+                  {l.label}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Calendar grid ── */}
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
+              {DAYS.map(d => (
+                <div key={d} style={{ padding: '7px 4px', textAlign: 'center', fontSize: 12,
+                  fontWeight: 700, color: d === 'Sun' ? '#dc2626' : '#6b7280' }}>{d}</div>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)' }}>
+              {cells.map((d, idx) => {
+                if (d === null) return (
+                  <div key={`e-${idx}`} style={{ minHeight: 68, background: '#fafafa',
+                    borderBottom: '1px solid #efefef', borderRight: (idx + 1) % 7 !== 0 ? '1px solid #efefef' : 'none' }} />
+                );
+                const adDate = getADDate(d);
+                const info   = getDayInfo(adDate);
+                const dateStr = toISODate(adDate);
+                const tod    = isToday(d);
+                const dow    = (firstDay + d - 1) % 7;
+                const isSel  = selectedDates.has(dateStr);
+                const selectable = !info?.leave;
+
+                let bg = '#fff';
+                if (info?.leave) bg = '#fffbeb';
+                else if (info?.isOff) bg = '#fff8f8';
+                else if (info) bg = '#f0f8ff';
+                if (isSel) bg = '#dbeafe';
+
+                return (
+                  <div key={d}
+                    onClick={selectable ? (e) => handleDayClick(d, e) : undefined}
+                    style={{
+                      minHeight: 68, background: bg,
+                      borderBottom: '1px solid #e5e7eb',
+                      borderRight: (idx + 1) % 7 !== 0 ? '1px solid #e5e7eb' : 'none',
+                      padding: '5px 7px', display: 'flex', flexDirection: 'column', gap: 3,
+                      outline: isSel ? '2px solid #1a56db' : (tod ? '2px solid #93c5fd' : 'none'),
+                      outlineOffset: -2,
+                      cursor: selectable ? 'pointer' : 'not-allowed',
+                      userSelect: 'none',
+                    }}>
+                    <div style={{ alignSelf: 'flex-start', width: 22, height: 22, borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5,
+                      fontWeight: tod ? 800 : 500,
+                      background: tod ? '#1a56db' : 'transparent',
+                      color: tod ? '#fff' : dow === 0 ? '#dc2626' : '#374151' }}>{fmtN(d)}</div>
+                    {info?.leave ? (
+                      <div style={{ background: info.leave.color + '22', color: info.leave.color, borderRadius: 4,
+                        fontSize: 10.5, fontWeight: 700, padding: '2px 5px', textAlign: 'center' }}>{info.leave.code}</div>
+                    ) : info?.isOff ? (
+                      <div style={{ background: '#fee2e2', color: '#991b1b', borderRadius: 4,
+                        fontSize: 10.5, fontWeight: 700, padding: '2px 5px', textAlign: 'center' }}>OFF</div>
+                    ) : info ? (
+                      <div style={{ background: '#dbeafe', color: '#1e40af', borderRadius: 4, fontSize: 10.5,
+                        fontWeight: 700, padding: '2px 5px', textAlign: 'center', overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{info.shiftName || 'On Duty'}</div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11, color: '#9ca3af' }}>
+            💡 Click a day to select it, click again to deselect. Shift+click extends a range from the last day you clicked. Days on approved leave can't be edited here.
+          </div>
+
+          {error && (
+            <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8,
+              padding: '10px 14px', color: '#991b1b', fontSize: 13, fontWeight: 600 }}>⚠️ {error}</div>
+          )}
+          {okMsg && !selectedDates.size && (
+            <div style={{ background: '#f0fdf4', border: '1px solid #6ee7b7', borderRadius: 8,
+              padding: '10px 14px', color: '#065f46', fontSize: 13, fontWeight: 600 }}>✅ {okMsg}</div>
+          )}
+        </div>
+
+        {/* ── Apply bar ── */}
+        {selectedDates.size > 0 && (
+          <div style={{ padding: '12px 20px', borderTop: '1px solid #f3f4f6', background: '#fafafa',
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: '#374151' }}>
+              {selectedDates.size} day{selectedDates.size !== 1 ? 's' : ''} selected
+            </span>
+            <div style={{ minWidth: 260 }}>
+              <MultiShiftDropdown shifts={pickableShifts} value={pendingChoiceIds} onChange={setPendingChoiceIds} />
+            </div>
+            <button onClick={handleApply} disabled={saving || !pendingChoiceIds.length}
+              style={{ height: 34, padding: '0 16px', fontSize: 12.5, fontWeight: 700,
+                background: (saving || !pendingChoiceIds.length) ? '#93c5fd' : '#1a56db', color: 'white',
+                border: 'none', borderRadius: 7, cursor: (saving || !pendingChoiceIds.length) ? 'not-allowed' : 'pointer' }}>
+              {saving ? '⏳ Applying…' : `✅ Apply to ${selectedDates.size} day(s)`}
+            </button>
+            <button onClick={handleClear} disabled={saving}
+              title="Remove any shift override on the selected day(s)"
+              style={{ height: 34, padding: '0 14px', fontSize: 12.5, fontWeight: 600,
+                background: '#fff5f5', border: '1px solid #fca5a5', color: '#dc2626',
+                borderRadius: 7, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              🗑️ Clear
+            </button>
+            <button onClick={() => { setSelectedDates(new Set()); setLastClicked(null); setPendingChoiceIds([]); }}
+              style={{ height: 34, padding: '0 14px', fontSize: 12.5, fontWeight: 600,
+                background: '#fff', border: '1px solid #d1d5db', color: '#374151', borderRadius: 7, cursor: 'pointer' }}>
+              Cancel Selection
+            </button>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{ padding: '14px 20px', borderTop: '1px solid #f3f4f6',
+          display: 'flex', justifyContent: 'flex-end', background: '#fafafa' }}>
+          <button onClick={onClose}
+            style={{ height: 36, padding: '0 18px', fontSize: 13, fontWeight: 600,
+              background: 'white', border: '1px solid #d1d5db', color: '#374151',
+              borderRadius: 8, cursor: 'pointer' }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ── AI Analysis drawer ──────────────────────────────────────────── */
 const RosterAIAnalysis = ({ rosters, employees, onClose }) => {
   const [phase, setPhase] = useState('thinking'); // thinking → done
@@ -936,7 +1420,7 @@ const RosterAIAnalysis = ({ rosters, employees, onClose }) => {
         <div style={{
           padding: '18px 20px', borderBottom: '1px solid #e5e7eb',
           display: 'flex', alignItems: 'center', gap: 10,
-          background: 'linear-gradient(135deg,#0f172a,#14532d)',
+          background: 'linear-gradient(135deg,#0f172a,#1e3a8a)',
         }}>
           <div style={{
             width: 36, height: 36, borderRadius: 10,
@@ -964,7 +1448,7 @@ const RosterAIAnalysis = ({ rosters, employees, onClose }) => {
               justifyContent: 'center', padding: '60px 20px', gap: 20 }}>
               <div style={{
                 width: 56, height: 56, borderRadius: '50%',
-                border: '3px solid #e5e7eb', borderTopColor: '#52b02c',
+                border: '3px solid #e5e7eb', borderTopColor: '#1a56db',
                 animation: 'spin 0.8s linear infinite',
               }} />
               <div style={{ textAlign: 'center' }}>
@@ -978,7 +1462,7 @@ const RosterAIAnalysis = ({ rosters, employees, onClose }) => {
               <div style={{ display: 'flex', gap: 4 }}>
                 {[0,1,2].map(i => (
                   <div key={i} style={{
-                    width: 6, height: 6, borderRadius: '50%', background: '#52b02c',
+                    width: 6, height: 6, borderRadius: '50%', background: '#1a56db',
                     animation: `bounce 1.2s ${i * 0.2}s ease-in-out infinite`,
                   }} />
                 ))}
@@ -1152,7 +1636,9 @@ const DutyRoster = () => {
   const fd = useDateFormat();
 
   const [showModal,      setShowModal]      = useState(false);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [editRoster,     setEditRoster]     = useState(null);
+  const [viewCalRow,     setViewCalRow]     = useState(null);
   const [showAdvSearch,  setShowAdvSearch]  = useState(false);
   const [showAIAnalysis, setShowAIAnalysis] = useState(false);
   const [shifts,         setShifts]         = useState([]);
@@ -1281,14 +1767,25 @@ const DutyRoster = () => {
     { field: 'branch',       header: 'Branch',     width: 120,
       render: v => v || <span style={{ color:'#d1d5db' }}>—</span> },
     { field: 'shiftName',    header: 'Shift',      width: 120,
-      render: v => v
-        ? <span style={{ background:'#f0fdf4', color:'#52b02c', border:'1px solid #86efac',
-            borderRadius:6, padding:'2px 8px', fontSize:12, fontWeight:600 }}>{v}</span>
-        : <span style={{ color:'#d1d5db' }}>—</span> },
+      render: (v, r) => {
+        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
+        const extra = (Array.isArray(r.shiftIds) ? r.shiftIds.length : 1) - 1;
+        return (
+          <span style={{ display:'inline-flex', alignItems:'center', gap:4 }}>
+            <span style={{ background:'#eff6ff', color:'#1a56db', border:'1px solid #93c5fd',
+              borderRadius:6, padding:'2px 8px', fontSize:12, fontWeight:600 }}>{v}</span>
+            {extra > 0 && (
+              <span title={`Rotates through ${extra + 1} shifts`}
+                style={{ background:'#f3f4f6', color:'#6b7280', border:'1px solid #e5e7eb',
+                  borderRadius:6, padding:'2px 6px', fontSize:11, fontWeight:700 }}>+{extra}</span>
+            )}
+          </span>
+        );
+      } },
     { field: 'dateFrom',     header: 'From Date',  width: 118,
-      render: v => v ? <span style={{ fontSize:14 }}>{fd(v)}</span> : <span style={{ color:'#d1d5db' }}>—</span> },
+      render: v => v ? fd(v) : <span style={{ color:'#d1d5db' }}>—</span> },
     { field: 'dateTo',       header: 'To Date',    width: 118,
-      render: v => v ? <span style={{ fontSize:14 }}>{fd(v)}</span> : <span style={{ color:'#d1d5db' }}>—</span> },
+      render: v => v ? fd(v) : <span style={{ color:'#d1d5db' }}>—</span> },
     { field: 'offDays',      header: 'Day Off',    width: 180, sortable: false,
       render: v => v?.length > 0
         ? <div style={{ display:'flex', gap:3, flexWrap:'wrap' }}>
@@ -1298,15 +1795,24 @@ const DutyRoster = () => {
             ))}
           </div>
         : <span style={{ color:'#d1d5db' }}>—</span> },
-    { field: '_actions', header: '', width: 115, sortable: false,
+    { field: '_actions', header: '', width: 155, sortable: false,
       render: (_, row) => (
         <div style={{ display:'flex', gap:5 }}>
           {canEditRoster && (
             <button onClick={e => { e.stopPropagation(); setEditRoster(row); }}
               style={{ height:28, padding:'0 10px', fontSize:12, fontWeight:600,
-                background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d',
+                background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8',
                 borderRadius:6, cursor:'pointer', whiteSpace:'nowrap' }}>
               ✏️ Edit
+            </button>
+          )}
+          {canEditRoster && (
+            <button onClick={e => { e.stopPropagation(); setViewCalRow(row); }}
+              title="View Calendar"
+              style={{ height:28, width:28, padding:0, fontSize:13, fontWeight:600,
+                background:'#f5f3ff', border:'1px solid #ddd6fe', color:'#7c3aed',
+                borderRadius:6, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              📅
             </button>
           )}
           {canDeleteRoster && (
@@ -1339,9 +1845,9 @@ const DutyRoster = () => {
           {/* Advanced Search */}
           <button onClick={() => setShowAdvSearch(true)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 13px', height: 36,
-            background: activeFilterCount > 0 ? '#f0fdf4' : '#f8fafc',
-            border: `1px solid ${activeFilterCount > 0 ? '#52b02c' : '#d1d5db'}`,
-            color: activeFilterCount > 0 ? '#52b02c' : '#374151',
+            background: activeFilterCount > 0 ? '#eff6ff' : '#f8fafc',
+            border: `1px solid ${activeFilterCount > 0 ? '#1a56db' : '#d1d5db'}`,
+            color: activeFilterCount > 0 ? '#1a56db' : '#374151',
             borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', position: 'relative',
           }}>
             <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
@@ -1359,7 +1865,7 @@ const DutyRoster = () => {
           {/* AI Analysis */}
           <button onClick={() => setShowAIAnalysis(true)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 36,
-            background: 'linear-gradient(135deg,#14532d,#2f6e1a)',
+            background: 'linear-gradient(135deg,#1e3a8a,#7e3af2)',
             border: 'none', color: '#fff',
             borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
             boxShadow: '0 2px 10px rgba(126,58,242,.35)',
@@ -1376,7 +1882,7 @@ const DutyRoster = () => {
 
           <button onClick={() => window.print()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 14px',
-              height: 36, background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d',
+              height: 36, background: '#eff6ff', border: '1px solid #93c5fd', color: '#1d4ed8',
               borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             🖨️ Print
           </button>
@@ -1397,13 +1903,10 @@ const DutyRoster = () => {
             </button>
           )}
           {canEditRoster && (
-            <button onClick={() => setShowModal(true)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 36,
-                padding: '0 16px', background: '#059669', color: 'white', border: 'none',
-                borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(5,150,105,.25)' }}>
-              + Create Roster
-            </button>
+            <CreateRosterMenuBtn onSelect={key => {
+              if (key === 'range') setShowModal(true);
+              else if (key === 'calendar') setShowCalendarModal(true);
+            }} />
           )}
         </div>
       </div>
@@ -1448,6 +1951,32 @@ const DutyRoster = () => {
         />
       )}
 
+      {/* ── Calendar View Roster Modal ── */}
+      {showCalendarModal && (
+        <CalendarRosterModal
+          employees={employees.filter(e => e.active)}
+          shifts={shifts}
+          rosters={rosters}
+          currentUser={currentUser}
+          onClose={() => setShowCalendarModal(false)}
+          onSaved={() => { load(); bumpRosterVersion(); }}
+        />
+      )}
+
+      {/* ── View Calendar Modal (row action) ── */}
+      {viewCalRow && (
+        <CalendarRosterModal
+          employees={employees}
+          shifts={shifts}
+          rosters={rosters}
+          currentUser={currentUser}
+          initialStaffId={viewCalRow.employeeDbId}
+          initialDate={viewCalRow.dateFrom?.slice(0, 10)}
+          onClose={() => setViewCalRow(null)}
+          onSaved={() => { load(); bumpRosterVersion(); }}
+        />
+      )}
+
       {/* ── Edit Roster Modal (double-click) ── */}
       {editRoster && (
         <EditRosterModal
@@ -1473,39 +2002,77 @@ const DutyRoster = () => {
         const MCS = ({ label, value, onChange, options, displayFn }) => {
           const [open, setOpen] = React.useState(false);
           const [srch, setSrch] = React.useState('');
+          const [activeIndex, setActiveIndex] = React.useState(-1);
           const ref  = React.useRef(null);
+          const itemRefs = React.useRef([]);
           React.useEffect(() => {
             const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
             document.addEventListener('mousedown', h);
             return () => document.removeEventListener('mousedown', h);
           }, []);
           const filtered = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
+          // "All" is always row 0 in the navigable list, followed by the filtered options
+          const navItems = [null, ...filtered];
+          itemRefs.current = [];
           const toggle   = v  => onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v]);
+          const selectNav = v => v === null ? onChange([]) : toggle(v);
           const selLabel = value.length === 0 ? 'All'
             : value.length === 1 ? (displayFn ? displayFn(value[0]) : value[0])
             : `${value.length} selected`;
+          const openWithHighlight = () => {
+            const idx = value.length === 1 ? navItems.findIndex(v => v === value[0]) : 0;
+            setActiveIndex(idx >= 0 ? idx : 0);
+            setOpen(true);
+          };
+          const handleTriggerKeyDown = e => {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              open ? setOpen(false) : openWithHighlight();
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          };
+          const handleSearchKeyDown = e => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setOpen(false);
+            }
+          };
+          React.useEffect(() => {
+            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+          }, [activeIndex, open]);
+          React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
 
           return (
             <div ref={ref} style={{ position: 'relative' }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#1f2937', marginBottom: 5 }}>{label}</div>
               <div
                 tabIndex={0}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(p => !p); } if (e.key === 'Escape') setOpen(false); }}
-                onClick={() => setOpen(p => !p)}
+                onKeyDown={handleTriggerKeyDown}
+                onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '8px 10px', border: `1.5px solid ${open ? '#52b02c' : '#d1d5db'}`,
+                  padding: '8px 10px', border: `1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
                   borderRadius: 7, background: 'white', cursor: 'pointer', fontSize: 13,
-                  color: value.length > 0 ? '#166534' : '#9ca3af', minHeight: 42,
+                  color: value.length > 0 ? '#1e40af' : '#9ca3af', minHeight: 42,
                   fontWeight: value.length > 0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline: 'none', userSelect: 'none',
+                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline: 'none', userSelect: 'none',
                 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                   {selLabel}
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: 6 }}>
                   {value.length > 0 && (
-                    <span style={{ background: '#52b02c', color: 'white', borderRadius: 10,
+                    <span style={{ background: '#1a56db', color: 'white', borderRadius: 10,
                       fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
                       {value.length}
                     </span>
@@ -1522,47 +2089,37 @@ const DutyRoster = () => {
               {open && (
                 <div style={{
                   position: 'absolute', top: 'calc(100% + 3px)', left: 0, right: 0, zIndex: 9999,
-                  background: 'white', border: '1.5px solid #52b02c', borderRadius: 8,
+                  background: 'white', border: '1.5px solid #1a56db', borderRadius: 8,
                   boxShadow: '0 8px 24px rgba(0,0,0,.18)', maxHeight: 220,
                   display: 'flex', flexDirection: 'column',
                 }}>
                   <div style={{ padding: '6px 8px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
                     <input autoFocus type="text" value={srch} onChange={e => setSrch(e.target.value)}
                       placeholder="Search…" onClick={e => e.stopPropagation()}
-                      onKeyDown={e => e.stopPropagation()}
+                      onKeyDown={handleSearchKeyDown}
                       style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 5,
                         padding: '5px 8px', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
                   </div>
                   <div style={{ overflowY: 'auto', flex: 1 }}>
-                    <div onMouseDown={e => { e.preventDefault(); onChange([]); }}
-                      style={{ padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 8,
-                        cursor: 'pointer', background: value.length === 0 ? '#f0fdf4' : 'white',
-                        borderBottom: '1px solid #f1f5f9' }}>
-                      <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                        border: `2px solid ${value.length === 0 ? '#52b02c' : '#d1d5db'}`,
-                        background: value.length === 0 ? '#52b02c' : 'white',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {value.length === 0 && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
-                      </span>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: value.length === 0 ? '#166534' : '#374151' }}>All</span>
-                    </div>
-                    {filtered.map(opt => {
-                      const sel = value.includes(opt);
+                    {navItems.map((v, i) => {
+                      const isAll = v === null;
+                      const sel   = isAll ? value.length === 0 : value.includes(v);
+                      const highlighted = i === activeIndex;
                       return (
-                        <div key={opt} onMouseDown={e => { e.preventDefault(); toggle(opt); }}
+                        <div key={v ?? '__all'} ref={el => itemRefs.current[i] = el}
+                          onMouseDown={e => { e.preventDefault(); selectNav(v); }}
+                          onMouseEnter={() => setActiveIndex(i)}
                           style={{ padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 8,
-                            cursor: 'pointer', background: sel ? '#f0fdf4' : 'white',
-                            borderBottom: '1px solid #f9fafb' }}
-                          onMouseEnter={e => { if (!sel) e.currentTarget.style.background = '#f8fafc'; }}
-                          onMouseLeave={e => { if (!sel) e.currentTarget.style.background = 'white'; }}>
+                            cursor: 'pointer', background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
+                            borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
                           <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                            border: `2px solid ${sel ? '#52b02c' : '#d1d5db'}`,
-                            background: sel ? '#52b02c' : 'white',
+                            border: `2px solid ${sel ? '#1a56db' : '#d1d5db'}`,
+                            background: sel ? '#1a56db' : 'white',
                             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize: 13, color: sel ? '#166534' : '#374151', fontWeight: sel ? 600 : 400 }}>
-                            {displayFn ? displayFn(opt) : opt}
+                          <span style={{ fontSize: 13, color: sel ? '#1e40af' : '#374151', fontWeight: sel ? 600 : 400 }}>
+                            {isAll ? 'All' : (displayFn ? displayFn(v) : v)}
                           </span>
                         </div>
                       );
@@ -1589,14 +2146,14 @@ const DutyRoster = () => {
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '16px 24px', borderBottom: '2px solid #e5e7eb',
-                background: 'linear-gradient(135deg,#f0fdf4,#f0f9ff)', flexShrink: 0 }}>
+                background: '#ffffff', flexShrink: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <svg viewBox="0 0 20 20" fill="#52b02c" width="18" height="18">
+                  <svg viewBox="0 0 20 20" fill="#1a56db" width="18" height="18">
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   <span style={{ fontSize: 17, fontWeight: 800, color: '#111827' }}>Advanced Search</span>
                   {activeFilterCount > 0 && (
-                    <span style={{ background: '#52b02c', color: '#fff', borderRadius: 10,
+                    <span style={{ background: '#1a56db', color: '#fff', borderRadius: 10,
                       fontSize: 12, fontWeight: 700, padding: '2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active
                     </span>
@@ -1632,7 +2189,7 @@ const DutyRoster = () => {
                     autoFocus
                     style={{ width: '100%', boxSizing: 'border-box', padding: '11px 14px 11px 34px',
                       border: '1.5px solid #d1d5db', borderRadius: 8, fontSize: 14, outline: 'none', fontFamily: 'inherit' }}
-                    onFocus={e => e.target.style.borderColor = '#52b02c'}
+                    onFocus={e => e.target.style.borderColor = '#1a56db'}
                     onBlur={e => e.target.style.borderColor = '#d1d5db'}
                   />
                 </div>
@@ -1657,15 +2214,15 @@ const DutyRoster = () => {
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#1f2937', marginBottom: 5 }}>Status</div>
                     <label
                       style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-                        border: '1.5px solid #52b02c', borderRadius: 7, userSelect: 'none', minHeight: 42,
-                        background: '#f0fdf4', cursor: 'not-allowed', opacity: 0.85 }}>
+                        border: '1.5px solid #1a56db', borderRadius: 7, userSelect: 'none', minHeight: 42,
+                        background: '#eff6ff', cursor: 'not-allowed', opacity: 0.85 }}>
                       <input
                         type="checkbox"
                         checked={true}
                         disabled
-                        style={{ width: 16, height: 16, accentColor: '#52b02c', cursor: 'not-allowed' }}
+                        style={{ width: 16, height: 16, accentColor: '#1a56db', cursor: 'not-allowed' }}
                       />
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>Working only</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#1e40af' }}>Working only</span>
                     </label>
                   </div>
                 </div>
@@ -1679,8 +2236,8 @@ const DutyRoster = () => {
                       onChange={e => setAF('fiscalYearId', e.target.value ? parseInt(e.target.value) : null)}
                       style={{ width: '100%', height: 42, border: '1.5px solid #d1d5db', borderRadius: 7,
                         padding: '0 10px', fontSize: 13, outline: 'none', background: 'white', cursor: 'pointer',
-                        color: advFilters.fiscalYearId ? '#166534' : '#9ca3af', fontWeight: advFilters.fiscalYearId ? 600 : 400 }}
-                      onFocus={e => e.target.style.borderColor = '#52b02c'}
+                        color: advFilters.fiscalYearId ? '#1e40af' : '#9ca3af', fontWeight: advFilters.fiscalYearId ? 600 : 400 }}
+                      onFocus={e => e.target.style.borderColor = '#1a56db'}
                       onBlur={e => e.target.style.borderColor = '#d1d5db'}
                     >
                       <option value="">All Fiscal Years</option>
@@ -1716,7 +2273,7 @@ const DutyRoster = () => {
                   )}
                   <button onClick={() => setShowAdvSearch(false)}
                     style={{ height: 34, padding: '0 20px', fontSize: 13, fontWeight: 700,
-                      background: '#52b02c', color: 'white', border: 'none',
+                      background: '#1a56db', color: 'white', border: 'none',
                       borderRadius: 7, cursor: 'pointer' }}>
                     Close
                   </button>
@@ -1731,7 +2288,7 @@ const DutyRoster = () => {
       {showClearModal && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:480 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fff5f5,#fee2e2)' }}>
+            <div className="modal-header">
               <h2 style={{ color:'#991b1b' }}>🗑️ Clear Duty Roster</h2>
               <button className="modal-close" onClick={() => setShowClearModal(false)}>✕</button>
             </div>
@@ -1742,15 +2299,13 @@ const DutyRoster = () => {
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                 <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label" style={{ fontSize:12 }}>From Date</label>
-                  <input type="date" className="form-control" style={{ fontSize:13 }}
-                    value={clearForm.dateFrom}
-                    onChange={e => setClearForm(p => ({ ...p, dateFrom:e.target.value }))} />
+                  <DateInput value={clearForm.dateFrom}
+                    onChange={v => setClearForm(p => ({ ...p, dateFrom:v }))} />
                 </div>
                 <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label" style={{ fontSize:12 }}>To Date</label>
-                  <input type="date" className="form-control" style={{ fontSize:13 }}
-                    value={clearForm.dateTo}
-                    onChange={e => setClearForm(p => ({ ...p, dateTo:e.target.value }))} />
+                  <DateInput value={clearForm.dateTo}
+                    onChange={v => setClearForm(p => ({ ...p, dateTo:v }))} />
                 </div>
                 <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label" style={{ fontSize:12 }}>Branch</label>

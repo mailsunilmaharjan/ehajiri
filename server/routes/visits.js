@@ -3,8 +3,33 @@ import pool from '../db.js';
 import { logAudit } from '../services/auditLog.js';
 import { sendOfficeVisitApplication, sendOfficeVisitStatusUpdate } from '../services/emailService.js';
 import { logError } from '../utils/logError.js';
+import { isLeaveBackdateEnabled } from '../utils/appSettings.js';
 
 const router = Router();
+
+/* Rejects fromDate values before today when the Super Admin has disabled
+   backdating (Settings → Leave & Office Visit Backdate Apply). Frontend date
+   pickers already disable past dates in this case, but that's trivially
+   bypassed via a direct API call, so this is the real enforcement point.
+   allowPast overrides this regardless of the setting — reserved for an
+   admin's Manual Posting entry (backfilling/correcting records is the whole
+   point of that form), never the normal self-service Apply flow. */
+async function rejectIfBackdated(fromDate, res, allowPast) {
+  if (!fromDate || allowPast || await isLeaveBackdateEnabled()) return false;
+  const { rows } = await pool.query('SELECT CURRENT_DATE::text AS today');
+  if (fromDate < rows[0].today) {
+    res.status(400).json({ error: 'Backdated office visit applications are currently disabled. Please select today or a later date.' });
+    return true;
+  }
+  return false;
+}
+
+/* Manual Posting + Admin (or Super Admin) login only — matches the frontend's
+   own allowPast gate on LeaveDateInput in LeaveVisitPage.jsx's Manual Posting
+   forms. Checked server-side too since a raw API call could otherwise set
+   isManual:true regardless of who's actually calling. */
+const isAdminManualBackdate = (req) =>
+  req.body?.isManual === true && ['admin', 'superAdmin'].includes(req.user?.role);
 
 /* Best-effort email lookup + send — never let a notification failure affect the request. */
 async function notifyVisitApplication(visit) {
@@ -68,6 +93,7 @@ router.get('/', async (_req, res) => {
 router.post('/', async (req, res) => {
   const { employeeId,purpose,location,fromDate,fromTime,toDate,toTime,description,reco,approval } = req.body;
   try {
+    if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
     const { rows } = await pool.query(
       `INSERT INTO office_visits (employee_id,purpose,location,from_date,from_time,to_date,to_time,description)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
@@ -76,6 +102,31 @@ router.post('/', async (req, res) => {
     const visit = toVisit(rows[0]);
     notifyVisitApplication({ ...visit, reco, approval });
     res.status(201).json(visit);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/:id', async (req, res) => {
+  const { employeeId, purpose, location, fromDate, fromTime, toDate, toTime, description,
+          status, recommendedBy, approvedBy, approvedDate } = req.body;
+
+  const finalStatus  = ['approved','rejected','pending'].includes(status) ? status : 'pending';
+  const finalAppBy   = finalStatus !== 'pending' ? (approvedBy   || null) : null;
+  const finalAppDate = finalStatus !== 'pending' ? (approvedDate || null) : null;
+
+  try {
+    if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
+    const { rows } = await pool.query(
+      `UPDATE office_visits
+       SET employee_id=$1, purpose=$2, location=$3, from_date=$4, from_time=$5, to_date=$6, to_time=$7,
+           description=$8, status=$9, recommended_by=$10, approved_by=$11, approved_date=$12
+       WHERE id=$13 RETURNING *`,
+      [employeeId, purpose, location, fromDate, fromTime, toDate, toTime, description,
+       finalStatus, recommendedBy || null, finalAppBy, finalAppDate, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Visit not found' });
+    const visit = toVisit(rows[0]);
+    logAudit({ actor: req.user, action: 'edit', entity: 'visit', entityId: req.params.id, before: null, after: visit });
+    res.json(visit);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

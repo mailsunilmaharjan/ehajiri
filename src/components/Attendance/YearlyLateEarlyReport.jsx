@@ -9,18 +9,11 @@ import DataGrid from '../DataGrid/DataGrid.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import ViewYearlyBtn from './ViewYearlyBtn.jsx';
-import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 const isoDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -72,7 +65,7 @@ const ReasonModal = ({ row, existingReason, onClose, onSave, L, fd }) => {
             placeholder={L('ढिला आउने / चाँडो जाने कारण लेख्नुस...','Reason for being late / leaving early...')}
             style={{ width:'100%', border:'1.5px solid #d1d5db', borderRadius:8, padding:'10px 12px',
               fontSize:13, resize:'vertical', outline:'none', boxSizing:'border-box' }}
-            onFocus={e => e.target.style.borderColor='#52b02c'}
+            onFocus={e => e.target.style.borderColor='#1a56db'}
             onBlur={e => e.target.style.borderColor='#d1d5db'}
             autoFocus />
           <div style={{ marginTop:8, fontSize:12, color:'#6b7280', fontStyle:'italic' }}>
@@ -90,7 +83,7 @@ const ReasonModal = ({ row, existingReason, onClose, onSave, L, fd }) => {
           <button onClick={async () => { setSaving(true); await onSave(row, reason); setSaving(false); onClose(); }}
             disabled={!reason.trim() || saving}
             style={{ padding:'8px 20px', border:'none', borderRadius:8,
-              background:reason.trim()&&!saving?'#52b02c':'#86efac',
+              background:reason.trim()&&!saving?'#1a56db':'#93c5fd',
               color:'white', fontSize:13, fontWeight:700,
               cursor:reason.trim()&&!saving?'pointer':'not-allowed' }}>
             {saving ? L('सेभ हुँदैछ...','Saving...') : L('सेभ गर्नुस','Save')}
@@ -118,7 +111,7 @@ const ActionBtn = ({ row, savedReasons, onGiveReason, L }) => {
     <div ref={ref} style={{ position:'relative', display:'inline-flex', alignItems:'center', gap:6 }}>
       <button onClick={() => setOpen(p => !p)}
         style={{ display:'inline-flex', alignItems:'center', gap:4, padding:'4px 10px', height:28,
-          background:open?'#166534':'#52b02c', color:'white', border:'none', borderRadius:6,
+          background:open?'#1e40af':'#1a56db', color:'white', border:'none', borderRadius:6,
           fontSize:12, fontWeight:600, cursor:'pointer', transition:'background .12s' }}>
         {L('कार्य','Action')}
         <svg viewBox="0 0 20 20" fill="white" width="11" height="11"
@@ -163,9 +156,9 @@ const YearlyLateEarlyReport = () => {
   const fd              = useDateFormat();
   const L = (np, en)    => language === 'np' ? np : en;
 
-  const now     = new Date();
+  const now     = getNepalNow();
   const useNP   = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
 
   const urlYear  = parseInt(searchParams.get('year'));
   const initYear = urlYear && !isNaN(urlYear)
@@ -215,34 +208,34 @@ const YearlyLateEarlyReport = () => {
   const columns = [
     {
       field:'fullName', header:L('कर्मचारी','Person'), sortable:true,
-      render: v => <span style={{ fontWeight:700, color:'#1f2937', fontSize:14 }}>{v}</span>,
+      render: v => <span style={{ color:'#1f2937' }}>{v}</span>,
     },
     {
       field:'postShort', header:L('पद','Post'),
-      render: (v, row) => <span style={{ fontSize:14, color:'#0369a1', fontWeight:700 }}>{row.position || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.position || v || '—'}</span>,
     },
     {
       field:'deptShort', header:L('विभाग','Dept.'),
-      render: (v, row) => <span style={{ fontSize:14, color:'#059669', fontWeight:700 }}>{row.department || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.department || v || '—'}</span>,
     },
     {
       field:'branchShort', header:L('शाखา','Branch'),
-      render: (v, row) => <span style={{ fontSize:14, color:'#7c3aed', fontWeight:700 }}>{branchAbbr(row.branch, settings) || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{branchAbbr(row.branch, settings) || v || '—'}</span>,
     },
     {
       field:'date', header:L('मिति','Date'), sortable:true,
-      render: v => <span style={{ fontWeight:600, color:'#374151', fontSize:14, whiteSpace:'nowrap' }}>{fd(v)}</span>,
+      render: v => <span style={{ color:'#374151', whiteSpace:'nowrap' }}>{fd(v)}</span>,
     },
     {
       field:'shiftDisplay', header:L('सिफ्ट','Shift'),
-      render: v => <span style={{ fontSize:14, color:'#7c3aed', fontFamily:'monospace', whiteSpace:'nowrap' }}>{v}</span>,
+      render: v => <span style={{ color:'#1f2937', fontFamily:'monospace', whiteSpace:'nowrap' }}>{v}</span>,
     },
     {
       field:'timeIn', header:L('आउने समय','In Time'), align:'center',
       render: (v, row) => {
         const warn = row.punches === 1;
         return v
-          ? <strong style={{ fontFamily:'monospace', color:warn?'#d97706':'#52b02c', fontSize:14 }}
+          ? <strong style={{ fontFamily:'monospace', color:warn?'#d97706':'#1a56db' }}
               title={warn?'Single punch':''}>
               {fmtTime(v)}{warn && ' ⚠'}
             </strong>
@@ -252,7 +245,7 @@ const YearlyLateEarlyReport = () => {
     {
       field:'timeOut', header:L('जाने समय','Out Time'), align:'center',
       render: v => v
-        ? <strong style={{ fontFamily:'monospace', color:'#374151', fontSize:14 }}>{fmtTime(v)}</strong>
+        ? <strong style={{ fontFamily:'monospace', color:'#374151' }}>{fmtTime(v)}</strong>
         : <span style={{ color:'#d1d5db' }}>—</span>,
     },
     {
@@ -260,10 +253,10 @@ const YearlyLateEarlyReport = () => {
       render: (lateIn, row) => {
         const parts = [];
         if (lateIn) parts.push(
-          <span key="late" style={{ color:'#dc2626', fontWeight:700, fontSize:14 }}>{lateIn}</span>
+          <span key="late" style={{ color:'#dc2626', fontWeight:700 }}>{lateIn}</span>
         );
         if (row.earlyOutFormatted) parts.push(
-          <span key="early" style={{ color:'#d97706', fontWeight:700, fontSize:14 }}>{row.earlyOutFormatted}</span>
+          <span key="early" style={{ color:'#d97706', fontWeight:700 }}>{row.earlyOutFormatted}</span>
         );
         if (!parts.length) return <span style={{ color:'#d1d5db' }}>—</span>;
         return <div style={{ display:'flex', flexDirection:'column', gap:2 }}>{parts}</div>;
@@ -331,7 +324,7 @@ const YearlyLateEarlyReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -347,7 +340,7 @@ const YearlyLateEarlyReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -383,7 +376,7 @@ const YearlyLateEarlyReport = () => {
               onClick={() => setStaffStatus(v)}
               style={{ padding:'5px 14px', border:'none', cursor:'pointer',
                 fontSize:13, fontWeight:600, transition:'background .15s',
-                background: staffStatus === v ? '#52b02c' : 'white',
+                background: staffStatus === v ? '#1a56db' : 'white',
                 color: staffStatus === v ? 'white' : '#374151' }}>
               {label}
             </button>

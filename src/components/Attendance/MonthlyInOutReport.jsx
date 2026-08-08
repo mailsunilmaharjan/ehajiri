@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewMonthlyBtn from './ViewMonthlyBtn.jsx';
-import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 
@@ -19,13 +19,6 @@ const abbrevPost = (name) => {
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 const isoDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -84,9 +77,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         boxShadow:'0 20px 60px rgba(0,0,0,.18)',overflow:'visible',position:'relative' }}
         onClick={e=>e.stopPropagation()}>
 
-        <div style={{ padding:'16px 22px 12px',background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'16px 22px 12px',background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex',justifyContent:'space-between',alignItems:'center' }}>
-          <span style={{ fontSize:16,fontWeight:700,color:'#166534' }}>{L('एडभान्स खोज','Advance Search')}</span>
+          <span style={{ fontSize:16,fontWeight:700,color:'#1e40af' }}>{L('एडभान्स खोज','Advance Search')}</span>
           <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1 }}>✕</button>
         </div>
 
@@ -96,7 +89,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
               {[['working',L('कार्यरत','Working')],['notworking',L('अवकाश','Not Working')]].map(([v,label])=>(
                 <button key={v} onClick={()=>{ set('_status',v); set('staffId',''); }}
                   style={{ flex:1,padding:'8px 12px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                    background:(local._status||'working')===v?'#52b02c':'white',
+                    background:(local._status||'working')===v?'#1a56db':'white',
                     color:(local._status||'working')===v?'white':'#374151',transition:'background .15s' }}>
                   {label}
                 </button>
@@ -145,7 +138,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
             {L('रिसेट','Reset')}
           </button>
           <button onClick={() => { onApply(local); onClose(); }}
-            style={{ padding:'8px 22px',border:'none',borderRadius:8,background:'#52b02c',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
+            style={{ padding:'8px 22px',border:'none',borderRadius:8,background:'#1a56db',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -156,8 +149,8 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
 
 /* ── Standard DataGrid header styles ── */
 const TH = {
-  background:'#efefef', color:'#374151', fontWeight:700, fontSize:12,
-  padding:'6px 8px', borderRight:'1px solid #dedede', borderBottom:'1px solid #dedede',
+  background:'#efefef', color:'#374151', fontWeight:700, fontSize:12.5,
+  padding:'4px 8px', borderRight:'1px solid #dedede', borderBottom:'1px solid #dedede',
   whiteSpace:'nowrap', textAlign:'center', userSelect:'none',
 };
 const thDay = (isWeekend, isHoliday) => ({
@@ -175,14 +168,14 @@ const thDow = (isWeekend, isHoliday) => ({
 
 /* Fixed left column */
 const TD_FIX = {
-  padding:'0 8px', fontSize:13, fontWeight:400,
+  padding:'0 8px', fontSize:12.5, fontWeight:400,
   borderRight:'1px solid #dedede',
   verticalAlign:'middle', whiteSpace:'nowrap',
 };
 
 /* Row label configs */
 const ROWS = [
-  { key:'in',  label:'IN',  color:'#52b02c' },
+  { key:'in',  label:'IN',  color:'#1a56db' },
   { key:'out', label:'OUT', color:'#059669' },
   { key:'wh',  label:'WH',  color:'#374151' },
   { key:'ot',  label:'OT',  color:'#7c3aed' },
@@ -233,7 +226,7 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast }) => 
       const tip = [day.visit.purpose, day.visit.location].filter(Boolean).join(' | ');
       badge = (
         <span title={tip || 'Office Visit'}
-          style={{ background:'#dcfce7', color:'#166534', borderRadius:4,
+          style={{ background:'#dbeafe', color:'#1e40af', borderRadius:4,
             padding:'1px 5px', fontSize:10, fontWeight:800, cursor:'help' }}>
           OV
         </span>
@@ -282,25 +275,27 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast }) => 
   );
 };
 
-/* Total WH cell — shown only in WH row */
-const TotalCell = ({ emp, rowKey, isLast }) => {
+/* Total WH / Total OT cell — each is its own column, only showing a value on
+   the row it belongs to (WH row or OT row respectively), dash elsewhere. */
+const TotalCell = ({ emp, rowKey, isLast, which }) => {
   const bdBottom = isLast ? '2px solid #c5cdd8' : '1px solid #ebebeb';
-  if (rowKey !== 'wh') {
+  if (rowKey !== which) {
     return (
-      <td style={{ background:'#f8fafc', borderLeft:'2px solid #c9d1db',
+      <td style={{ background:'#f8fafc', borderLeft: which==='wh' ? '2px solid #c9d1db' : undefined,
         borderRight:'1px solid #dedede', borderBottom:bdBottom,
         padding:'3px 4px', minWidth:54, textAlign:'center' }}>
-        <span style={{ color:'#d1d5db', fontSize:11, fontWeight: rowKey==='wh'?700:400 }}>—</span>
+        <span style={{ color:'#d1d5db', fontSize:11, fontWeight:400 }}>—</span>
       </td>
     );
   }
-  const total = emp.totalWorkedHrs;
+  const total = which === 'wh' ? emp.totalWorkedHrs : (emp.eligibleForOt ? emp.totalApprovedOTFormatted : null);
+  const color = which === 'wh' ? '#065f46' : '#059669';
   return (
-    <td style={{ background:'#f0fdf4', borderLeft:'2px solid #c9d1db',
+    <td style={{ background:'#f0fdf4', borderLeft: which==='wh' ? '2px solid #c9d1db' : undefined,
       borderRight:'1px solid #dedede', borderBottom:bdBottom,
       padding:'3px 8px', minWidth:64, textAlign:'center', verticalAlign:'middle' }}>
       {total && total !== '—'
-        ? <strong style={{ fontFamily:'monospace', fontSize:12, fontWeight:900, color:'#065f46' }}>
+        ? <strong style={{ fontFamily:'monospace', fontSize:12, fontWeight:900, color }}>
             {total}
           </strong>
         : <span style={{ color:'#d1d5db' }}>—</span>
@@ -320,9 +315,9 @@ const MonthlyInOutReport = () => {
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
-  const now     = new Date();
+  const now     = getNepalNow();
   const useNP   = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
 
   const urlYear  = parseInt(searchParams.get('year'));
   const urlMonth = parseInt(searchParams.get('month'));
@@ -441,6 +436,7 @@ const MonthlyInOutReport = () => {
         <td style="padding:3px 5px;border:1px solid #dedede;text-align:center;color:#7c3aed;font-weight:700">${resolveShort(e)}</td>
         ${dayCells}
         <td style="padding:3px 5px;border:1px solid #dedede;text-align:center;font-weight:700;color:#065f46">${e.totalWorkedHrs||''}</td>
+        <td style="padding:3px 5px;border:1px solid #dedede;text-align:center;font-weight:700;color:#059669">${e.eligibleForOt ? (e.totalApprovedOTFormatted||'—') : '—'}</td>
       </tr>`;
     }).join('');
     const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:10px">
@@ -452,6 +448,7 @@ const MonthlyInOutReport = () => {
         <th style="padding:4px 5px;border:1px solid #dedede;background:#efefef">Branch</th>
         ${dayHeaders}
         <th style="padding:4px 5px;border:1px solid #dedede;background:#f0fdf4;color:#065f46">Total WH</th>
+        <th style="padding:4px 5px;border:1px solid #dedede;background:#f0fdf4;color:#059669">Total OT</th>
       </tr></thead>
       <tbody>${dataRows}</tbody>
     </table>`;
@@ -464,7 +461,7 @@ const MonthlyInOutReport = () => {
       const n = useNP ? (idx + 1) : d.dayNum;
       return [`${n}(${d.dayKey.slice(0,3)}) IN`, `${n}(${d.dayKey.slice(0,3)}) OUT`, `${n} WH`, `${n} OT`];
     });
-    const header = 'SN,Staff,Post,Dept,Branch,' + dayHdrs.join(',') + ',Total WH';
+    const header = 'SN,Staff,Post,Dept,Branch,' + dayHdrs.join(',') + ',Total WH,Total OT';
     const dataRows = employees.map((e,i) => {
       const cells = dates.flatMap(d => [
         e.days[d.date]?.timeIn   || '',
@@ -472,7 +469,8 @@ const MonthlyInOutReport = () => {
         e.days[d.date]?.workedHrs|| '',
         e.days[d.date]?.otHrs    || '',
       ]);
-      return [i+1, e.fullName, e.postShort, e.deptShort, resolveShort(e), ...cells, e.totalWorkedHrs||'']
+      return [i+1, e.fullName, e.postShort, e.deptShort, resolveShort(e), ...cells,
+        e.totalWorkedHrs||'', e.eligibleForOt ? (e.totalApprovedOTFormatted||'—') : '—']
         .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
     }).join('\n');
     downloadCSV(getExcelHeaderRows(settings, language, rptTitle, rptSub()) + header + '\n' + dataRows,
@@ -488,7 +486,7 @@ const MonthlyInOutReport = () => {
           <h1 className="page-title">🔄 {L('मासिक IN & OUT रिपोर्ट','Monthly IN & OUT Report')}</h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -504,7 +502,7 @@ const MonthlyInOutReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -545,7 +543,7 @@ const MonthlyInOutReport = () => {
               onClick={() => setFilters(p => ({ ...p, _status:v, staffId:'' }))}
               style={{ padding:'5px 14px', border:'none', cursor:'pointer',
                 fontSize:13, fontWeight:600, transition:'background .15s',
-                background: staffStatus === v ? '#52b02c' : 'white',
+                background: staffStatus === v ? '#1a56db' : 'white',
                 color: staffStatus === v ? 'white' : '#374151' }}>
               {label}
             </button>
@@ -564,7 +562,7 @@ const MonthlyInOutReport = () => {
           </svg>
           {L('एडभान्स खोज','Advance Search')}
           {activeFilterCount > 0 && (
-            <span style={{ background:'#52b02c',color:'white',borderRadius:'50%',
+            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
               fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
           )}
@@ -630,6 +628,10 @@ const MonthlyInOutReport = () => {
                   borderLeft:'2px solid #c9d1db', minWidth:64 }}>
                   {useNP ? 'कुल WH' : 'Total WH'}
                 </th>
+                {/* Total OT header */}
+                <th rowSpan={2} style={{ ...TH, background:'#f0fdf4', color:'#059669', minWidth:64 }}>
+                  {useNP ? 'कुल OT' : 'Total OT'}
+                </th>
               </tr>
               <tr>
                 {dates.map(({ date, dayKey, isWeekend, isHoliday }) => (
@@ -643,7 +645,7 @@ const MonthlyInOutReport = () => {
             <tbody>
               {employees.length === 0 && (
                 <tr>
-                  <td colSpan={7 + dates.length}
+                  <td colSpan={8 + dates.length}
                     style={{ textAlign:'center',padding:'40px',color:'#9ca3af',fontSize:13 }}>
                     {search ? L('कुनै कर्मचारी भेटिएन','No staff found') : L('डेटा छैन','No data')}
                   </td>
@@ -669,15 +671,15 @@ const MonthlyInOutReport = () => {
                               position:'sticky', left:34, zIndex:1, borderBottom:'2px solid #c5cdd8' }}>
                               {emp.fullName}
                             </td>
-                            <td rowSpan={4} style={{ ...TD_FIX, color:'#0369a1', textAlign:'left',
+                            <td rowSpan={4} style={{ ...TD_FIX, color:'#1f2937', textAlign:'left',
                               borderBottom:'2px solid #c5cdd8' }} title={emp.position}>
                               {(settings.posts||[]).find(p=>p.name===emp.position)?.shortName || emp.postShort || emp.position || '—'}
                             </td>
-                            <td rowSpan={4} style={{ ...TD_FIX, color:'#059669', textAlign:'left',
+                            <td rowSpan={4} style={{ ...TD_FIX, color:'#1f2937', textAlign:'left',
                               borderBottom:'2px solid #c5cdd8' }} title={emp.department}>
                               {(settings.departments||[]).find(d=>d.name===emp.department)?.shortName || emp.deptShort || emp.department || '—'}
                             </td>
-                            <td rowSpan={4} style={{ ...TD_FIX, color:'#7c3aed', textAlign:'left',
+                            <td rowSpan={4} style={{ ...TD_FIX, color:'#1f2937', textAlign:'left',
                               borderBottom:'2px solid #c5cdd8' }} title={emp.branch}>{resolveShort(emp)}</td>
                           </>
                         )}
@@ -696,7 +698,8 @@ const MonthlyInOutReport = () => {
                           />
                         ))}
 
-                        <TotalCell emp={emp} rowKey={row.key} isLast={isLast} />
+                        <TotalCell emp={emp} rowKey={row.key} isLast={isLast} which="wh" />
+                        <TotalCell emp={emp} rowKey={row.key} isLast={isLast} which="ot" />
                       </tr>
                     );
                   })}
@@ -723,7 +726,7 @@ const MonthlyInOutReport = () => {
           <span><span style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>W</span> = Weekend</span>
           <span><span style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>PH</span> = Public Holiday</span>
           <span><span style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>SL</span> = Leave</span>
-          <span><span style={{ background:'#dcfce7',color:'#166534',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>OV</span> = Office Visit</span>
+          <span><span style={{ background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>OV</span> = Office Visit</span>
           <span><strong style={{ color:'#d97706' }}>⚠</strong> = Single punch</span>
           <span style={{ marginLeft:'auto' }}>{employees.length} {L('कर्मचारी','staff')}</span>
         </div>

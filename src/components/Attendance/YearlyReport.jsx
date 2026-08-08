@@ -1,20 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import { useData }     from '../../context/DataContext.jsx';
 import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import ViewYearlyBtn   from './ViewYearlyBtn.jsx';
-import { adToBS, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 
 const BS_MONTHS  = ['Bai','Jes','Asa','Shr','Bha','Ash','Kar','Man','Pou','Mag','Fal','Cha'];
 const AD_MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 const minsToHHMM = (m) => {
   const h = Math.floor(Math.abs(m) / 60), min = Math.abs(m) % 60;
@@ -120,10 +114,11 @@ const YearlyReport = () => {
   const { settings } = useSettings();
   const L  = (np, en) => language === 'np' ? np : en;
   const fd = useDateFormat();
+  const { rosterVersion } = useData();
 
-  const now    = new Date();
+  const now    = getNepalNow();
   const useNP  = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
   const initYear = useNP ? (todayBS?.year || now.getFullYear()) : now.getFullYear();
 
   const [year,    setYear]    = useState(initYear);
@@ -145,7 +140,7 @@ const YearlyReport = () => {
     finally { setLoading(false); }
   }, [year, useNP]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, rosterVersion]);
 
   const s   = data?.summary   || {};
   const r   = data?.rankings  || {};
@@ -162,7 +157,7 @@ const YearlyReport = () => {
           <h1 className="page-title">📊 {L('वार्षिक विश्लेषण','Yearly Staff Analytics')}</h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:6,
+              <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:6,
                 padding:'1px 8px', fontSize:12, fontWeight:600, marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -207,7 +202,7 @@ const YearlyReport = () => {
 
           {/* ── Year calendar stats row ── */}
           <div style={{ display:'flex', gap:10, marginBottom:20, flexWrap:'wrap', alignItems:'stretch' }}>
-            <Chip label={L('जम्मा दिन','Total No. of Days')}                value={fmt(s.totalDays||0)}        color="#52b02c" bg="#f0fdf4" />
+            <Chip label={L('जम्मा दिन','Total No. of Days')}                value={fmt(s.totalDays||0)}        color="#1a56db" bg="#eff6ff" />
             <Chip label={L('जम्मा सप्ताहन्त','Total Weekends')}              value={fmt(s.weekendDays||0)}      color="#6b7280" bg="#f3f4f6" />
             <Chip label={L('जम्मा सार्वजनिक बिदा','Total Public Holiday')}    value={fmt(s.holidayDays||0)}      color="#d97706" bg="#fef3c7" />
             <Chip label={L('उपस्थित हुनुपर्ने दिन','Total Need to be Present Days')} value={fmt(s.totalWorkingDays||0)} color="#065f46" bg="#d1fae5" />

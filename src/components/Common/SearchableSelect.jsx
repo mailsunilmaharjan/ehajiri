@@ -12,6 +12,11 @@ import { createPortal } from 'react-dom';
  *   options      — [{ value, label }]
  *   multiple     — bool (default false) — enables checkbox multi-select
  *   placeholder  — string
+ *   renderOption — optional (option) => JSX, for a richer open-dropdown row
+ *                  (e.g. a bold name plus a smaller secondary line). `label`
+ *                  is still what's shown in the closed trigger and what
+ *                  search filters against — this only replaces the row
+ *                  content while the dropdown is open.
  *   className, style, disabled
  */
 const SearchableSelect = ({
@@ -23,6 +28,7 @@ const SearchableSelect = ({
   className   = 'form-control',
   style       = {},
   disabled    = false,
+  renderOption = null,
 }) => {
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
@@ -162,7 +168,7 @@ const SearchableSelect = ({
           color: (multiple ? selectedArr.length > 0 : value) ? '#1f2937' : '#9ca3af',
           fontSize: 13, fontFamily: 'inherit', padding: '6px 10px',
           border: '1px solid #d1d5db', borderRadius: 6, outline: 'none', boxSizing: 'border-box',
-          ...(open ? { borderColor: '#52b02c', boxShadow: '0 0 0 2px rgba(82,176,44,.1)' } : {}),
+          ...(open ? { borderColor: '#1a56db', boxShadow: '0 0 0 2px rgba(26,86,219,.1)' } : {}),
         }}>
         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
           {displayLabel}
@@ -176,7 +182,7 @@ const SearchableSelect = ({
               onMouseLeave={e => e.currentTarget.style.color='#9ca3af'}>×</span>
           )}
           {multiple && selectedArr.length > 0 && (
-            <span style={{ background:'#52b02c', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700,
+            <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700,
               padding:'1px 6px', minWidth:18, textAlign:'center' }}>
               {selectedArr.length}
             </span>
@@ -193,7 +199,7 @@ const SearchableSelect = ({
         <div ref={dropRef} style={{
           position: 'fixed', zIndex: 99999,
           top: rect.top, left: rect.left, width: rect.width,
-          background: '#fff', border: '1.5px solid #52b02c', borderRadius: 8,
+          background: '#fff', border: '1.5px solid #1a56db', borderRadius: 8,
           boxShadow: '0 8px 28px rgba(0,0,0,.18)',
           maxHeight: 280, display: 'flex', flexDirection: 'column',
         }}>
@@ -227,16 +233,16 @@ const SearchableSelect = ({
                       style={{
                         padding: '8px 10px', fontSize:13, cursor:'pointer',
                         display:'flex', alignItems:'center', gap:8,
-                        background: highlighted ? '#f0fdf4' : (active ? '#f8fafc' : 'transparent'),
-                        color:      active ? '#52b02c' : '#374151',
-                        borderLeft: active ? '3px solid #52b02c' : (highlighted ? '3px solid #86efac' : '3px solid transparent'),
+                        background: highlighted ? '#eff6ff' : (active ? '#f8fafc' : 'transparent'),
+                        color:      active ? '#1a56db' : '#374151',
+                        borderLeft: active ? '3px solid #1a56db' : (highlighted ? '3px solid #93c5fd' : '3px solid transparent'),
                       }}>
                       {/* checkbox for multiple mode */}
                       {multiple && (
                         <span style={{
                           width:15, height:15, borderRadius:3, flexShrink:0,
-                          border: `2px solid ${active ? '#52b02c' : '#d1d5db'}`,
-                          background: active ? '#52b02c' : '#fff',
+                          border: `2px solid ${active ? '#1a56db' : '#d1d5db'}`,
+                          background: active ? '#1a56db' : '#fff',
                           display:'flex', alignItems:'center', justifyContent:'center',
                         }}>
                           {active && (
@@ -246,7 +252,11 @@ const SearchableSelect = ({
                           )}
                         </span>
                       )}
-                      <span style={{ fontWeight: active ? 600 : 400 }}>{opt.label}</span>
+                      {renderOption ? (
+                        <span style={{ flex: 1, minWidth: 0 }}>{renderOption(opt)}</span>
+                      ) : (
+                        <span style={{ fontWeight: active ? 600 : 400 }}>{opt.label}</span>
+                      )}
                     </div>
                   );
                 })
@@ -259,7 +269,7 @@ const SearchableSelect = ({
               justifyContent:'space-between', alignItems:'center', flexShrink:0, background:'#fafafa' }}>
               <span style={{ fontSize:11, color:'#6b7280' }}>{selectedArr.length} selected</span>
               <button type="button" onMouseDown={e => { e.preventDefault(); closeDrop(); }}
-                style={{ padding:'3px 12px', background:'#52b02c', color:'#fff', border:'none',
+                style={{ padding:'3px 12px', background:'#1a56db', color:'#fff', border:'none',
                   borderRadius:5, fontSize:12, fontWeight:600, cursor:'pointer' }}>Done</button>
             </div>
           )}

@@ -31,6 +31,7 @@ import backupRouter    from './routes/backup.js';
 import zktecoRouter    from './routes/zkteco.js';
 import zktecoApiRouter from './routes/zktecoApi.js';
 import standaloneDevicesRouter from './routes/standaloneDevices.js';
+import standaloneSyncRouter    from './routes/standaloneSync.js';
 import attendanceRouter from './routes/attendance.js';
 import licenseRouter    from './routes/license.js';
 import updaterRouter    from './routes/updater.js';
@@ -39,6 +40,7 @@ import dutyRosterRouter from './routes/dutyRoster.js';
 import auditLogRouter   from './routes/auditLog.js';
 import staffNotesRouter  from './routes/staffNotes.js';
 import contactsRouter    from './routes/contacts.js';
+import tasksRouter        from './routes/tasks.js';
 import messagesRouter    from './routes/messages.js';
 import chatRouter        from './routes/chat.js';
 import emailConfigRouter from './routes/emailConfig.js';
@@ -48,9 +50,21 @@ import { logBugReport }  from './services/bugReportService.js';
 import { licenseGuard } from './middleware/licenseGuard.js';
 import { authGuard }    from './middleware/authGuard.js';
 import { requireRole }  from './middleware/roleGuard.js';
+import { standaloneSyncTokenGuard } from './middleware/standaloneSyncTokenGuard.js';
+import { mountTenantPathProxy } from './middleware/tenantPathProxy.js';
+import * as routingCache from './services/routingCache.js';
 
 const app  = express();
 const PORT = parseInt(process.env.PORT || '5000');
+
+// Shared-login hub only (attend.zkattendance.com/t/<subdomain>/...) — routes
+// a browser to a DIFFERENT tenant's own process without any subdomain DNS,
+// which was never actually set up. Mounted before cors()/express.json() so
+// proxied request bodies (a staff-list import, a raw DB-dump upload) stream
+// through untouched instead of being consumed/parsed here first.
+if (process.env.ENABLE_TENANT_RESOLVE === 'true') {
+  mountTenantPathProxy(app);
+}
 
 // Optional TLS — server/certs/{cert,key}.pem, generated locally via
 // server/scripts/generate-cert.js (self-signed, for a bare-IP VPS) or dropped
@@ -111,15 +125,23 @@ app.use('/api/backup',    licenseGuard, authGuard, requireRole('admin', 'superAd
 // — plus the global on/off flag, which an admin/superAdmin controls in Settings.
 app.use('/api/zkteco',    licenseGuard, authGuard, requireRole('admin', 'superAdmin'), requireModuleEnabled(FLAG_KEYS.attendanceDevice, 'Attendance Device'), zktecoApiRouter);
 app.use('/api/standalone',licenseGuard, authGuard, requireRole('admin', 'superAdmin'), requireModuleEnabled(FLAG_KEYS.standaloneDevice, 'StandAlone Device'), standaloneDevicesRouter);
+// Remote sync agent ingestion — an unattended process with no logged-in user,
+// so it authenticates with a per-device token (standaloneSyncTokenGuard)
+// instead of authGuard/requireRole. See routes/standaloneSync.js.
+app.use('/api/standalone-sync', licenseGuard, requireModuleEnabled(FLAG_KEYS.standaloneDevice, 'StandAlone Device'), standaloneSyncTokenGuard, standaloneSyncRouter);
 app.use('/api/attendance',licenseGuard, authGuard, attendanceRouter);
 app.use('/api/overtime',    licenseGuard, authGuard, overtimeRouter);
 app.use('/api/duty-roster', licenseGuard, authGuard, dutyRosterRouter);
 app.use('/api/audit-log',   licenseGuard, authGuard, requireRole('superAdmin'), auditLogRouter);
 app.use('/api/staff-notes',  licenseGuard, authGuard, staffNotesRouter);
 app.use('/api/contacts',     licenseGuard, authGuard, contactsRouter);
+app.use('/api/tasks',        licenseGuard, authGuard, tasksRouter);
 app.use('/api/messages',     licenseGuard, authGuard, messagesRouter);
 app.use('/api/chat',         licenseGuard, authGuard, chatRouter);
-app.use('/api/email-config', licenseGuard, authGuard, requireRole('admin', 'superAdmin'), emailConfigRouter);
+// requireRole allows admin+superAdmin (the API itself is fine with either),
+// but the module flag is Super-Admin-only to flip (see RoleManagement.jsx) —
+// so in practice this stays 503 for everyone until a Super Admin enables it.
+app.use('/api/email-config', licenseGuard, authGuard, requireRole('admin', 'superAdmin'), requireModuleEnabled(FLAG_KEYS.emailSetup, 'Email Setup'), emailConfigRouter);
 app.use('/api/ai',          licenseGuard, authGuard, aiAnalysisRouter);
 // ZKTeco ADMS push protocol — devices POST attendance to /iclock/*
 app.use('/iclock',         requireModuleEnabled(FLAG_KEYS.attendanceDevice, 'Attendance Device'), zktecoRouter);
@@ -143,6 +165,7 @@ app.get('/api/health', async (_req, res) => {
     dbVersion: DB_VERSION,
     dbApplied,
     dbAppliedAt,
+    tenantId: process.env.TENANT_ID || null,
     time: new Date().toISOString(),
   });
 });
@@ -207,6 +230,10 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
     }
 
     startAttendanceNotificationScheduler();
+
+    if (process.env.ENABLE_TENANT_RESOLVE === 'true') {
+      routingCache.start();
+    }
 
     const server = app.listen(PORT, () => {
       console.log(`✅ Server running  →  http://localhost:${PORT}/api`);

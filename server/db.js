@@ -21,6 +21,13 @@ const pool = new Pool({
   max     : 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  // Every report/dashboard query buckets attendance by calendar day via
+  // `check_time::date` / CURRENT_DATE, which resolve using the session's
+  // timezone — without this, that defaults to the OS/server's own timezone
+  // (confirmed America/Los_Angeles on this box), silently shifting Nepal
+  // daytime punches onto the wrong calendar day (~13h offset from UTC+5:45)
+  // and making "today" disappear from every report until well past midnight.
+  options : '-c timezone=Asia/Kathmandu',
 });
 
 pool.on('error', (err) => logError('[pg pool error]', err));

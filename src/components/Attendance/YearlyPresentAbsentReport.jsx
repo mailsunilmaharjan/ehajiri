@@ -6,18 +6,12 @@ import { useData }     from '../../context/DataContext.jsx';
 import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewYearlyBtn from './ViewYearlyBtn.jsx';
-import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
+import { staffRankCompare } from '../../utils/branchUtils.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const BS_MONTHS_SHORT  = ['Baisakh','Jestha','Asadh','Shrawan','Bhadra','Ashwin',
                            'Kartik','Mangsir','Poush','Magh','Falgun','Chaitra'];
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 const isoDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -38,7 +32,7 @@ const STATUS = {
   AB : { bg:'#fee2e2', color:'#991b1b', label:'AB', title:'Absent' },
   H  : { bg:'#f3f4f6', color:'#9ca3af', label:'W',  title:'Weekend' },
   L  : { bg:'#ede9fe', color:'#5b21b6', label:'L',  title:'Leave' },
-  OV : { bg:'#dcfce7', color:'#166534', label:'OV', title:'Office Visit' },
+  OV : { bg:'#dbeafe', color:'#1e40af', label:'OV', title:'Office Visit' },
   PH : { bg:'#fef3c7', color:'#92400e', label:'PH', title:'Public Holiday' },
 };
 
@@ -94,16 +88,16 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
       <div onClick={() => setOpen(p => !p)}
         style={{ display:'flex',alignItems:'center',justifyContent:'space-between',
           height:36, padding:'0 10px',
-          border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
+          border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer',
-          boxShadow:open?'0 0 0 2px rgba(82,176,44,.1)':'none', transition:'all .15s' }}>
+          boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none', transition:'all .15s' }}>
         <span style={{ fontSize:13, color:selected?'#1f2937':'#9ca3af',
           fontWeight:selected?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
           {selected
             ? `${selected.fullName}${selected.position ? ` • ${abbrev(selected.position)}` : ''}${selected.deviceId ? ` [${selected.deviceId}]` : ''}`
             : `— ${L('कर्मचारी छान्नुस','Select Staff Member')} —`}
         </span>
-        <svg viewBox="0 0 20 20" fill={open?'#52b02c':'#9ca3af'} width="13" height="13"
+        <svg viewBox="0 0 20 20" fill={open?'#1a56db':'#9ca3af'} width="13" height="13"
           style={{ flexShrink:0, marginLeft:6, transform:open?'rotate(180deg)':'none', transition:'transform .2s' }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
         </svg>
@@ -142,16 +136,16 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
                 <div key={e.id}
                   onMouseDown={ev=>{ ev.preventDefault(); onChange(String(e.id)); setOpen(false); setSearch(''); }}
                   style={{ display:'flex',alignItems:'center',gap:10,padding:'8px 14px',
-                    cursor:'pointer',background:active?'#f0fdf4':'white',
+                    cursor:'pointer',background:active?'#eff6ff':'white',
                     borderBottom:'1px solid #f3f4f6',transition:'background .1s' }}
                   onMouseEnter={ev=>{ if(!active) ev.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#f0fdf4':'white'; }}>
+                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':'white'; }}>
                   {/* Rank badge */}
-                  <div style={{ width:22,height:22,borderRadius:'50%',background:active?'#52b02c':'#f3f4f6',
+                  <div style={{ width:22,height:22,borderRadius:'50%',background:active?'#1a56db':'#f3f4f6',
                     color:active?'white':'#9ca3af',fontSize:10,fontWeight:700,flexShrink:0,
                     display:'flex',alignItems:'center',justifyContent:'center' }}>{idx+1}</div>
                   <div style={{ flex:1,minWidth:0 }}>
-                    <div style={{ fontSize:13,fontWeight:active?700:600,color:active?'#166534':'#1f2937',
+                    <div style={{ fontSize:13,fontWeight:active?700:600,color:active?'#1e40af':'#1f2937',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>
                       {e.fullName}
                     </div>
@@ -162,7 +156,7 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
                     </div>
                   </div>
                   {active && (
-                    <svg viewBox="0 0 20 20" fill="#52b02c" width="14" height="14" style={{ flexShrink:0 }}>
+                    <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14" style={{ flexShrink:0 }}>
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
                     </svg>
                   )}
@@ -183,13 +177,13 @@ const YearlyPresentAbsentReport = () => {
   const [searchParams] = useSearchParams();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
-  const { employees }  = useData();
+  const { employees, rosterVersion } = useData();
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
-  const now     = new Date();
+  const now     = getNepalNow();
   const useNP   = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
 
   const urlYear = parseInt(searchParams.get('year'));
   const [year,        setYear]        = useState(urlYear || (useNP ? (todayBS?.year || now.getFullYear()) : now.getFullYear()));
@@ -207,11 +201,8 @@ const YearlyPresentAbsentReport = () => {
   const sortedEmps = useMemo(() =>
     [...employees]
       .filter(e => staffStatus === 'notworking' ? e.active === false : e.active !== false)
-      .sort((a,b) => {
-        const ra=a.rankingOrder??99999, rb=b.rankingOrder??99999;
-        return ra!==rb ? ra-rb : (a.fullName||'').localeCompare(b.fullName||'');
-      }),
-    [employees, staffStatus]
+      .sort((a,b) => staffRankCompare(a, b, settings)),
+    [employees, staffStatus, settings.branches]
   );
 
   // Auto-select first employee on mount or when staffStatus changes
@@ -266,7 +257,7 @@ const YearlyPresentAbsentReport = () => {
     finally { setLoading(false); }
   }, [year, selectedId, useNP, staffStatus]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, rosterVersion]);
 
   /* ── Build month-×-day matrix for selected staff ── */
   const matrix = useMemo(() => {
@@ -336,12 +327,12 @@ const YearlyPresentAbsentReport = () => {
 
   /* ── Table header/cell styles ── */
   const TH = {
-    background:'#efefef', color:'#374151', fontWeight:700, fontSize:12,
-    padding:'6px 5px', borderRight:'1px solid #dedede', borderBottom:'2px solid #dedede',
+    background:'#efefef', color:'#374151', fontWeight:700, fontSize:12.5,
+    padding:'4px 5px', borderRight:'1px solid #dedede', borderBottom:'2px solid #dedede',
     textAlign:'center', whiteSpace:'nowrap', userSelect:'none',
   };
   const TD = {
-    padding:'3px 3px', fontSize:12,
+    padding:'3px 3px', fontSize:12.5,
     borderRight:'1px solid #e5e7eb', borderBottom:'1px solid #f3f4f6',
     textAlign:'center', verticalAlign:'middle', minHeight:38,
   };
@@ -357,7 +348,7 @@ const YearlyPresentAbsentReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -375,7 +366,7 @@ const YearlyPresentAbsentReport = () => {
             onClick={() => {
               if (!matrix.length || !selectedEmp) return;
               const ST = { P:'#065f46,#d1fae5', PP:'#713f12,#fef08a', AB:'#991b1b,#fee2e2',
-                           H:'#9ca3af,#f3f4f6', L:'#5b21b6,#ede9fe', OV:'#166534,#dcfce7',
+                           H:'#9ca3af,#f3f4f6', L:'#5b21b6,#ede9fe', OV:'#1e40af,#dbeafe',
                            PH:'#92400e,#fef3c7' };
               const cellStyle = (st) => {
                 if (!st) return 'color:#e5e7eb;';
@@ -414,7 +405,7 @@ const YearlyPresentAbsentReport = () => {
               const sumItems = [
                 ['Total Days',yearSummary.total,'#374151'],['Present',yearSummary.present,'#065f46'],
                 ['Absent',yearSummary.absent,'#991b1b'],['Leave',yearSummary.leave,'#5b21b6'],
-                ['Office Visit',yearSummary.ov,'#166534'],['Holiday',yearSummary.ph,'#92400e'],
+                ['Office Visit',yearSummary.ov,'#1e40af'],['Holiday',yearSummary.ph,'#92400e'],
                 ['Weekend',yearSummary.weekend,'#6b7280'],['Late In',yearSummary.lateIn,'#dc2626'],
                 ['Early Out',yearSummary.earlyOut,'#d97706'],
               ].map(([l,v,c])=>`<span>${l}: <strong style="color:${c}">${v}</strong></span>`).join(' &nbsp;·&nbsp; ');
@@ -439,7 +430,7 @@ const YearlyPresentAbsentReport = () => {
                   const TD2 = (v,bold=false,color='#374151') => `<td style="padding:6px 12px;border:1px solid #e5e7eb;text-align:center;${bold?'font-weight:800;':''}color:${color};">${v}</td>`;
                   leaveHtml = `
 <div style="margin-top:14px;">
-  <div style="font-weight:700;font-size:12px;color:#166534;padding-bottom:5px;margin-bottom:8px;border-bottom:2px solid #e2e8f0;">Leave Details</div>
+  <div style="font-weight:700;font-size:12px;color:#1e40af;padding-bottom:5px;margin-bottom:8px;border-bottom:2px solid #e2e8f0;">Leave Details</div>
   <table style="border-collapse:collapse;font-size:11px;">
     <thead><tr>
       ${TH2('',   'left')}
@@ -498,7 +489,7 @@ const YearlyPresentAbsentReport = () => {
   .header       { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 8px; }
   .company-name { font-size: 15px; font-weight: 800; color: #1f2937; margin-bottom: 2px; }
   .company-sub  { font-size: 10px; color: #6b7280; margin-bottom: 6px; }
-  .report-row   { display: flex; gap: 12px; align-items: center; font-size: 11px; font-weight: 700; color: #52b02c; }
+  .report-row   { display: flex; gap: 12px; align-items: center; font-size: 11px; font-weight: 700; color: #1a56db; }
   .hr-line      { border: none; border-top: 2px solid #374151; margin: 7px 0; }
   .staff-row    { display: flex; gap: 18px; font-size: 11px; flex-wrap: wrap; margin-bottom: 6px; }
   .staff-row span strong { color: #9ca3af; font-weight: 500; }
@@ -558,7 +549,7 @@ ${footerHtml}
               if (w) { w.document.write(html); w.document.close(); }
             }}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -585,7 +576,7 @@ ${footerHtml}
               onClick={() => { setStaffStatus(v); setSelectedId(''); }}
               style={{ padding:'5px 14px', border:'none', cursor:'pointer',
                 fontSize:13, fontWeight:600, transition:'background .15s',
-                background: staffStatus === v ? '#52b02c' : 'white',
+                background: staffStatus === v ? '#1a56db' : 'white',
                 color: staffStatus === v ? 'white' : '#374151' }}>
               {label}
             </button>
@@ -702,7 +693,7 @@ ${footerHtml}
                 {/* FY + Report Title row */}
                 <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
                   {currentFY && (
-                    <span style={{ fontSize:12, fontWeight:700, color:'#52b02c' }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:'#1a56db' }}>
                       Fiscal Year : {currentFY.name}
                     </span>
                   )}
@@ -755,7 +746,7 @@ ${footerHtml}
               { label:'Present',      value:yearSummary.present,  color:'#065f46'  },
               { label:'Absent',       value:yearSummary.absent,   color:'#991b1b'  },
               { label:'Leave',        value:yearSummary.leave,    color:'#5b21b6'  },
-              { label:'Office Visit', value:yearSummary.ov,       color:'#166534'  },
+              { label:'Office Visit', value:yearSummary.ov,       color:'#1e40af'  },
               { label:'Holiday',      value:yearSummary.ph,       color:'#92400e'  },
               { label:'Weekend',      value:yearSummary.weekend,  color:'#6b7280'  },
               { label:'Late In',      value:yearSummary.lateIn,   color:'#dc2626'  },
@@ -794,9 +785,9 @@ ${footerHtml}
               <tbody>
                 {matrix.map((row, ri) => (
                   <tr key={ri}
-                    style={{ background: ri%2===0?'white':'#f9fafb' }}
-                    onMouseEnter={e=>e.currentTarget.style.background='#f0fdf4'}
-                    onMouseLeave={e=>e.currentTarget.style.background=ri%2===0?'white':'#f9fafb'}>
+                    style={{ background: ri%2===0?'white':'#f3f4f6' }}
+                    onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
+                    onMouseLeave={e=>e.currentTarget.style.background=ri%2===0?'white':'#f3f4f6'}>
                     {/* SN */}
                     <td style={{ ...TD, background:'#efefef', fontWeight:700, color:'#6b7280',
                       position:'sticky', left:0, zIndex:1, borderRight:'1px solid #dedede', width:36 }}>
@@ -822,10 +813,10 @@ ${footerHtml}
                       );
                     })}
                     {/* Month totals */}
-                    <td style={{ ...TD, background:'#f0fdf4', fontWeight:800, color:'#065f46', fontSize:13 }}>{row.P}</td>
+                    <td style={{ ...TD, background:'#f0fdf4', fontWeight:800, color:'#065f46' }}>{row.P}</td>
                     <td style={{ ...TD, background: row.AB>0?'#fff5f5':'white', fontWeight:800,
-                      color:row.AB>0?'#991b1b':'#d1d5db', fontSize:13 }}>{row.AB}</td>
-                    <td style={{ ...TD, fontWeight:800, color:row.L>0?'#5b21b6':'#d1d5db', fontSize:13 }}>{row.L}</td>
+                      color:row.AB>0?'#991b1b':'#d1d5db' }}>{row.AB}</td>
+                    <td style={{ ...TD, fontWeight:800, color:row.L>0?'#5b21b6':'#d1d5db' }}>{row.L}</td>
                   </tr>
                 ))}
               </tbody>
@@ -855,16 +846,16 @@ ${footerHtml}
 
             /* Shared cell styles */
             const TH3 = ({ children, align='center' }) => (
-              <th style={{ background:'#efefef', color:'#374151', fontWeight:700, fontSize:12,
-                padding:'8px 14px', borderRight:'1px solid #dedede', borderBottom:'2px solid #dedede',
+              <th style={{ background:'#efefef', color:'#374151', fontWeight:700, fontSize:12.5,
+                padding:'4px 8px', borderRight:'1px solid #dedede', borderBottom:'2px solid #dedede',
                 textAlign:align, whiteSpace:'nowrap' }}>
                 {children}
               </th>
             );
             const TD3 = ({ children, bold, color, bg='white', align='center' }) => (
-              <td style={{ padding:'7px 14px', borderRight:'1px solid #e5e7eb',
+              <td style={{ padding:'3px 8px', borderRight:'1px solid #e5e7eb',
                 borderBottom:'1px solid #f3f4f6', textAlign:align, background:bg,
-                fontWeight:bold?800:400, color:color||'#374151', fontSize:13 }}>
+                fontWeight:bold?800:400, color:color||'#374151', fontSize:12.5 }}>
                 {children}
               </td>
             );
@@ -881,7 +872,7 @@ ${footerHtml}
                 overflow:'auto', boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
                 {/* Header */}
                 <div style={{ background:'#f8fafc', borderBottom:'2px solid #e2e8f0',
-                  padding:'10px 16px', fontWeight:700, fontSize:13, color:'#166534' }}>
+                  padding:'10px 16px', fontWeight:700, fontSize:13, color:'#1e40af' }}>
                   {L('बिदा विवरण','Leave Details')}
                 </div>
                 <table style={{ borderCollapse:'collapse' }}>

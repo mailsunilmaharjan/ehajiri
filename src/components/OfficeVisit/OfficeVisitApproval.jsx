@@ -269,9 +269,7 @@ const OfficeVisitApproval = () => {
       {actionModal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{
-              background: actionModal.type === 'reject' ? '#fef2f2' : '#f0fdf4'
-            }}>
+            <div className="modal-header">
               <h2>
                 {actionModal.type === 'recommend' ? '👍 Recommend'
                   : actionModal.type === 'approve' ? `✅ ${t('Approve')}`

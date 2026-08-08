@@ -1,27 +1,32 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useNavigate }  from 'react-router-dom';
 import { useAuth }      from '../../context/AuthContext.jsx';
 import { useLanguage }  from '../../context/LanguageContext.jsx';
 import { useData }      from '../../context/DataContext.jsx';
 import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import { useSettings }  from '../../context/SettingsContext.jsx';
-import { makeDateFormatter } from '../../utils/dateUtils.js';
+import { makeDateFormatter, getNepalTodayISO } from '../../utils/dateUtils.js';
+import { staffRankCompare } from '../../utils/branchUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import SearchableSelect from '../Common/SearchableSelect.jsx';
 
 /* load saved reco/approval from localStorage */
 const loadRecoApproval = () => {
   try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
 };
 
-/* date picker that respects settings.defaultCalendar */
-const LeaveDateInput = ({ value, onChange, min, error, settings }) => {
+/* date picker that respects settings.defaultCalendar and settings.leaveBackdateEnabled —
+   allowPast overrides the block regardless of that setting, for Admin Manual Posting
+   (correcting/backfilling records is the whole point of that form; see its own callers). */
+const LeaveDateInput = ({ value, onChange, error, settings, allowPast }) => {
+  const blockPast = !allowPast && settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} />;
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
   }
   return (
     <input type="date" className={`form-control ${error ? 'error' : ''}`}
-      value={value} min={min}
+      value={value} min={blockPast ? getNepalTodayISO() : undefined}
       onChange={e => onChange(e.target.value)}
       style={{ fontSize:13 }} />
   );
@@ -49,11 +54,11 @@ const PURPOSES = [
    LEAVE PANEL
 ══════════════════════════════════════════════════ */
 const LeavePanel = () => {
-  const { currentUser, isManager, canManageStaff } = useAuth();
+  const { currentUser, isManager, canManageStaff, isAdmin } = useAuth();
   const { t, language } = useLanguage();
-  const { settings } = useSettings();
+  const { settings, refreshSettings } = useSettings();
   const fd = makeDateFormatter(settings);
-  const { filteredLeaves: leaves, deleteLeave, addLeave, updateLeave, approveLeave, rejectLeave, getEmployeeName, getLeaveTypeName, getLeaveTypeColor, leaveTypes, getLeaveBalance, filteredEmployees: employees, employees: allEmployees } = useData();
+  const { filteredLeaves: leaves, deleteLeave, addLeave, updateLeave, approveLeave, rejectLeave, getEmployeeName, getLeaveTypeName, getLeaveTypeColor, leaveTypes, getLeaveBalance, refreshLeaveBalances, filteredEmployees: employees, employees: allEmployees } = useData();
   const navigate = useNavigate();
 
   const [filterStatus, setFilterStatus] = useState('all');
@@ -69,6 +74,14 @@ const LeavePanel = () => {
   const manualFormRef = useRef(null);
   const [delConfirm,   setDelConfirm]   = useState(null);
   const [showApply,    setShowApply]    = useState(false);
+  // Refetch settings right as Apply opens — this page stays mounted for the
+  // whole session, so a long-open tab would otherwise keep enforcing
+  // whatever leaveBackdateEnabled was when it first loaded.
+  useEffect(() => { if (showApply) refreshSettings(); }, [showApply]);
+  // Same reasoning — leaveBalances is normally fetched once at login, so a
+  // credit granted elsewhere (e.g. an OT-to-leave grant on the Overtime
+  // Approval page) wouldn't show up in "days remaining" here without this.
+  useEffect(() => { if (showApply) refreshLeaveBalances(); }, [showApply]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showManual,   setShowManual]   = useState(false);
   const [manualForm,   setManualForm]   = useState({ employeeId:'', leaveTypeCode:'', fromDate:'', toDate:'', halfDay:false, reason:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualErrors, setManualErrors] = useState({});
@@ -97,7 +110,7 @@ const LeavePanel = () => {
   };
 
   /* ── Apply form state ── */
-  const today = new Date().toISOString().split('T')[0];
+  const today = getNepalTodayISO();
   const emptyForm = {
     leaveTypeCode: '', fromDate: today, toDate: today,
     halfDay: false, reason: '', reco: [], approval: [], document: null,
@@ -132,7 +145,11 @@ const LeavePanel = () => {
                     && l.leaveTypeCode === lt.shortName
                     && l.status === 'approved')
           .reduce((s, l) => s + Number(l.days || 0), 0);
-        result[lt.shortName] = Math.max(0, prevYear + currYear - used);
+        // Server-side credits (e.g. OT-to-leave grants from the Overtime
+        // Approval page) live in leave_balances, not the opening/used math
+        // above — add them in so a granted day actually shows up here.
+        const credited = Number(getLeaveBalance(empId)?.[lt.shortName] || 0);
+        result[lt.shortName] = Math.max(0, prevYear + currYear + credited - used);
       });
       return result;
     } catch {
@@ -306,9 +323,9 @@ const LeavePanel = () => {
         const isMan = v === true || String(row.employeeId) !== String(currentUser.id);
         return (
           <span style={{ fontSize:12, fontWeight:600, padding:'2px 9px', borderRadius:10, whiteSpace:'nowrap',
-            background: isMan ? '#fef3c7' : '#f0fdf4',
-            color:      isMan ? '#92400e' : '#166534',
-            border:     `1px solid ${isMan ? '#fde68a' : '#bbf7d0'}` }}>
+            background: isMan ? '#fef3c7' : '#eff6ff',
+            color:      isMan ? '#92400e' : '#1e40af',
+            border:     `1px solid ${isMan ? '#fde68a' : '#bfdbfe'}` }}>
             {isMan
               ? (language==='np' ? '✍️ म्यानुअल' : '✍️ Manual')
               : (language==='np' ? '📝 आवेदन'  : '📝 Application')}
@@ -318,7 +335,7 @@ const LeavePanel = () => {
     },
     { field: 'fromDate',      header: t('From Date'),    width: 110, render: v => fd(v) },
     { field: 'toDate',        header: t('To Date'),      width: 110, render: v => fd(v) },
-    { field: 'days',          header: t('Days'),         width: 60,  align:'center', render: v => <strong style={{ color:'#52b02c' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</strong> },
+    { field: 'days',          header: t('Days'),         width: 60,  align:'center', render: v => <strong style={{ color:'#1a56db' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</strong> },
     { field: 'reason',        header: t('Reason'),       width: 150, render: v => <span style={{ maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', display:'block', fontSize:14 }}>{v}</span> },
     { field: 'appliedDate',   header: t('Applied Date'), width: 110, render: v => fd(v) },
     { field: 'status',        header: t('Status'),       width: 110, render: v => <StatusBadge status={v} /> },
@@ -416,7 +433,9 @@ const LeavePanel = () => {
         const LeaveMCS = () => {
           const [open, setOpen] = React.useState(false);
           const [srch, setSrch] = React.useState('');
+          const [activeIndex, setActiveIndex] = React.useState(-1);
           const ref = React.useRef(null);
+          const itemRefs = React.useRef([]);
           React.useEffect(() => {
             const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
             document.addEventListener('mousedown', h);
@@ -430,27 +449,64 @@ const LeavePanel = () => {
             if (srch && !lt.name.toLowerCase().includes(srch.toLowerCase())) return false;
             return true;
           });
+          // "All Types" is always row 0 in the navigable list
+          const navItems = [null, ...visOpts];
+          itemRefs.current = [];
 
           const toggle = (code) => setFilterTypes(p =>
             p.includes(code) ? p.filter(x => x !== code) : [...p, code]
           );
+          const selectNav = (lt) => lt === null ? setFilterTypes([]) : toggle(lt.shortName);
           const selLabel = filterTypes.length === 0 ? 'All Types'
             : filterTypes.length === 1 ? (ltConfigs.find(lt => lt.shortName === filterTypes[0])?.name || filterTypes[0])
             : `${filterTypes.length} selected`;
+          const openWithHighlight = () => {
+            const idx = filterTypes.length === 1 ? navItems.findIndex(lt => lt?.shortName === filterTypes[0]) : 0;
+            setActiveIndex(idx >= 0 ? idx : 0);
+            setOpen(true);
+          };
+          const handleTriggerKeyDown = e => {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              open ? setOpen(false) : openWithHighlight();
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          };
+          const handleSearchKeyDown = e => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setOpen(false);
+            }
+          };
+          React.useEffect(() => {
+            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+          }, [activeIndex, open]);
+          React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
 
           return (
             <div ref={ref} style={{ position:'relative' }}>
-              <div tabIndex={0} onClick={() => setOpen(p => !p)}
+              <div tabIndex={0} onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
+                onKeyDown={handleTriggerKeyDown}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'5px 12px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
+                  padding:'5px 12px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minWidth:200, minHeight:34,
-                  color: filterTypes.length > 0 ? '#166534' : '#374151',
+                  color: filterTypes.length > 0 ? '#1e40af' : '#374151',
                   fontWeight: filterTypes.length > 0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline:'none', userSelect:'none' }}>
+                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none' }}>
                 <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{selLabel}</span>
                 <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
                   {filterTypes.length > 0 && (
-                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>
+                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>
                       {filterTypes.length}
                     </span>
                   )}
@@ -465,42 +521,36 @@ const LeavePanel = () => {
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
+                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', minWidth:280, maxHeight:280,
                   display:'flex', flexDirection:'column' }}>
                   {/* Search */}
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
-                      placeholder="Search leave type..." onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}
+                      placeholder="Search leave type..." onClick={e=>e.stopPropagation()} onKeyDown={handleSearchKeyDown}
                       style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 9px',
                         fontSize:13, outline:'none', boxSizing:'border-box' }} />
                   </div>
                   {/* All row */}
                   <div style={{ overflowY:'auto', flex:1 }}>
-                    <div onMouseDown={e=>{e.preventDefault(); setFilterTypes([]);}}
-                      style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                        background: filterTypes.length===0 ? '#f0fdf4' : 'white', borderBottom:'1px solid #f1f5f9' }}>
-                      <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
-                        border:`2px solid ${filterTypes.length===0?'#52b02c':'#d1d5db'}`, background:filterTypes.length===0?'#52b02c':'white' }}>
-                        {filterTypes.length===0 && <svg viewBox="0 0 12 12" fill="none" width="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
-                      </span>
-                      <span style={{ fontSize:13, fontWeight:600, color:filterTypes.length===0?'#166534':'#374151' }}>All Types</span>
-                    </div>
-                    {visOpts.map(lt => {
-                      const sel = filterTypes.includes(lt.shortName);
+                    {navItems.map((lt, i) => {
+                      const isAll = lt === null;
+                      const sel   = isAll ? filterTypes.length === 0 : filterTypes.includes(lt.shortName);
+                      const highlighted = i === activeIndex;
                       return (
-                        <div key={lt.shortName} onMouseDown={e=>{e.preventDefault(); toggle(lt.shortName);}}
+                        <div key={isAll ? '__all' : lt.shortName} ref={el => itemRefs.current[i] = el}
+                          onMouseDown={e=>{e.preventDefault(); selectNav(lt);}}
+                          onMouseEnter={() => setActiveIndex(i)}
                           style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                            background: sel ? '#f0fdf4' : 'white', borderBottom:'1px solid #f9fafb' }}
-                          onMouseEnter={e=>{ if(!sel) e.currentTarget.style.background='#f8fafc'; }}
-                          onMouseLeave={e=>{ if(!sel) e.currentTarget.style.background='white'; }}>
+                            background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
+                            borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
                           <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
-                            border:`2px solid ${sel?'#52b02c':'#d1d5db'}`, background:sel?'#52b02c':'white' }}>
+                            border:`2px solid ${sel?'#1a56db':'#d1d5db'}`, background:sel?'#1a56db':'white' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize:13, color:sel?'#166534':'#374151', fontWeight:sel?600:400 }}>
-                            {lt.name}
-                            {lt.carryForward !== undefined && (
+                          <span style={{ fontSize:13, color:sel?'#1e40af':'#374151', fontWeight:sel?600:400 }}>
+                            {isAll ? 'All Types' : lt.name}
+                            {!isAll && lt.carryForward !== undefined && (
                               <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:6,
                                 background: lt.carryForward ? '#d1fae5' : '#f3f4f6',
                                 color: lt.carryForward ? '#065f46' : '#6b7280' }}>
@@ -551,9 +601,9 @@ const LeavePanel = () => {
                 <button key={opt.key} type="button"
                   onClick={() => { setFilterAccum(opt.key); setFilterTypes([]); }}
                   style={{ padding:'4px 12px', fontSize:12, borderRadius:20, cursor:'pointer',
-                    border:`1.5px solid ${filterAccum===opt.key?'#52b02c':'#d1d5db'}`,
-                    background: filterAccum===opt.key ? '#f0fdf4' : 'white',
-                    color: filterAccum===opt.key ? '#52b02c' : '#374151',
+                    border:`1.5px solid ${filterAccum===opt.key?'#1a56db':'#d1d5db'}`,
+                    background: filterAccum===opt.key ? '#eff6ff' : 'white',
+                    color: filterAccum===opt.key ? '#1a56db' : '#374151',
                     fontWeight: filterAccum===opt.key ? 700 : 400, transition:'all .12s' }}>
                   {opt.label}
                 </button>
@@ -562,7 +612,7 @@ const LeavePanel = () => {
             </div>
 
             {/* Right: action buttons */}
-            <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+            <div style={{ display:'flex', gap:8, flexShrink:0, flexWrap:'wrap' }}>
               {isManager && (
                 <button className="btn btn-outline btn-sm" onClick={() => navigate('/leave/approval')}>
                   ✅ {t('Leave Approval')}
@@ -607,7 +657,7 @@ const LeavePanel = () => {
       {actionModal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background: actionModal.type === 'approve' ? '#f0fdf4' : '#fef2f2' }}>
+            <div className="modal-header">
               <h2>
                 {actionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`} — {t('Leave Application')}
               </h2>
@@ -635,7 +685,7 @@ const LeavePanel = () => {
                   style={{ fontSize:13 }} autoFocus />
               </div>
               {actionModal.type === 'approve' && (
-                <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#166534' }}>
+                <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#1e40af' }}>
                   📊 Approving this leave will automatically reduce the employee's leave balance by <strong>{actionModal.leave.days} day{actionModal.leave.days !== 1 ? 's' : ''}</strong>.
                 </div>
               )}
@@ -724,80 +774,18 @@ const LeavePanel = () => {
           const toIds = (v) => Array.isArray(v) ? v : (v ? [v] : []);
           const recoIds = toIds(cfg.reco).map(String);
           const apprIds = toIds(cfg.approval).map(String);
-          const toOpts = (ids) => ids.length > 0
-            ? ids.map(id => {
-                const e = activeEmps.find(x => String(x.id) === id);
-                return { value: id, label: e ? e.fullName : `#${id}` };
-              })
-            : activeEmps.map(e => ({ value: String(e.id), label: e.fullName }));
+          const toOpts = (ids) => ids.map(id => {
+            const e = activeEmps.find(x => String(x.id) === id);
+            return { value: id, label: e ? e.fullName : `#${id}` };
+          });
           return { recoOpts: toOpts(recoIds), apprOpts: toOpts(apprIds) };
         })();
-
-        /* inline searchable single-select for edit modal */
-        const ESel = ({ value, onChange, options, placeholder }) => {
-          const [open, setOpen] = React.useState(false);
-          const [srch, setSrch] = React.useState('');
-          const ref = React.useRef(null);
-          React.useEffect(() => {
-            const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-            document.addEventListener('mousedown', h);
-            return () => document.removeEventListener('mousedown', h);
-          }, []);
-          const filtered = srch ? options.filter(o => o.label.toLowerCase().includes(srch.toLowerCase())) : options;
-          const selLabel = options.find(o => String(o.value) === String(value))?.label || '';
-          return (
-            <div ref={ref} style={{ position: 'relative' }}>
-              <div tabIndex={0} onClick={() => setOpen(p => !p)}
-                style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 11px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
-                  borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:40,
-                  color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open?'0 0 0 2px #bbf7d0':'none', outline:'none', userSelect:'none' }}>
-                <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                  {selLabel || placeholder}
-                </span>
-                <span style={{ fontSize:9, color:'#9ca3af', flexShrink:0 }}>{open?'▲':'▼'}</span>
-              </div>
-              {open && (
-                <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
-                  boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220, display:'flex', flexDirection:'column' }}>
-                  <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
-                    <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
-                      placeholder="Search..." onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}
-                      style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px',
-                        fontSize:13, outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div style={{ overflowY:'auto', flex:1 }}>
-                    <div onMouseDown={e=>{e.preventDefault(); onChange(''); setOpen(false); setSrch('');}}
-                      style={{ padding:'8px 12px', fontSize:13, cursor:'pointer', borderBottom:'1px solid #f3f4f6',
-                        background: !value ? '#f0fdf4' : 'white', color: !value ? '#166534' : '#6b7280' }}>
-                      — None —
-                    </div>
-                    {filtered.map(opt => (
-                      <div key={opt.value} onMouseDown={e=>{e.preventDefault(); onChange(opt.value); setOpen(false); setSrch('');}}
-                        style={{ padding:'8px 12px', fontSize:13, cursor:'pointer', borderBottom:'1px solid #f3f4f6',
-                          background: String(value)===String(opt.value)?'#f0fdf4':'white',
-                          color: String(value)===String(opt.value)?'#166534':'#374151',
-                          fontWeight: String(value)===String(opt.value)?700:400 }}
-                        onMouseEnter={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='#f8fafc'; }}
-                        onMouseLeave={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='white'; }}>
-                        {opt.label}
-                      </div>
-                    ))}
-                    {filtered.length===0 && <div style={{ padding:'10px 12px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results</div>}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
 
         return (
           <div className="modal-overlay">
             <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
-              <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#e0e7ff)', position:'sticky', top:0, zIndex:10 }}>
+              <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>✏️ Edit Leave Application #{editLeave.id}</h2>
                 <button className="modal-close" onClick={() => setEditLeave(null)}>✕</button>
               </div>
@@ -806,7 +794,8 @@ const LeavePanel = () => {
                   {/* Staff */}
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
-                    <select value={editForm.employeeId} onChange={e => setEF('employeeId', e.target.value)}
+                    <select value={editForm.employeeId}
+                      onChange={e => setEditForm(p => ({ ...p, employeeId: e.target.value, recommendedBy: '', approvedBy: '' }))}
                       className="form-control" style={{ fontSize:13 }}>
                       {activeEmps.map(e => (
                         <option key={e.id} value={String(e.id)}>
@@ -831,7 +820,7 @@ const LeavePanel = () => {
                   <div style={{ marginBottom:14 }}>
                     <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none' }}>
                       <input type="checkbox" checked={editForm.halfDay} onChange={e => setEF('halfDay', e.target.checked)}
-                        style={{ width:15, height:15, accentColor:'#52b02c' }} />
+                        style={{ width:15, height:15, accentColor:'#1a56db' }} />
                       <span style={{ fontSize:13, fontWeight:600 }}>Half Day</span>
                     </label>
                   </div>
@@ -874,10 +863,11 @@ const LeavePanel = () => {
                   <div className="form-row">
                     <div className="form-group">
                       <Lbl>Recommended By</Lbl>
-                      <ESel value={editForm.recommendedBy}
+                      <SearchableSelect value={editForm.recommendedBy}
                         onChange={v => setEF('recommendedBy', v)}
                         options={editEmpRecoAppr.recoOpts}
-                        placeholder="— Select Recommendator —" />
+                        placeholder={editEmpRecoAppr.recoOpts.length === 0 ? 'No recommendator configured' : '— Select Recommendator —'}
+                        disabled={editEmpRecoAppr.recoOpts.length === 0} />
                     </div>
                     <div className="form-group">
                       <Lbl>Recommended Date</Lbl>
@@ -890,10 +880,11 @@ const LeavePanel = () => {
                   <div className="form-row">
                     <div className="form-group">
                       <Lbl>Approved By</Lbl>
-                      <ESel value={editForm.approvedBy}
+                      <SearchableSelect value={editForm.approvedBy}
                         onChange={v => setEF('approvedBy', v)}
                         options={editEmpRecoAppr.apprOpts}
-                        placeholder="— Select Approver —" />
+                        placeholder={editEmpRecoAppr.apprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
+                        disabled={editEmpRecoAppr.apprOpts.length === 0} />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
@@ -922,62 +913,6 @@ const LeavePanel = () => {
       {/* ── Manual Posting Modal (Leave) ── */}
       {showManual && (() => {
         const setMF = (f, v) => setManualForm(p => ({ ...p, [f]: v }));
-
-        /* inline searchable single-select */
-        const SrchSel = ({ value, onChange, options, placeholder, error }) => {
-          const [open, setSOpen] = React.useState(false);
-          const [srch, setSrch]  = React.useState('');
-          const sRef = React.useRef(null);
-          React.useEffect(() => {
-            const h = e => { if (sRef.current && !sRef.current.contains(e.target)) setSOpen(false); };
-            document.addEventListener('mousedown', h);
-            return () => document.removeEventListener('mousedown', h);
-          }, []);
-          const filtered = srch ? options.filter(o => o.label.toLowerCase().includes(srch.toLowerCase())) : options;
-          const selLabel = options.find(o => String(o.value) === String(value))?.label || '';
-          return (
-            <div ref={sRef} style={{ position:'relative' }}>
-              <div tabIndex={0} onClick={() => setSOpen(p=>!p)}
-                style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 11px', border:`1.5px solid ${error?'#f87171':open?'#52b02c':'#d1d5db'}`,
-                  borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:40,
-                  color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open?'0 0 0 2px #bbf7d0':'none', outline:'none', userSelect:'none' }}>
-                <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                  {selLabel || placeholder}
-                </span>
-                <span style={{ fontSize:9, color:'#9ca3af', flexShrink:0 }}>{open?'▲':'▼'}</span>
-              </div>
-              {open && (
-                <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
-                  boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:260, display:'flex', flexDirection:'column' }}>
-                  <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
-                    <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
-                      placeholder="Search..." onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}
-                      style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px',
-                        fontSize:13, outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div style={{ overflowY:'auto', flex:1 }}>
-                    {filtered.map(opt => (
-                      <div key={opt.value} onMouseDown={e=>{e.preventDefault(); onChange(opt.value); setSOpen(false); setSrch('');}}
-                        style={{ padding:'8px 12px', fontSize:13, cursor:'pointer',
-                          borderBottom:'1px solid #f3f4f6',
-                          background: String(value)===String(opt.value) ? '#f0fdf4' : 'white',
-                          color: String(value)===String(opt.value) ? '#166534' : '#374151',
-                          fontWeight: String(value)===String(opt.value) ? 700 : 400 }}
-                        onMouseEnter={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='#f8fafc'; }}
-                        onMouseLeave={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='white'; }}>
-                        {opt.label}
-                      </div>
-                    ))}
-                    {filtered.length === 0 && <div style={{ padding:'10px 12px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results</div>}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
 
         const validateManual = () => {
           const e = {};
@@ -1033,19 +968,26 @@ const LeavePanel = () => {
         const Err = ({ msg }) => msg ? <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{msg}</div> : null;
 
         const activeEmps = allEmployees.filter(e => e.active !== false)
-          .sort((a, b) => (a.rankingOrder ?? 9999) - (b.rankingOrder ?? 9999));
+          .sort((a, b) => staffRankCompare(a, b, settings));
         const empOpts = activeEmps.map(e => ({
           value: String(e.id),
           label: `${e.fullName}${e.employeeId ? ` [${e.employeeId}]` : ''}${e.department ? ` — ${e.department}` : ''}`,
         }));
         const ltOpts = ltConfigs.map(lt => ({ value: lt.shortName, label: lt.name }));
-        const staffForRecoAppr = activeEmps.map(e => ({ value: String(e.id), label: e.fullName }));
+
+        /* only staff configured (Staff Detail → Set Recommendator & Approval) for this employee */
+        const manualCfg    = recoConfig[String(manualForm.employeeId)] || {};
+        const toIds         = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map(String);
+        const manualRecoIds = toIds(manualCfg.reco);
+        const manualApprIds = toIds(manualCfg.approval);
+        const manualRecoOpts = activeEmps.filter(e => manualRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
+        const manualApprOpts = activeEmps.filter(e => manualApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
 
         return (
           <div className="modal-overlay">
             <div className="modal modal-lg" style={{ maxWidth:700, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
-              <div className="modal-header" style={{ background:'linear-gradient(135deg,#f5f3ff,#ede9fe)', position:'sticky', top:0, zIndex:10 }}>
+              <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>✍️ Manual Leave Posting</h2>
                 <button className="modal-close" onClick={() => setShowManual(false)}>✕</button>
               </div>
@@ -1058,16 +1000,21 @@ const LeavePanel = () => {
                   {/* Staff */}
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
-                    <SrchSel value={manualForm.employeeId} onChange={v => setMF('employeeId', v)}
-                      options={empOpts} placeholder="— Search & Select Staff —" error={!!manualErrors.employeeId} />
+                    <div style={{ outline: manualErrors.employeeId ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
+                      <SearchableSelect value={manualForm.employeeId}
+                        onChange={v => setManualForm(p => ({ ...p, employeeId: v, recommendedBy: '', approvedBy: '' }))}
+                        options={empOpts} placeholder="— Search & Select Staff —" />
+                    </div>
                     <Err msg={manualErrors.employeeId} />
                   </div>
 
                   {/* Leave Type */}
                   <div className="form-group">
                     <Lbl required>Leave Type</Lbl>
-                    <SrchSel value={manualForm.leaveTypeCode} onChange={v => setMF('leaveTypeCode', v)}
-                      options={ltOpts} placeholder="— Search & Select Leave Type —" error={!!manualErrors.leaveTypeCode} />
+                    <div style={{ outline: manualErrors.leaveTypeCode ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
+                      <SearchableSelect value={manualForm.leaveTypeCode} onChange={v => setMF('leaveTypeCode', v)}
+                        options={ltOpts} placeholder="— Search & Select Leave Type —" />
+                    </div>
                     <Err msg={manualErrors.leaveTypeCode} />
                   </div>
 
@@ -1085,13 +1032,13 @@ const LeavePanel = () => {
                     <div className="form-group">
                       <Lbl required>From Date</Lbl>
                       <LeaveDateInput value={manualForm.fromDate} error={!!manualErrors.fromDate}
-                        settings={settings} onChange={v => setMF('fromDate', v)} />
+                        settings={settings} allowPast={isAdmin} onChange={v => setMF('fromDate', v)} />
                       <Err msg={manualErrors.fromDate} />
                     </div>
                     <div className="form-group">
                       <Lbl required>To Date</Lbl>
                       <LeaveDateInput value={manualForm.toDate} error={!!manualErrors.toDate}
-                        min={manualForm.fromDate} settings={settings} onChange={v => setMF('toDate', v)} />
+                        min={manualForm.fromDate} settings={settings} allowPast={isAdmin} onChange={v => setMF('toDate', v)} />
                       <Err msg={manualErrors.toDate} />
                     </div>
                   </div>
@@ -1120,14 +1067,15 @@ const LeavePanel = () => {
                   <div className="form-row">
                     <div className="form-group">
                       <Lbl>Recommended By</Lbl>
-                      <SrchSel value={manualForm.recommendedBy} onChange={v => setMF('recommendedBy', v)}
-                        options={[{ value:'', label:'— None —' }, ...staffForRecoAppr]}
-                        placeholder="— Select Recommendator —" />
+                      <SearchableSelect value={manualForm.recommendedBy} onChange={v => setMF('recommendedBy', v)}
+                        options={manualRecoOpts}
+                        placeholder={!manualForm.employeeId ? '— Select staff first —' : manualRecoOpts.length === 0 ? 'No recommendator configured' : '— Select Recommendator —'}
+                        disabled={!manualForm.employeeId || manualRecoOpts.length === 0} />
                     </div>
                     <div className="form-group">
                       <Lbl>Recommended Date</Lbl>
                       <LeaveDateInput value={manualForm.recommendedDate} settings={settings}
-                        onChange={v => setMF('recommendedDate', v)} />
+                        allowPast={isAdmin} onChange={v => setMF('recommendedDate', v)} />
                     </div>
                   </div>
 
@@ -1135,14 +1083,15 @@ const LeavePanel = () => {
                   <div className="form-row">
                     <div className="form-group">
                       <Lbl>Approved By</Lbl>
-                      <SrchSel value={manualForm.approvedBy} onChange={v => setMF('approvedBy', v)}
-                        options={[{ value:'', label:'— None —' }, ...staffForRecoAppr]}
-                        placeholder="— Select Approver —" />
+                      <SearchableSelect value={manualForm.approvedBy} onChange={v => setMF('approvedBy', v)}
+                        options={manualApprOpts}
+                        placeholder={!manualForm.employeeId ? '— Select staff first —' : manualApprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
+                        disabled={!manualForm.employeeId || manualApprOpts.length === 0} />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
                       <LeaveDateInput value={manualForm.approvedDate} settings={settings}
-                        onChange={v => setMF('approvedDate', v)} />
+                        allowPast={isAdmin} onChange={v => setMF('approvedDate', v)} />
                     </div>
                   </div>
 
@@ -1187,7 +1136,7 @@ const LeavePanel = () => {
               onClick={e => e.stopPropagation()}>
 
               {/* Header */}
-              <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#e0e7ff)', position:'sticky', top:0, zIndex:10 }}>
+              <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>📝 {t('Apply for Leave')}</h2>
                 <button className="modal-close" onClick={() => setShowApply(false)}>✕</button>
               </div>
@@ -1251,7 +1200,7 @@ const LeavePanel = () => {
                         </span>
                         {ltc.reduceWeekend && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Weekends deducted</span>}
                         {ltc.reducePublicHoliday && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Holidays deducted</span>}
-                        {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#f0fdf4', color:'#52b02c' }}>Balance required</span>}
+                        {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#eff6ff', color:'#1a56db' }}>Balance required</span>}
                         {ltc.isServicePeriod && ltc.timesPerService && (
                           <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10,
                             background: timesAlreadyTaken >= ltc.timesPerService ? '#fff1f2' : '#f5f3ff',
@@ -1268,7 +1217,7 @@ const LeavePanel = () => {
                     <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none' }}>
                       <input type="checkbox" checked={applyForm.halfDay}
                         onChange={e => handleApplyChange('halfDay', e.target.checked)}
-                        style={{ width:15, height:15, accentColor:'#52b02c' }} />
+                        style={{ width:15, height:15, accentColor:'#1a56db' }} />
                       <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>Half Day</span>
                       {applyForm.halfDay && <span style={{ fontSize:11, color:'#6b7280' }}>(0.5 days will be deducted)</span>}
                     </label>
@@ -1306,11 +1255,11 @@ const LeavePanel = () => {
                   {(applyForm.halfDay || (applyForm.fromDate && applyForm.toDate)) && (
                     <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
                       {/* Days box */}
-                      <div style={{ flex:1, minWidth:120, background:'#f0fdf4', border:'1px solid #bbf7d0',
+                      <div style={{ flex:1, minWidth:120, background:'#eff6ff', border:'1px solid #bfdbfe',
                         borderRadius:8, padding:'10px 14px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                        <span style={{ fontSize:12, color:'#166534', fontWeight:600 }}>📅 No. of Days</span>
+                        <span style={{ fontSize:12, color:'#1e40af', fontWeight:600 }}>📅 No. of Days</span>
                         <input readOnly value={days} style={{ width:50, textAlign:'center', fontSize:18, fontWeight:800,
-                          color:'#52b02c', background:'transparent', border:'none', outline:'none' }} />
+                          color:'#1a56db', background:'transparent', border:'none', outline:'none' }} />
                       </div>
                       {/* Balance box */}
                       {applyForm.leaveTypeCode && (
@@ -1342,8 +1291,8 @@ const LeavePanel = () => {
                         </div>
                       )}
                       {applyForm.reco.length === 1 && (
-                        <div style={{ background:'#f0f9ff', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                          <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                        <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
+                          <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
                             {getEmpName(applyForm.reco[0])}
                           </span>
                         </div>
@@ -1410,7 +1359,7 @@ const LeavePanel = () => {
                       border:'1.5px dashed #d1d5db', borderRadius:8, cursor:'pointer',
                       background: applyForm.document ? '#f0fdf4' : '#fafafa',
                       transition:'border .15s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor='#52b02c'}
+                      onMouseEnter={e => e.currentTarget.style.borderColor='#1a56db'}
                       onMouseLeave={e => e.currentTarget.style.borderColor='#d1d5db'}>
                       <input type="file" accept="image/*,.pdf,.doc,.docx"
                         style={{ display:'none' }}
@@ -1449,7 +1398,7 @@ const LeavePanel = () => {
       {viewLeave && (
         <div className="modal-overlay">
           <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>📅 {t('Leave Application')} #{viewLeave.id}</h2>
               <button className="modal-close" onClick={() => setViewLeave(null)}>✕</button>
             </div>
@@ -1510,9 +1459,9 @@ const LeavePanel = () => {
    OFFICE VISIT PANEL
 ══════════════════════════════════════════════════ */
 const VisitPanel = () => {
-  const { currentUser, isManager, canManageStaff } = useAuth();
+  const { currentUser, isManager, canManageStaff, isAdmin } = useAuth();
   const { t } = useLanguage();
-  const { settings } = useSettings();
+  const { settings, refreshSettings } = useSettings();
   const fd = makeDateFormatter(settings);
   const { filteredVisits: officeVisits, deleteVisit, addVisit, approveVisit, rejectVisit, getEmployeeName, filteredEmployees: employees, employees: allEmployees } = useData();
   const navigate = useNavigate();
@@ -1521,6 +1470,8 @@ const VisitPanel = () => {
   const [viewVisit,      setViewVisit]     = useState(null);
   const [delConfirm,     setDelConfirm]    = useState(null);
   const [showApply,      setShowApply]     = useState(false);
+  // Refetch settings right as Apply opens — see LeavePanel's identical effect above.
+  useEffect(() => { if (showApply) refreshSettings(); }, [showApply]);
   const [showManualV,    setShowManualV]   = useState(false);
   const [manualVForm,    setManualVForm]   = useState({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:'', toDate:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualVErrors,  setManualVErrors] = useState({});
@@ -1550,7 +1501,7 @@ const VisitPanel = () => {
   };
 
   /* ── Apply form state ── */
-  const today = new Date().toISOString().split('T')[0];
+  const today = getNepalTodayISO();
 
   /* reco/approval from localStorage */
   const getMyRecoApproval = useCallback(() => {
@@ -1758,7 +1709,7 @@ const VisitPanel = () => {
             </button>
           ))}
         </div>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
           {isManager && (
             <button className="btn btn-outline btn-sm" onClick={() => navigate('/office-visit/approval')}>
               ✅ {t('Visit Approval')}
@@ -1782,7 +1733,7 @@ const VisitPanel = () => {
       {visitActionModal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background: visitActionModal.type === 'approve' ? '#f0fdf4' : '#fef2f2' }}>
+            <div className="modal-header">
               <h2>
                 {visitActionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`} — {t('Office Visit Application')}
               </h2>
@@ -1841,62 +1792,6 @@ const VisitPanel = () => {
       {showManualV && (() => {
         const setMV = (f, v) => setManualVForm(p => ({ ...p, [f]: v }));
 
-        /* inline searchable single-select */
-        const SrchSel = ({ value, onChange, options, placeholder, error }) => {
-          const [open, setSOpen] = React.useState(false);
-          const [srch, setSrch]  = React.useState('');
-          const sRef = React.useRef(null);
-          React.useEffect(() => {
-            const h = e => { if (sRef.current && !sRef.current.contains(e.target)) setSOpen(false); };
-            document.addEventListener('mousedown', h);
-            return () => document.removeEventListener('mousedown', h);
-          }, []);
-          const filtered = srch ? options.filter(o => o.label.toLowerCase().includes(srch.toLowerCase())) : options;
-          const selLabel = options.find(o => String(o.value) === String(value))?.label || '';
-          return (
-            <div ref={sRef} style={{ position:'relative' }}>
-              <div tabIndex={0} onClick={() => setSOpen(p=>!p)}
-                style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 11px', border:`1.5px solid ${error?'#f87171':open?'#52b02c':'#d1d5db'}`,
-                  borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:40,
-                  color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open?'0 0 0 2px #bbf7d0':'none', outline:'none', userSelect:'none' }}>
-                <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                  {selLabel || placeholder}
-                </span>
-                <span style={{ fontSize:9, color:'#9ca3af', flexShrink:0 }}>{open?'▲':'▼'}</span>
-              </div>
-              {open && (
-                <div style={{ position:'absolute', top:'calc(100% + 2px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
-                  boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:260, display:'flex', flexDirection:'column' }}>
-                  <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
-                    <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
-                      placeholder="Search..." onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}
-                      style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px',
-                        fontSize:13, outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div style={{ overflowY:'auto', flex:1 }}>
-                    {filtered.map(opt => (
-                      <div key={opt.value} onMouseDown={e=>{e.preventDefault(); onChange(opt.value); setSOpen(false); setSrch('');}}
-                        style={{ padding:'8px 12px', fontSize:13, cursor:'pointer',
-                          borderBottom:'1px solid #f3f4f6',
-                          background: String(value)===String(opt.value) ? '#f0fdf4' : 'white',
-                          color: String(value)===String(opt.value) ? '#166534' : '#374151',
-                          fontWeight: String(value)===String(opt.value) ? 700 : 400 }}
-                        onMouseEnter={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='#f8fafc'; }}
-                        onMouseLeave={e=>{ if(String(value)!==String(opt.value)) e.currentTarget.style.background='white'; }}>
-                        {opt.label}
-                      </div>
-                    ))}
-                    {filtered.length === 0 && <div style={{ padding:'10px 12px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results</div>}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
-
         const validateMV = () => {
           const e = {};
           if (!manualVForm.employeeId)     e.employeeId     = t('Required field');
@@ -1928,6 +1823,7 @@ const VisitPanel = () => {
             toDate:          manualVForm.toDate,
             status:          manualVForm.status,
             appliedDate:     today,
+            isManual:        true,
             recommendedBy:   manualVForm.recommendedBy   || null,
             recommendedDate: manualVForm.recommendedDate || null,
             approvedBy:      manualVForm.approvedBy      || null,
@@ -1945,8 +1841,14 @@ const VisitPanel = () => {
         );
         const Err = ({ msg }) => msg ? <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{msg}</div> : null;
         const activeEmps = allEmployees.filter(e => e.active !== false)
-          .sort((a, b) => (a.rankingOrder ?? 9999) - (b.rankingOrder ?? 9999));
-        const staffForRecoAppr = activeEmps.map(e => ({ value: String(e.id), label: e.fullName }));
+          .sort((a, b) => staffRankCompare(a, b, settings));
+        /* only staff configured (Staff Detail → Set Recommendator & Approval) for this employee */
+        const manualVCfg    = loadRecoApproval()[String(manualVForm.employeeId)] || {};
+        const toIdsV         = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map(String);
+        const manualVRecoIds = toIdsV(manualVCfg.reco);
+        const manualVApprIds = toIdsV(manualVCfg.approval);
+        const manualVRecoOpts = activeEmps.filter(e => manualVRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
+        const manualVApprOpts = activeEmps.filter(e => manualVApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
         const visitTypeOpts = (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean);
         const empOpts = activeEmps.map(e => ({ value: String(e.id), label: `${e.fullName}${e.employeeId ? ` [${e.employeeId}]` : ''}${e.department ? ` — ${e.department}` : ''}` }));
 
@@ -1954,7 +1856,7 @@ const VisitPanel = () => {
           <div className="modal-overlay">
             <div className="modal modal-lg" style={{ maxWidth:660, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
-              <div className="modal-header" style={{ background:'linear-gradient(135deg,#f5f3ff,#ede9fe)', position:'sticky', top:0, zIndex:10 }}>
+              <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>✍️ Manual Office Visit Posting</h2>
                 <button className="modal-close" onClick={() => setShowManualV(false)}>✕</button>
               </div>
@@ -1966,8 +1868,11 @@ const VisitPanel = () => {
                   {/* Staff */}
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
-                    <SrchSel value={manualVForm.employeeId} onChange={v => setMV('employeeId', v)}
-                      options={empOpts} placeholder="— Search & Select Staff —" error={!!manualVErrors.employeeId} />
+                    <div style={{ outline: manualVErrors.employeeId ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
+                      <SearchableSelect value={manualVForm.employeeId}
+                        onChange={v => setManualVForm(p => ({ ...p, employeeId: v, recommendedBy: '', approvedBy: '' }))}
+                        options={empOpts} placeholder="— Search & Select Staff —" />
+                    </div>
                     <Err msg={manualVErrors.employeeId} />
                   </div>
 
@@ -1975,9 +1880,11 @@ const VisitPanel = () => {
                   <div className="form-group">
                     <Lbl required>Official Visit</Lbl>
                     {visitTypeOpts.length > 0
-                      ? <SrchSel value={manualVForm.officialVisit} onChange={v => setMV('officialVisit', v)}
-                          options={visitTypeOpts.map(vt => ({ value: vt, label: vt }))}
-                          placeholder="— Select Visit Type —" error={!!manualVErrors.officialVisit} />
+                      ? <div style={{ outline: manualVErrors.officialVisit ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
+                          <SearchableSelect value={manualVForm.officialVisit} onChange={v => setMV('officialVisit', v)}
+                            options={visitTypeOpts.map(vt => ({ value: vt, label: vt }))}
+                            placeholder="— Select Visit Type —" />
+                        </div>
                       : <input type="text" className={`form-control ${manualVErrors.officialVisit ? 'error' : ''}`}
                           placeholder="Enter visit name..." value={manualVForm.officialVisit}
                           onChange={e => setMV('officialVisit', e.target.value)} style={{ fontSize:13 }} />
@@ -1991,13 +1898,13 @@ const VisitPanel = () => {
                     <div style={{ display:'flex', gap:10 }}>
                       {['National','International'].map(vt => (
                         <label key={vt} style={{ display:'flex', alignItems:'center', gap:7, cursor:'pointer', userSelect:'none',
-                          padding:'7px 16px', border:`1.5px solid ${manualVForm.visitType===vt?'#52b02c':'#d1d5db'}`,
-                          borderRadius:8, background: manualVForm.visitType===vt?'#f0fdf4':'white',
+                          padding:'7px 16px', border:`1.5px solid ${manualVForm.visitType===vt?'#1a56db':'#d1d5db'}`,
+                          borderRadius:8, background: manualVForm.visitType===vt?'#eff6ff':'white',
                           fontSize:13, fontWeight: manualVForm.visitType===vt?700:400,
-                          color: manualVForm.visitType===vt?'#52b02c':'#374151' }}>
+                          color: manualVForm.visitType===vt?'#1a56db':'#374151' }}>
                           <input type="radio" name="mvVisitType" value={vt}
                             checked={manualVForm.visitType===vt} onChange={() => setMV('visitType', vt)}
-                            style={{ accentColor:'#52b02c' }} />
+                            style={{ accentColor:'#1a56db' }} />
                           {vt==='National'?'🇳🇵 National':'🌍 International'}
                         </label>
                       ))}
@@ -2036,13 +1943,13 @@ const VisitPanel = () => {
                     <div className="form-group">
                       <Lbl required>From Date</Lbl>
                       <LeaveDateInput value={manualVForm.fromDate} error={!!manualVErrors.fromDate}
-                        settings={settings} onChange={v => setMV('fromDate', v)} />
+                        settings={settings} allowPast={isAdmin} onChange={v => setMV('fromDate', v)} />
                       <Err msg={manualVErrors.fromDate} />
                     </div>
                     <div className="form-group">
                       <Lbl required>To Date</Lbl>
                       <LeaveDateInput value={manualVForm.toDate} error={!!manualVErrors.toDate}
-                        min={manualVForm.fromDate} settings={settings} onChange={v => setMV('toDate', v)} />
+                        min={manualVForm.fromDate} settings={settings} allowPast={isAdmin} onChange={v => setMV('toDate', v)} />
                       <Err msg={manualVErrors.toDate} />
                     </div>
                   </div>
@@ -2062,14 +1969,15 @@ const VisitPanel = () => {
                   <div className="form-row">
                     <div className="form-group">
                       <Lbl>Recommended By</Lbl>
-                      <SrchSel value={manualVForm.recommendedBy} onChange={v => setMV('recommendedBy', v)}
-                        options={[{ value:'', label:'— None —' }, ...staffForRecoAppr]}
-                        placeholder="— Select Recommendator —" />
+                      <SearchableSelect value={manualVForm.recommendedBy} onChange={v => setMV('recommendedBy', v)}
+                        options={manualVRecoOpts}
+                        placeholder={!manualVForm.employeeId ? '— Select staff first —' : manualVRecoOpts.length === 0 ? 'No recommendator configured' : '— Select Recommendator —'}
+                        disabled={!manualVForm.employeeId || manualVRecoOpts.length === 0} />
                     </div>
                     <div className="form-group">
                       <Lbl>Recommended Date</Lbl>
                       <LeaveDateInput value={manualVForm.recommendedDate} settings={settings}
-                        onChange={v => setMV('recommendedDate', v)} />
+                        allowPast={isAdmin} onChange={v => setMV('recommendedDate', v)} />
                     </div>
                   </div>
 
@@ -2077,14 +1985,15 @@ const VisitPanel = () => {
                   <div className="form-row">
                     <div className="form-group">
                       <Lbl>Approved By</Lbl>
-                      <SrchSel value={manualVForm.approvedBy} onChange={v => setMV('approvedBy', v)}
-                        options={[{ value:'', label:'— None —' }, ...staffForRecoAppr]}
-                        placeholder="— Select Approver —" />
+                      <SearchableSelect value={manualVForm.approvedBy} onChange={v => setMV('approvedBy', v)}
+                        options={manualVApprOpts}
+                        placeholder={!manualVForm.employeeId ? '— Select staff first —' : manualVApprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
+                        disabled={!manualVForm.employeeId || manualVApprOpts.length === 0} />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
                       <LeaveDateInput value={manualVForm.approvedDate} settings={settings}
-                        onChange={v => setMV('approvedDate', v)} />
+                        allowPast={isAdmin} onChange={v => setMV('approvedDate', v)} />
                     </div>
                   </div>
 
@@ -2122,45 +2031,82 @@ const VisitPanel = () => {
         const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
           const [open, setOpen] = React.useState(false);
           const [srch, setSrch] = React.useState('');
+          const [activeIndex, setActiveIndex] = React.useState(-1);
           const ref = React.useRef(null);
+          const itemRefs = React.useRef([]);
           React.useEffect(() => {
             const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
             document.addEventListener('mousedown', h);
             return () => document.removeEventListener('mousedown', h);
           }, []);
           const filtered = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
+          itemRefs.current = [];
+
+          const select = (v) => { onChange(v); setOpen(false); setSrch(''); setActiveIndex(-1); };
+          const openWithHighlight = () => {
+            const idx = filtered.indexOf(value);
+            setActiveIndex(idx >= 0 ? idx : (filtered.length ? 0 : -1));
+            setOpen(true);
+          };
+          const handleTriggerKeyDown = e => {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              open ? setOpen(false) : openWithHighlight();
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          };
+          const handleSearchKeyDown = e => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setActiveIndex(i => (filtered.length ? (i + 1) % filtered.length : -1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActiveIndex(i => (filtered.length ? (i - 1 + filtered.length) % filtered.length : -1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (activeIndex >= 0 && filtered[activeIndex] !== undefined) select(filtered[activeIndex]);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setOpen(false);
+            }
+          };
+          React.useEffect(() => {
+            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+          }, [activeIndex, open]);
+          React.useEffect(() => { if (open) setActiveIndex(filtered.length ? 0 : -1); }, [srch]);
           return (
             <div ref={ref} style={{ position:'relative' }}>
-              <div tabIndex={0} onClick={() => setOpen(p=>!p)}
-                onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setOpen(p=>!p); } if (e.key==='Escape') setOpen(false); }}
+              <div tabIndex={0} onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
+                onKeyDown={handleTriggerKeyDown}
                 style={{
                   display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'9px 12px', border:`1.5px solid ${error?'#f87171':open?'#52b02c':'#d1d5db'}`,
+                  padding:'9px 12px', border:`1.5px solid ${error?'#f87171':open?'#1a56db':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:42,
                   color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline:'none', userSelect:'none',
+                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none',
                 }}>
                 <span>{value || placeholder}</span>
                 <span style={{ fontSize:9, color:'#9ca3af', flexShrink:0 }}>{open?'▲':'▼'}</span>
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
+                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:240, display:'flex', flexDirection:'column' }}>
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
-                      placeholder="Search..." onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}
+                      placeholder="Search..." onClick={e=>e.stopPropagation()} onKeyDown={handleSearchKeyDown}
                       style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 9px',
                         fontSize:13, outline:'none', boxSizing:'border-box' }} />
                   </div>
                   <div style={{ overflowY:'auto', flex:1 }}>
-                    {filtered.map(opt => (
-                      <div key={opt} onMouseDown={e=>{e.preventDefault(); onChange(opt); setOpen(false); setSrch('');}}
+                    {filtered.map((opt, i) => (
+                      <div key={opt} ref={el => itemRefs.current[i] = el}
+                        onMouseDown={e=>{e.preventDefault(); select(opt);}}
+                        onMouseEnter={() => setActiveIndex(i)}
                         style={{ padding:'9px 12px', fontSize:13, cursor:'pointer', borderBottom:'1px solid #f3f4f6',
-                          background: value===opt ? '#f0fdf4' : 'white',
-                          color: value===opt ? '#166534' : '#374151', fontWeight: value===opt ? 700 : 400 }}
-                        onMouseEnter={e=>{ if(value!==opt) e.currentTarget.style.background='#f8fafc'; }}
-                        onMouseLeave={e=>{ if(value!==opt) e.currentTarget.style.background='white'; }}>
+                          background: value===opt ? '#eff6ff' : (i===activeIndex ? '#f8fafc' : 'white'),
+                          color: value===opt ? '#1e40af' : '#374151', fontWeight: value===opt ? 700 : 400 }}>
                         {opt}
                       </div>
                     ))}
@@ -2177,7 +2123,7 @@ const VisitPanel = () => {
         return (
           <div className="modal-overlay">
             <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'92vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
-              <div className="modal-header" style={{ background:'linear-gradient(135deg,#ecfdf5,#d1fae5)', position:'sticky', top:0, zIndex:10 }}>
+              <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>🏢 {t('Apply for Visit')}</h2>
                 <button className="modal-close" onClick={() => setShowApply(false)}>✕</button>
               </div>
@@ -2220,14 +2166,14 @@ const VisitPanel = () => {
                     <div style={{ display:'flex', gap:10, marginTop:4 }}>
                       {['National','International'].map(vt => (
                         <label key={vt} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none',
-                          padding:'8px 18px', border:`1.5px solid ${applyForm.visitType===vt?'#52b02c':'#d1d5db'}`,
-                          borderRadius:8, background: applyForm.visitType===vt ? '#f0fdf4' : 'white',
+                          padding:'8px 18px', border:`1.5px solid ${applyForm.visitType===vt?'#1a56db':'#d1d5db'}`,
+                          borderRadius:8, background: applyForm.visitType===vt ? '#eff6ff' : 'white',
                           fontSize:13, fontWeight: applyForm.visitType===vt ? 700 : 400,
-                          color: applyForm.visitType===vt ? '#52b02c' : '#374151', transition:'all .12s' }}>
+                          color: applyForm.visitType===vt ? '#1a56db' : '#374151', transition:'all .12s' }}>
                           <input type="radio" name="visitTypeModal" value={vt}
                             checked={applyForm.visitType===vt}
                             onChange={() => handleApplyChange('visitType', vt)}
-                            style={{ accentColor:'#52b02c', width:14, height:14 }} />
+                            style={{ accentColor:'#1a56db', width:14, height:14 }} />
                           {vt==='National' ? '🇳🇵 National' : '🌍 International'}
                         </label>
                       ))}
@@ -2291,7 +2237,7 @@ const VisitPanel = () => {
                         {applyForm.reco.length > 0
                           ? <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                               {applyForm.reco.map(id => (
-                                <span key={id} style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:10, padding:'2px 10px', fontSize:12, fontWeight:600 }}>
+                                <span key={id} style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 10px', fontSize:12, fontWeight:600 }}>
                                   {getEmpNameForVisit(id)}
                                 </span>
                               ))}
@@ -2361,7 +2307,7 @@ const VisitPanel = () => {
       {viewVisit && (
         <div className="modal-overlay">
           <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>🏢 {t('Office Visit Application')} #{viewVisit.id}</h2>
               <button className="modal-close" onClick={() => setViewVisit(null)}>✕</button>
             </div>
@@ -2436,7 +2382,7 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   const tabs = [
-    { key:'leave', icon:'📅', label:t('Leave Management'), badge: isManager ? stats.pendingLeaves : 0, color:'#52b02c', bg:'#f0fdf4', border:'#52b02c' },
+    { key:'leave', icon:'📅', label:t('Leave Management'), badge: isManager ? stats.pendingLeaves : 0, color:'#1a56db', bg:'#eff6ff', border:'#1a56db' },
     { key:'visit', icon:'🏢', label:t('Office Visit'),     badge: isManager ? stats.pendingVisits : 0, color:'#059669', bg:'#ecfdf5', border:'#059669' },
   ];
 

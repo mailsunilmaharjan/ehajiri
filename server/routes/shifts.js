@@ -14,6 +14,7 @@ const toRow = r => ({
   gracePeriodStart     : r.grace_period_start,
   gracePeriodEnd       : r.grace_period_end,
   makeDefault          : r.make_default,
+  isOff                : r.is_off,
   active               : r.active,
   color                : r.color,
   exceptionalDayEnabled: r.exceptional_day_enabled,

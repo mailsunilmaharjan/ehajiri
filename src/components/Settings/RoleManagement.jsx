@@ -1,14 +1,15 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useAuth, DEFAULT_PAGE_PERMISSIONS, savePagePermissions } from '../../context/AuthContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import api from '../../api/client.js';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Role metadata
 ───────────────────────────────────────────────────────────────────────── */
 const ROLE_META = {
   admin:          { label: 'System Admin',   color: '#7e3af2', bg: '#ede9fe', icon: '👑' },
-  branchManager:  { label: 'Branch Manager', color: '#52b02c', bg: '#dcfce7', icon: '🏢' },
+  branchManager:  { label: 'Branch Manager', color: '#1a56db', bg: '#dbeafe', icon: '🏢' },
   departmentHead: { label: 'Dept. Head',     color: '#0e9f6e', bg: '#d1fae5', icon: '🏛️' },
   employee:       { label: 'Employee',       color: '#6b7280', bg: '#f3f4f6', icon: '👤' },
 };
@@ -28,6 +29,7 @@ const MATRIX_GROUPS = [
     pages: [
       { key: 'staffDetail',  label: 'Staff Details', icon: '👥' },
       { key: 'myNotes',      label: 'My Notes',      icon: '📝' },
+      { key: 'task',         label: 'Task',          icon: '✅' },
       { key: 'staffContact', label: 'Contact',        icon: '📞', alwaysOn: true },
     ],
   },
@@ -37,6 +39,7 @@ const MATRIX_GROUPS = [
       { key: 'leave',               label: 'Leave & Office Visit List', icon: '📅' },
       { key: 'leaveApply',          label: 'Apply for Leave',           icon: '📝' },
       { key: 'officeVisitApply',    label: 'Apply for Office Visit',    icon: '🚗' },
+      { key: 'manualPostingApply',  label: 'Inform Late In/Early Out',  icon: '⏱️' },
       { key: 'leaveApproval',       label: 'Leave Approval',            icon: '✅' },
       { key: 'officeVisitApproval', label: 'Office Visit Approval',     icon: '✅' },
       { key: 'leaveCalculation',    label: 'Leave Calculation',         icon: '🧮', noDelete: true },
@@ -89,17 +92,19 @@ const OVERRIDE_GROUPS = [
     desc: 'Staff section pages',
     pages: [
       { key: 'myNotes',      label: 'My Notes', icon: '📝' },
+      { key: 'task',         label: 'Task',     icon: '✅' },
       { key: 'staffContact', label: 'Contact',  icon: '📞', alwaysOn: true },
     ],
   },
   {
     group: 'Branches',
-    color: '#52b02c', bg: '#f0fdf4',
+    color: '#1a56db', bg: '#eff6ff',
     desc: 'Branch-level access & approvals',
     pages: [
       { key: 'leave',               label: 'Leave & Office Visit', icon: '📅' },
       { key: 'leaveApply',          label: 'Apply for Leave',      icon: '📝' },
       { key: 'officeVisitApply',    label: 'Apply Office Visit',   icon: '🚗' },
+      { key: 'manualPostingApply',  label: 'Inform Late/Early',    icon: '⏱️' },
       { key: 'leaveApproval',       label: 'Leave Approval',       icon: '✅' },
       { key: 'officeVisitApproval', label: 'OV Approval',          icon: '✅' },
       { key: 'leaveCalculation',    label: 'Leave Calculation',    icon: '🧮', noDelete: true },
@@ -132,7 +137,7 @@ const OVERRIDE_GROUPS = [
 const ROLES_FOR_MATRIX = [
   { key: 'employee',       label: 'Employee',       color: '#6b7280', bg: '#f3f4f6' },
   { key: 'departmentHead', label: 'Dept. Head',     color: '#0e9f6e', bg: '#d1fae5' },
-  { key: 'branchManager',  label: 'Branch Manager', color: '#52b02c', bg: '#dcfce7' },
+  { key: 'branchManager',  label: 'Branch Manager', color: '#1a56db', bg: '#dbeafe' },
 ];
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -171,11 +176,11 @@ const PermCell = ({ perm, onChange, disabled, noDelete, disabledLabel = 'Admin o
 
   const fields = noDelete
     ? [
-        { key: 'view', label: 'View', color: '#52b02c' },
+        { key: 'view', label: 'View', color: '#1a56db' },
         { key: 'edit', label: 'Edit', color: '#059669' },
       ]
     : [
-        { key: 'view',   label: 'View',   color: '#52b02c' },
+        { key: 'view',   label: 'View',   color: '#1a56db' },
         { key: 'edit',   label: 'Edit',   color: '#059669' },
         { key: 'delete', label: 'Delete', color: '#dc2626' },
       ];
@@ -191,7 +196,7 @@ const PermCell = ({ perm, onChange, disabled, noDelete, disabledLabel = 'Admin o
             disabled={key !== 'view' && !p.view}
             onChange={() => toggle(key)}
             style={{ accentColor: color, width: 13, height: 13 }} />
-          <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{label}</span>
+          <span style={{ fontSize: 12.5, color: '#374151', fontWeight: 500 }}>{label}</span>
         </label>
       ))}
       {noDelete && (
@@ -205,7 +210,7 @@ const PermCell = ({ perm, onChange, disabled, noDelete, disabledLabel = 'Admin o
    Staff Override Section
 ───────────────────────────────────────────────────────────────────────── */
 const StaffOverrideSection = ({ employees, saved, onSave }) => {
-  const ROLE_COLORS = { admin: '#7e3af2', branchManager: '#52b02c', departmentHead: '#0e9f6e', employee: '#6b7280' };
+  const ROLE_COLORS = { admin: '#7e3af2', branchManager: '#1a56db', departmentHead: '#0e9f6e', employee: '#6b7280' };
   const ROLE_LABELS = { admin: 'Admin', branchManager: 'Branch Mgr', departmentHead: 'Dept. Head', employee: 'Employee' };
 
   const [selEmpId,  setSelEmpId]  = useState('');
@@ -279,7 +284,7 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
                   onClick={() => { selectEmp(String(e.id)); setSearch(e.fullName); }}
                   style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13,
                     borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}
-                  onMouseEnter={el => el.currentTarget.style.background = '#f0fdf4'}
+                  onMouseEnter={el => el.currentTarget.style.background = '#eff6ff'}
                   onMouseLeave={el => el.currentTarget.style.background = 'white'}>
                   <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                     background: (ROLE_COLORS[e.role] || '#6b7280') + '22',
@@ -326,7 +331,7 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
                 <span style={{ fontSize: 12, color: '#6b7280' }}>— {grp.desc}</span>
               </div>
               <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                   <thead>
                     <tr style={{ background: '#f8fafc' }}>
                       <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, fontSize: 12,
@@ -342,9 +347,9 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
                       const hasOverride = overrides[page.key] !== undefined;
                       const currPerm    = overrides[page.key] || { view: false, edit: false, delete: false };
                       return (
-                        <tr key={page.key} style={{ background: hasOverride ? grp.bg : (pi % 2 === 0 ? 'white' : '#f9fafb') }}>
+                        <tr key={page.key} style={{ background: hasOverride ? grp.bg : (pi % 2 === 0 ? 'white' : '#f3f4f6') }}>
                           <td style={{ padding: '9px 14px', fontWeight: hasOverride ? 700 : 400,
-                            borderBottom: '1px solid #eef0f4', fontSize: 13 }}>
+                            borderBottom: '1px solid #eef0f4' }}>
                             <span style={{ marginRight: 7 }}>{page.icon}</span>{page.label}
                             {hasOverride && (
                               <span style={{ marginLeft: 8, fontSize: 10, background: grp.color,
@@ -386,7 +391,7 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
 
           <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
             <button onClick={handleSave} title="Ctrl+S"
-              style={{ padding: '9px 26px', border: 'none', borderRadius: 8, background: '#52b02c',
+              style={{ padding: '9px 26px', border: 'none', borderRadius: 8, background: '#1a56db',
                 color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
               💾 <u>S</u>ave Overrides
             </button>
@@ -474,12 +479,12 @@ const StaffRoleAssignment = ({ employees, updateEmployee }) => {
       </div>
 
       <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead>
             <tr style={{ background: '#f0f5fa' }}>
               {['Staff Name', 'Department', 'Branch', 'Current Role', 'Change Role'].map(h => (
                 <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700,
-                  fontSize: 13, borderBottom: '2px solid #dce6f0' }}>{h}</th>
+                  borderBottom: '2px solid #dce6f0' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -487,7 +492,7 @@ const StaffRoleAssignment = ({ employees, updateEmployee }) => {
             {active.map((emp, i) => {
               const meta = ROLE_META[emp.role] || ROLE_META.employee;
               return (
-                <tr key={emp.id} style={{ background: i % 2 === 0 ? 'white' : '#f9fafb' }}>
+                <tr key={emp.id} style={{ background: i % 2 === 0 ? 'white' : '#f3f4f6' }}>
                   <td style={{ padding: '9px 14px', borderBottom: '1px solid #eef0f4', fontWeight: 600 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 30, height: 30, borderRadius: '50%', background: meta.bg,
@@ -496,19 +501,19 @@ const StaffRoleAssignment = ({ employees, updateEmployee }) => {
                         {emp.avatar || emp.fullName?.[0] || '?'}
                       </div>
                       <div>
-                        <div style={{ fontSize: 13 }}>{emp.fullName}</div>
+                        <div>{emp.fullName}</div>
                         {emp.employeeId && <div style={{ fontSize: 11, color: '#9ca3af' }}>{emp.employeeId}</div>}
                       </div>
                     </div>
                   </td>
-                  <td style={{ padding: '9px 14px', borderBottom: '1px solid #eef0f4', fontSize: 13, color: '#374151' }}>
+                  <td style={{ padding: '9px 14px', borderBottom: '1px solid #eef0f4', color: '#374151' }}>
                     {emp.department || '—'}
                   </td>
-                  <td style={{ padding: '9px 14px', borderBottom: '1px solid #eef0f4', fontSize: 13, color: '#374151' }}>
+                  <td style={{ padding: '9px 14px', borderBottom: '1px solid #eef0f4', color: '#374151' }}>
                     {emp.branch || '—'}
                   </td>
                   <td style={{ padding: '9px 14px', borderBottom: '1px solid #eef0f4' }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, padding: '3px 10px', borderRadius: 10,
+                    <span style={{ fontWeight: 700, padding: '3px 10px', borderRadius: 10,
                       background: meta.bg, color: meta.color, border: `1px solid ${meta.color}44` }}>
                       {meta.icon} {meta.label}
                     </span>
@@ -536,7 +541,7 @@ const StaffRoleAssignment = ({ employees, updateEmployee }) => {
               );
             })}
             {active.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: 28, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+              <tr><td colSpan={5} style={{ padding: 28, textAlign: 'center', color: '#9ca3af' }}>
                 No staff found
               </td></tr>
             )}
@@ -554,12 +559,45 @@ const StaffRoleAssignment = ({ employees, updateEmployee }) => {
    MAIN — RoleManagement
 ═══════════════════════════════════════════════════════════════════════════ */
 const RoleManagement = () => {
-  const { refreshPagePerms } = useAuth();
+  const { refreshPagePerms, isAdmin, isSuperAdmin } = useAuth();
   const { employees, updateEmployee } = useData();
 
   const [activeTab, setActiveTab] = useState('matrix');
   const [saved,     setSaved]     = useState(loadSaved);
   const [saveMsg,   setSaveMsg]   = useState('');
+
+  /* ── Module Controls tab — global on/off flags (Email Setup / StandAlone
+     Device), stored server-side in app_settings, NOT per-role like the
+     matrix above. Email Setup is Super Admin only; StandAlone Device follows
+     the same admin/superAdmin rule as its own in-page toggle (Settings →
+     StandAlone Device), duplicated here so it can be turned on before that
+     page is even reachable (its tab is hidden until this flag is enabled). */
+  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false });
+  const [moduleFlagsLoading, setModuleFlagsLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/module-flags')
+      .then(f => setModuleFlags(f))
+      .catch(() => {})
+      .finally(() => setModuleFlagsLoading(false));
+  }, []);
+
+  const MODULE_FLAG_FIELD = {
+    module_attendance_device_enabled: 'attendanceDeviceEnabled',
+    module_standalone_device_enabled: 'standaloneDeviceEnabled',
+    module_email_setup_enabled:       'emailSetupEnabled',
+  };
+
+  const toggleModuleFlag = async (flagKey) => {
+    const field = MODULE_FLAG_FIELD[flagKey];
+    const next = !moduleFlags[field];
+    try {
+      await api.put('/settings', { [flagKey]: next });
+      setModuleFlags(f => ({ ...f, [field]: next }));
+    } catch (err) {
+      alert(`Failed to update: ${err.message}`);
+    }
+  };
 
   /* Build editable role permissions: merge saved → defaults */
   const [rolePerms, setRolePerms] = useState(() => {
@@ -612,6 +650,7 @@ const RoleManagement = () => {
     { key: 'matrix',     label: '📋 Permission Matrix'     },
     { key: 'overrides',  label: '🔧 Staff Page Overrides'  },
     { key: 'assignment', label: '🔄 Staff Role Assignment' },
+    { key: 'modules',    label: '🧩 Module Controls'       },
   ];
 
   return (
@@ -631,7 +670,7 @@ const RoleManagement = () => {
       {/* Legend */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         {[
-          { dot: '#52b02c', label: 'View — can open & read the page' },
+          { dot: '#1a56db', label: 'View — can open & read the page' },
           { dot: '#059669', label: 'Edit — can add or modify records' },
           { dot: '#dc2626', label: 'Delete — can delete records' },
           { dot: '#7e3af2', label: 'Admin — always full access (fixed)' },
@@ -666,17 +705,17 @@ const RoleManagement = () => {
         {activeTab === 'matrix' && (
           <div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                 <thead>
                   <tr style={{ background: '#f0f5fa' }}>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, fontSize: 13,
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700,
                       borderBottom: '2px solid #c8d6e5', minWidth: 200,
                       position: 'sticky', left: 0, background: '#f0f5fa', zIndex: 2 }}>
                       Page / Feature
                     </th>
                     {ROLES_FOR_MATRIX.map(r => (
                       <th key={r.key} style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700,
-                        fontSize: 13, borderBottom: '2px solid #c8d6e5', minWidth: 220,
+                        borderBottom: '2px solid #c8d6e5', minWidth: 220,
                         background: r.bg, color: r.color, borderLeft: '1px solid #dce6f0' }}>
                         <div style={{ marginBottom: 6 }}>{r.label}</div>
                         <button onClick={() => resetRole(r.key)}
@@ -687,7 +726,7 @@ const RoleManagement = () => {
                       </th>
                     ))}
                     {/* Admin column — always full */}
-                    <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700, fontSize: 13,
+                    <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700,
                       borderBottom: '2px solid #c8d6e5', minWidth: 160,
                       background: '#ede9fe', color: '#7e3af2', borderLeft: '1px solid #dce6f0' }}>
                       <div>👑 System Admin</div>
@@ -708,10 +747,10 @@ const RoleManagement = () => {
                         </td>
                       </tr>
                       {grp.pages.map((page, pi) => (
-                        <tr key={page.key} style={{ background: pi % 2 === 0 ? 'white' : '#f9fafb' }}>
+                        <tr key={page.key} style={{ background: pi % 2 === 0 ? 'white' : '#f3f4f6' }}>
                           <td style={{ padding: '10px 14px', borderBottom: '1px solid #eef0f4',
-                            fontSize: 13, fontWeight: 500,
-                            position: 'sticky', left: 0, background: pi % 2 === 0 ? 'white' : '#f9fafb', zIndex: 1 }}>
+                            fontWeight: 500,
+                            position: 'sticky', left: 0, background: pi % 2 === 0 ? 'white' : '#f3f4f6', zIndex: 1 }}>
                             <span style={{ marginRight: 8 }}>{page.icon}</span>{page.label}
                           </td>
                           {ROLES_FOR_MATRIX.map(r => (
@@ -730,7 +769,7 @@ const RoleManagement = () => {
                           <td style={{ padding: '8px 12px', textAlign: 'center',
                             borderBottom: '1px solid #eef0f4', borderLeft: '1px solid #f3f4f6',
                             background: '#faf5ff' }}>
-                            <span style={{ fontSize: 13, color: '#7e3af2', fontWeight: 600 }}>
+                            <span style={{ color: '#7e3af2', fontWeight: 600 }}>
                               {page.noDelete ? '✓ View + Edit' : '✓ View + Edit + Delete'}
                             </span>
                           </td>
@@ -744,9 +783,9 @@ const RoleManagement = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 18 }}>
               <button onClick={handleSaveMatrix} title="Ctrl+S"
-                style={{ padding: '10px 28px', border: 'none', borderRadius: 8, background: '#52b02c',
+                style={{ padding: '10px 28px', border: 'none', borderRadius: 8, background: '#1a56db',
                   color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(82,176,44,.3)' }}>
+                  boxShadow: '0 2px 8px rgba(26,86,219,.3)' }}>
                 💾 <u>S</u>ave Permission Matrix
               </button>
               {saveMsg && <span style={{ fontSize: 13, color: '#059669', fontWeight: 700 }}>✅ {saveMsg}</span>}
@@ -773,6 +812,69 @@ const RoleManagement = () => {
         {/* ── STAFF ROLE ASSIGNMENT TAB ── */}
         {activeTab === 'assignment' && (
           <StaffRoleAssignment employees={employees} updateEmployee={updateEmployee} />
+        )}
+
+        {/* ── MODULE CONTROLS TAB — global on/off flags, not per-role ── */}
+        {activeTab === 'modules' && (
+          <div>
+            <p style={{ fontSize: 13, color: '#6b7280', marginTop: 0, marginBottom: 18 }}>
+              These are global switches, not per-role permissions — each one hides its
+              feature from <strong>every</strong> role (including System Admin) until enabled here.
+            </p>
+
+            {moduleFlagsLoading ? (
+              <div style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                {/* Email Setup — Super Admin only */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.emailSetupEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.emailSetupEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>📧 Email Setup</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.emailSetupEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.emailSetupEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.emailSetupEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_email_setup_enabled')}>
+                      {moduleFlags.emailSetupEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+
+                {/* StandAlone Device — admin/superAdmin */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.standaloneDeviceEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.standaloneDeviceEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>🖥️ StandAlone Device</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.standaloneDeviceEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.standaloneDeviceEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Admin/Super Admin'}
+                    </div>
+                  </div>
+                  {isAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.standaloneDeviceEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_standalone_device_enabled')}>
+                      {moduleFlags.standaloneDeviceEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Admin only</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

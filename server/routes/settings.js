@@ -4,6 +4,7 @@ import { logAudit } from '../services/auditLog.js';
 import { startStandaloneBridge, stopStandaloneBridge } from '../services/standaloneBridgeLauncher.js';
 import { startStandaloneScheduler, stopStandaloneScheduler } from '../services/standaloneScheduler.js';
 import { invalidateModuleFlagsCache, FLAG_KEYS } from '../utils/moduleFlags.js';
+import { invalidateAppSettingsCache } from '../utils/appSettings.js';
 import { requireRole } from '../middleware/roleGuard.js';
 
 const router = Router();
@@ -14,7 +15,7 @@ const canManageSettings = requireRole('admin', 'superAdmin');
 /* ─── Generic key-value settings ─── */
 router.get('/', async (_req, res) => {
   try {
-    const [{ rows: settingsRows }, { rows: statusRows }] = await Promise.all([
+    const [{ rows: settingsRows }, { rows: statusRows }, { rows: weekendRows }] = await Promise.all([
       pool.query('SELECT key, value FROM app_settings'),
       pool.query(`
         SELECT id, name,
@@ -24,16 +25,31 @@ router.get('/', async (_req, res) => {
         FROM employee_statuses
         ORDER BY id
       `),
+      pool.query(`
+        SELECT id, weekends,
+               effective_date AS "effectiveDate",
+               changed_date   AS "changedDate",
+               changed_by     AS "changedBy",
+               reason
+        FROM weekend_history
+        ORDER BY effective_date
+      `),
     ]);
 
     const obj = {};
     settingsRows.forEach(r => { obj[r.key] = r.value; });
 
-    /* Always inject live statuses from the dedicated table so the frontend
-       sees DB-authoritative system data even before the user saves settings. */
-    if (statusRows.length > 0) {
+    /* Always inject live statuses/weekend history from their dedicated tables
+       so the frontend sees DB-authoritative data — these are what attendance
+       reports actually query (weekend_history in particular drives every
+       report's Present/Absent/Weekend classification), not whatever's cached
+       in this generic blob. Reports never read app_settings directly, so a
+       weekendHistory edit that only landed here would silently never apply. */
+    if (statusRows.length > 0 || weekendRows.length > 0) {
       if (!obj.main) obj.main = {};
-      obj.main = { ...(typeof obj.main === 'object' ? obj.main : {}), statuses: statusRows };
+      obj.main = { ...(typeof obj.main === 'object' ? obj.main : {}) };
+      if (statusRows.length > 0)  obj.main.statuses = statusRows;
+      if (weekendRows.length > 0) obj.main.weekendHistory = weekendRows;
     }
 
     res.json(obj);
@@ -54,6 +70,8 @@ router.put('/', canManageSettings, async (req, res) => {
     }
     await client.query('COMMIT');
     logAudit({ actor: req.user, action: 'update', entity: 'settings', entityId: null, before: null, after: settings });
+
+    if ('main' in settings) invalidateAppSettingsCache();
 
     if (FLAG_KEYS.standaloneDevice in settings) {
       invalidateModuleFlagsCache();
@@ -78,7 +96,7 @@ router.put('/', canManageSettings, async (req, res) => {
 /* ─── Setup lists (fiscal years, departments, etc.) ─── */
 const SETUP_TABLES = {
   fiscalYears      : { table: 'fiscal_years',      cols: ['name','start_date','end_date','is_default','is_system'] },
-  branches         : { table: 'branches',           cols: ['name','short_name','address','phone'] },
+  branches         : { table: 'branches',           cols: ['name','short_name','address','phone','ranking_order'] },
   departments      : { table: 'departments',        cols: ['name','short_name','ranking_order','is_default','is_system'] },
   posts            : { table: 'posts',              cols: ['name','short_name','ranking_order','is_default','is_system'] },
   grades           : { table: 'grades',             cols: ['name'] },
@@ -87,6 +105,8 @@ const SETUP_TABLES = {
   statuses         : { table: 'employee_statuses',  cols: ['name','status_type','is_default','is_system'] },
   jobTimings       : { table: 'job_timings',        cols: ['name','is_default','is_system'] },
   weekendHistory   : { table: 'weekend_history',    cols: ['weekends','effective_date','changed_date','changed_by','reason'] },
+  taskCategories   : { table: 'task_categories',    cols: ['name','ranking_order'] },
+  taskPriorities   : { table: 'task_priorities',    cols: ['name','color','ranking_order'] },
 };
 
 router.get('/:list', async (req, res) => {

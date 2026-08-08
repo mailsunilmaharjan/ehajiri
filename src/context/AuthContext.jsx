@@ -16,10 +16,12 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: false, edit: false, delete: false },
     myNotes:               { view: true,  edit: true,  delete: true  },
+    task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: false },
     leave:                 { view: true,  edit: false, delete: false },
     leaveApply:            { view: true,  edit: true,  delete: false },
     officeVisitApply:      { view: true,  edit: true,  delete: false },
+    manualPostingApply:    { view: true,  edit: true,  delete: false },
     leaveApproval:         { view: false, edit: false, delete: false },
     officeVisitApproval:   { view: false, edit: false, delete: false },
     leaveCalculation:      { view: true,  edit: false, delete: false },
@@ -40,10 +42,12 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: false, edit: false, delete: false },
     myNotes:               { view: true,  edit: true,  delete: true  },
+    task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: false },
     leave:                 { view: true,  edit: false, delete: false },
     leaveApply:            { view: true,  edit: true,  delete: false },
     officeVisitApply:      { view: true,  edit: true,  delete: false },
+    manualPostingApply:    { view: true,  edit: true,  delete: false },
     leaveApproval:         { view: true,  edit: true,  delete: false },
     officeVisitApproval:   { view: true,  edit: true,  delete: false },
     leaveCalculation:      { view: true,  edit: false, delete: false },
@@ -64,10 +68,12 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: true,  edit: true,  delete: true  },
     myNotes:               { view: true,  edit: true,  delete: true  },
+    task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: false },
     leave:                 { view: true,  edit: false, delete: false },
     leaveApply:            { view: true,  edit: true,  delete: false },
     officeVisitApply:      { view: true,  edit: true,  delete: false },
+    manualPostingApply:    { view: true,  edit: true,  delete: false },
     leaveApproval:         { view: true,  edit: true,  delete: false },
     officeVisitApproval:   { view: true,  edit: true,  delete: false },
     leaveCalculation:      { view: true,  edit: true,  delete: false },
@@ -88,10 +94,12 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     dashboard:             { view: true,  edit: true,  delete: true  },
     staffDetail:           { view: true,  edit: true,  delete: true  },
     myNotes:               { view: true,  edit: true,  delete: true  },
+    task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: true  },
     leave:                 { view: true,  edit: true,  delete: true  },
     leaveApply:            { view: true,  edit: true,  delete: true  },
     officeVisitApply:      { view: true,  edit: true,  delete: true  },
+    manualPostingApply:    { view: true,  edit: true,  delete: true  },
     leaveApproval:         { view: true,  edit: true,  delete: true  },
     officeVisitApproval:   { view: true,  edit: true,  delete: true  },
     leaveCalculation:      { view: true,  edit: false, delete: false },
@@ -131,6 +139,20 @@ export const savePagePermissions = (perms) => {
   localStorage.setItem(PERM_KEY, JSON.stringify(perms));
 };
 
+// Shared tail of any successful authentication — plain login, or an
+// already-authenticated result handed over by the SSO exchange (see
+// AuthProvider's applySsoSession below). Takes its setters as params rather
+// than closing over component state, so it can live outside the component
+// instead of being redeclared on every render.
+async function applySession(result, { setCurrentUser, setToken, setPagePerms, setUSERS }) {
+  const { token, ...user } = result;
+  setCurrentUser(user);
+  localStorage.setItem('current_user', JSON.stringify(user));
+  setToken(token);
+  setPagePerms(loadPerms());
+  try { const all = await api.get('/auth/users'); setUSERS(all); } catch {}
+}
+
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(() => {
     try { const s = localStorage.getItem('current_user'); return s ? JSON.parse(s) : null; }
@@ -139,8 +161,23 @@ export const AuthProvider = ({ children }) => {
   const [error,          setError]          = useState('');
   const [licenseError,   setLicenseError]   = useState(false);
   const [licenseChecked, setLicenseChecked] = useState(false);
+  // Who to contact to renew — shown on the Subscription Expired screen.
+  // Populated from whichever response actually flagged the license problem
+  // (initial status check, a blocked login attempt), since either one may
+  // be the first thing that runs depending on whether a session existed.
+  const [licenseDistributor, setLicenseDistributor] = useState(null);
+  // Set from a SUCCESSFUL login's response when the active license expires
+  // within the warning window — an informational one-time popup, not a block.
+  const [licenseWarning, setLicenseWarning] = useState(null);
   const [USERS,          setUSERS]          = useState([]);
   const [pagePerms,      setPagePerms]      = useState(loadPerms);
+
+  const distributorFrom = (d) => ({
+    name       : d?.distributorName        || '',
+    contactName: d?.distributorContactName || '',
+    phone      : d?.distributorPhone       || '',
+    email      : d?.distributorEmail       || '',
+  });
 
   /* ── Check license on every app load ── */
   useEffect(() => {
@@ -148,6 +185,7 @@ export const AuthProvider = ({ children }) => {
       .then(d => {
         if (!d.licensed || d.expired) {
           setLicenseError(true);
+          setLicenseDistributor(distributorFrom(d));
           setCurrentUser(null);
           localStorage.removeItem('current_user');
         }
@@ -161,6 +199,7 @@ export const AuthProvider = ({ children }) => {
         // to wipe current_user on every reload that raced the check).
         if (err?.data?.licenseError) {
           setLicenseError(true);
+          setLicenseDistributor(distributorFrom(err.data));
           setCurrentUser(null);
           localStorage.removeItem('current_user');
         }
@@ -173,16 +212,35 @@ export const AuthProvider = ({ children }) => {
     setError('');
     setLicenseError(false);
     try {
-      const { token, ...user } = await api.post('/auth/login', { username, password });
-      setCurrentUser(user);
-      localStorage.setItem('current_user', JSON.stringify(user));
-      setToken(token);
-      setPagePerms(loadPerms());
-      try { const all = await api.get('/auth/users'); setUSERS(all); } catch {}
+      const result = await api.post('/auth/login', { username, password });
+      if (result.licenseWarning) setLicenseWarning(result.licenseWarning);
+      // Shared-hub login only: this email belongs to a different company —
+      // the server never touched a password for it, just told us where to
+      // send the browser. Full navigation (not client-side routing) to that
+      // tenant's own path prefix (/t/<subdomain>/...) on this SAME domain —
+      // no subdomain DNS involved at all. The email itself travels as an
+      // opaque, short-lived token (?et=...), not in the clear — the
+      // destination page exchanges it server-side instead of it ever
+      // sitting in the URL bar/history/access logs.
+      if (result.redirect && result.subdomain) {
+        // localStorage is origin-scoped, not tenant-scoped — without this,
+        // the destination page's very first render would briefly show
+        // THIS tenant's cached identity (AuthProvider reads it
+        // synchronously on mount) until its first API call 401s.
+        logout();
+        const qs = result.redirectToken ? `?et=${encodeURIComponent(result.redirectToken)}` : '';
+        window.location.href = `/t/${result.subdomain}/login${qs}`;
+        return true;
+      }
+      await applySession(result, { setCurrentUser, setToken, setPagePerms, setUSERS });
       return true;
     } catch (err) {
       const data = err?.response?.data || err?.data || {};
-      if (data.licenseError) { setLicenseError(true); return false; }
+      if (data.licenseError) {
+        setLicenseError(true);
+        setLicenseDistributor(distributorFrom(data));
+        return false;
+      }
       setError('इमेल वा पासवर्ड गलत छ');
       return false;
     }
@@ -193,6 +251,16 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('current_user');
     setToken(null);
   }, []);
+
+  // Used by the SsoLogin page only — it already has a full {token, ...user}
+  // result from GET /auth/sso-exchange (LicenseAdmin's "Open Software"
+  // action), so there's no /auth/login round-trip to make here, just the
+  // same session bookkeeping a normal login ends with.
+  const applySsoSession = useCallback((result) => {
+    logout(); // same stale-identity guard as the cross-tenant redirect above
+    if (result.licenseWarning) setLicenseWarning(result.licenseWarning);
+    return applySession(result, { setCurrentUser, setToken, setPagePerms, setUSERS });
+  }, [logout]);
 
   /* Merge a patch into the logged-in user (e.g. a new profile photo) and
      keep the localStorage copy in sync so it survives reloads. */
@@ -291,8 +359,9 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{
-      currentUser, login, logout, updateCurrentUser, error,
-      licenseError, licenseChecked,
+      currentUser, login, logout, applySsoSession, updateCurrentUser, error,
+      licenseError, licenseChecked, licenseDistributor,
+      licenseWarning, dismissLicenseWarning: () => setLicenseWarning(null),
       // Role flags
       isAdmin, isSuperAdmin, isBranchManager, isDeptHead, isEmployee,
       // Legacy

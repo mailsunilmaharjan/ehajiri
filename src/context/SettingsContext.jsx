@@ -1,34 +1,44 @@
 ﻿import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import api from '../api/client.js';
 import { useAuth } from './AuthContext.jsx';
+import { getNepalNow, getNepalTodayISO } from '../utils/dateUtils.js';
 
 const SettingsContext = createContext(null);
 
 // Compute once at module load — fresh install defaults
-const _today = new Date().toISOString().split('T')[0];
+const _today = getNepalTodayISO();
 const _twoMonthsAgo = (() => {
-  const d = new Date();
+  const d = getNepalNow();
   d.setMonth(d.getMonth() - 2);
-  return d.toISOString().split('T')[0];
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 })();
 
+// Placeholder-only — every tenant now gets its real company info pushed into
+// app_settings at creation (LicenseAdmin's pushCompanyInfoToTenant) and loaded
+// from there once /api/settings (post-login) or /api/auth/branding
+// (pre-login) resolves. These generic values are what shows only in the
+// brief window before that fetch completes, or if it genuinely fails — never
+// a specific other real tenant's identity, which is what used to be here.
 const DEFAULT_SETTINGS = {
-  companyNameNp    : 'प्लानेट इन्फोसिस प्रा.लि.',
-  companyNameEn    : 'Planet Infosys Pvt. Ltd.',
-  companyAddressNp : 'चाकुपाथ, ललितपुर',
-  companyAddressEn : 'Chakupath, Lalitpur',
-  companyPhone     : '015269837',
-  companyEmail     : 'info.planetinfosys@gmail.com',
-  companyWebsite   : 'www.planetinfosys.com.np',
+  companyNameNp    : 'ईहाजिरी',
+  companyNameEn    : 'eHajiri',
+  companyAddressNp : '',
+  companyAddressEn : '',
+  companyPhone     : '',
+  companyEmail     : '',
+  companyWebsite   : '',
+  companyEmailDomain: '',
   companyLogo      : null,
   logoWidth        : null,
   logoHeight       : null,
+  liveAttendanceNotifications: true,
   defaultWeekends  : ['Sat'],
   weekendStartDate : _twoMonthsAgo,
   weekendHistory   : [{ id:1, weekends:['Sat'], effectiveDate:_twoMonthsAgo, changedDate:_today, changedBy:'System', reason:'Initial Setup' }],
   defaultCalendar  : 'np',
   defaultDateFormat: 'dd-MMM-yyyy',
   nepaliDigits     : false,
+  leaveBackdateEnabled: true, // Off = block picking a past From Date on Leave/Office Visit apply (Super Admin only)
   fiscalYears      : [
     { id:1, name:'FY 2081/082', startDate:'2024-07-17', endDate:'2025-07-15', isDefault:false, isSystem:false },
     { id:2, name:'FY 2082/083', startDate:'2025-07-16', endDate:'2026-07-15', isDefault:true,  isSystem:false },
@@ -90,61 +100,134 @@ export const SettingsProvider = ({ children }) => {
   const [settings, setSettings] = useState(load);
   const [apiOk, setApiOk] = useState(false);
 
-  /* ── Load settings from DB on login (and on startup for an already
-     logged-in session). /api/settings is authGuarded, so fetching while
-     logged out 401s — which not only left the defaults showing, it left
-     apiOk stuck false so persist() never wrote changes back to the DB. ── */
-  useEffect(() => {
+  /* Re-fetches /settings and applies it to state + localStorage. Used both on
+     login below and on-demand (e.g. by an apply-leave/apply-office-visit
+     modal right as it opens) — this app only ever fetches settings once per
+     login, so a session left open across a Super Admin toggling something
+     like Leave/Visit backdating would otherwise keep enforcing whatever was
+     true when this tab last loaded, not the current server value, until the
+     page is refreshed. */
+  const refreshSettings = useCallback(async () => {
     if (!currentUser) return;
-    api.get('/settings').then(remoteSettings => {
+    try {
+      const remoteSettings = await api.get('/settings');
       if (remoteSettings.main) {
         const merged = { ...DEFAULT_SETTINGS, ...remoteSettings.main };
         setSettings(merged);
         localStorage.setItem('app_settings', JSON.stringify(merged));
         setApiOk(true);
       }
-    }).catch(() => {
-      // Fall back to localStorage already loaded in useState
+    } catch {
       setApiOk(false);
-    });
-  }, [currentUser?.id]);
+    }
+  }, [currentUser]);
 
-  const persist = useCallback((next) => {
+  /* ── Load settings from DB on login (and on startup for an already
+     logged-in session). /api/settings is authGuarded, so fetching while
+     logged out 401s — which not only left the defaults showing, it left
+     apiOk stuck false so persist() never wrote changes back to the DB. ── */
+  useEffect(() => { refreshSettings(); }, [currentUser?.id]);
+
+  /* ── Pre-login branding (Login page only). Matters most on the shared hub
+     (attend.zkattendance.com), where every company's staff land on the same
+     login page before it's known which tenant they belong to — without this,
+     the page has no way to know whose name/logo to show and always fell back
+     to DEFAULT_SETTINGS, which used to hardcode a specific real company. Only
+     runs while logged out; the authenticated fetch above takes over on login
+     and is authoritative for everything else. ── */
+  useEffect(() => {
+    if (currentUser) return;
+    api.get('/auth/branding').then(branding => {
+      if (branding && (branding.companyNameEn || branding.companyLogo)) {
+        setSettings(prev => ({ ...prev, ...branding }));
+      }
+    }).catch(() => {});
+  }, [currentUser]);
+
+  // `updater` receives the server's CURRENT state (re-fetched right here, not
+  // this tab's possibly-hours-stale React state) and returns the new value to
+  // save — every save is a full-blob PUT (see server/routes/settings.js),
+  // so building it from anything less than fresh data means whatever OTHER
+  // field(s) changed server-side since this tab last loaded (another tab's
+  // edit, a script, anything) get silently reverted by this save. This was
+  // confirmed live: editing Branches from a stale tab wiped out Posts that
+  // had been added directly afterward, because the stale tab's cached
+  // `settings.posts` rode along in the "unchanged" fields of that save.
+  const persist = useCallback(async (updater) => {
+    let base = settings;
+    if (apiOk) {
+      try {
+        const fresh = await api.get('/settings');
+        if (fresh.main) base = { ...DEFAULT_SETTINGS, ...fresh.main };
+      } catch { /* refetch failed — fall back to this tab's local state */ }
+    }
+    const next = updater(base);
+    setSettings(next);
     localStorage.setItem('app_settings', JSON.stringify(next));
     if (apiOk) {
-      api.put('/settings', { main: next }).catch(() => {});
+      await api.put('/settings', { main: next }).catch(() => {});
     }
-  }, [apiOk]);
+    return next;
+  }, [apiOk, settings]);
 
-  const updateSettings = useCallback((patch) => {
-    setSettings(prev => {
-      const next = { ...prev, ...patch };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const updateSettings = useCallback((patch) => persist(base => ({ ...base, ...patch })), [persist]);
 
-  const updateSetupList = useCallback((key, items) => {
-    setSettings(prev => {
-      const next = { ...prev, [key]: items };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const updateSetupList = useCallback((key, items) => persist(base => ({ ...base, [key]: items })), [persist]);
 
-  const addWeekendHistory = useCallback((entry) => {
+  // weekend_history is a dedicated table, not part of the generic app_settings
+  // blob — every attendance report resolves weekends by querying it directly
+  // (WHERE effective_date <= :date ORDER BY effective_date DESC LIMIT 1), so
+  // an entry that only ever lived in the blob (via persist()) was invisible
+  // to every report no matter how many times it was "saved" here. These two
+  // write through to /settings/weekendHistory (backed by that table) the same
+  // way addLeave/updateLeave write through to their own dedicated tables.
+  //
+  // Unlike updateSettings/updateSetupList above, these are NOT optimistic —
+  // this data drives every attendance report's Present/Absent/Weekend
+  // classification, so a save that only ever lands in local React state (API
+  // unreachable, a validation error, etc.) must never be allowed to look like
+  // it succeeded. The caller awaits and must catch: on failure, nothing is
+  // applied locally and the error propagates so the UI can tell the user the
+  // save didn't happen, instead of showing a false "success" that reports
+  // then silently never reflect.
+  const addWeekendHistory = useCallback(async (entry) => {
+    if (!apiOk) throw new Error('Not connected to the server — weekend setting was not saved.');
+    const changedDate = getNepalTodayISO();
+    const saved = await api.post('/settings/weekendHistory', { ...entry, changedDate });
     setSettings(prev => {
-      const newEntry = { id: Date.now(), ...entry, changedDate: new Date().toISOString().split('T')[0] };
       const next = {
         ...prev,
         defaultWeekends : entry.weekends,
         weekendStartDate: entry.effectiveDate,
-        weekendHistory  : [...(prev.weekendHistory || []), newEntry],
+        weekendHistory  : [...(prev.weekendHistory || []), saved],
       };
-      persist(next);
+      localStorage.setItem('app_settings', JSON.stringify(next));
       return next;
     });
-  }, [persist]);
+  }, [apiOk]);
+
+  const updateWeekendHistory = useCallback(async (id, entry) => {
+    if (!apiOk) throw new Error('Not connected to the server — weekend setting was not saved.');
+    const saved = await api.put(`/settings/weekendHistory/${id}`, entry);
+    setSettings(prev => {
+      const next = {
+        ...prev,
+        defaultWeekends : entry.weekends,
+        weekendStartDate: entry.effectiveDate,
+        weekendHistory  : (prev.weekendHistory || []).map(h => h.id === id ? { ...h, ...saved } : h),
+      };
+      localStorage.setItem('app_settings', JSON.stringify(next));
+      return next;
+    });
+  }, [apiOk]);
+
+  const deleteWeekendHistory = useCallback(async (id) => {
+    await persist(base => ({ ...base, weekendHistory: (base.weekendHistory || []).filter(h => h.id !== id) }));
+    if (apiOk) {
+      try { await api.delete(`/settings/weekendHistory/${id}`); }
+      catch { /* API failed (e.g. local-only ID not in DB) — optimistic removal already applied */ }
+    }
+  }, [persist, apiOk]);
 
   const resetSettings = () => {
     setSettings(DEFAULT_SETTINGS);
@@ -157,7 +240,8 @@ export const SettingsProvider = ({ children }) => {
 
   return (
     <SettingsContext.Provider value={{
-      settings, updateSettings, addWeekendHistory, updateSetupList, resetSettings, getCompanyName, apiOk,
+      settings, updateSettings, addWeekendHistory, updateWeekendHistory, deleteWeekendHistory,
+      updateSetupList, resetSettings, getCompanyName, apiOk, refreshSettings,
     }}>
       {children}
     </SettingsContext.Provider>

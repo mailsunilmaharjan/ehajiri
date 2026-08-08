@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { apiUrl } from '../api/client.js';
 
 /**
  * Connects to the SSE stream at /api/attendance/live and shows
@@ -14,7 +15,7 @@ export function useAttendanceNotifications() {
     }
 
     const connect = () => {
-      const es = new EventSource('/api/attendance/live');
+      const es = new EventSource(apiUrl('/attendance/live'));
       esRef.current = es;
 
       es.onmessage = (e) => {

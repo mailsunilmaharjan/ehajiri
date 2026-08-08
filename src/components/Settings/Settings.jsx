@@ -5,16 +5,17 @@ import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { APP_VERSION, DB_VERSION } from '../../version.js';
-import api, { getToken } from '../../api/client.js';
+import api, { getToken, apiUrl } from '../../api/client.js';
 import ZKTecoDeviceSettings from './ZKTecoDeviceSettings.jsx';
 import StandAloneDeviceSettings from './StandAloneDeviceSettings.jsx';
 import ProfileTab from '../Common/ProfileTab.jsx';
 import BugFinder from './BugFinder.jsx';
+import BulkImportModal from './BulkImportModal.jsx';
 import {
   FORMAT_OPTIONS, formatDate,
   adToBS, bsToAD,
   BS_DATA, BS_MONTHS_NP, BS_MONTHS_EN, getBSDays,
-  toNepaliDigits,
+  toNepaliDigits, getNepalNow, getNepalTodayISO,
 } from '../../utils/dateUtils.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
@@ -47,7 +48,7 @@ const SHIFT_DAYS = [
   { key:'Fri', np:'शुक्र',en:'Fri' },
   { key:'Sat', np:'शनि',  en:'Sat' },
 ];
-const SHIFT_COLORS = ['#52b02c','#0e9f6e','#e3a008','#f05252','#7e3af2','#e74694','#111827'];
+const SHIFT_COLORS = ['#1a56db','#0e9f6e','#e3a008','#f05252','#7e3af2','#e74694','#111827'];
 
 /* ── shared table styles ── */
 const thStyle = {
@@ -58,7 +59,7 @@ const thStyle = {
   borderRight:'1px solid #dce6f0',
 };
 const tdStyle = {
-  padding:'9px 14px', fontSize:13,
+  padding:'9px 14px', fontSize:12.5,
   borderBottom:'1px solid #dce6f0', borderRight:'1px solid #e8f0f8',
   color:'#1f2937',
 };
@@ -78,7 +79,7 @@ const renderCellValue = (field, value, L) => {
   if (field.key === 'isDefault') {
     return value
       ? <span style={{ background:'#dcfce7', color:'#166534', padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:700, border:'1px solid #bbf7d0', display:'inline-block' }}>{L('छ','Yes')}</span>
-      : <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
+      : <span style={{ color:'#d1d5db' }}>—</span>;
   }
   if (field.key === 'statusType') {
     return value === 'Working'
@@ -86,7 +87,7 @@ const renderCellValue = (field, value, L) => {
       : <span style={{ background:'#fee2e2', color:'#b91c1c', padding:'2px 8px', borderRadius:10, fontSize:11, fontWeight:600 }}>{L('कार्यरत नभएको','Not Working')}</span>;
   }
   if (field.key === 'rankingOrder') {
-    return <span style={{ fontWeight:700, color:'#6366f1', fontSize:13 }}>{value ?? '—'}</span>;
+    return <span style={{ fontWeight:700, color:'#6366f1' }}>{value ?? '—'}</span>;
   }
   return <span>{String(value ?? '—')}</span>;
 };
@@ -117,12 +118,12 @@ const renderFormField = (field, form, setForm, errors, L, fd, calendar) => {
     return (
       <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:4 }}>
         <div
-          style={{ width:44, height:24, background:val?'#52b02c':'#d1d5db', borderRadius:12, position:'relative', transition:'background .2s', cursor:'pointer', flexShrink:0 }}
+          style={{ width:44, height:24, background:val?'#1a56db':'#d1d5db', borderRadius:12, position:'relative', transition:'background .2s', cursor:'pointer', flexShrink:0 }}
           onClick={() => setForm(p => ({ ...p, [field.key]: !p[field.key] }))}
         >
           <div style={{ position:'absolute', top:2, left:val?22:2, width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
         </div>
-        <span style={{ fontSize:13, color:val?'#52b02c':'#6b7280', fontWeight:val?600:400 }}>
+        <span style={{ fontSize:13, color:val?'#1a56db':'#6b7280', fontWeight:val?600:400 }}>
           {val ? L('हो — डिफल्ट','Yes — Default') : L('होइन','No')}
         </span>
       </div>
@@ -159,9 +160,9 @@ const DayBadge = ({ dayKeys, language }) => (
       return (
         <span key={d.key} style={{
           padding:'2px 7px', borderRadius:5, fontSize:11, fontWeight:600,
-          background: on ? '#dcfce7' : '#f3f4f6',
-          color:      on ? '#166534' : '#9ca3af',
-          border:`1px solid ${on ? '#bbf7d0' : '#e5e7eb'}`,
+          background: on ? '#dbeafe' : '#f3f4f6',
+          color:      on ? '#1e40af' : '#9ca3af',
+          border:`1px solid ${on ? '#bfdbfe' : '#e5e7eb'}`,
         }}>{language==='np' ? d.np : d.key}</span>
       );
     })}
@@ -187,7 +188,7 @@ const BSDatePicker = ({ value, onChange, error, allowedYears }) => {
   const { settings } = useSettings();
   const { language }  = useLanguage();
 
-  const todayBs = adToBS(new Date()) || { year: 2082, month: 1, day: 1 };
+  const todayBs = adToBS(getNepalTodayISO()) || { year: 2082, month: 1, day: 1 };
 
   const parseBs = (adVal) => {
     if (!adVal) return null;
@@ -239,11 +240,11 @@ const BSDatePicker = ({ value, onChange, error, allowedYears }) => {
   /* Each dropdown is highlighted independently based on whether it was explicitly touched */
   const sel = (hasValue) => ({
     flex: 1, padding: '7px 6px',
-    border: `1.5px solid ${error ? '#ef4444' : hasValue ? '#52b02c' : '#d1d5db'}`,
+    border: `1.5px solid ${error ? '#ef4444' : hasValue ? '#1a56db' : '#d1d5db'}`,
     borderRadius: 6, fontSize: 13, outline: 'none',
-    background: hasValue ? '#f0fdf4' : 'white',
+    background: hasValue ? '#eff6ff' : 'white',
     cursor: 'pointer',
-    color: hasValue ? '#166534' : '#1f2937',
+    color: hasValue ? '#1e40af' : '#1f2937',
     fontWeight: hasValue ? 600 : 400,
     transition: 'border-color .15s, background .15s',
   });
@@ -306,13 +307,14 @@ const BSDatePicker = ({ value, onChange, error, allowedYears }) => {
 /* ═══════════════════════════════════════════════════════════
    SetupSection — mini-DataGrid with sub-nav style header
 ════════════════════════════════════════════════════════════ */
-const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete }) => {
+const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShortName, bulkImport }) => {
   const { t, language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
   const fd = useDateFormat();
   const { settings } = useSettings();
 
   const [modal,      setModal]      = useState(false);
+  const [bulkOpen,   setBulkOpen]   = useState(false);
   const [editId,     setEditId]     = useState(null);
   const [form,       setForm]       = useState({});
   const [errors,     setErrors]     = useState({});
@@ -341,7 +343,14 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete }) => {
   const handleSave = () => {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    onSave(editId, { ...form });
+    const finalForm = { ...form };
+    // Auto short name (e.g. Department/Post: "Administration" -> "Admin") —
+    // only fills in when the user left it blank, never overrides a manually
+    // typed short name.
+    if (autoShortName && !String(finalForm[autoShortName.to] || '').trim()) {
+      finalForm[autoShortName.to] = String(finalForm[autoShortName.from] || '').trim().slice(0, autoShortName.len || 5);
+    }
+    onSave(editId, finalForm);
     setModal(false);
   };
 
@@ -401,17 +410,36 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete }) => {
           }).forEach(id => onDelete(id));
         }}
         toolbar={
-          <button className="btn btn-primary btn-sm" onClick={openAdd}>
-            + {L('नयाँ थप्नुस','Add New')}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={openAdd}>
+              + {L('नयाँ थप्नुस','Add New')}
+            </button>
+            {bulkImport && (
+              <button className="btn btn-outline btn-sm" onClick={() => setBulkOpen(true)}>
+                📋 {L('बल्क आयात','Bulk Import')}
+              </button>
+            )}
+          </div>
         }
       />
+
+      {/* ── Bulk Import Modal (Super Admin only, see bulkImport prop) ── */}
+      {bulkImport && (
+        <BulkImportModal
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          title={title}
+          hasShortName={bulkImport.hasShortName}
+          nextRankingOrder={data.length + 1}
+          onImport={items => bulkImport.onImport(items)}
+        />
+      )}
 
       {/* ── Add/Edit Modal ── */}
       {modal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>
                 {editId ? `✏️ ${L('सम्पादन','Edit')} — ${title}` : `+ ${L('नयाँ','New')} — ${title}`}
               </h2>
@@ -481,6 +509,7 @@ const ShiftInlineSection = () => {
   const L = (np, en) => language === 'np' ? np : en;
   const { shifts, addShift, updateShift, deleteShift, refreshShifts, refreshEmployees, employees } = useData();
   const { isAdmin, isManager } = useAuth();
+  const { settings } = useSettings();
 
   const [modal,             setModal]             = useState(false);
   const [editId,            setEditId]            = useState(null);
@@ -586,7 +615,7 @@ const ShiftInlineSection = () => {
   // Ctrl+N opens the Add Shift modal when not already open (ShiftInlineSection)
   useNewShortcut(!modal, openAdd);
 
-  const Toggle = ({ value, onChange, color='#52b02c' }) => (
+  const Toggle = ({ value, onChange, color='#1a56db' }) => (
     <div style={{ width:44, height:24, background:value?color:'#d1d5db', borderRadius:12, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
       onClick={() => onChange(!value)}>
       <div style={{ position:'absolute', top:2, left:value?22:2, width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
@@ -597,7 +626,7 @@ const ShiftInlineSection = () => {
     { field:'makeDefault', header:L('डिफल्ट','Default'), width:90, sortable:false, filterable:false,
       render: v => v
         ? <span style={{ background:'#dcfce7', color:'#166534', padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:700, border:'1px solid #bbf7d0', display:'inline-flex', alignItems:'center', gap:4 }}>⭐ {L('छ','Yes')}</span>
-        : <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>
+        : <span style={{ color:'#d1d5db' }}>—</span>
     },
     { field:'name', header:L('सिफ्ट नाम','Shift Name'), width:160,
       render: (v, row) => (
@@ -609,7 +638,7 @@ const ShiftInlineSection = () => {
     { field:'startTime', header:L('सुरु समय','Start Time'), width:100, render:v=><strong>{v}</strong> },
     { field:'endTime',   header:L('अन्त समय','End Time'),   width:100, render:v=><strong>{v}</strong> },
     { field:'workHours', header:L('घण्टा','Hours'), width:70, align:'center',
-      render:v=><span style={{fontWeight:700,color:'#52b02c'}}>{v}h</span>
+      render:v=><span style={{fontWeight:700,color:'#1a56db'}}>{v}h</span>
     },
     { field:'exceptionalDayEnabled', header:L('असाधारण','Exceptional'), width:105, sortable:false, filterable:false,
       render:v=>v
@@ -673,7 +702,7 @@ const ShiftInlineSection = () => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal modal-lg" style={{ maxHeight:'92vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)', position:'sticky', top:0, zIndex:10 }}>
+            <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
               <h2>{editId ? `✏️ ${L('सिफ्ट सम्पादन','Edit Shift')}` : `+ ${L('नयाँ सिफ्ट','New Shift')}`}</h2>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
@@ -735,10 +764,10 @@ const ShiftInlineSection = () => {
               </div>
 
               {/* Make Default */}
-              <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'12px 16px', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'12px 16px', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <div>
-                  <div style={{ fontSize:14, fontWeight:600, color:'#166534' }}>⭐ {L('डिफल्ट सिफ्ट बनाउनुस','Make Default Shift')}</div>
-                  <div style={{ fontSize:12, color:'#22c55e', marginTop:2 }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:'#1e40af' }}>⭐ {L('डिफल्ट सिफ्ट बनाउनुस','Make Default Shift')}</div>
+                  <div style={{ fontSize:12, color:'#3b82f6', marginTop:2 }}>
                     {L('चेक गरेमा यो सिफ्ट सबै कर्मचारीमा लागू हुनेछ','If checked, this shift will be applied to all staff')}
                   </div>
                 </div>
@@ -752,7 +781,7 @@ const ShiftInlineSection = () => {
                     }
                   }
                   hc('makeDefault', v);
-                }} color="#52b02c" />
+                }} color="#1a56db" />
               </div>
 
               {/* Exceptional Day */}
@@ -852,7 +881,7 @@ const ShiftInlineSection = () => {
       {defaultConflict && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fffbeb,#fef3c7)' }}>
+            <div className="modal-header">
               <h2>⚠️ {L('डिफल्ट सिफ्ट विरोध','Default Shift Conflict')}</h2>
               <button className="modal-close" onClick={() => setDefaultConflict(null)}>✕</button>
             </div>
@@ -897,7 +926,7 @@ const ShiftInlineSection = () => {
       {winterModal && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#e0f2fe,#f0f9ff)' }}>
+            <div className="modal-header">
               <h2>❄️ {L('शीतकालीन नीति सेटिङ','Winter Policy Settings')}</h2>
               <button className="modal-close" onClick={() => setWinterModal(false)}>✕</button>
             </div>
@@ -1007,11 +1036,11 @@ const Toggle = ({ value, onChange, label }) => (
   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
     <div
       onClick={() => onChange(!value)}
-      style={{ width:40, height:22, background:value?'#52b02c':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', flexShrink:0, transition:'background .2s' }}
+      style={{ width:40, height:22, background:value?'#1a56db':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', flexShrink:0, transition:'background .2s' }}
     >
       <div style={{ position:'absolute', top:2, left:value?20:2, width:18, height:18, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}></div>
     </div>
-    {label && <span style={{ fontSize:13, color:value?'#52b02c':'#6b7280', fontWeight:value?600:400 }}>{label}</span>}
+    {label && <span style={{ fontSize:13, color:value?'#1a56db':'#6b7280', fontWeight:value?600:400 }}>{label}</span>}
   </div>
 );
 
@@ -1030,8 +1059,8 @@ const CheckGroup = ({ options, value = [], onChange, allKey = 'All' }) => {
         const active = has(opt.value);
         return (
           <label key={opt.value} style={{ display:'flex', alignItems:'center', gap:5, cursor:'pointer', userSelect:'none' }}>
-            <input type="checkbox" checked={active} onChange={() => toggle(opt.value)} style={{ accentColor:'#52b02c', width:15, height:15 }} />
-            <span style={{ fontSize:13, fontWeight:active?600:400, color:active?'#166534':'#374151' }}>{opt.label}</span>
+            <input type="checkbox" checked={active} onChange={() => toggle(opt.value)} style={{ accentColor:'#1a56db', width:15, height:15 }} />
+            <span style={{ fontSize:13, fontWeight:active?600:400, color:active?'#1e40af':'#374151' }}>{opt.label}</span>
           </label>
         );
       })}
@@ -1094,16 +1123,16 @@ const CheckDropdown = ({ options, value = [], onChange, allKey = 'All' }) => {
               <label key={opt.value} style={{
                 display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
                 cursor:'pointer', userSelect:'none',
-                background: checked ? '#f0fdf4' : 'transparent',
+                background: checked ? '#eff6ff' : 'transparent',
                 borderBottom: idx < options.length - 1 ? '1px solid #f3f4f6' : 'none',
                 fontWeight: isAllOpt ? 600 : 400,
               }}>
                 <input type="checkbox" checked={checked}
                   onChange={() => toggle(opt.value)}
-                  style={{ accentColor:'#52b02c', width:15, height:15, cursor:'pointer', flexShrink:0 }}
+                  style={{ accentColor:'#1a56db', width:15, height:15, cursor:'pointer', flexShrink:0 }}
                   onClick={e => e.stopPropagation()}
                 />
-                <span style={{ fontSize:13, color: checked ? '#166534' : '#374151', fontWeight: checked ? 600 : 400 }}>
+                <span style={{ fontSize:13, color: checked ? '#1e40af' : '#374151', fontWeight: checked ? 600 : 400 }}>
                   {opt.label}
                 </span>
               </label>
@@ -1116,7 +1145,7 @@ const CheckDropdown = ({ options, value = [], onChange, allKey = 'All' }) => {
 };
 
 const sectionBtnStyle = {
-  background:'#f0fdf4', border:'1px solid #bbf7d0', color:'#52b02c',
+  background:'#eff6ff', border:'1px solid #bfdbfe', color:'#1a56db',
   borderRadius:6, padding:'5px 12px', fontSize:13, fontWeight:600, cursor:'pointer',
 };
 
@@ -1197,7 +1226,7 @@ const LeaveTypeSection = () => {
       <DataGrid
         columns={[
           { field:'name',                header:L('बिदाको नाम','Leave Name'),      width:160, render:v=><span style={{fontWeight:600}}>{v}</span> },
-          { field:'shortName',           header:L('छोटो नाम','Short'),             width:70,  render:v=><span style={{background:'#f0fdf4',color:'#52b02c',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
+          { field:'shortName',           header:L('छोटो नाम','Short'),             width:70,  render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
           { field:'daysPerYear',         header:L('दिन/वर्ष','Days/Yr'),           width:80,  align:'center', render:v=><span style={{fontWeight:700,color:'#0369a1'}}>{v}</span> },
           { field:'genderFor',           header:L('लिङ्ग','Gender'),               width:90,  render:v=>(v||['All']).join(', ') },
           { field:'reduceWeekend',       header:L('विकेन्ड घटाउ','Red.Wknd'),     width:95,  align:'center', render:v=>v?'✅':'—' },
@@ -1226,7 +1255,7 @@ const LeaveTypeSection = () => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:680, width:'95%' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ बिदा प्रकार','New Leave Type')}`}</h2>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
@@ -1386,7 +1415,7 @@ const OfficeVisitTypeSection = () => {
       <DataGrid
         columns={[
           { field:'name',      header:L('भ्रमणको नाम','Office Visit Name'), width:220, render:v=><span style={{fontWeight:600}}>{v}</span> },
-          { field:'shortName', header:L('छोटो नाम','Short Name'),           width:110, render:v=><span style={{background:'#f0fdf4',color:'#52b02c',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
+          { field:'shortName', header:L('छोटो नाम','Short Name'),           width:110, render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
           { field:'actions', header:L('कार्य','Actions'), width:80, sortable:false, filterable:false, render:(_,row)=>(
             <div className="dg-actions">
               <button className="dg-action-btn edit"   onClick={e=>{e.stopPropagation();openEdit(row);}}>✏</button>
@@ -1407,7 +1436,7 @@ const OfficeVisitTypeSection = () => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ भ्रमण प्रकार','New Office Visit Type')}`}</h2>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
             </div>
@@ -1462,7 +1491,7 @@ const PublicHolidaySection = () => {
   const fd = useDateFormat();
   const { settings, updateSetupList } = useSettings();
   const allHolidays = settings.publicHolidays || [];
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getNepalTodayISO();
   const allFYs   = settings.fiscalYears || [];
   // Prefer the FY that contains today; fall back to the one marked isDefault
   const activeFY  = allFYs.find(fy => fy.startDate <= todayStr && fy.endDate >= todayStr);
@@ -1568,7 +1597,7 @@ const PublicHolidaySection = () => {
       {/* Current FY indicator */}
       <div style={{ marginBottom:10, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
         {activeFY ? (
-          <span style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', color:'#166534', borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:700 }}>
+          <span style={{ background:'#eff6ff', border:'1px solid #bfdbfe', color:'#1e40af', borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:700 }}>
             📆 {activeFY.name} &nbsp;·&nbsp; {fd(activeFY.startDate)} → {fd(activeFY.endDate)}
           </span>
         ) : fyExpired ? (
@@ -1620,7 +1649,7 @@ const PublicHolidaySection = () => {
       {modal && (
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:700, width:'95%' }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fef3c7,#fff7ed)' }}>
+            <div className="modal-header">
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ सार्वजनिक छुट्टी','New Public Holiday')}`}</h2>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
             </div>
@@ -1637,7 +1666,7 @@ const PublicHolidaySection = () => {
 
               {/* Dates row — respects Default Calendar setting */}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:16, marginBottom:14, alignItems:'flex-start' }}>
-                <DateField field="startDate" label={L('सुरु मिति','Holiday Start From')} previewColor="#52b02c" required />
+                <DateField field="startDate" label={L('सुरु मिति','Holiday Start From')} previewColor="#1a56db" required />
                 <DateField field="endDate"   label={L('अन्त मिति','Holiday Ends')}       previewColor="#7c3aed" required />
                 <div className="form-group" style={{ marginBottom:0, minWidth:72 }}>
                   <label className="form-label">{L('दिन सङ्ख्या','No. of Days')}</label>
@@ -1691,7 +1720,7 @@ const PublicHolidaySection = () => {
                       padding:'7px 10px', border:'1.5px solid #d1d5db', borderRadius:6,
                       background:'white', cursor:'pointer', minHeight:36,
                     }}>
-                    <span style={{ fontSize:13, color: form.isFixedEveryYear ? '#166534' : '#6b7280', fontWeight: form.isFixedEveryYear ? 600 : 400 }}>
+                    <span style={{ fontSize:13, color: form.isFixedEveryYear ? '#1e40af' : '#6b7280', fontWeight: form.isFixedEveryYear ? 600 : 400 }}>
                       {form.isFixedEveryYear ? L('हो','Yes') : L('होइन','No')}
                     </span>
                     <Toggle value={form.isFixedEveryYear} onChange={v=>set('isFixedEveryYear',v)} />
@@ -1724,7 +1753,7 @@ const PublicHolidaySection = () => {
       {dupAlert && (
         <div className="modal-overlay" style={{ zIndex:1100 }}>
           <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:420 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fff7ed,#fef3c7)' }}>
+            <div className="modal-header">
               <h2 style={{ color:'#92400e' }}>⚠️ {L('मिति दोहोरिएको','Duplicate Date')}</h2>
               <button className="modal-close" onClick={() => setDupAlert(null)}>✕</button>
             </div>
@@ -1738,7 +1767,7 @@ const PublicHolidaySection = () => {
                 </div>
                 <div>
                   <strong>{L('छुट्टी नाम','Holiday Name')}:</strong>&nbsp;
-                  <span style={{ color:'#52b02c', fontWeight:600 }}>"{dupAlert.name}"</span>
+                  <span style={{ color:'#1a56db', fontWeight:600 }}>"{dupAlert.name}"</span>
                 </div>
               </div>
               <div style={{ fontSize:13, color:'#6b7280', marginTop:10 }}>
@@ -1824,7 +1853,7 @@ const LanguageSection = () => {
     <div className="card" style={{ overflow:'hidden' }}>
 
       {/* Header */}
-      <div className="card-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)', borderBottom:'1px solid #e5e7eb' }}>
+      <div className="card-header" style={{ background:'linear-gradient(135deg,#eff6ff,#f0fdf4)', borderBottom:'1px solid #e5e7eb' }}>
         <div>
           <h3>🌐 {L('भाषा तालिका','Language Translation Table')}</h3>
           <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>
@@ -1840,12 +1869,12 @@ const LanguageSection = () => {
       <div style={{ display:'flex', gap:16, padding:'10px 20px', background:'#f8fafc', borderBottom:'1px solid #f1f5f9', fontSize:12, flexWrap:'wrap', alignItems:'center' }}>
         <span>📝 {L('कुल','Total')}: <strong>{totalCount}</strong></span>
         <span>🤖 {L('स्वतः','Auto')}: <strong style={{ color:'#059669' }}>{totalCount - customCount}</strong></span>
-        <span>✏️ {L('सम्पादित','Edited')}: <strong style={{ color:'#52b02c' }}>{customCount}</strong></span>
+        <span>✏️ {L('सम्पादित','Edited')}: <strong style={{ color:'#1a56db' }}>{customCount}</strong></span>
         <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
           {['all','custom','missing'].map(m => (
             <button key={m} onClick={() => setFilterMode(m)} style={{
               padding:'2px 10px', borderRadius:10, fontSize:11, fontWeight:600, cursor:'pointer', border:'none',
-              background: filterMode===m ? '#52b02c' : '#e5e7eb',
+              background: filterMode===m ? '#1a56db' : '#e5e7eb',
               color:      filterMode===m ? 'white'   : '#374151',
             }}>
               {m==='all'     ? L('सबै','All') :
@@ -1863,7 +1892,7 @@ const LanguageSection = () => {
           { field:'isCustom', header:L('स्रोत','Source'), width:80, align:'center', sortable:false, filterable:false,
             render:v=>(
               <span style={v
-                ? {background:'#f0fdf4',color:'#52b02c',fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,border:'1px solid #bbf7d0'}
+                ? {background:'#eff6ff',color:'#1a56db',fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,border:'1px solid #bfdbfe'}
                 : {background:'#f0fdf4',color:'#059669',fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,border:'1px solid #a7f3d0'}}>
                 {v?'✏️':'🤖'}
               </span>
@@ -1872,7 +1901,7 @@ const LanguageSection = () => {
           { field:'actions', header:L('कार्य','Action'), width:70, sortable:false, filterable:false, render:(_,row)=>(
             <div style={{display:'flex',gap:4,justifyContent:'center'}}>
               <button title={L('सम्पादन','Edit')} onClick={e=>{e.stopPropagation();openEdit(row);}}
-                style={{background:'none',border:'none',cursor:'pointer',fontSize:14,padding:'2px 4px',color:'#52b02c'}}>✏️</button>
+                style={{background:'none',border:'none',cursor:'pointer',fontSize:14,padding:'2px 4px',color:'#1a56db'}}>✏️</button>
               {row.isCustom && (
                 <button title={L('मूलमा फर्काउनुस','Reset to default')} onClick={e=>{e.stopPropagation();handleReset(row.english);}}
                   style={{background:'none',border:'none',cursor:'pointer',fontSize:14,padding:'2px 4px',color:'#6b7280'}}>↩️</button>
@@ -1890,7 +1919,7 @@ const LanguageSection = () => {
         toolbar={
           <div style={{display:'flex',gap:8,alignItems:'center'}}>
             <button onClick={()=>changeLanguage(language==='np'?'en':'np')}
-              style={{padding:'5px 14px',background:language==='np'?'#52b02c':'#059669',color:'white',border:'none',borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer'}}>
+              style={{padding:'5px 14px',background:language==='np'?'#1a56db':'#059669',color:'white',border:'none',borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer'}}>
               {language==='np'?'🇬🇧 EN':'🇳🇵 NP'}
             </button>
             <button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>
@@ -1998,11 +2027,11 @@ const EmailSetupTab = ({ showToast }) => {
       setEmailCfg(d || {
         smtpHost: '', smtpPort: '587', smtpUser: '', smtpPass: '',
         fromName: 'eHajiri TMS', fromEmail: '', secure: false, enabled: true,
-        dailyDigestTime: '18:00',
+        lateInGraceMinutes: 30, absentGraceMinutes: 60, earlyOutGraceMinutes: 15,
         notifications: {
           forgotPassword: true, resetPassword: true,
           leaveApplication: true, officeVisitApplication: true, staffCreated: true,
-          missingAttendance: true,
+          missingAttendance: true, manualPosting: true,
           lateEarlyNotification: true, absentNotification: true,
           leaveStatusUpdate: true, officeVisitStatusUpdate: true,
         },
@@ -2044,10 +2073,11 @@ const EmailSetupTab = ({ showToast }) => {
     { key: 'leaveApplication',       label: L('बिदा आवेदन','Leave Application'),                             desc: L('जब कर्मचारीले बिदाको आवेदन दिन्छ','When a staff member submits a leave application') },
     { key: 'officeVisitApplication', label: L('कार्यालय भ्रमण आवेदन','Office Visit Application'),           desc: L('जब कर्मचारीले कार्यालय भ्रमण आवेदन दिन्छ','When a staff member submits an office visit application') },
     { key: 'missingAttendance',      label: L('छुटेको हाजिरी अनुरोध','Missing Attendance Request'),         desc: L('जब कर्मचारीले छुटेको हाजिरीको अनुरोध गर्छ','When a staff member requests missing attendance be recorded') },
+    { key: 'manualPosting',          label: L('म्यानुअल हाजिरी प्रविष्टि','Manual Attendance Entry'),        desc: L('जब एडमिनले कर्मचारीको लागि म्यानुअल हाजिरी प्रविष्टि गर्छ','When an admin posts a manual attendance entry for a staff member') },
     { key: 'leaveStatusUpdate',       label: L('बिदा स्वीकृति/अस्वीकृति','Leave Status Update'),              desc: L('जब बिदा आवेदन स्वीकृत वा अस्वीकृत हुन्छ — कर्मचारीलाई सूचित गरिन्छ','When a leave application is approved or rejected — notifies the employee') },
     { key: 'officeVisitStatusUpdate', label: L('भ्रमण स्वीकृति/अस्वीकृति','Office Visit Status Update'),      desc: L('जब कार्यालय भ्रमण आवेदन स्वीकृत वा अस्वीकृत हुन्छ — कर्मचारीलाई सूचित गरिन्छ','When an office visit application is approved or rejected — notifies the employee') },
-    { key: 'lateEarlyNotification',   label: L('ढिलो/चाँडो सूचना','Late In / Early Out Notification'),       desc: L('दैनिक — कर्मचारी, विभाग प्रमुख, शाखा प्रबन्धक र एडमिनलाई सूचित गर्छ','Daily digest — notifies the staff member, their Dept. Head, Branch Manager, and Admins') },
-    { key: 'absentNotification',      label: L('अनुपस्थिति सूचना','Absent Notification'),                    desc: L('दैनिक — कर्मचारी, विभाग प्रमुख र एडमिनलाई सूचित गर्छ','Daily digest — notifies the staff member, their Dept. Head, and Admins') },
+    { key: 'lateEarlyNotification',   label: L('ढिलो/चाँडो सूचना','Late In / Early Out Notification'),       desc: L('शिफ्ट सुरु भएको ३० मिनेट पछि (ढिलो) र शिफ्ट सकिएको १५ मिनेट पछि (चाँडो) — कर्मचारी, विभाग प्रमुख, शाखा प्रबन्धक र एडमिनलाई सूचित गर्छ','Checked per shift — Late In a set number of minutes after that shift starts, Early Out a set number of minutes after it ends — notifies the staff member, their Dept. Head, Branch Manager, and Admins') },
+    { key: 'absentNotification',      label: L('अनुपस्थिति सूचना','Absent Notification'),                    desc: L('शिफ्ट सुरु भएको १ घण्टा पछि — कर्मचारी, विभाग प्रमुख र एडमिनलाई सूचित गर्छ','Checked a set number of minutes after each shift starts — notifies the staff member, their Dept. Head, and Admins') },
     { key: 'staffCreated',           label: L('कर्मचारी खाता सिर्जना','Staff Account Created'),             desc: L('जब नयाँ कर्मचारीको खाता सिर्जना गरिन्छ','When a new staff account is created — sends login credentials') },
   ];
 
@@ -2060,7 +2090,7 @@ const EmailSetupTab = ({ showToast }) => {
         <div className="card-header" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
           <h3>📧 {L('SMTP कन्फिगरेसन','SMTP Configuration')}</h3>
           <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
-            <input type="checkbox" checked={!!emailCfg.enabled} onChange={e => set('enabled', e.target.checked)} style={{ width:16, height:16, accentColor:'#52b02c' }} />
+            <input type="checkbox" checked={!!emailCfg.enabled} onChange={e => set('enabled', e.target.checked)} style={{ width:16, height:16, accentColor:'#1a56db' }} />
             {L('इमेल सक्रिय','Enable Email')}
           </label>
         </div>
@@ -2101,9 +2131,22 @@ const EmailSetupTab = ({ showToast }) => {
               <input style={fieldStyle} placeholder="noreply@yourcompany.com" value={emailCfg.fromEmail||''} onChange={e => set('fromEmail', e.target.value)} />
             </div>
             <div>
-              <label style={labelStyle}>{L('दैनिक सूचना समय','Daily Digest Time')}</label>
-              <input type="time" style={fieldStyle} value={emailCfg.dailyDigestTime || '18:00'} onChange={e => set('dailyDigestTime', e.target.value)} />
-              <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('ढिलो/चाँडो र अनुपस्थिति सूचना यो समयमा पठाइन्छ','Late In/Early Out and Absent digests are sent once per day, after this time')}</div>
+              <label style={labelStyle}>{L('ढिलो सूचना (मिनेट)','Late In Check (minutes)')}</label>
+              <input type="number" min="1" style={fieldStyle} value={emailCfg.lateInGraceMinutes ?? 30}
+                onChange={e => set('lateInGraceMinutes', parseInt(e.target.value) || 30)} />
+              <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('शिफ्ट सुरु भएको यति मिनेट पछि जाँच गरिन्छ','Minutes after each shift\'s start time before checking who\'s Late In')}</div>
+            </div>
+            <div>
+              <label style={labelStyle}>{L('अनुपस्थिति सूचना (मिनेट)','Absent Check (minutes)')}</label>
+              <input type="number" min="1" style={fieldStyle} value={emailCfg.absentGraceMinutes ?? 60}
+                onChange={e => set('absentGraceMinutes', parseInt(e.target.value) || 60)} />
+              <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('शिफ्ट सुरु भएको यति मिनेट पछि जाँच गरिन्छ','Minutes after each shift\'s start time before checking who\'s Absent')}</div>
+            </div>
+            <div>
+              <label style={labelStyle}>{L('चाँडो प्रस्थान सूचना (मिनेट)','Early Out Check (minutes)')}</label>
+              <input type="number" min="1" style={fieldStyle} value={emailCfg.earlyOutGraceMinutes ?? 15}
+                onChange={e => set('earlyOutGraceMinutes', parseInt(e.target.value) || 15)} />
+              <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('शिफ्ट सकिएको यति मिनेट पछि जाँच गरिन्छ','Minutes after each shift\'s end time before checking who left Early')}</div>
             </div>
           </div>
           <div style={{ marginTop:16, display:'flex', gap:10 }}>
@@ -2127,7 +2170,7 @@ const EmailSetupTab = ({ showToast }) => {
                 <input type="checkbox" style={{ opacity:0, width:0, height:0 }}
                   checked={!!(emailCfg.notifications||{})[key]}
                   onChange={e => setNotif(key, e.target.checked)} />
-                <span style={{ position:'absolute', inset:0, borderRadius:24, transition:'.2s', background: (emailCfg.notifications||{})[key] ? '#52b02c' : '#d1d5db' }}>
+                <span style={{ position:'absolute', inset:0, borderRadius:24, transition:'.2s', background: (emailCfg.notifications||{})[key] ? '#1a56db' : '#d1d5db' }}>
                   <span style={{ position:'absolute', top:3, left: (emailCfg.notifications||{})[key] ? 23 : 3, width:18, height:18, borderRadius:'50%', background:'white', transition:'.2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }} />
                 </span>
               </label>
@@ -2185,8 +2228,8 @@ const ModuleToggleBanner = ({ enabled, isAdmin, onToggle, label, L }) => (
    Main Settings component
 ════════════════════════════════════════════════════════════ */
 const Settings = () => {
-  const { currentUser, isAdmin, canView } = useAuth();
-  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false });
+  const { currentUser, isAdmin, isSuperAdmin, canView } = useAuth();
+  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false });
   const [moduleFlagsLoading, setModuleFlagsLoading] = useState(true);
 
   useEffect(() => {
@@ -2196,22 +2239,26 @@ const Settings = () => {
       .finally(() => setModuleFlagsLoading(false));
   }, []);
 
+  // app_settings key -> moduleFlags state field, so adding a new module flag
+  // (Email Setup, etc.) only needs an entry here, not a hardcoded ternary.
+  const MODULE_FLAG_FIELD = {
+    module_attendance_device_enabled: 'attendanceDeviceEnabled',
+    module_standalone_device_enabled: 'standaloneDeviceEnabled',
+    module_email_setup_enabled:       'emailSetupEnabled',
+  };
+
   const toggleModule = async (flagKey) => {
-    const next = !moduleFlags[flagKey === 'module_attendance_device_enabled' ? 'attendanceDeviceEnabled' : 'standaloneDeviceEnabled'];
+    const field = MODULE_FLAG_FIELD[flagKey];
+    const next = !moduleFlags[field];
     try {
       await api.put('/settings', { [flagKey]: next });
-      setModuleFlags(f => ({
-        ...f,
-        ...(flagKey === 'module_attendance_device_enabled'
-          ? { attendanceDeviceEnabled: next }
-          : { standaloneDeviceEnabled: next }),
-      }));
+      setModuleFlags(f => ({ ...f, [field]: next }));
     } catch (err) {
       alert(`Failed to update: ${err.message}`);
     }
   };
   const { t, language, changeLanguage, autoTranslate, toggleAutoTranslate } = useLanguage();
-  const { settings, updateSettings, addWeekendHistory, updateSetupList, apiOk: settingsApiOk } = useSettings();
+  const { settings, updateSettings, addWeekendHistory, updateWeekendHistory, deleteWeekendHistory, updateSetupList, apiOk: settingsApiOk } = useSettings();
   const { apiOk: dataApiOk, employees, updateEmployee } = useData();
   const isOnline = settingsApiOk || dataApiOk;   // true when PostgreSQL is reachable
   const fd = useDateFormat();
@@ -2223,13 +2270,25 @@ const Settings = () => {
   const [activeTab,   setActiveTab]   = useState(initialTab);
   const [activeSetup, setActiveSetup] = useState('fiscalYear');
   const [local,       setLocal]       = useState({ ...settings });
+  const [relinking,   setRelinking]   = useState(false);
+  // `local` is captured once at mount, which is usually BEFORE the initial
+  // post-login /api/settings fetch resolves (SettingsContext seeds state
+  // from localStorage/defaults first) — without this, clicking Save on this
+  // tab before that fetch lands would push those stale seed values over
+  // whatever's actually on the server. Only resyncs on that one transition
+  // (apiOk false -> true), not on every later settings change, so it doesn't
+  // clobber a form the user is already mid-editing.
+  useEffect(() => { if (settingsApiOk) setLocal({ ...settings }); }, [settingsApiOk]);
   const [logoError,   setLogoError]   = useState('');
   const [toast,       setToast]       = useState(null);
   const [companyModal, setCompanyModal] = useState(false);
   const [cForm,        setCForm]        = useState({});
   const [weekendModal, setWeekendModal] = useState(false);
   const [weekendEditId, setWeekendEditId] = useState(null); // null=new, id=edit existing
-  const twoMonthsAgo = (() => { const d = new Date(); d.setMonth(d.getMonth() - 2); return d.toISOString().split('T')[0]; })();
+  const twoMonthsAgo = (() => {
+    const d = getNepalNow(); d.setMonth(d.getMonth() - 2);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
 
   const [wForm, setWForm] = useState(() => {
     return {
@@ -2275,6 +2334,35 @@ const Settings = () => {
   }, [activeTab]);
 
   const showToast = (msg, type='success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
+
+  // A punch's employee_id is normally resolved once, at insert time, by
+  // matching pin -> Device ID (see saveAttlogs() server-side). If staff's
+  // Device ID gets set/corrected after logs already came in — bulk import
+  // being the usual case — those punches stay unlinked forever and reports
+  // silently mark that day Absent despite the punch existing. This re-runs
+  // that match against CURRENT Device IDs so a later fix repairs every past
+  // report too, without needing a one-off DB script each time it happens.
+  const relinkAttendanceLogs = async () => {
+    if (relinking) return;
+    setRelinking(true);
+    try {
+      const r = await api.post('/attendance/relink-logs');
+      const gap = (r.stillUnmatched || []).reduce((sum, u) => sum + u.count, 0);
+      showToast(
+        r.relinked > 0
+          ? `${r.relinked} attendance record(s) linked to staff.${gap ? ` ${gap} punch(es) still have no matching staff Device ID.` : ''}`
+          : gap
+            ? `No new links found. ${gap} punch(es) still have no matching staff Device ID.`
+            : 'Everything is already linked — nothing to fix.',
+        'success'
+      );
+    } catch (e) {
+      showToast(e.message || 'Failed to regenerate logs', 'error');
+    } finally {
+      setRelinking(false);
+    }
+  };
+
   const set = (f, v) => setLocal(p => ({ ...p, [f]: v }));
   const L = (np, en) => language === 'np' ? np : en;
   const livePreview = (fmt) => formatDate(PREVIEW_DATE, {
@@ -2315,6 +2403,7 @@ const Settings = () => {
       companyLogo:      settings.companyLogo      || null,
       logoWidth:        settings.logoWidth        || null,
       logoHeight:       settings.logoHeight       || null,
+      liveAttendanceNotifications: settings.liveAttendanceNotifications !== false,
     });
     setLogoError('');
     setCompanyModal(true);
@@ -2359,29 +2448,35 @@ const Settings = () => {
 
   const handleSave = () => { updateSettings(local); showToast(t('Record saved successfully')); };
 
-  const handleWeekendSave = () => {
+  const handleWeekendSave = async () => {
     if (!wForm.weekends.length) { showToast('कम्तीमा एक दिन छान्नुस', 'danger'); return; }
     if (!wForm.effectiveDate)   { showToast('Effective Date required', 'danger'); return; }
-    if (weekendEditId) {
-      // Update existing history entry
-      const updatedHistory = (settings.weekendHistory || []).map(h =>
-        h.id === weekendEditId
-          ? { ...h, weekends: wForm.weekends, effectiveDate: wForm.effectiveDate, reason: wForm.reason || '—' }
-          : h
-      );
-      updateSettings({ weekendHistory: updatedHistory, defaultWeekends: wForm.weekends, weekendStartDate: wForm.effectiveDate });
+    try {
+      if (weekendEditId) {
+        // Update existing history entry — writes through to the weekend_history
+        // table (see updateWeekendHistory), which is what every attendance
+        // report actually reads to decide which days are weekends. Awaited so
+        // the modal only closes / shows success once the save is confirmed —
+        // every attendance report depends on this actually landing in the DB.
+        await updateWeekendHistory(weekendEditId, {
+          weekends: wForm.weekends, effectiveDate: wForm.effectiveDate, reason: wForm.reason || '—',
+        });
+        showToast(L('सप्ताहन्त अपडेट भयो','Weekend record updated'));
+      } else {
+        await addWeekendHistory({
+          weekends: wForm.weekends, effectiveDate: wForm.effectiveDate,
+          changedBy: currentUser?.fullName || 'Admin', reason: wForm.reason || '—',
+        });
+        showToast(L('सप्ताहन्त सफलतापूर्वक परिवर्तन भयो','Weekend updated successfully'));
+      }
       setLocal(p => ({ ...p, defaultWeekends: wForm.weekends, weekendStartDate: wForm.effectiveDate }));
-      showToast(L('सप्ताहन्त अपडेट भयो','Weekend record updated'));
-    } else {
-      addWeekendHistory({
-        weekends: wForm.weekends, effectiveDate: wForm.effectiveDate,
-        changedBy: currentUser?.fullName || 'Admin', reason: wForm.reason || '—',
-      });
-      setLocal(p => ({ ...p, defaultWeekends: wForm.weekends, weekendStartDate: wForm.effectiveDate }));
-      showToast(L('सप्ताहन्त सफलतापूर्वक परिवर्तन भयो','Weekend updated successfully'));
+      setWeekendModal(false);
+      setWeekendEditId(null);
+    } catch (e) {
+      // Save failed — leave the modal open so the user can retry, instead of
+      // showing success for a change that never reached the database.
+      showToast(L('साप्ताहिक बिदा सुरक्षित गर्न सकिएन: ', 'Failed to save weekend setting: ') + (e.message || ''), 'danger');
     }
-    setWeekendModal(false);
-    setWeekendEditId(null);
   };
 
   /* Ctrl+S saves the Weekend modal — same action as the Save Change button */
@@ -2450,6 +2545,22 @@ const Settings = () => {
     showToast(t('Record deleted successfully'));
   };
 
+  // Bulk Import (Super Admin only, see BulkImportModal) — same updateSetupList
+  // path as handleSetupSave, so it goes through the same fresh-refetch
+  // persist() and can't silently clobber another tab's concurrent edit.
+  // De-dupes case-insensitively against the CURRENT list, not just within
+  // the pasted block.
+  const handleBulkImport = (key, newItems) => {
+    const list = settings[key] || [];
+    const existingNames = new Set(list.map(i => String(i.name).trim().toLowerCase()));
+    const base = Date.now();
+    const toAdd = newItems
+      .filter(ni => ni.name && !existingNames.has(ni.name.trim().toLowerCase()))
+      .map((ni, idx) => ({ ...ni, id: base + idx, isSystem: false, isDefault: false }));
+    if (toAdd.length) updateSetupList(key, [...list, ...toAdd]);
+    return { added: toAdd.length, skipped: newItems.length - toAdd.length };
+  };
+
   /* ── Backup helpers ── */
   const lsGet = (key, fb) => { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fb; } catch { return fb; } };
 
@@ -2488,7 +2599,7 @@ const Settings = () => {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = `ehajiri-backup-v${data.meta?.appVersion}-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `ehajiri-backup-v${data.meta?.appVersion}-${getNepalTodayISO()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -2568,6 +2679,59 @@ const Settings = () => {
       const r = await api.post('/backup/sql/save', { path: dir });
       addBackupHistory('PostgreSQL dump (pg_dump -Fc)', r.sizeKb, r.file);
       showToast(`${L('SQL ब्याकअप सुरक्षित भयो','SQL backup saved')}: ${r.file}`);
+    } catch (e) {
+      showToast(e.message, 'danger');
+    } finally {
+      setSqlBackupLoading(false);
+    }
+  };
+
+  /* Fetch a backup as a Blob and hand it to the BROWSER's own download
+     mechanism — lands in whichever computer's Downloads folder the person
+     clicking the button is actually sitting at, unlike handleBackup/
+     handleBackupSql above which write into a folder on the SERVER's own
+     disk (fine only when the server and the browser are the same machine). */
+  const downloadBackupBlob = async (path, filename) => {
+    const token = getToken();
+    const res = await fetch(apiUrl(path), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    return blob.size;
+  };
+
+  const handleBackupDownload = async () => {
+    setBackupLoading(true);
+    try {
+      const stamp = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
+      const size = await downloadBackupBlob(
+        `/backup?by=${encodeURIComponent(currentUser?.fullName || 'Admin')}`,
+        `ehajiri-backup-${stamp}.json`
+      );
+      addBackupHistory('JSON', Math.round(size / 1024), L('ब्राउजर डाउनलोड (यो कम्प्युटर)','Browser download (this computer)'));
+      showToast(L('ब्याकअप डाउनलोड भयो','Backup downloaded'));
+    } catch (e) {
+      showToast(e.message, 'danger');
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleBackupSqlDownload = async () => {
+    setSqlBackupLoading(true);
+    try {
+      const stamp = new Date().toISOString().slice(0,10);
+      const size = await downloadBackupBlob('/backup/sql', `ehajiri-backup-${stamp}.backup`);
+      addBackupHistory('PostgreSQL dump (pg_dump -Fc)', Math.round(size / 1024), L('ब्राउजर डाउनलोड (यो कम्प्युटर)','Browser download (this computer)'));
+      showToast(L('SQL ब्याकअप डाउनलोड भयो','SQL backup downloaded'));
     } catch (e) {
       showToast(e.message, 'danger');
     } finally {
@@ -2657,7 +2821,7 @@ const Settings = () => {
     if (restoreData.native) {
       try {
         const token = getToken();
-        const res = await fetch('/api/backup/restore-native', {
+        const res = await fetch(apiUrl('/backup/restore-native'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/octet-stream',
@@ -2721,12 +2885,18 @@ const Settings = () => {
     { key:'officeVisit',   icon:'🚗',  label:L('कार्यालय भ्रमण','Office Visit')          },
     { key:'publicHoliday', icon:'🎉',  label:L('सार्वजनिक छुट्टी','Public Holiday')      },
     canView('attendanceDevice') && { key:'device',        icon:'📡',  label:L('हाजिरी डिभाइस','Attendance Device')      },
-    canView('standaloneDevice') && { key:'standaloneDevice', icon:'🖥️', label:L('स्टान्डअलोन डिभाइस','StandAlone Device') },
-    { key:'language',      icon:'🌐',  label:L('भाषा','Language')                         },
+    // StandAlone Device — hidden from EVERY role (including admin/superAdmin)
+    // until the module flag is enabled from Settings → Role Management
+    // ("User Rights"); canView() alone can't hide this from admin/superAdmin
+    // since getPagePerm() always returns full access for them.
+    canView('standaloneDevice') && moduleFlags.standaloneDeviceEnabled && { key:'standaloneDevice', icon:'🖥️', label:L('स्टान्डअलोन डिभाइस','StandAlone Device') },
+    isSuperAdmin && { key:'language',   icon:'🌐',  label:L('भाषा','Language')                         },
     { key:'profile',       icon:'👤',  label:L('प्रोफाइल','Profile')                     },
-    { key:'emailSetup',    icon:'📧',  label:L('इमेल सेटअप','Email Setup')               },
+    // Email Setup — Super Admin only, AND hidden until enabled from Role
+    // Management (default OFF, migration 75).
+    isSuperAdmin && moduleFlags.emailSetupEnabled && { key:'emailSetup', icon:'📧',  label:L('इमेल सेटअप','Email Setup')               },
     { key:'database',      icon:'🗄️', label:L('डेटाबेस','Database')                     },
-    isAdmin && { key:'bugFinder', icon:'🐞',  label:L('बग फाइन्डर','Bug Finder')          },
+    isSuperAdmin && { key:'bugFinder', icon:'🐞',  label:L('बग फाइन्डर','Bug Finder')          },
   ].filter(Boolean);
 
   const setupSubNav = [
@@ -2761,9 +2931,9 @@ const Settings = () => {
             <div key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
               padding:'11px 18px', cursor:'pointer', fontSize:14, fontWeight:500,
               display:'flex', alignItems:'center', gap:9,
-              background:   activeTab===tab.key ? '#f0fdf4' : 'transparent',
-              color:        activeTab===tab.key ? '#52b02c' : '#374151',
-              borderLeft:   activeTab===tab.key ? '3px solid #52b02c' : '3px solid transparent',
+              background:   activeTab===tab.key ? '#eff6ff' : 'transparent',
+              color:        activeTab===tab.key ? '#1a56db' : '#374151',
+              borderLeft:   activeTab===tab.key ? '3px solid #1a56db' : '3px solid transparent',
               transition:'all .15s',
             }}>
               <span style={{ fontSize:16 }}>{tab.icon}</span>
@@ -2777,7 +2947,7 @@ const Settings = () => {
               🐘 PostgreSQL
             </div>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <span style={{ fontSize:12, fontWeight:700, color:'#52b02c' }}>v{APP_VERSION}</span>
+              <span style={{ fontSize:12, fontWeight:700, color:'#1a56db' }}>v{APP_VERSION}</span>
               <span style={{ fontSize:10, color:'#6b7280' }}>DB v{dbVersionInfo?.dbApplied ?? DB_VERSION}</span>
             </div>
           </div>
@@ -2792,7 +2962,7 @@ const Settings = () => {
               {/* ── Company Information — view card, double-click to edit ── */}
               <div className="card" onDoubleClick={openCompanyModal}
                 style={{ cursor:'pointer', transition:'box-shadow .15s' }}
-                onMouseEnter={e => e.currentTarget.style.boxShadow='0 0 0 2px #52b02c55'}
+                onMouseEnter={e => e.currentTarget.style.boxShadow='0 0 0 2px #1a56db55'}
                 onMouseLeave={e => e.currentTarget.style.boxShadow=''}>
                 <div className="card-header">
                   <div>
@@ -2808,12 +2978,12 @@ const Settings = () => {
                 </div>
 
                 {/* Letterhead preview (read-only) */}
-                <div style={{ background:'linear-gradient(135deg,#f8faff,#f0fdf4)', borderBottom:'1px solid #e5e7eb', padding:'14px 24px', display:'flex', alignItems:'center', gap:20, minHeight:90 }}>
+                <div style={{ background:'linear-gradient(135deg,#f8faff,#eff6ff)', borderBottom:'1px solid #e5e7eb', padding:'14px 24px', display:'flex', alignItems:'center', gap:20, minHeight:90 }}>
                   <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
                     {settings.companyLogo ? (
                       <img src={settings.companyLogo} alt="Logo" style={{ maxWidth:180, maxHeight:70, objectFit:'contain', borderRadius:4 }} />
                     ) : (
-                      <div style={{ width:120, height:52, border:'2px dashed #bbf7d0', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'white', gap:4 }}>
+                      <div style={{ width:120, height:52, border:'2px dashed #bfdbfe', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'white', gap:4 }}>
                         <span style={{ fontSize:20 }}>🖼️</span>
                         <span style={{ fontSize:11, color:'#94a3b8' }}>{L('लोगो छैन','No Logo')}</span>
                       </div>
@@ -2821,11 +2991,11 @@ const Settings = () => {
                     {settings.logoWidth && <span style={{ fontSize:10, color:'#9ca3af' }}>{settings.logoWidth}×{settings.logoHeight}px</span>}
                   </div>
                   <div style={{ flex:1, textAlign:'center' }}>
-                    <div style={{ fontSize:17, fontWeight:800, color:'#14532d' }}>{language==='np' ? settings.companyNameNp : settings.companyNameEn}</div>
+                    <div style={{ fontSize:17, fontWeight:800, color:'#1e3a8a' }}>{language==='np' ? settings.companyNameNp : settings.companyNameEn}</div>
                     <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{language==='np' ? settings.companyAddressNp : settings.companyAddressEn}</div>
                     <div style={{ fontSize:12, color:'#6b7280' }}>{settings.companyPhone}{settings.companyEmail && ` | ${settings.companyEmail}`}</div>
                     {settings.companyWebsite && <div style={{ fontSize:11, color:'#6b7280' }}>{settings.companyWebsite}</div>}
-                    <div style={{ borderTop:'2px solid #52b02c', marginTop:8 }}></div>
+                    <div style={{ borderTop:'2px solid #1a56db', marginTop:8 }}></div>
                   </div>
                 </div>
 
@@ -2866,7 +3036,7 @@ const Settings = () => {
                 </div>
                 <DataGrid
                   columns={[
-                    { field:'effectiveDate', header:L('प्रभावी मिति','Effective Date'),        width:160, render:v=><span style={{fontWeight:600,color:'#52b02c'}}>{fd(v)}</span> },
+                    { field:'effectiveDate', header:L('प्रभावी मिति','Effective Date'),        width:160, render:v=><span style={{fontWeight:600,color:'#1a56db'}}>{fd(v)}</span> },
                     { field:'weekends',      header:L('सप्ताहन्त दिनहरू','Weekend Days'),       width:560, minWidth:560, sortable:false, filterable:false, render:v=><DayBadge dayKeys={v||[]} language={language} /> },
                     { field:'changedDate',   header:L('परिवर्तन मिति','Changed On'),            width:160, render:v=><span style={{color:'#6b7280'}}>{fd(v)}</span> },
                     { field:'changedBy',     header:L('परिवर्तन गर्ने','Changed By'),           width:130, render:v=><span style={{fontWeight:500}}>{v}</span> },
@@ -2881,14 +3051,8 @@ const Settings = () => {
                     setWeekendEditId(row.id);
                     setWeekendModal(true);
                   }}
-                  onDeleteKey={row=>{
-                    const remaining = (settings.weekendHistory||[]).filter(h=>h.id!==row.id);
-                    updateSettings({ weekendHistory: remaining });
-                  }}
-                  onDeleteSelected={ids=>{
-                    const remaining = (settings.weekendHistory||[]).filter(h=>!ids.includes(h.id));
-                    updateSettings({ weekendHistory: remaining });
-                  }}
+                  onDeleteKey={row=>deleteWeekendHistory(row.id)}
+                  onDeleteSelected={ids=>ids.forEach(id=>deleteWeekendHistory(id))}
                   toolbar={
                     <button className="btn btn-primary btn-sm" onClick={()=>{ setWForm({ weekends:[...settings.defaultWeekends], effectiveDate:twoMonthsAgo, reason:'' }); setWeekendEditId(null); setWeekendModal(true); }}>
                       + {L('सप्ताहन्त परिवर्तन','Change Weekend')}
@@ -2923,7 +3087,7 @@ const Settings = () => {
                             <div style={{ fontSize:12, fontWeight:600 }}>{L('नेपाली अंक (०,१,२...)','Nepali Digits')}</div>
                             <div style={{ fontSize:11, color:'#6b7280' }}>{L('उदाहरण','eg')}: {formatDate(PREVIEW_DATE,{calendar:'np',format:local.defaultDateFormat,nepaliDigits:true})}</div>
                           </div>
-                          <div style={{ width:40, height:22, background:local.nepaliDigits?'#52b02c':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                          <div style={{ width:40, height:22, background:local.nepaliDigits?'#1a56db':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
                             onClick={() => set('nepaliDigits', !local.nepaliDigits)}>
                             <div style={{ position:'absolute', top:2, left:local.nepaliDigits?20:2, width:18, height:18, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
                           </div>
@@ -2941,7 +3105,7 @@ const Settings = () => {
                         ))}
                       </select>
                       {/* Live preview pill */}
-                      <div style={{ marginTop:8, display:'inline-flex', alignItems:'center', gap:8, background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'6px 14px', fontSize:13, fontWeight:700, color:'#166534' }}>
+                      <div style={{ marginTop:8, display:'inline-flex', alignItems:'center', gap:8, background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'6px 14px', fontSize:13, fontWeight:700, color:'#1e40af' }}>
                         {livePreview(local.defaultDateFormat)}
                         <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>— {L('प्रिभ्यु','preview')}</span>
                       </div>
@@ -2955,6 +3119,54 @@ const Settings = () => {
                   </div>
                 </div>
               </div>
+
+              {/* ── Leave/Office Visit Backdate toggle — Super Admin only.
+                   Off blocks picking yesterday-or-earlier as the From Date on
+                   any Leave or Office Visit application (all 5 apply surfaces,
+                   both calendars); On (default) leaves today's behavior as-is. ── */}
+              {isSuperAdmin && (
+                <div className="card" style={{ marginTop:16 }}>
+                  <div className="card-header">
+                    <div>
+                      <h3>🔒 {L('विदा र कार्यालय भ्रमण ब्याकडेट आवेदन','Leave & Office Visit Backdate Apply')}</h3>
+                      <div style={{ fontSize:11, color:'#9ca3af', marginTop:2 }}>
+                        {L('निष्क्रिय हुँदा, कर्मचारीले विदा वा कार्यालय भ्रमण आवेदनमा हिजो वा त्यसभन्दा अघिको मिति छान्न सक्दैनन्',
+                          'When Off, staff cannot select yesterday or an earlier date as the From Date on Leave or Office Visit applications')}
+                      </div>
+                    </div>
+                    <div style={{ width:40, height:22, background:local.leaveBackdateEnabled?'#1a56db':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                      onClick={() => set('leaveBackdateEnabled', !local.leaveBackdateEnabled)}>
+                      <div style={{ position:'absolute', top:2, left:local.leaveBackdateEnabled?20:2, width:18, height:18, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
+                    </div>
+                  </div>
+                  <div className="card-body" style={{ display:'flex', justifyContent:'flex-end' }}>
+                    <button className="btn btn-primary btn-sm" onClick={handleSave}>
+                      💾 {L('सुरक्षित','Save')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Regenerate attendance logs — relinks any punch whose employee
+                   couldn't be resolved yet (e.g. Device ID set after the logs
+                   already came in via bulk import) so reports stop showing that
+                   staff member as Absent despite the punch being on file. ── */}
+              {isAdmin && (
+                <div className="card" style={{ marginTop:16 }}>
+                  <div className="card-header">
+                    <div>
+                      <h3>🔄 {L('लगहरू पुन: उत्पन्न गर्नुस','Regenerate the Logs for Report')}</h3>
+                      <div style={{ fontSize:11, color:'#9ca3af', marginTop:2 }}>
+                        {L('कर्मचारी ठीक तरिकाले लिंक नभएका उपस्थिति लगहरू ठीक गर्नुस — उदाहरण: डिभाइस आईडी लगहरू आइसकेपछि सेट भएको खण्डमा',
+                          'Fixes attendance punches that never got linked to a staff member — e.g. when a Device ID was set after those logs already came in')}
+                      </div>
+                    </div>
+                    <button className="btn btn-sm btn-outline-primary" disabled={relinking} onClick={relinkAttendanceLogs}>
+                      {relinking ? `⏳ ${L('चलिरहेको...','Running...')}` : `🔄 ${L('पुन: उत्पन्न गर्नुस','Regenerate')}`}
+                    </button>
+                  </div>
+                </div>
+              )}
 
             </div>
           )}
@@ -2970,20 +3182,20 @@ const Settings = () => {
                     {[{code:'en',flag:'🌍',title:L('अंग्रेजी (AD)','English (AD)'),sub:'Gregorian · Anno Domini'},{code:'np',flag:'🇳🇵',title:L('नेपाली (BS)','Nepali (BS)'),sub:'विक्रम सम्वत् · Bikram Sambat'}].map(cal => {
                       const active = local.defaultCalendar === cal.code;
                       return (
-                        <div key={cal.code} onClick={() => set('defaultCalendar', cal.code)} style={{ border:`2px solid ${active?'#52b02c':'#e5e7eb'}`, background:active?'#f0fdf4':'#f9fafb', borderRadius:12, padding:'18px 20px', cursor:'pointer', transition:'all .15s' }}>
+                        <div key={cal.code} onClick={() => set('defaultCalendar', cal.code)} style={{ border:`2px solid ${active?'#1a56db':'#e5e7eb'}`, background:active?'#eff6ff':'#f9fafb', borderRadius:12, padding:'18px 20px', cursor:'pointer', transition:'all .15s' }}>
                           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
                             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                               <span style={{ fontSize:26 }}>{cal.flag}</span>
                               <div>
-                                <div style={{ fontSize:15, fontWeight:700, color:active?'#166534':'#1f2937' }}>{cal.title}</div>
+                                <div style={{ fontSize:15, fontWeight:700, color:active?'#1e40af':'#1f2937' }}>{cal.title}</div>
                                 <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{cal.sub}</div>
                               </div>
                             </div>
-                            <div style={{ width:20, height:20, borderRadius:'50%', border:`2px solid ${active?'#52b02c':'#d1d5db'}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                              {active && <div style={{ width:10, height:10, borderRadius:'50%', background:'#52b02c' }}></div>}
+                            <div style={{ width:20, height:20, borderRadius:'50%', border:`2px solid ${active?'#1a56db':'#d1d5db'}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                              {active && <div style={{ width:10, height:10, borderRadius:'50%', background:'#1a56db' }}></div>}
                             </div>
                           </div>
-                          <div style={{ marginTop:12, background:active?'#dcfce7':'#f3f4f6', borderRadius:6, padding:'7px 12px', fontSize:14, fontWeight:700, color:active?'#166534':'#374151', textAlign:'center' }}>{livePreview(local.defaultDateFormat)}</div>
+                          <div style={{ marginTop:12, background:active?'#dbeafe':'#f3f4f6', borderRadius:6, padding:'7px 12px', fontSize:14, fontWeight:700, color:active?'#1e40af':'#374151', textAlign:'center' }}>{livePreview(local.defaultDateFormat)}</div>
                         </div>
                       );
                     })}
@@ -2994,7 +3206,7 @@ const Settings = () => {
                         <div style={{ fontSize:14, fontWeight:600 }}>{L('नेपाली अंक (०,१,२...)','Nepali Digits (०,१,२...)')}</div>
                         <div style={{ fontSize:12, color:'#6b7280' }}>{L('मितिमा देवनागरी अंक','Use Devanagari numerals in dates')} — {L('उदाहरण','Example')}: {formatDate(PREVIEW_DATE,{calendar:'np',format:local.defaultDateFormat,nepaliDigits:true})}</div>
                       </div>
-                      <div style={{ width:48, height:26, background:local.nepaliDigits?'#52b02c':'#d1d5db', borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s' }}
+                      <div style={{ width:48, height:26, background:local.nepaliDigits?'#1a56db':'#d1d5db', borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s' }}
                         onClick={() => set('nepaliDigits', !local.nepaliDigits)}>
                         <div style={{ position:'absolute', top:3, left:local.nepaliDigits?24:3, width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
                       </div>
@@ -3010,12 +3222,12 @@ const Settings = () => {
                     {FORMAT_OPTIONS.map(opt => {
                       const active = local.defaultDateFormat === opt.key;
                       return (
-                        <label key={opt.key} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'11px 16px', borderRadius:8, cursor:'pointer', border:`2px solid ${active?'#52b02c':'#e5e7eb'}`, background:active?'#f0fdf4':'#f9fafb', transition:'all .15s' }}>
+                        <label key={opt.key} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'11px 16px', borderRadius:8, cursor:'pointer', border:`2px solid ${active?'#1a56db':'#e5e7eb'}`, background:active?'#eff6ff':'#f9fafb', transition:'all .15s' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                            <input type="radio" name="dateFormat" checked={active} onChange={() => set('defaultDateFormat', opt.key)} style={{ accentColor:'#52b02c', width:15, height:15 }} />
-                            <span style={{ fontFamily:'monospace', fontSize:14, fontWeight:600, color:active?'#166534':'#374151' }}>{opt.label}</span>
+                            <input type="radio" name="dateFormat" checked={active} onChange={() => set('defaultDateFormat', opt.key)} style={{ accentColor:'#1a56db', width:15, height:15 }} />
+                            <span style={{ fontFamily:'monospace', fontSize:14, fontWeight:600, color:active?'#1e40af':'#374151' }}>{opt.label}</span>
                           </div>
-                          <span style={{ fontSize:14, fontWeight:active?700:500, color:active?'#52b02c':'#6b7280', background:active?'#dcfce7':'#f3f4f6', padding:'4px 12px', borderRadius:6 }}>{livePreview(opt.key)}</span>
+                          <span style={{ fontSize:14, fontWeight:active?700:500, color:active?'#1a56db':'#6b7280', background:active?'#dbeafe':'#f3f4f6', padding:'4px 12px', borderRadius:6 }}>{livePreview(opt.key)}</span>
                         </label>
                       );
                     })}
@@ -3087,15 +3299,18 @@ const Settings = () => {
                 {activeSetup === 'branch' && (
                   <SetupSection
                     title={L('शाखा','Branch')}
-                    data={settings.branches || []}
+                    data={[...(settings.branches || [])].sort((a,b)=>(a.rankingOrder??9999)-(b.rankingOrder??9999))}
                     fields={[
-                      { key:'name',      header:L('शाखाको नाम','Branch Name'), required:true },
-                      { key:'shortName', header:L('संक्षिप्त नाम','Short Name') },
-                      { key:'address',   header:L('ठेगाना','Address') },
-                      { key:'phone',     header:L('फोन','Phone') },
+                      { key:'name',         header:L('शाखाको नाम','Branch Name'), required:true },
+                      { key:'shortName',    header:L('संक्षिप्त नाम','Short Name') },
+                      { key:'rankingOrder', header:L('क्रम','Ranking Order'), type:'number', placeholder:'1' },
+                      { key:'address',      header:L('ठेगाना','Address') },
+                      { key:'phone',        header:L('फोन','Phone') },
                     ]}
+                    sortKey="rankingOrder"
                     onSave={(id,form) => handleSetupSave('branches', id, form)}
                     onDelete={(id) => handleSetupDelete('branches', id)}
+                    bulkImport={isSuperAdmin ? { hasShortName: true, onImport: items => handleBulkImport('branches', items) } : null}
                   />
                 )}
 
@@ -3110,8 +3325,10 @@ const Settings = () => {
                       { key:'isDefault',    header:L('डिफल्ट','Default'), type:'boolean' },
                     ]}
                     sortKey="rankingOrder"
+                    autoShortName={{ from:'name', to:'shortName', len:5 }}
                     onSave={(id,form) => handleSetupSave('departments', id, form, true)}
                     onDelete={(id) => handleSetupDelete('departments', id)}
+                    bulkImport={isSuperAdmin ? { hasShortName: true, onImport: items => handleBulkImport('departments', items) } : null}
                   />
                 )}
 
@@ -3126,8 +3343,10 @@ const Settings = () => {
                       { key:'isDefault',    header:L('डिफल्ट','Default'), type:'boolean' },
                     ]}
                     sortKey="rankingOrder"
+                    autoShortName={{ from:'name', to:'shortName', len:5 }}
                     onSave={(id,form) => handleSetupSave('posts', id, form, true)}
                     onDelete={(id) => handleSetupDelete('posts', id)}
+                    bulkImport={isSuperAdmin ? { hasShortName: true, onImport: items => handleBulkImport('posts', items) } : null}
                   />
                 )}
 
@@ -3142,6 +3361,7 @@ const Settings = () => {
                     sortKey="rankingOrder"
                     onSave={(id,form) => handleSetupSave('grades', id, form)}
                     onDelete={(id) => handleSetupDelete('grades', id)}
+                    bulkImport={isSuperAdmin ? { hasShortName: false, onImport: items => handleBulkImport('grades', items) } : null}
                   />
                 )}
 
@@ -3280,7 +3500,7 @@ const Settings = () => {
           )}
 
           {/* ══════════ LANGUAGE ══════════ */}
-          {activeTab === 'language' && <LanguageSection />}
+          {activeTab === 'language' && isSuperAdmin && <LanguageSection />}
 
           {/* ══════════ PROFILE ══════════ */}
           {activeTab === 'profile' && (
@@ -3302,7 +3522,7 @@ const Settings = () => {
               {
                 key:'branchManager', icon:'🏪',
                 name:L('शाखा प्रबन्धक','Branch Manager'),
-                color:'#52b02c', bg:'#f0fdf4', border:'#bbf7d0',
+                color:'#1a56db', bg:'#eff6ff', border:'#bfdbfe',
                 desc:L('आफ्नो शाखाका सम्पूर्ण कर्मचारीमा पूर्ण अधिकार मात्र','Full rights of all staff only within their assigned Branch'),
               },
               {
@@ -3430,7 +3650,7 @@ const Settings = () => {
                               <td key={i} style={{ ...tdStyle, textAlign:'center' }}>
                                 {v
                                   ? <span style={{ color:'#0e9f6e', fontSize:15 }}>✅</span>
-                                  : <span style={{ color:'#d1d5db', fontSize:13 }}>⛔</span>}
+                                  : <span style={{ color:'#d1d5db' }}>⛔</span>}
                               </td>
                             ))}
                           </tr>
@@ -3444,7 +3664,7 @@ const Settings = () => {
                 {assignModal && (
                   <div className="modal-overlay">
                     <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-                      <div className="modal-header" style={{ background:`linear-gradient(135deg,${assignModal.bg},#ffffff)` }}>
+                      <div className="modal-header">
                         <h2>{assignModal.icon} {L('कर्मचारी थप्नुस','Assign Staff')} — {assignModal.name}</h2>
                         <button className="modal-close" onClick={() => setAssignModal(null)}>✕</button>
                       </div>
@@ -3504,14 +3724,14 @@ const Settings = () => {
                 {changeModal && (
                   <div className="modal-overlay">
                     <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-                      <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+                      <div className="modal-header">
                         <h2>✏️ {L('भूमिका परिवर्तन','Change Role')}</h2>
                         <button className="modal-close" onClick={() => setChangeModal(null)}>✕</button>
                       </div>
                       <div className="modal-body">
                         {/* Staff info */}
                         <div style={{ display:'flex', alignItems:'center', gap:12, background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', marginBottom:16 }}>
-                          <div style={{ width:38,height:38,borderRadius:'50%',background:'#dcfce7',color:'#52b02c',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:16 }}>
+                          <div style={{ width:38,height:38,borderRadius:'50%',background:'#dbeafe',color:'#1a56db',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:16 }}>
                             {changeModal.emp.avatar}
                           </div>
                           <div>
@@ -3542,9 +3762,20 @@ const Settings = () => {
             );
           })()}
 
-          {/* ══════════ EMAIL SETUP ══════════ */}
-          {activeTab === 'emailSetup' && (
-            <EmailSetupTab showToast={showToast} />
+          {/* ══════════ EMAIL SETUP (Super Admin only, module flag default OFF) ══════════ */}
+          {activeTab === 'emailSetup' && isSuperAdmin && (
+            <div>
+              {!moduleFlagsLoading && (
+                <ModuleToggleBanner
+                  enabled={moduleFlags.emailSetupEnabled}
+                  isAdmin={isSuperAdmin}
+                  onToggle={() => toggleModule('module_email_setup_enabled')}
+                  label={L('इमेल सेटअप मोड्युल','Email Setup module')}
+                  L={L}
+                />
+              )}
+              {moduleFlags.emailSetupEnabled && <EmailSetupTab showToast={showToast} />}
+            </div>
           )}
 
           {/* ══════════ DATABASE / BACKUP & RESTORE ══════════ */}
@@ -3581,7 +3812,7 @@ const Settings = () => {
                   {/* Compact info strip */}
                   <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
                     {[
-                      { label:L('एप संस्करण','App Version'), value:`v${APP_VERSION}`,                             icon:'🏷️', color:'#52b02c', bg:'#f0fdf4', border:'#bbf7d0' },
+                      { label:L('एप संस्करण','App Version'), value:`v${APP_VERSION}`,                             icon:'🏷️', color:'#1a56db', bg:'#eff6ff', border:'#bfdbfe' },
                       { label:L('DB स्किमा','DB Schema'),    value:`v${dbVersionInfo?.dbApplied ?? DB_VERSION}`,   icon:'🗂️', color:'#0369a1', bg:'#e0f2fe', border:'#bae6fd' },
                       { label:L('भण्डारण','Storage'),        value: isOnline ? 'PostgreSQL' : 'localStorage',     icon: isOnline?'🐘':'💾', color: isOnline?'#336791':'#7e3af2', bg: isOnline?'#f0f9ff':'#f5f3ff', border: isOnline?'#bae6fd':'#ddd6fe' },
                     ].map(item => (
@@ -3596,7 +3827,7 @@ const Settings = () => {
                     <div style={{ marginLeft:'auto', background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'6px 14px', fontSize:12, color:'#6b7280', display:'flex', gap:14 }}>
                       <span>🖥️ <strong>localhost:5001</strong></span>
                       <span>📦 <strong>{isOnline ? 'ehajiri_db' : 'localStorage'}</strong></span>
-                      <span>📅 {L('अन्तिम अपडेट','Last Updated')}: <strong>{dbVersionInfo?.dbAppliedAt ? fd(dbVersionInfo.dbAppliedAt.split('T')[0]) : fd(new Date().toISOString().split('T')[0])}</strong></span>
+                      <span>📅 {L('अन्तिम अपडेट','Last Updated')}: <strong>{dbVersionInfo?.dbAppliedAt ? fd(dbVersionInfo.dbAppliedAt.split('T')[0]) : fd(getNepalTodayISO())}</strong></span>
                     </div>
                   </div>
                 </div>
@@ -3608,7 +3839,50 @@ const Settings = () => {
                   <h3>📥 {L('डेटाबेस ब्याकअप','Database Backup')}</h3>
                 </div>
                 <div className="card-body">
-                  <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, fontSize:13, flexWrap:'wrap' }}>
+                  <div style={{ background: isOnline ? '#f0fdf4' : '#fefce8', border:`1px solid ${isOnline ? '#bbf7d0' : '#fde68a'}`, borderRadius:8, padding:'12px 14px', marginBottom:16, fontSize:13, color: isOnline ? '#065f46' : '#92400e' }}>
+                    {isOnline ? '✅' : '💾'}{' '}
+                    {isOnline
+                      ? `${L('ब्याकअपमा संस्करण जानकारी स्वतः समावेश हुन्छ।','Version info is automatically included in backup.')} ${L('पुनर्स्थापनामा स्वत: माइग्रेसन लागू हुन्छ।','Auto-migration is applied on restore.')}`
+                      : L('PostgreSQL उपलब्ध नभएकोले स्थानीय डेटा ब्याकअप हुनेछ। PostgreSQL जडान भएपछि डेटाबेस ब्याकअप पूर्ण हुन्छ।',
+                          'Local data will be backed up since PostgreSQL is not available. Full DB backup available when PostgreSQL is connected.')}
+                  </div>
+
+                  {/* ── Download to this computer — the file goes straight into whatever
+                       machine's browser is clicking the button, not the server. ── */}
+                  <div style={{ fontSize:13, fontWeight:700, color:'#111827', marginBottom:8 }}>
+                    ⬇️ {L('यो कम्प्युटरमा डाउनलोड गर्नुहोस्','Download to This Computer')}
+                  </div>
+                  <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap', marginBottom:10 }}>
+                    <button
+                      className="btn btn-outline"
+                      style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, padding:'10px 22px' }}
+                      onClick={() => handleBackupSqlDownload()}
+                      disabled={sqlBackupLoading || !isOnline}
+                      title={L('सबै तालिकाहरू (हाजिरी लग सहित) समेट्ने compressed PostgreSQL डम्प — pg_restore बाट restore गर्नुहोस्।','Compressed PostgreSQL dump of ALL tables (attendance logs included) — restore with: pg_restore -d ehajiri_db <file>.backup')}
+                    >
+                      {sqlBackupLoading ? '⏳ ...' : '🗄️'} {L('पूर्ण PostgreSQL ब्याकअप (सबै तथ्याङ्क)','Full PostgreSQL Backup (all data)')}
+                    </button>
+                    <button
+                      className="btn btn-outline"
+                      style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, padding:'10px 22px' }}
+                      onClick={() => handleBackupDownload()}
+                      disabled={backupLoading}
+                    >
+                      {backupLoading ? '⏳ ...' : '📥'} {L('JSON ब्याकअप (सेटअप डेटा मात्र)','JSON Backup (setup data only)')}
+                    </button>
+                  </div>
+                  <div style={{ fontSize:12, color:'#9ca3af', marginBottom:20 }}>
+                    ⚠️ {L('JSON ब्याकअपमा हाजिरी लग (पंच रेकर्ड) समावेश हुँदैन — स्टाफ/शिफ्ट/बिदा सेटअप मात्र। हाजिरी लग सहित पूर्ण ब्याकअपको लागि माथिको "पूर्ण PostgreSQL ब्याकअप" प्रयोग गर्नुहोस्।',
+                      'The JSON backup does NOT include attendance logs (punch records) — only staff/shift/leave setup data. For a complete backup including attendance logs, use "Full PostgreSQL Backup" above.')}
+                  </div>
+
+                  {/* ── Save to server folder — only useful when you can actually reach the
+                       server's own disk (e.g. via RDP, or a shared/mapped network drive the
+                       server can see). For a normal browser session, use Download above instead. ── */}
+                  <div style={{ fontSize:13, fontWeight:700, color:'#111827', marginBottom:8 }}>
+                    🖥️ {L('सर्भर फोल्डरमा सुरक्षित गर्नुहोस्','Save to Server Folder')}
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, fontSize:13, flexWrap:'wrap' }}>
                     <span style={{ color:'#6b7280', fontWeight:600 }}>📁 {L('ब्याकअप स्थान','Backup Location')}:</span>
                     {backupPath
                       ? <code style={{ background:'#f3f4f6', border:'1px solid #e5e7eb', borderRadius:6, padding:'3px 10px', fontSize:12, color:'#1f2937' }}>{backupPath}</code>
@@ -3617,12 +3891,9 @@ const Settings = () => {
                       {backupPath ? `✏️ ${L('परिवर्तन','Change')}` : `📂 ${L('स्थान छान्नुहोस','Set Location')}`}
                     </button>
                   </div>
-                  <div style={{ background: isOnline ? '#f0fdf4' : '#fefce8', border:`1px solid ${isOnline ? '#bbf7d0' : '#fde68a'}`, borderRadius:8, padding:'12px 14px', marginBottom:16, fontSize:13, color: isOnline ? '#065f46' : '#92400e' }}>
-                    {isOnline ? '✅' : '💾'}{' '}
-                    {isOnline
-                      ? `${L('ब्याकअपमा संस्करण जानकारी स्वतः समावेश हुन्छ।','Version info is automatically included in backup.')} ${L('पुनर्स्थापनामा स्वत: माइग्रेसन लागू हुन्छ।','Auto-migration is applied on restore.')}`
-                      : L('PostgreSQL उपलब्ध नभएकोले स्थानीय डेटा ब्याकअप हुनेछ। PostgreSQL जडान भएपछि डेटाबेस ब्याकअप पूर्ण हुन्छ।',
-                          'Local data will be backed up since PostgreSQL is not available. Full DB backup available when PostgreSQL is connected.')}
+                  <div style={{ fontSize:12, color:'#9ca3af', marginBottom:16 }}>
+                    ℹ️ {L('यो सर्भरको आफ्नै डिस्कमा फोल्डर हो — रिमोट/ब्राउजरबाट पहुँच गर्दा तपाईंको कम्प्युटरमा फाइल आउँदैन। यो कम्प्युटरमा फाइल चाहिन्छ भने माथिको "Download" प्रयोग गर्नुहोस्।',
+                      "This is a folder on the server's own disk — accessing remotely/via browser will NOT put the file on your computer. Use \"Download to This Computer\" above if you need the file locally.")}
                   </div>
                   <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
                     <button
@@ -3689,10 +3960,16 @@ const Settings = () => {
                           ))}
                         </div>
                         {restorePreview.native && (
+                          <>
                           <div style={{ marginTop:12, background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#0369a1' }}>
                             🗄️ {L('पूर्ण PostgreSQL पुनर्स्थापना — हाजिरी लग सहित सबै तालिकाहरू बदलिनेछन्। पुरानो संस्करणको डम्प भए माइग्रेसन स्वत: चल्नेछ।',
                                   'Full PostgreSQL restore — replaces ALL tables including attendance logs. If the dump is from an older version, migrations run automatically.')}
                           </div>
+                          <div style={{ marginTop:8, background:'#fffbeb', border:'1px solid #fcd34d', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#92400e' }}>
+                            ⚠️ {L('यो ब्याकअप अर्को कम्पनीको भए पनि, हालको इजाजतपत्र र कम्पनी जानकारी (Settings → Company Info) परिवर्तन हुँदैन — ती सधैं यही स्थापनाको आफ्नै रहन्छन्। बाँकी सबै डेटा (स्टाफ, हाजिरी) भने बदलिन्छ।',
+                                  "This backup's license and Company Info (Settings → Company Info) will NOT overwrite this installation's own — those always stay whatever's currently active here, even if you're restoring another company's backup file by mistake. Everything else (staff, attendance) still gets fully replaced.")}
+                          </div>
+                          </>
                         )}
                         {!restorePreview.native && restorePreview.dbVersion < DB_VERSION && (
                           <div style={{ marginTop:12, background:'#fffbeb', border:'1px solid #fcd34d', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#92400e' }}>
@@ -3751,9 +4028,9 @@ const Settings = () => {
                     { field:'source', header:L('स्रोत','Source'), width:150, render:v=>(
                       <span style={{
                         padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700,
-                        background:v==='PostgreSQL'?'#dcfce7':'#f3e8ff',
-                        color:v==='PostgreSQL'?'#166534':'#7e3af2',
-                        border:`1px solid ${v==='PostgreSQL'?'#bbf7d0':'#ddd6fe'}`,
+                        background:v==='PostgreSQL'?'#dbeafe':'#f3e8ff',
+                        color:v==='PostgreSQL'?'#1e40af':'#7e3af2',
+                        border:`1px solid ${v==='PostgreSQL'?'#bfdbfe':'#ddd6fe'}`,
                       }}>
                         {v==='PostgreSQL'?'🐘':'💾'} {v}
                       </span>
@@ -3781,7 +4058,7 @@ const Settings = () => {
         )}
 
         {/* ══════════ BUG FINDER ══════════ */}
-        {activeTab === 'bugFinder' && <BugFinder />}
+        {activeTab === 'bugFinder' && isSuperAdmin && <BugFinder />}
 
         </div>
       </div>
@@ -3842,8 +4119,8 @@ const Settings = () => {
                   {ALL_DAYS.map(d => {
                     const on = wForm.weekends.includes(d.key);
                     return (
-                      <label key={d.key} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, cursor:'pointer', border:`2px solid ${on?'#52b02c':'#e5e7eb'}`, background:on?'#f0fdf4':'#f9fafb', fontWeight:on?700:400, color:on?'#166534':'#374151', transition:'all .13s' }}>
-                        <input type="checkbox" checked={on} onChange={() => setWForm(p => ({ ...p, weekends: on ? p.weekends.filter(k=>k!==d.key) : [...p.weekends, d.key] }))} style={{ accentColor:'#52b02c', width:13, height:13 }} />
+                      <label key={d.key} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, cursor:'pointer', border:`2px solid ${on?'#1a56db':'#e5e7eb'}`, background:on?'#eff6ff':'#f9fafb', fontWeight:on?700:400, color:on?'#1e40af':'#374151', transition:'all .13s' }}>
+                        <input type="checkbox" checked={on} onChange={() => setWForm(p => ({ ...p, weekends: on ? p.weekends.filter(k=>k!==d.key) : [...p.weekends, d.key] }))} style={{ accentColor:'#1a56db', width:13, height:13 }} />
                         {language==='np' ? d.np : d.en}
                       </label>
                     );
@@ -3897,7 +4174,7 @@ const Settings = () => {
       {companyModal && (
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:620, width:'95%' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>🏢 {L('कम्पनी जानकारी सम्पादन','Edit Company Information')}</h2>
               <button className="modal-close" onClick={() => setCompanyModal(false)}>✕</button>
             </div>
@@ -3905,7 +4182,7 @@ const Settings = () => {
               {/* Logo upload */}
               <div style={{ marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
                 <div
-                  style={{ width:150, height:64, border:'2px dashed #bbf7d0', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'#f8faff', cursor:'pointer', overflow:'hidden', flexShrink:0 }}
+                  style={{ width:150, height:64, border:'2px dashed #bfdbfe', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', background:'#f8faff', cursor:'pointer', overflow:'hidden', flexShrink:0 }}
                   onClick={() => companyLogoInputRef.current?.click()}
                 >
                   {cForm.companyLogo
@@ -3972,6 +4249,25 @@ const Settings = () => {
                 <label className="form-label">{L('वेबसाइट','Website')}</label>
                 <input type="text" className="form-control" value={cForm.companyWebsite || ''}
                   onChange={e => sc('companyWebsite', e.target.value)} />
+              </div>
+
+              <div style={{ marginTop:16, padding:'12px 16px', background:'#f9fafb', borderRadius:10,
+                border:'1px solid #e5e7eb', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <div>
+                  <div style={{ fontSize:14, fontWeight:600 }}>
+                    {L('लाइभ स्टाफ हाजिरी सूचना सक्षम गर्नुहोस्','Enable Live Staff Attendance Notifications')}
+                  </div>
+                  <div style={{ fontSize:12, color:'#6b7280' }}>
+                    {L('कर्मचारीले पन्च गर्दा तत्काल पप-अप सूचना देखाउनुहोस्','Show a live pop-up whenever a staff member punches in/out')}
+                  </div>
+                </div>
+                <div style={{ width:48, height:26, background: cForm.liveAttendanceNotifications ? '#1a56db' : '#d1d5db',
+                    borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                  onClick={() => sc('liveAttendanceNotifications', !cForm.liveAttendanceNotifications)}>
+                  <div style={{ position:'absolute', top:3, left: cForm.liveAttendanceNotifications ? 24 : 3,
+                    width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s',
+                    boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
+                </div>
               </div>
             </div>
             <div className="modal-footer">

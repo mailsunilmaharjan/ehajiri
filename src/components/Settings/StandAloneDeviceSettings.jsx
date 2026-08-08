@@ -1,3 +1,9 @@
+// ⚠ StandAlone SDK code (legacy zkemkeeper.dll COM control, pull model) —
+// DISABLED BY DEFAULT. This component isn't reachable at all until the
+// StandAlone Device module flag is turned on from Settings → Role Management
+// → Module Controls (default OFF, hidden from every role including Admin/
+// Super Admin until then) — see server/routes/standaloneDevices.js's
+// top-of-file note for the full gating chain.
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
@@ -36,7 +42,7 @@ const KNOWN_COMMANDS = [
 const emptyDevice = { name:'', ipAddress:'', port:4370, commPassword:'', model:'', location:'' };
 
 /* ═══ tiny atoms (mirrors ZKTecoDeviceSettings.jsx conventions) ═══ */
-const Badge = ({ children, color='#52b02c', bg='#f0fdf4', border='#bbf7d0' }) => (
+const Badge = ({ children, color='#1a56db', bg='#eff6ff', border='#bfdbfe' }) => (
   <span style={{ background:bg, color, border:`1px solid ${border}`, borderRadius:10,
     padding:'2px 9px', fontSize:11, fontWeight:700, display:'inline-block' }}>
     {children}
@@ -59,7 +65,7 @@ const ConnectionDot = ({ status }) => {
   );
 };
 
-const ActionBtn = ({ icon, label, color='#52b02c', bg='#f0fdf4', border='#bbf7d0',
+const ActionBtn = ({ icon, label, color='#1a56db', bg='#eff6ff', border='#bfdbfe',
   onClick, loading=false, disabled=false, danger=false }) => (
   <button
     disabled={disabled || loading}
@@ -105,6 +111,11 @@ const DeviceControlModal = ({ device, allDevices, onClose, showToast, onRefresh 
   const [cmdArgs,   setCmdArgs]   = useState('[]');
   const [cmdResult, setCmdResult] = useState(null);
 
+  // Remote Sync Agent panel state — config.json for a standalone-bridge.exe
+  // run at a site where this device isn't on the same machine as the eHajiri
+  // server (see server/routes/standaloneDevices.js POST .../sync-token).
+  const [syncConfig, setSyncConfig] = useState(null);
+
   const run = async (key, fn, successMsg) => {
     setBusy(b => ({ ...b, [key]: true }));
     try {
@@ -134,15 +145,37 @@ const DeviceControlModal = ({ device, allDevices, onClose, showToast, onRefresh 
     }
   };
 
+  const generateSyncToken = async () => {
+    setBusy(b => ({ ...b, syncToken:true }));
+    try {
+      const r = await api.post(`/standalone/devices/${id}/sync-token`, { serverUrl: window.location.origin });
+      setSyncConfig(r.config);
+      showToast?.('✅ Sync token generated', 'success');
+      onRefresh?.();
+    } catch (err) { showToast?.(`❌ ${err.message}`, 'error'); }
+    finally { setBusy(b => ({ ...b, syncToken:false })); }
+  };
+
+  const revokeSyncToken = async () => {
+    setBusy(b => ({ ...b, revokeSync:true }));
+    try {
+      await api.delete(`/standalone/devices/${id}/sync-token`);
+      setSyncConfig(null);
+      showToast?.('✅ Sync token revoked', 'success');
+      onRefresh?.();
+    } catch (err) { showToast?.(`❌ ${err.message}`, 'error'); }
+    finally { setBusy(b => ({ ...b, revokeSync:false })); }
+  };
+
   return (
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth:600, maxHeight:'92vh', overflowY:'auto' }}
            onClick={e => e.stopPropagation()}>
 
         <div className="modal-header"
-          style={{ background:'linear-gradient(135deg,#f0fdf4,#dcfce7)', position:'sticky', top:0, zIndex:10 }}>
+          style={{ position:'sticky', top:0, zIndex:10 }}>
           <div>
-            <h2 style={{ color:'#166534', margin:0 }}>🖥️ {L('डिभाइस नियन्त्रण','Device Control')} — {device.name}</h2>
+            <h2 style={{ color:'#1e40af', margin:0 }}>🖥️ {L('डिभाइस नियन्त्रण','Device Control')} — {device.name}</h2>
             <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>
               {device.ip_address}:{device.port} &nbsp;·&nbsp; <ConnectionDot status={device.connection_status} />
             </div>
@@ -158,13 +191,14 @@ const DeviceControlModal = ({ device, allDevices, onClose, showToast, onRefresh 
             {[
               { key:'info', icon:'📊', label:L('डिभाइस जानकारी','Device Info') },
               { key:'data', icon:'📋', label:L('डाटा सञ्चालन','Data Operations') },
-            ].map(({ key, icon, label }) => (
+              { key:'sync', icon:'📡', label:L('रिमोट सिंक','Remote Sync') },
+            ].map(({ key, icon, label }, i, arr) => (
               <button key={key} onClick={() => setGroup(key)}
                 style={{ flex:1, padding:'9px 6px', border:'none', cursor:'pointer',
                   fontSize:12, fontWeight:700, textAlign:'center',
-                  background: group === key ? '#52b02c' : 'white',
+                  background: group === key ? '#1a56db' : 'white',
                   color:      group === key ? 'white'   : '#6b7280',
-                  borderRight: key === 'info' ? '1px solid #e5e7eb' : 'none' }}>
+                  borderRight: i < arr.length - 1 ? '1px solid #e5e7eb' : 'none' }}>
                 <span style={{ fontSize:14, display:'block' }}>{icon}</span>
                 {label}
               </button>
@@ -253,7 +287,7 @@ const DeviceControlModal = ({ device, allDevices, onClose, showToast, onRefresh 
                 }} />
               {!usbFile ? (
                 <button onClick={() => usbInputRef.current?.click()}
-                  style={{ width:'100%', padding:'10px', background:'white', border:'2px dashed #86efac',
+                  style={{ width:'100%', padding:'10px', background:'white', border:'2px dashed #93c5fd',
                     borderRadius:8, color:'#0369a1', fontSize:13, fontWeight:600, cursor:'pointer' }}>
                   📁 {L('USB ड्राइवबाट .dat फाइल छान्नुहोस्','Choose .dat file from USB drive')}
                 </button>
@@ -290,6 +324,59 @@ const DeviceControlModal = ({ device, allDevices, onClose, showToast, onRefresh 
                       ✅ {usbResult.parsed} {L('रेकर्ड पार्स गरियो','records parsed')} · {usbResult.inserted} {L('नयाँ थपियो','newly inserted')}
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {group === 'sync' && (
+            <div style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:'14px', marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>
+                📡 {L('रिमोट सिंक एजेन्ट','Remote Sync Agent')}
+              </div>
+              <div style={{ fontSize:12, color:'#6b7280', marginBottom:12, lineHeight:1.6 }}>
+                {L(
+                  'यदि यो डिभाइस eHajiri सर्भर भएको मेसिनमा छैन भने (जस्तै केन्द्रीय रूपमा होस्ट गरिएको tenant), StandaloneBridge.exe लाई डिभाइस भएको ठाउँमा राखेर तलको config फाइलको सहायताले एटेन्डेन्स लग यहाँ पठाउन सकिन्छ — पूरा eHajiri एप त्यहाँ चलाउनु पर्दैन।',
+                  "If this device isn't on the same machine as the eHajiri server (e.g. a centrally-hosted tenant), run StandaloneBridge.exe at the device's site with the config below to push attendance logs here over the network — no full eHajiri app needed there."
+                )}
+              </div>
+              <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+                <ActionBtn icon="🔑" label={device.sync_token ? 'Regenerate Sync Token' : 'Generate Sync Token'} loading={busy.syncToken}
+                  onClick={() => (!device.sync_token || window.confirm("Regenerating replaces the existing token — any agent already running with the old config.json will stop syncing until it's updated. Continue?"))
+                    && generateSyncToken()} />
+                {device.sync_token && (
+                  <ActionBtn icon="🚫" label="Revoke Token" color="#ef4444" bg="#fef2f2" border="#fca5a5" loading={busy.revokeSync}
+                    onClick={() => window.confirm("Revoke this device's sync token? The remote agent will stop being able to push logs until a new one is generated.")
+                      && revokeSyncToken()} />
+                )}
+              </div>
+              {syncConfig && (
+                <div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:11, color:'#6b7280', marginBottom:6 }}>
+                    {L('यो फाइल sync-config.json नामले StandaloneBridge.exe सँगै राख्नुहोस्। सर्भर यहाँबाट फरक ठेगानामा पुग्ने भए serverUrl बदल्नुहोस्।',
+                       "Save this as sync-config.json next to StandaloneBridge.exe on a PC at the device's site. Edit serverUrl first if the server isn't reachable at this address from there.")}
+                  </div>
+                  <pre style={{ background:'#1f2937', color:'#d1fae5', borderRadius:8, padding:'10px 12px',
+                    fontSize:11, overflowX:'auto', margin:0 }}>{JSON.stringify(syncConfig, null, 2)}</pre>
+                  <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                    <button className="btn btn-outline btn-sm" onClick={() => navigator.clipboard.writeText(JSON.stringify(syncConfig, null, 2))}>
+                      📋 {L('कपी','Copy')}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={() => {
+                      const blob = new Blob([JSON.stringify(syncConfig, null, 2)], { type:'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = 'sync-config.json'; a.click();
+                      URL.revokeObjectURL(url);
+                    }}>
+                      ⬇️ {L('डाउनलोड','Download')}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {device.last_sync_ping_at && (
+                <div style={{ marginTop:12, fontSize:11, color:'#6b7280' }}>
+                  {L('अन्तिम रिमोट सिंक','Last remote sync')}: {new Date(device.last_sync_ping_at).toLocaleString()}
                 </div>
               )}
             </div>
@@ -527,7 +614,7 @@ const TimeScheduleTab = ({ devices, showToast }) => {
 
   return (
     <div>
-      <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:12, color:'#166534' }}>
+      <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:12, color:'#1e40af' }}>
         ℹ️ {L(
           'यो SDK ले प्रत्येक दिन एउटा मात्र समय श्रेणी (शुरु–अन्त्य) समर्थन गर्छ। "बन्द" चिन्ह लगाएको दिनमा पञ्च स्वीकार हुँदैन।',
           'This SDK supports one start/end window per day. Days marked "Closed" reject punches entirely that day.'
@@ -770,7 +857,7 @@ const StandAloneDeviceSettings = () => {
     { field:'privilege',     header:'Privilege', render:v => <Badge>{PRIV_LABELS[v] || v}</Badge> },
     { field:'card_no',       header:'Card No', render:v => (!v || v === '0') ? '—' : v },
     { field:'fp_count', header:'🖐️ Fingers', width:90, render:v => v > 0
-      ? <Badge color="#52b02c" bg="#f0fdf4" border="#bbf7d0">🖐️ {v}</Badge>
+      ? <Badge color="#1a56db" bg="#eff6ff" border="#bfdbfe">🖐️ {v}</Badge>
       : <span style={{ color:'#9ca3af' }}>—</span> },
     { field:'face_count', header:'🙂 Face', width:80, render:v => v > 0
       ? <Badge color="#7c3aed" bg="#f3e8ff" border="#d8b4fe">🙂 {v}</Badge>
@@ -786,7 +873,7 @@ const StandAloneDeviceSettings = () => {
     { field:'enroll_number', header:'Enroll #', width:90 },
     { field:'template_type', header:'Type', width:70, render:v => v === 'face'
       ? <Badge color="#7c3aed" bg="#f3e8ff" border="#d8b4fe">Face</Badge>
-      : <Badge color="#52b02c" bg="#f0fdf4" border="#bbf7d0">Fingerprint</Badge> },
+      : <Badge color="#1a56db" bg="#eff6ff" border="#bfdbfe">Fingerprint</Badge> },
     { field:'finger_index',  header:'Finger/Face #', render:(v,row) => row.template_type === 'face' ? v : (FINGER_LABELS[v] || v) },
     { field:'template_size', header:'Template Size', width:110 },
     { field:'enrolled_at',   header:L('मिति','Enrolled'), render:v => v ? new Date(v).toLocaleString() : '—' },
@@ -826,8 +913,8 @@ const StandAloneDeviceSettings = () => {
         {subTabs.map(t => (
           <button key={t.key} onClick={() => setSubTab(t.key)} style={{
             padding:'8px 14px', background:'none', border:'none',
-            borderBottom: subTab === t.key ? '2px solid #52b02c' : '2px solid transparent',
-            color:        subTab === t.key ? '#52b02c' : '#6b7280',
+            borderBottom: subTab === t.key ? '2px solid #1a56db' : '2px solid transparent',
+            color:        subTab === t.key ? '#1a56db' : '#6b7280',
             fontWeight:   subTab === t.key ? 700 : 400,
             cursor:'pointer', fontSize:12.5, display:'flex', alignItems:'center', gap:5, marginBottom:-2,
           }}>

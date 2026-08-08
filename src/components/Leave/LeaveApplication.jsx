@@ -1,14 +1,35 @@
-import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
+import { useSettings } from '../../context/SettingsContext.jsx';
+import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import { getNepalTodayISO } from '../../utils/dateUtils.js';
+
+/* ── Date input that respects calendar setting — mirrors LeaveApplyModal.jsx ── */
+const LeaveDateInput = ({ value, onChange, error, settings }) => {
+  const blockPast = settings.leaveBackdateEnabled === false;
+  if (settings.defaultCalendar === 'np') {
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+  }
+  return (
+    <input type="date" className={`form-control ${error ? 'error' : ''}`}
+      value={value} min={blockPast ? getNepalTodayISO() : undefined}
+      onChange={e => onChange(e.target.value)} />
+  );
+};
 
 const LeaveApplication = () => {
   const { currentUser } = useAuth();
   const { t } = useLanguage();
   const { addLeave, leaveTypes, getLeaveBalance } = useData();
+  const { settings, refreshSettings } = useSettings();
   const navigate = useNavigate();
+
+  // Refetch on mount so a Super Admin toggling Leave/Visit backdating takes
+  // effect immediately for a session that navigated here from an already-open tab.
+  useEffect(() => { refreshSettings(); }, []);
 
   const balance = getLeaveBalance(currentUser.id);
   const [form, setForm] = useState({ leaveTypeCode: '', fromDate: '', toDate: '', reason: '' });
@@ -16,7 +37,7 @@ const LeaveApplication = () => {
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getNepalTodayISO();
 
   const calcDays = () => {
     if (!form.fromDate || !form.toDate) return 0;
@@ -29,13 +50,13 @@ const LeaveApplication = () => {
     if (!form.leaveTypeCode) e.leaveTypeCode = t('Required field');
     if (!form.fromDate) e.fromDate = t('Required field');
     if (!form.toDate) e.toDate = t('Required field');
-    if (form.fromDate && form.toDate && form.toDate < form.fromDate) e.toDate = '?????? ???? ???? ????????? ????? ????????';
+    if (form.fromDate && form.toDate && form.toDate < form.fromDate) e.toDate = 'अन्त्य मिति सुरु मितिभन्दा पछाडि हुनुपर्छ';
     if (!form.reason.trim()) e.reason = t('Required field');
-    if (form.reason.trim().length < 5) e.reason = '??????? ? ????? ???????';
+    if (form.reason.trim().length < 5) e.reason = 'कम्तीमा ५ अक्षर लेख्नुस';
     const days = calcDays();
     if (form.leaveTypeCode && days > 0) {
       const avail = balance[form.leaveTypeCode] || 0;
-      if (days > avail) e.days = `????????? ????????? (??????: ${avail} ???)`;
+      if (days > avail) e.days = `अपर्याप्त ब्यालेन्स (उपलब्ध: ${avail} दिन)`;
     }
     return e;
   };
@@ -68,7 +89,7 @@ const LeaveApplication = () => {
             <div className="breadcrumb-item"><a href="#" onClick={e => { e.preventDefault(); navigate('/leave'); }}>{t('Leave Management')}</a></div>
             <div className="breadcrumb-item active">{t('Apply for Leave')}</div>
           </div>
-          <h1 className="page-title">?? {t('Apply for Leave')}</h1>
+          <h1 className="page-title">📝 {t('Apply for Leave')}</h1>
         </div>
       </div>
 
@@ -79,7 +100,7 @@ const LeaveApplication = () => {
           <div className="card-body">
             {success && (
               <div className="alert alert-success">
-                <span>?</span> {t('Application submitted successfully')} � {t('Please wait...')}
+                <span>✅</span> {t('Application submitted successfully')} — {t('Please wait...')}
               </div>
             )}
 
@@ -113,28 +134,28 @@ const LeaveApplication = () => {
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label required">{t('From Date')}</label>
-                  <input type="date" className={`form-control ${errors.fromDate ? 'error' : ''}`}
-                    value={form.fromDate} min={today}
-                    onChange={e => handleChange('fromDate', e.target.value)} />
+                  <LeaveDateInput value={form.fromDate} min={today} error={errors.fromDate}
+                    settings={settings}
+                    onChange={v => handleChange('fromDate', v)} />
                   {errors.fromDate && <div className="form-error">{errors.fromDate}</div>}
                 </div>
                 <div className="form-group">
                   <label className="form-label required">{t('To Date')}</label>
-                  <input type="date" className={`form-control ${errors.toDate ? 'error' : ''}`}
-                    value={form.toDate} min={form.fromDate || today}
-                    onChange={e => handleChange('toDate', e.target.value)} />
+                  <LeaveDateInput value={form.toDate} min={form.fromDate || today} error={errors.toDate}
+                    settings={settings}
+                    onChange={v => handleChange('toDate', v)} />
                   {errors.toDate && <div className="form-error">{errors.toDate}</div>}
                 </div>
               </div>
 
               {/* Days display */}
               {days > 0 && (
-                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '8px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13, color: '#166534' }}>?? ??? ???? ???:</span>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: '#52b02c' }}>{days} {t('Days')}</span>
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '8px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, color: '#1e40af' }}>📅 कुल बिदा दिन:</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: '#1a56db' }}>{days} {t('Days')}</span>
                 </div>
               )}
-              {errors.days && <div className="alert alert-danger"><span>??</span> {errors.days}</div>}
+              {errors.days && <div className="alert alert-danger"><span>⚠️</span> {errors.days}</div>}
 
               {/* Reason */}
               <div className="form-group">
@@ -148,7 +169,7 @@ const LeaveApplication = () => {
               <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                 <button type="button" className="btn btn-outline" onClick={() => navigate('/leave')}>{t('Cancel')}</button>
                 <button type="submit" className="btn btn-primary" disabled={submitting || success}>
-                  {submitting ? `? ${t('Please wait...')}` : `?? ${t('Submit')}`}
+                  {submitting ? `⏳ ${t('Please wait...')}` : `📤 ${t('Submit')}`}
                 </button>
               </div>
             </form>
@@ -158,7 +179,7 @@ const LeaveApplication = () => {
         {/* Leave Balance Sidebar */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
-            <div className="card-header"><h3>?? {t('Leave Balance')}</h3></div>
+            <div className="card-header"><h3>📊 {t('Leave Balance')}</h3></div>
             <div className="card-body" style={{ padding: '14px 16px' }}>
               {leaveTypes.map(lt => {
                 const avail = balance[lt.code] || 0;
@@ -173,7 +194,7 @@ const LeaveApplication = () => {
                     <div style={{ height: 6, background: '#f3f4f6', borderRadius: 3 }}>
                       <div style={{ height: '100%', borderRadius: 3, background: lt.color, width: `${pct}%`, transition: 'width .3s' }}></div>
                     </div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('Used')}: {used} � {t('Available')}: {avail}</div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('Used')}: {used} · {t('Available')}: {avail}</div>
                   </div>
                 );
               })}

@@ -1,8 +1,9 @@
 /**
- * Global on/off feature flags for the device-integration modules, stored in
- * the generic app_settings key-value table. Both default OFF (seeded by
- * migration 47) — an admin/superAdmin must explicitly enable each from
- * Settings before any device integration becomes active.
+ * Global on/off feature flags — device-integration modules (attendanceDevice,
+ * standaloneDevice, seeded OFF by migration 47) plus Email Setup (seeded OFF
+ * by migration 75), all stored in the generic app_settings key-value table.
+ * All default OFF — an admin/superAdmin (Email Setup: Super Admin only, see
+ * RoleManagement.jsx) must explicitly enable each before it becomes active.
  *
  * Cached briefly in-process since /iclock is a hot path for ADMS devices
  * polling frequently; invalidate() is called right after a toggle is saved
@@ -14,6 +15,7 @@ import pool from '../db.js';
 export const FLAG_KEYS = {
   attendanceDevice: 'module_attendance_device_enabled',
   standaloneDevice: 'module_standalone_device_enabled',
+  emailSetup:       'module_email_setup_enabled',
 };
 
 const TTL_MS = 5000;
@@ -33,6 +35,7 @@ export async function getModuleFlags() {
   cache = {
     attendanceDeviceEnabled: map[FLAG_KEYS.attendanceDevice] === true,
     standaloneDeviceEnabled: map[FLAG_KEYS.standaloneDevice] === true,
+    emailSetupEnabled:       map[FLAG_KEYS.emailSetup]       === true,
   };
   cachedAt = now;
   return cache;
@@ -46,5 +49,6 @@ export async function isModuleEnabled(flagKey) {
   const flags = await getModuleFlags();
   if (flagKey === FLAG_KEYS.attendanceDevice) return flags.attendanceDeviceEnabled;
   if (flagKey === FLAG_KEYS.standaloneDevice) return flags.standaloneDeviceEnabled;
+  if (flagKey === FLAG_KEYS.emailSetup)       return flags.emailSetupEnabled;
   return false;
 }

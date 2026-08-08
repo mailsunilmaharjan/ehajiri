@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import Avatar from './Avatar.jsx';
@@ -41,6 +41,27 @@ const ProfileTab = ({ currentUser, showToast }) => {
   const [pwSaving, setPwSaving] = useState(false);
   const [photoSaving, setPhotoSaving] = useState(false);
   const fileRef = useRef(null);
+
+  const [emailForm,   setEmailForm]   = useState(currentUser?.email || '');
+  const [emailSaving, setEmailSaving] = useState(false);
+  // Stays in sync if currentUser changes out from under this field (e.g.
+  // after a successful save below re-populates it from the server).
+  useEffect(() => { setEmailForm(currentUser?.email || ''); }, [currentUser?.email]);
+  const emailDirty = emailForm.trim().toLowerCase() !== (currentUser?.email || '').toLowerCase();
+
+  const saveEmail = async () => {
+    const next = emailForm.trim().toLowerCase();
+    if (!next) return showToast(L('इमेल आवश्यक छ','Email is required'), 'error');
+    if (!next.includes('@')) return showToast(L('मान्य इमेल राख्नुहोस्','Enter a valid email address'), 'error');
+    setEmailSaving(true);
+    try {
+      const { email } = await api.put('/auth/profile-email', { email: next });
+      updateCurrentUser({ email });
+      showToast(L('इमेल परिवर्तन भयो','Email updated'));
+    } catch (e) {
+      showToast(e.message || L('इमेल सेभ भएन','Failed to update email'), 'error');
+    } finally { setEmailSaving(false); }
+  };
 
   const savePhoto = async (photo) => {
     setPhotoSaving(true);
@@ -96,13 +117,13 @@ const ProfileTab = ({ currentUser, showToast }) => {
                 title={L('प्रोफाइल फोटो परिवर्तन','Change profile picture')}
                 style={{ cursor: photoSaving ? 'wait' : 'pointer', opacity: photoSaving ? 0.6 : 1 }}>
                 <Avatar photo={currentUser?.profilePhoto} name={currentUser?.fullName} size={72}
-                  style={{ border:'2px solid #dcfce7', boxShadow:'0 2px 8px rgba(82,176,44,.15)' }} />
+                  style={{ border:'2px solid #dbeafe', boxShadow:'0 2px 8px rgba(26,86,219,.15)' }} />
               </div>
               <button
                 onClick={() => !photoSaving && fileRef.current?.click()}
                 title={L('प्रोफाइल फोटो परिवर्तन','Change profile picture')}
                 style={{ position:'absolute', right:-2, bottom:-2, width:26, height:26,
-                  borderRadius:'50%', border:'2px solid #fff', background:'#52b02c', color:'#fff',
+                  borderRadius:'50%', border:'2px solid #fff', background:'#1a56db', color:'#fff',
                   fontSize:13, display:'flex', alignItems:'center', justifyContent:'center',
                   cursor: photoSaving ? 'wait' : 'pointer', padding:0 }}>
                 📷
@@ -110,14 +131,14 @@ const ProfileTab = ({ currentUser, showToast }) => {
               <input ref={fileRef} type="file" accept="image/*" onChange={handlePickPhoto}
                 style={{ display:'none' }} />
             </div>
-            <div>
-              <div style={{ fontSize:20, fontWeight:700 }}>{currentUser?.fullName}</div>
-              <div style={{ fontSize:13, color:'#6b7280' }}>{currentUser?.email}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:20, fontWeight:700, overflowWrap:'break-word' }}>{currentUser?.fullName}</div>
+              <div style={{ fontSize:13, color:'#6b7280', overflowWrap:'break-word' }}>{currentUser?.email}</div>
               <div style={{ fontSize:12, color:'#9ca3af' }}>{currentUser?.employeeId} · {currentUser?.department}</div>
               <div style={{ marginTop:6, display:'flex', gap:12 }}>
                 <span
                   onClick={() => !photoSaving && fileRef.current?.click()}
-                  style={{ fontSize:12, fontWeight:600, color:'#52b02c', cursor:'pointer' }}>
+                  style={{ fontSize:12, fontWeight:600, color:'#1a56db', cursor:'pointer' }}>
                   {photoSaving ? L('सेभ हुँदैछ…','Saving…') : `📷 ${L('फोटो परिवर्तन','Change Photo')}`}
                 </span>
                 {currentUser?.profilePhoto && !photoSaving && (
@@ -132,7 +153,6 @@ const ProfileTab = ({ currentUser, showToast }) => {
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
             {[
               [L('पूरा नाम','Full Name'),    currentUser?.fullName],
-              [L('इमेल','Email'),             currentUser?.email],
               [L('मोबाइल','Mobile'),          currentUser?.phone],
               [L('विभाग','Department'),       currentUser?.department],
               [L('पद','Position'),            currentUser?.position],
@@ -145,6 +165,30 @@ const ProfileTab = ({ currentUser, showToast }) => {
                 </div>
               </div>
             ))}
+
+            {/* Email — the only field on this page that's actually editable
+                (besides photo/password below); must stay unique across every
+                staff member in this company (server enforces it, this is
+                just the friendly error). */}
+            <div>
+              <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{L('इमेल','Email')}</div>
+              <div style={{ display:'flex', gap:8 }}>
+                <input
+                  type="email"
+                  className="form-control"
+                  style={{ fontSize:14, flex:1, minWidth:0 }}
+                  value={emailForm}
+                  onChange={e => setEmailForm(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && emailDirty && !emailSaving) saveEmail(); }}
+                  placeholder={L('इमेल ठेगाना','Email address')}
+                />
+                <button className="btn btn-primary btn-sm" onClick={saveEmail}
+                  disabled={emailSaving || !emailDirty}
+                  style={{ flexShrink:0 }}>
+                  {emailSaving ? L('सेभ हुँदैछ…','Saving…') : `💾 ${L('सेभ','Save')}`}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

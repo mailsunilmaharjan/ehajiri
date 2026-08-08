@@ -139,7 +139,7 @@ const ShiftGroupLevelSelect = ({
                       padding:'6px 8px 6px 34px', fontSize:13, cursor:'pointer' }}
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => toggleChildLevel(l)}>
-                      <input type="checkbox" checked={lChecked} readOnly style={{ accentColor:'#52b02c' }} />
+                      <input type="checkbox" checked={lChecked} readOnly style={{ accentColor:'#1a56db' }} />
                       {l.name}
                     </label>
                   );
@@ -154,7 +154,7 @@ const ShiftGroupLevelSelect = ({
                 fontSize:13, cursor:'pointer' }}
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => toggleValue(String(l.id))}>
-                <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#52b02c' }} />
+                <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#1a56db' }} />
                 {l.name}
               </label>
             );

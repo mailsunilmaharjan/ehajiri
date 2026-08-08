@@ -19,8 +19,8 @@
 .topmenu {
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 62px;
-  color: #fff;
+  height: 52px;
+  color: #1e293b;
   display: flex;
   align-items: center;
   z-index: 100;
@@ -28,12 +28,12 @@
   gap: 0;
   user-select: none;
   overflow: visible;   /* must stay visible so dropdowns show */
-  /* Solid ZKTeco-style green bar */
-  background: linear-gradient(90deg, #63c033, #52b02c);
+  background: #fff;
   box-shadow:
-    0 1px 0 rgba(0,0,0,.08),
-    0 4px 16px rgba(0,0,0,.12),
-    0 1px 3px rgba(0,0,0,.08);
+    0 1px 0 rgba(0,0,0,.05),
+    0 4px 16px rgba(0,0,0,.07),
+    0 1px 3px rgba(0,0,0,.04);
+  backdrop-filter: blur(12px);
 }
 
 /* Ribbon stage — logo-side only, clips ribbons without affecting dropdowns */
@@ -41,10 +41,23 @@
   position: absolute;
   top: 0; left: 0;
   width: 240px;
-  height: 62px;
+  height: 52px;
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
+}
+
+/* Animated rainbow top accent line */
+.topmenu::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    #dde4ff 0%, #c8f5fd 18%, #fef3c7 36%,
+    #fde8f1 54%, #d1fae5 72%, #dde4ff 90%, #c8f5fd 100%);
+  background-size: 200% 100%;
+  animation: navShift 7s linear infinite;
 }
 
 /* Sunshine shimmer sweep across bottom edge */
@@ -71,29 +84,27 @@
 .tm-brand {
   display: flex; align-items: center; gap: 10px;
   cursor: pointer; padding: 0 16px 0 0; flex-shrink: 0;
-  border-right: 1px solid rgba(255,255,255,.25);
+  border-right: 1px solid #e5e7eb;
   margin-right: 10px;
   transition: opacity .15s;
 }
-.tm-brand:hover { opacity: .85; }
+.tm-brand:hover { opacity: .8; }
 
 .tm-logo {
-  width: 36px; height: 36px; border-radius: 10px;
-  background: #fff;
-  color: #3e8620; font-size: 14px; font-weight: 800;
+  width: 32px; height: 32px; border-radius: 9px;
+  background: linear-gradient(135deg, #1a56db, #7e3af2);
+  color: white; font-size: 13px; font-weight: 800;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  box-shadow: 0 2px 8px rgba(26,86,219,.35);
 }
 
 .tm-brand-text { display: flex; flex-direction: column; }
 .tm-brand-name {
-  font-size: 14px; font-weight: 700; color: #fff;
+  font-size: 13px; font-weight: 700; color: #111827;
   line-height: 1.2; white-space: nowrap;
   letter-spacing: -.2px;
 }
-.tm-brand-sub { font-size: 11px; color: rgba(255,255,255,.75); font-weight: 500; }
-
 /* Nav — overflow:visible so dropdowns can extend below the bar */
 .tm-nav {
   display: flex; align-items: center;
@@ -104,9 +115,9 @@
 /* Nav items */
 .tm-item {
   display: flex; align-items: center; gap: 6px;
-  padding: 0 12px; height: 62px;
-  font-size: 14px; font-weight: 500;
-  color: rgba(255,255,255,.92);
+  padding: 0 10px; height: 52px;
+  font-size: 13px; font-weight: 500;
+  color: #000;
   cursor: pointer;
   transition: all .18s ease;
   white-space: nowrap;
@@ -115,44 +126,44 @@
   letter-spacing: .1px;
 }
 
-/* Hover effect — subtle white overlay */
+/* Hover effect — subtle background + color shift */
 .tm-item:hover {
-  color: #fff;
-  background: rgba(255,255,255,.12);
-  border-bottom-color: rgba(255,255,255,.5);
+  color: #1a56db;
+  background: linear-gradient(180deg, transparent 60%, rgba(26,86,219,.04) 100%);
+  border-bottom-color: rgba(26,86,219,.25);
 }
 
-/* Active state — dark block, matching the ZKTeco reference */
+/* Active state */
 .tm-item.active {
-  color: #fff;
+  color: #1a56db;
   font-weight: 600;
-  border-bottom-color: transparent;
-  background: rgba(0,0,0,.22);
+  border-bottom-color: #1a56db;
+  background: linear-gradient(180deg, transparent 50%, rgba(26,86,219,.06) 100%);
 }
 
 /* Ripple on click */
 .tm-item:active { transform: translateY(1px); }
 
 .tm-icon {
-  font-size: 16px;
+  font-size: 14px;
   transition: transform .2s ease;
 }
 .tm-item:hover .tm-icon { transform: scale(1.15); }
 
 .tm-chevron {
   width: 14px; height: 14px;
-  color: rgba(255,255,255,.7);
+  color: #9ca3af;
   transition: transform .22s ease, color .15s;
   flex-shrink: 0;
 }
-.tm-item:hover .tm-chevron { color: #fff; }
-.tm-item.open .tm-chevron { transform: rotate(180deg); color: #fff; }
+.tm-item:hover .tm-chevron { color: #1a56db; }
+.tm-item.open .tm-chevron { transform: rotate(180deg); color: #1a56db; }
 
 /* Dropdown — overflow:visible so sub-menus can extend outside */
 .tm-dropdown {
   display: none; position: absolute;
   top: calc(100% + 4px); left: 0;
-  background: #fff;
+  background: #f7f8fa;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   box-shadow:
@@ -182,14 +193,21 @@
 .tm-dropdown-item {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 16px;
-  font-size: 14px; cursor: pointer;
+  font-size: 13px; cursor: pointer;
   transition: all .12s; color: #374151;
   border-left: 3px solid transparent;
 }
+
+/* Nepali mode (html.lang-np, set by LanguageContext.jsx): main menu items
+   read bold, sub-menu (dropdown) items stay normal weight — keeps the two
+   levels visually distinct in Devanagari, where medium/normal weights read
+   closer together than in Latin script. English mode is untouched. */
+html.lang-np .tm-item { font-weight: 700; }
+html.lang-np .tm-dropdown-item { font-weight: 400; }
 .tm-dropdown-item:hover {
   background: #f0f7ff;
-  color: #52b02c;
-  border-left-color: #52b02c;
+  color: #1a56db;
+  border-left-color: #1a56db;
   padding-left: 20px;
 }
 .tm-dropdown-item.danger { color: #374151; }
@@ -223,14 +241,14 @@
 
 /* Bell */
 .tm-bell {
-  position: relative; font-size: 19px; cursor: pointer;
-  padding: 7px; border-radius: 8px;
+  position: relative; font-size: 17px; cursor: pointer;
+  padding: 6px; border-radius: 8px;
   transition: all .15s;
-  color: #fff;
+  color: #4b5563;
 }
 .tm-bell:hover {
-  background: rgba(255,255,255,.18);
-  color: #fff;
+  background: #eff6ff;
+  color: #1a56db;
   transform: rotate(-10deg) scale(1.1);
 }
 .tm-bell-badge {
@@ -244,35 +262,35 @@
 /* Settings icon button */
 .tm-settings-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 8px;
+  width: 32px; height: 32px; border-radius: 8px;
   cursor: pointer;
   transition: all .15s;
-  color: #fff;
+  color: #4b5563;
 }
 .tm-settings-btn:hover {
-  background: rgba(255,255,255,.18);
-  color: #fff;
+  background: #eff6ff;
+  color: #1a56db;
   transform: rotate(30deg) scale(1.1);
 }
 .tm-settings-btn.active {
-  background: rgba(255,255,255,.22);
-  color: #fff;
+  background: #eff6ff;
+  color: #1a56db;
 }
 
 /* Language button */
 .tm-lang-btn {
-  background: rgba(255,255,255,.15);
-  border: 1px solid rgba(255,255,255,.4);
-  color: #fff;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  color: #374151;
   border-radius: 8px; padding: 5px 11px;
   font-size: 12px; font-weight: 700; cursor: pointer;
   transition: all .15s; letter-spacing: .5px;
 }
 .tm-lang-btn:hover {
-  background: #fff;
-  color: #3e8620;
-  border-color: #fff;
-  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  background: #1a56db;
+  color: white;
+  border-color: #1a56db;
+  box-shadow: 0 2px 8px rgba(26,86,219,.3);
   transform: translateY(-1px);
 }
 .tm-lang-btn:active { transform: translateY(0); }
@@ -280,7 +298,7 @@
 /* Divider between right items */
 .tm-right-divider {
   width: 1px; height: 28px;
-  background: rgba(255,255,255,.3); flex-shrink: 0;
+  background: #e5e7eb; flex-shrink: 0;
 }
 
 /* User section */
@@ -293,36 +311,36 @@
   border: 1px solid transparent;
 }
 .tm-user:hover {
-  background: rgba(255,255,255,.15);
-  border-color: rgba(255,255,255,.3);
-  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  background: #f8fafc;
+  border-color: #e5e7eb;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
 }
 .tm-user.open {
-  background: rgba(255,255,255,.2);
-  border-color: rgba(255,255,255,.4);
+  background: #eff6ff;
+  border-color: #bfdbfe;
 }
 
 .tm-avatar {
-  width: 34px; height: 34px; border-radius: 50%;
+  width: 30px; height: 30px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 14px; font-weight: 700; flex-shrink: 0;
-  box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(255,255,255,.35);
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
+  box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(26,86,219,.2);
   transition: box-shadow .15s;
 }
-.tm-user:hover .tm-avatar { box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(255,255,255,.6); }
+.tm-user:hover .tm-avatar { box-shadow: 0 0 0 2px white, 0 0 0 3px rgba(26,86,219,.5); }
 .tm-avatar.lg { width: 42px; height: 42px; font-size: 17px; }
 
 .tm-user-info { display: flex; flex-direction: column; }
 .tm-user-name {
-  font-size: 14px; font-weight: 400;
-  color: #fff; line-height: 1.2; background: transparent;
+  font-size: 13px; font-weight: 400;
+  color: #111827; line-height: 1.2; background: transparent;
 }
 .tm-user-role { font-size: 11px; font-weight: 500; line-height: 1.2; }
 
 /* User dropdown header */
 .tm-user-dd-header {
   padding: 14px 16px; display: flex; align-items: center; gap: 12px;
-  background: linear-gradient(135deg, #f8fafc, #f0fdf4);
+  background: linear-gradient(135deg, #f8fafc, #eff6ff);
   border-bottom: 1px solid #e5e7eb;
 }
 .tm-role-badge {
@@ -348,22 +366,22 @@
 .tm-reports-header {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 16px;
-  font-size: 14px; font-weight: 500; cursor: pointer;
+  font-size: 13px; font-weight: 500; cursor: pointer;
   transition: all .12s; color: #374151;
   border-left: 3px solid transparent;
   user-select: none;
 }
 .tm-reports-header:hover {
-  background: #f0f7ff; color: #52b02c; border-left-color: #52b02c;
+  background: #f0f7ff; color: #1a56db; border-left-color: #1a56db;
 }
 .tm-reports-header.open {
-  background: #f0fdf4; color: #52b02c; border-left-color: #52b02c;
+  background: #eff6ff; color: #1a56db; border-left-color: #1a56db;
 }
 .tm-reports-chevron {
   margin-left: auto; width: 13px; height: 13px;
   color: #9ca3af; transition: transform .2s;
 }
-.tm-reports-header.open .tm-reports-chevron { transform: rotate(180deg); color: #52b02c; }
+.tm-reports-header.open .tm-reports-chevron { transform: rotate(180deg); color: #1a56db; }
 
 /* ── Report sub-items (inline accordion) ── */
 .tm-sub-items {
@@ -381,11 +399,11 @@
   border-left: 3px solid transparent;
 }
 .tm-sub-item:hover {
-  background: #e0f0ff; color: #52b02c; border-left-color: #52b02c;
+  background: #e0f0ff; color: #1a56db; border-left-color: #1a56db;
 }
 
 /* Layout content */
-.main-layout { padding-top: 62px; min-height: 100vh; min-height: 100dvh; }
+.main-layout { padding-top: 52px; min-height: 100vh; min-height: 100dvh; }
 
 /* Mobile toggle */
 .tm-mobile-toggle {
@@ -395,7 +413,7 @@
 }
 .tm-mobile-toggle span {
   display: block; width: 22px; height: 2px;
-  background: #fff; border-radius: 2px;
+  background: #374151; border-radius: 2px;
   transition: all .2s;
 }
 
@@ -405,7 +423,6 @@
   .tm-item { padding: 0 9px; font-size: 13px; }
 }
 @media (max-width: 1024px) {
-  .tm-brand-sub { display: none; }
   .tm-item { padding: 0 8px; font-size: 13px; }
 }
 
@@ -434,8 +451,8 @@
     height: auto; padding: 13px 18px; min-height: 44px;
     border-bottom: none; border-left: 3px solid transparent;
   }
-  .tm-item.active { border-left-color: #52b02c; border-bottom: none; background: #f0fdf4; }
-  .tm-item:hover { background: #f8fafc; border-left-color: #bbf7d0; border-bottom: none; }
+  .tm-item.active { border-left-color: #1a56db; border-bottom: none; background: #eff6ff; }
+  .tm-item:hover { background: #f8fafc; border-left-color: #bfdbfe; border-bottom: none; }
   .tm-dropdown {
     position: static; box-shadow: none; border: none; border-radius: 0;
     background: #f8fafc; animation: none;

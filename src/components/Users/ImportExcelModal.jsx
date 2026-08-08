@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import * as XLSX from 'xlsx';
+import api from '../../api/client.js';
 
 /* ── Column schema ── */
 const COLUMNS = [
@@ -79,7 +80,7 @@ function downloadTemplate() {
     if (ws[addr]) {
       ws[addr].s = {
         font: { bold: true, color: { rgb: 'FFFFFF' } },
-        fill: { fgColor: { rgb: '52B02C' } },
+        fill: { fgColor: { rgb: '1A56DB' } },
         alignment: { horizontal: 'center' },
       };
     }
@@ -153,12 +154,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
         email:      String(r.email      || '').trim() || null,
         phone:      String(r.phone      || '').trim() || null,
       }));
-      const res = await fetch('/api/employees/import', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ employees: payload }),
-      });
-      const data = await res.json();
+      const data = await api.post('/employees/import', { employees: payload });
       setResult(data);
       setStep('result');
       if (data.created > 0 && onImported) onImported();
@@ -175,8 +171,8 @@ export default function ImportExcelModal({ onClose, onImported }) {
       <div className="modal" style={{ maxWidth: 780, width: '94vw' }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
-          <h2 style={{ display:'flex', alignItems:'center', gap:8, fontSize:16, fontWeight:700, color:'#166534' }}>
+        <div className="modal-header">
+          <h2 style={{ display:'flex', alignItems:'center', gap:8, fontSize:16, fontWeight:700, color:'#1e40af' }}>
             📥 Import Staff from Excel
           </h2>
           <button className="modal-close" onClick={onClose}>✕</button>
@@ -196,7 +192,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
               </div>
               <button onClick={downloadTemplate} style={{
                 display:'inline-flex', alignItems:'center', gap:6,
-                padding:'7px 16px', background:'#52b02c', color:'#fff',
+                padding:'7px 16px', background:'#1a56db', color:'#fff',
                 border:'none', borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer',
               }}>
                 ⬇ Template
@@ -210,9 +206,9 @@ export default function ImportExcelModal({ onClose, onImported }) {
               onDragLeave={() => setDragOver(false)}
               onClick={() => fileRef.current?.click()}
               style={{
-                border: `2px dashed ${dragOver ? '#52b02c' : '#c7d2fe'}`,
+                border: `2px dashed ${dragOver ? '#1a56db' : '#c7d2fe'}`,
                 borderRadius: 10,
-                background: dragOver ? '#f0fdf4' : '#f8fafc',
+                background: dragOver ? '#eff6ff' : '#f8fafc',
                 padding: '40px 24px',
                 textAlign: 'center',
                 cursor: 'pointer',
@@ -224,7 +220,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
                 Drop your Excel / CSV file here
               </div>
               <div style={{ fontSize: 13, color: '#64748b' }}>
-                or <span style={{ color:'#52b02c', textDecoration:'underline' }}>browse</span> to choose a file
+                or <span style={{ color:'#1a56db', textDecoration:'underline' }}>browse</span> to choose a file
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 8 }}>
                 Supported: .xlsx, .xls, .csv
@@ -255,9 +251,9 @@ export default function ImportExcelModal({ onClose, onImported }) {
                   <span key={c.key} style={{
                     display:'inline-flex', alignItems:'center', gap:4,
                     padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:600,
-                    background: c.required ? '#dcfce7' : '#f3f4f6',
-                    color: c.required ? '#166534' : '#6b7280',
-                    border: `1px solid ${c.required ? '#86efac' : '#e5e7eb'}`,
+                    background: c.required ? '#dbeafe' : '#f3f4f6',
+                    color: c.required ? '#1e40af' : '#6b7280',
+                    border: `1px solid ${c.required ? '#93c5fd' : '#e5e7eb'}`,
                   }} title={c.note || ''}>
                     {c.required && <span style={{ color:'#ef4444' }}>*</span>}
                     {c.label}

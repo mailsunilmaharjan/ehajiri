@@ -5,12 +5,15 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import { getNepalTodayISO } from '../../utils/dateUtils.js';
 
 /* ── Searchable single-select dropdown ── */
 const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
   const [open, setOpen] = useState(false);
   const [srch, setSrch] = useState('');
+  const [activeIndex, setActiveIndex] = useState(-1);
   const ref = useRef(null);
+  const itemRefs = useRef([]);
 
   useEffect(() => {
     const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -19,17 +22,52 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
   }, []);
 
   const filtered = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
+  itemRefs.current = [];
+
+  const select = (v) => { onChange(v); setOpen(false); setSrch(''); setActiveIndex(-1); };
+  const openWithHighlight = () => {
+    const idx = filtered.indexOf(value);
+    setActiveIndex(idx >= 0 ? idx : (filtered.length ? 0 : -1));
+    setOpen(true);
+  };
+  const handleTriggerKeyDown = e => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      open ? setOpen(false) : openWithHighlight();
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+  const handleSearchKeyDown = e => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (filtered.length ? (i + 1) % filtered.length : -1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (filtered.length ? (i - 1 + filtered.length) % filtered.length : -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && filtered[activeIndex] !== undefined) select(filtered[activeIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+  useEffect(() => {
+    if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+  useEffect(() => { if (open) setActiveIndex(filtered.length ? 0 : -1); }, [srch]);
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <div tabIndex={0} onClick={() => setOpen(p => !p)}
-        onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setOpen(p=>!p); } if (e.key==='Escape') setOpen(false); }}
+      <div tabIndex={0} onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
+        onKeyDown={handleTriggerKeyDown}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '9px 12px', border: `1.5px solid ${error ? '#f87171' : open ? '#52b02c' : '#d1d5db'}`,
+          padding: '9px 12px', border: `1.5px solid ${error ? '#f87171' : open ? '#1a56db' : '#d1d5db'}`,
           borderRadius: 7, background: 'white', cursor: 'pointer', fontSize: 13, minHeight: 42,
           color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-          boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline: 'none', userSelect: 'none',
+          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline: 'none', userSelect: 'none',
         }}>
         <span>{value || placeholder}</span>
         <span style={{ fontSize: 9, color: '#9ca3af', flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
@@ -37,31 +75,30 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 3px)', left: 0, right: 0, zIndex: 9999,
-          background: 'white', border: '1.5px solid #52b02c', borderRadius: 8,
+          background: 'white', border: '1.5px solid #1a56db', borderRadius: 8,
           boxShadow: '0 8px 24px rgba(0,0,0,.18)', maxHeight: 220, display: 'flex', flexDirection: 'column',
         }}>
           <div style={{ padding: '6px 8px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
             <input autoFocus type="text" value={srch}
               onChange={e => setSrch(e.target.value)}
               onClick={e => e.stopPropagation()}
-              onKeyDown={e => e.stopPropagation()}
+              onKeyDown={handleSearchKeyDown}
               placeholder="Search..."
               style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 5,
                 padding: '6px 10px', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
           </div>
           <div style={{ overflowY: 'auto', flex: 1 }}>
-            {filtered.map(opt => (
-              <div key={opt}
-                onMouseDown={e => { e.preventDefault(); onChange(opt); setOpen(false); setSrch(''); }}
+            {filtered.map((opt, i) => (
+              <div key={opt} ref={el => itemRefs.current[i] = el}
+                onMouseDown={e => { e.preventDefault(); select(opt); }}
+                onMouseEnter={() => setActiveIndex(i)}
                 style={{
                   padding: '9px 12px', fontSize: 13, cursor: 'pointer',
                   borderBottom: '1px solid #f3f4f6',
-                  background: value === opt ? '#f0fdf4' : 'white',
-                  color: value === opt ? '#166534' : '#374151',
+                  background: value === opt ? '#eff6ff' : (i === activeIndex ? '#f8fafc' : 'white'),
+                  color: value === opt ? '#1e40af' : '#374151',
                   fontWeight: value === opt ? 700 : 400,
-                }}
-                onMouseEnter={e => { if (value !== opt) e.currentTarget.style.background = '#f8fafc'; }}
-                onMouseLeave={e => { if (value !== opt) e.currentTarget.style.background = value===opt?'#f0fdf4':'white'; }}>
+                }}>
                 {opt}
               </div>
             ))}
@@ -81,14 +118,15 @@ const loadRecoApproval = () => {
   try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
 };
 
-const VisitDateInput = ({ value, onChange, min, error, settings }) => {
+const VisitDateInput = ({ value, onChange, error, settings }) => {
+  const blockPast = settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} />;
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
   }
   return (
     <input type="date"
       className={`form-control ${error ? 'error' : ''}`}
-      value={value} min={min}
+      value={value} min={blockPast ? getNepalTodayISO() : undefined}
       onChange={e => onChange(e.target.value)}
       style={{ fontSize: 13 }} />
   );
@@ -107,11 +145,16 @@ const Err = ({ msg }) => msg
    OfficeVisitApplyModal — globally rendered modal
 ════════════════════════════════════════════════ */
 const OfficeVisitApplyModal = () => {
-  const { isOpen, close, targetEmployeeId } = useOfficeVisitApply();
+  const { isOpen, close, targetEmployeeId, prefillDates } = useOfficeVisitApply();
   const { currentUser }   = useAuth();
   const { t }             = useLanguage();
-  const { settings }      = useSettings();
+  const { settings, refreshSettings } = useSettings();
   const { addVisit, employees } = useData();
+
+  // This modal stays mounted for the whole session (see Layout.jsx) — refetch
+  // right as it opens so a Super Admin toggling Leave/Visit backdating takes
+  // effect immediately, not just after a full page reload.
+  useEffect(() => { if (isOpen) refreshSettings(); }, [isOpen]);
 
   // When opened from daily attendance context menu, use target employee; else current user
   const activeUser = useMemo(() => {
@@ -119,7 +162,7 @@ const OfficeVisitApplyModal = () => {
     return (employees || []).find(e => String(e.id) === String(targetEmployeeId)) || currentUser;
   }, [targetEmployeeId, employees, currentUser]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getNepalTodayISO();
 
   const visitTypeOptions = useMemo(() =>
     (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean),
@@ -153,7 +196,9 @@ const OfficeVisitApplyModal = () => {
   /* Reset form each time modal opens */
   useEffect(() => {
     if (isOpen) {
-      setForm({ ...emptyForm, reco: myReco, approval: myApproval });
+      const fromDate = prefillDates?.fromDate || today;
+      const toDate   = prefillDates?.toDate   || fromDate;
+      setForm({ ...emptyForm, fromDate, toDate, reco: myReco, approval: myApproval });
       setErrors({});
       setSuccess(false);
       setSubmitting(false);
@@ -213,7 +258,7 @@ const OfficeVisitApplyModal = () => {
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#f0fdfa,#e0f2fe)', flexShrink: 0 }}>
+        <div className="modal-header" style={{ flexShrink: 0 }}>
           <h2>🏢 {t('Apply for Visit')}</h2>
           <button className="modal-close" onClick={close}>✕</button>
         </div>
@@ -281,14 +326,14 @@ const OfficeVisitApplyModal = () => {
                 {['National', 'International'].map(vt => (
                   <label key={vt} style={{ display: 'flex', alignItems: 'center', gap: 8,
                     cursor: 'pointer', userSelect: 'none', padding: '8px 18px',
-                    border: `1.5px solid ${form.visitType === vt ? '#52b02c' : '#d1d5db'}`,
-                    borderRadius: 8, background: form.visitType === vt ? '#f0fdf4' : 'white',
+                    border: `1.5px solid ${form.visitType === vt ? '#1a56db' : '#d1d5db'}`,
+                    borderRadius: 8, background: form.visitType === vt ? '#eff6ff' : 'white',
                     fontSize: 13, fontWeight: form.visitType === vt ? 700 : 400,
-                    color: form.visitType === vt ? '#52b02c' : '#374151', transition: 'all .12s' }}>
+                    color: form.visitType === vt ? '#1a56db' : '#374151', transition: 'all .12s' }}>
                     <input type="radio" name="visitType" value={vt}
                       checked={form.visitType === vt}
                       onChange={() => handleChange('visitType', vt)}
-                      style={{ accentColor: '#52b02c', width: 14, height: 14 }} />
+                      style={{ accentColor: '#1a56db', width: 14, height: 14 }} />
                     {vt === 'National' ? '🇳🇵 National' : '🌍 International'}
                   </label>
                 ))}
@@ -361,7 +406,7 @@ const OfficeVisitApplyModal = () => {
                   {form.reco.length > 0
                     ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {form.reco.map(id => (
-                          <span key={id} style={{ background: '#f0fdf4', color: '#52b02c',
+                          <span key={id} style={{ background: '#eff6ff', color: '#1a56db',
                             borderRadius: 10, padding: '2px 11px', fontSize: 13, fontWeight: 600 }}>
                             {getEmpName(id)}
                           </span>
@@ -392,9 +437,9 @@ const OfficeVisitApplyModal = () => {
 
             {/* Summary preview */}
             {form.officialVisit && form.address && (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0',
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe',
                 borderRadius: 8, padding: '12px 14px', marginBottom: 16, fontSize: 13 }}>
-                <div style={{ fontWeight: 700, color: '#166534', marginBottom: 8 }}>📋 Summary</div>
+                <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 8 }}>📋 Summary</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, color: '#374151' }}>
                   <div><span style={{ color: '#6b7280' }}>Official Visit:</span> <strong>{form.officialVisit}</strong></div>
                   <div><span style={{ color: '#6b7280' }}>Visit Type:</span>

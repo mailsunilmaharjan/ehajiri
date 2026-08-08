@@ -5,9 +5,16 @@
  */
 import React, { useState, useEffect } from 'react';
 import api from '../../api/client.js';
+import { useSettings } from '../../context/SettingsContext.jsx';
 
 const ImportDeviceUsersModal = ({ onClose, onDone }) => {
-  const [emailDomain,  setEmailDomain]  = useState('planetinfosys.com.np');
+  const { settings } = useSettings();
+  // Fixed to this company's own domain (set once at tenant creation, deduped
+  // against every other company on the platform) — not admin-editable here,
+  // since typing a different domain would risk colliding with another
+  // tenant's staff logins. The server enforces this same value regardless of
+  // what's sent, this is display-only.
+  const emailDomain = settings.companyEmailDomain || 'yourcompany.com.np';
   const [deviceUsers,  setDeviceUsers]  = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [running,      setRunning]      = useState(false);
@@ -23,7 +30,7 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
   const handleRun = async () => {
     setRunning(true);
     try {
-      const r = await api.post('/zkteco/import-to-staff', { emailDomain });
+      const r = await api.post('/zkteco/import-to-staff', {});
       setResult(r);
       if (onDone) await onDone();
     } catch (err) {
@@ -35,7 +42,6 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
 
   const unlinked = deviceUsers.filter(u => !u.employee_id);
   const linked   = deviceUsers.filter(u =>  u.employee_id);
-  const validDomain = emailDomain.trim().length > 3 && emailDomain.includes('.');
 
   return (
     <div className="modal-overlay">
@@ -44,14 +50,14 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
 
         {/* Header */}
         <div className="modal-header"
-             style={{ background:'linear-gradient(135deg,#1e3a5f,#52b02c)', color:'white', position:'sticky', top:0, zIndex:10 }}>
+             style={{ position:'sticky', top:0, zIndex:10 }}>
           <div>
-            <h2 style={{ color:'white', margin:0 }}>📥 Import Device Users to Staff</h2>
-            <div style={{ fontSize:12, color:'#bbf7d0', marginTop:2 }}>
+            <h2 style={{ margin:0 }}>📥 Import Device Users to Staff</h2>
+            <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>
               Device Users → Staff Detail table
             </div>
           </div>
-          <button className="modal-close" style={{ color:'white' }} onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         <div className="modal-body">
@@ -91,14 +97,14 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
                         {result.results.map((r, i) => {
                           const colors = {
                             created: { bg:'#d1fae5', color:'#065f46' },
-                            updated: { bg:'#dcfce7', color:'#166534' },
+                            updated: { bg:'#dbeafe', color:'#1e40af' },
                             linked:  { bg:'#e0f2fe', color:'#0369a1' },
                             error:   { bg:'#fee2e2', color:'#991b1b' },
                           };
                           const c = colors[r.action] || { bg:'#f3f4f6', color:'#374151' };
                           return (
                             <tr key={i} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'white':'#fafafa' }}>
-                              <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#52b02c' }}>{r.pin}</td>
+                              <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#1a56db' }}>{r.pin}</td>
                               <td style={{ padding:'5px 10px', fontWeight:600 }}>{r.name}</td>
                               <td style={{ padding:'5px 10px', fontFamily:'monospace', fontSize:11, color:'#6b7280' }}>{r.email}</td>
                               <td style={{ padding:'5px 10px', textAlign:'center' }}>
@@ -134,7 +140,7 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
               {!loading && (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:16 }}>
                   {[
-                    { label:'Total Device Users', value:deviceUsers.length,     color:'#52b02c', bg:'#f0fdf4' },
+                    { label:'Total Device Users', value:deviceUsers.length,     color:'#1a56db', bg:'#eff6ff' },
                     { label:'Will Create (new)',  value:unlinked.length,         color:'#059669', bg:'#d1fae5' },
                     { label:'Will Update (linked)',value:linked.length,          color:'#0369a1', bg:'#e0f2fe' },
                   ].map(s => (
@@ -162,7 +168,7 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
                   </thead>
                   <tbody>
                     {[
-                      { from:'PIN',       to:'Attendance Device ID', fromColor:'#52b02c', toColor:'#059669' },
+                      { from:'PIN',       to:'Attendance Device ID', fromColor:'#1a56db', toColor:'#059669' },
                       { from:'Name',      to:'Staff Name (Full Name)',fromColor:'#374151', toColor:'#374151' },
                       { from:'auto-gen',  to:`Email  (PIN@${emailDomain||'domain'})`, fromColor:'#6b7280', toColor:'#7c3aed' },
                     ].map(row => (
@@ -176,21 +182,20 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
                 </table>
               </div>
 
-              {/* Email domain */}
+              {/* Email domain — fixed to this company, not editable */}
               <div className="form-group" style={{ marginBottom:14 }}>
                 <label className="form-label" style={{ fontWeight:700 }}>📧 Email Domain</label>
                 <div style={{ display:'flex', alignItems:'center', gap:0 }}>
                   <span style={{ background:'#f3f4f6', border:'1px solid #d1d5db', borderRight:'none', borderRadius:'6px 0 0 6px', padding:'9px 12px', fontSize:13, color:'#6b7280', whiteSpace:'nowrap' }}>
                     PIN @
                   </span>
-                  <input className="form-control"
-                    style={{ borderRadius:'0 6px 6px 0', borderLeft:'none', fontSize:14 }}
-                    value={emailDomain}
-                    placeholder="planetinfosys.com.np"
-                    onChange={e => setEmailDomain(e.target.value.trim())} />
+                  <span style={{ flex:1, background:'#f9fafb', border:'1px solid #d1d5db', borderRadius:'0 6px 6px 0', padding:'9px 12px', fontSize:14, fontWeight:600, color:'#374151' }}>
+                    {emailDomain}
+                  </span>
                 </div>
                 <div style={{ fontSize:12, color:'#6b7280', marginTop:4 }}>
-                  Example: PIN = <strong>8</strong> → email = <code>8@{emailDomain||'planetinfosys.com.np'}</code>
+                  Assigned to your company at setup, unique across every company on the platform.
+                  Example: PIN = <strong>8</strong> → email = <code>8@{emailDomain}</code>
                 </div>
               </div>
 
@@ -214,14 +219,14 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
                       <tbody>
                         {deviceUsers.map((u, i) => (
                           <tr key={u.id} style={{ borderBottom:'1px solid #f3f4f6', background: i%2===0?'white':'#fafafa' }}>
-                            <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#52b02c' }}>{u.pin}</td>
+                            <td style={{ padding:'5px 10px', fontFamily:'monospace', fontWeight:700, color:'#1a56db' }}>{u.pin}</td>
                             <td style={{ padding:'5px 10px', fontWeight:600 }}>{u.name || `Staff ${u.pin}`}</td>
                             <td style={{ padding:'5px 10px', fontFamily:'monospace', fontSize:11, color:'#059669' }}>
-                              {u.pin}@{emailDomain||'planetinfosys.com.np'}
+                              {u.pin}@{emailDomain}
                             </td>
                             <td style={{ padding:'5px 10px', textAlign:'center' }}>
                               {u.employee_id
-                                ? <span style={{ background:'#dcfce7', color:'#166534', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:700 }}>UPDATE</span>
+                                ? <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:700 }}>UPDATE</span>
                                 : <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:700 }}>CREATE</span>
                               }
                             </td>
@@ -248,7 +253,7 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
             <button className="btn btn-outline" onClick={onClose}>Cancel</button>
             <button
               className="btn btn-primary"
-              disabled={running || loading || !validDomain || deviceUsers.length === 0}
+              disabled={running || loading || deviceUsers.length === 0}
               style={{ background:'#059669', borderColor:'#059669', display:'flex', alignItems:'center', gap:8, fontSize:14, padding:'9px 22px' }}
               onClick={handleRun}
             >

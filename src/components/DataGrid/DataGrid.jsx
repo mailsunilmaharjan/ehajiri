@@ -27,6 +27,9 @@ const DataGrid = ({
   selectionActions = null,    // extra buttons rendered in the selection bar
   contextMenu = null,         // [{ label, icon, onClick(row), className? }] — shown on right-click
   extraSearchFields = [],     // extra row fields to include in global search (not shown as columns)
+  className = '',             // extra class on the outer container, for scoping one-off style overrides
+  showFooter = true,          // set false to hide the pagination/info footer (e.g. small fixed-size reports)
+  initialSelected = [],       // seeds the checkbox selection once on mount (e.g. a caller pre-checking rows before this grid ever renders) — uncontrolled after that, same as selectedRows always has been
 }) => {
   const { language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
@@ -38,9 +41,9 @@ const DataGrid = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultPageSize);
   const [showFilters, setShowFilters] = useState(false);
-  const [selectedRows, setSelectedRows] = useState([]);
+  const [selectedRows, setSelectedRows] = useState(initialSelected);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
-  const [focusedRowIdx, setFocusedRowIdx] = useState(0);
+  const [focusedRowIdx, setFocusedRowIdx] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, row }
   const scrollRef = useRef(null);
   const searchRef = useRef(null);
@@ -125,7 +128,7 @@ const DataGrid = ({
   const startIdx = (currentPage - 1) * pageSize;
   const pageData = processedData.slice(startIdx, startIdx + pageSize);
 
-  useEffect(() => { setFocusedRowIdx(0); }, [currentPage, pageSize, globalSearch, sortField, sortDir]);
+  useEffect(() => { setFocusedRowIdx(-1); }, [currentPage, pageSize, globalSearch, sortField, sortDir]);
   useEffect(() => { if (showSearch) searchRef.current?.focus(); }, []);
 
   const handleKeyDown = (e) => {
@@ -169,9 +172,12 @@ const DataGrid = ({
   const snDigits = String(maxSN).length;
   const snWidth = Math.max(32, snDigits * 10 + 22);
 
+  const hasToolbar = title || toolbarLeft || showSearch || showFilterButton || toolbar;
+
   return (
-    <div className="dg-container">
+    <div className={`dg-container${className ? ' ' + className : ''}`}>
       {/* Toolbar */}
+      {hasToolbar && (
       <div className="dg-toolbar">
         {(title || toolbarLeft) && <div className="dg-toolbar-left">{title && <div className="dg-title">{title}</div>}{toolbarLeft}</div>}
         <div className="dg-toolbar-right">
@@ -214,6 +220,7 @@ const DataGrid = ({
           {toolbar}
         </div>
       </div>
+      )}
 
       {/* Selection info bar */}
       {selectedRows.length > 0 && (
@@ -402,6 +409,7 @@ const DataGrid = ({
       )}
 
       {/* Footer / Pagination */}
+      {showFooter && (
       <div className="dg-footer">
         <div className="dg-info">
           {processedData.length > 0 ? (
@@ -431,6 +439,7 @@ const DataGrid = ({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };

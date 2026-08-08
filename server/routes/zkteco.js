@@ -32,6 +32,8 @@ import {
   queueCommand,
   pushBioPhotoToDevice,
   checkTimezoneAccess,
+  checkValidityWindow,
+  consumeValidityUse,
 } from '../services/zktecoService.js';
 
 /** Push a freshly-captured fingerprint/face template to every other active
@@ -48,6 +50,24 @@ async function pushTemplateToAreaSiblings(originSn, fn) {
     [origin.area_id, originSn]
   );
   for (const { serial_number } of siblings) await fn(serial_number);
+}
+
+/** Rebuild the full DATA UPDATE USERINFO payload from a user's just-saved
+ * record and push it to every area sibling. Always reads back the current
+ * row (rather than forwarding the triggering event's raw fields) so a
+ * CARD-only update doesn't blank out Name/Privilege/Passwd on the sibling,
+ * and vice versa. Mirrors the FP/BIOPHOTO sibling pushes above — without
+ * this, a user enrolled (or card-assigned) on one device never reaches the
+ * other device sharing its area at all. */
+async function pushUserToAreaSiblings(originSn, pin) {
+  const { rows: [u] } = await pool.query(
+    'SELECT name, privilege, card_no, passwd FROM zkteco_users WHERE device_sn=$1 AND pin=$2',
+    [originSn, pin]
+  );
+  if (!u) return;
+  const card   = (u.card_no && u.card_no !== '0') ? u.card_no : '';
+  const params = `PIN=${pin}\tName=${u.name||''}\tPri=${u.privilege||0}\tPasswd=${u.passwd||''}\tCard=${card}\tGrp=1\tTZ=0000000000000000\tVerify=0\tExpires=0\tStartDatetime=2000-01-01 00:00:00\tEndDatetime=2099-12-31 23:59:00`;
+  await pushTemplateToAreaSiblings(originSn, (siblingSn) => queueCommand(siblingSn, 'DATA UPDATE USERINFO', params));
 }
 
 const router = express.Router();
@@ -75,6 +95,13 @@ function classifyLines(body) {
     else if (upper.startsWith('CARD'))       cards.push(line);
     else if (upper.startsWith('OPLOG'))      oplogs.push(line);
     else if (upper.startsWith('BIOPHOTO'))   biophotos.push(line);
+    // BIODATA rows (biometric enrollment metadata, "BIODATA Pin=X\t...") don't
+    // match any category above and used to fall through to the `att` catch-all
+    // — parseAttlog would then treat "BIODATA Pin=X" as a literal ATTLOG PIN
+    // (its first tab-separated field), inserting a garbage attendance_logs row
+    // that can never match a real employee. Not currently acted on, just kept
+    // out of the attendance bucket.
+    else if (upper.startsWith('BIODATA'))    continue;
     else                                     att.push(line);
   }
   return { att, users, fps, cards, info, oplogs, biophotos };
@@ -283,9 +310,7 @@ async function handleZkteco(req, res) {
         try {
           const pin    = body.trim().split('\t')[0];
           const empRes = await pool.query(
-            `SELECT id, active, department, access_expires, access_expiry_mode,
-                    access_valid_from, access_valid_to, access_valid_count
-             FROM users WHERE device_id=$1 LIMIT 1`, [pin]
+            `SELECT id, active, department FROM users WHERE device_id=$1 LIMIT 1`, [pin]
           );
           const emp = empRes.rows[0];
 
@@ -298,27 +323,15 @@ async function handleZkteco(req, res) {
 
           // 2. Validity/expiry — re-checked here independently of the device's own
           // Expires/StartDatetime/EndDatetime/VaildCount fields (firmware-dependent, not
-          // guaranteed to be enforced on-device), so this is the authoritative gate.
-          // Modes mirror the device's own Expires value: 0 none | 1 date range |
-          // 2 use-count | 3 date range AND use-count.
-          const mode = emp.access_expiry_mode ?? (emp.access_expires ? 1 : 0);
-          if (mode > 0) {
-            let dateOk = true;
-            if (mode === 1 || mode === 3) {
-              // Nepal local date (UTC+5:45) — using plain UTC here would read as
-              // "yesterday" for ~6 hours every night, rejecting/admitting people
-              // a day early/late right at the edges of their validity window.
-              const today = new Date(Date.now() + 345 * 60000).toISOString().slice(0, 10);
-              const validFrom = emp.access_valid_from ? String(emp.access_valid_from).slice(0, 10) : null;
-              const validTo   = emp.access_valid_to   ? String(emp.access_valid_to).slice(0, 10)   : null;
-              dateOk = (!validFrom || today >= validFrom) && (!validTo || today <= validTo);
-            }
-            const countOk = (mode === 2 || mode === 3) ? (emp.access_valid_count ?? 0) > 0 : true;
-            if (!dateOk || !countOk) {
-              console.log(`[ZK] PostVerifyData PIN=${pin} → DENY (validity mode=${mode}, dateOk=${dateOk}, countOk=${countOk}, remaining=${emp.access_valid_count})`);
-              res.set('Content-Type', 'application/json');
-              return res.json({ result: 0 });
-            }
+          // guaranteed to be enforced on-device), so this is the authoritative gate for
+          // devices that actually call PostVerifyData. Shared with saveAttlogs(), which
+          // is the gate that matters for devices that verify locally and just push
+          // ATTLOG afterward without ever hitting this endpoint.
+          const withinValidity = await checkValidityWindow(emp.id, new Date());
+          if (!withinValidity) {
+            console.log(`[ZK] PostVerifyData PIN=${pin} → DENY (outside validity window)`);
+            res.set('Content-Type', 'application/json');
+            return res.json({ result: 0 });
           }
 
           // 3. Check timezone access rule (person-level first, then department)
@@ -328,12 +341,7 @@ async function handleZkteco(req, res) {
           // Consume one use now that access is actually being granted — mirrors the
           // device's own VaildCount decrement, atomically guarded so concurrent scans
           // can't drive it negative.
-          if (allow && (mode === 2 || mode === 3)) {
-            await pool.query(
-              `UPDATE users SET access_valid_count = access_valid_count - 1 WHERE id=$1 AND access_valid_count > 0`,
-              [emp.id]
-            );
-          }
+          if (allow) await consumeValidityUse(emp.id);
 
           console.log(`[ZK] PostVerifyData PIN=${pin} → ${allow ? 'ALLOW' : 'DENY (timezone rule)'}`);
           res.set('Content-Type', 'application/json');
@@ -363,8 +371,10 @@ async function handleZkteco(req, res) {
 
         // ── Attendance logs (ATTLOG) ────────────────────────────────────
         let attInserted = 0;
+        let attReceived = 0;
         if (att.length > 0 || table === 'ATTLOG') {
           const records = parseAttlog(att.join('\n'));
+          attReceived = records.length;
           if (records.length) {
             attInserted = await saveAttlogs(sn, records);
             // Guide §11: echo the device's own Stamp value back in the next handshake.
@@ -406,6 +416,10 @@ async function handleZkteco(req, res) {
                 console.log(`[ZK] Auto-cleared admin PIN=${kv.PIN} on ${sn}`);
               }
             }
+            // Pushed after the auto-downgrade above (not right after saveDeviceUser)
+            // so a privilege>=6 arrival that gets auto-cleared never propagates the
+            // stale admin privilege to area siblings first.
+            await pushUserToAreaSiblings(sn, kv.PIN);
           }
         }
         // Clear the pending flag once we've processed the user list
@@ -446,6 +460,7 @@ async function handleZkteco(req, res) {
               [cardNo, sn, pin]
             );
             console.log(`[ZK] Card saved SN=${sn} PIN=${pin} Card=${cardNo}`);
+            await pushUserToAreaSiblings(sn, pin);
           }
         }
 
@@ -471,8 +486,14 @@ async function handleZkteco(req, res) {
           if (Object.keys(parsed).length) await saveDeviceInfo(sn, parsed);
         }
 
-        // ATTLOG must return count (device uses it to advance stamp pointer)
-        if (table === 'ATTLOG') return res.send(`OK: ${attInserted}\n`);
+        // ATTLOG must return count (device uses it to advance stamp pointer).
+        // Echo records RECEIVED/parsed, not records newly INSERTED — a resend
+        // of already-stored rows (reconnect, retry) is a legitimate 0-new-rows
+        // outcome from the server's dedup, but the device sent that count of
+        // records successfully; echoing the smaller "inserted" count here made
+        // the device think part of the batch failed, which is a very plausible
+        // cause of records silently going missing across a large bulk pull.
+        if (table === 'ATTLOG') return res.send(`OK: ${attReceived}\n`);
         return res.send('OK\n');
 
       } catch (err) {

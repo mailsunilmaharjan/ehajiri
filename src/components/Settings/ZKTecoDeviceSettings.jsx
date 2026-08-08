@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
-import api from '../../api/client.js';
+import { useAuth } from '../../context/AuthContext.jsx';
+import api, { apiUrl } from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import ImportDeviceUsersModal from '../Common/ImportDeviceUsersModal.jsx';
 import ZKTecoAreaTab          from './ZKTecoAreaTab.jsx';
 import SaveButton             from '../Common/SaveButton.jsx';
 import KeyboardMultiSelect    from '../Common/KeyboardMultiSelect.jsx';
 import useSaveShortcut        from '../../hooks/useSaveShortcut.js';
+import { getNepalNow }        from '../../utils/dateUtils.js';
 
 /* ═══ constants ══════════════════════════════════════════════ */
 const DEVICE_MODELS = ['M2F','SenseFace','ZKTeco K40 Pro','MB2000','SenseFace 4A','SenseFace 7A','Other'];
@@ -34,7 +36,7 @@ const modelType = (m = '') => {
 const cleanIp = (raw) => raw ? raw.replace(/^::ffff:/i,'').replace(/^::1$/,'localhost') : '—';
 
 /* ═══ tiny atoms ═════════════════════════════════════════════ */
-const Badge = ({ children, color='#52b02c', bg='#f0fdf4', border='#bbf7d0', style={} }) => (
+const Badge = ({ children, color='#1a56db', bg='#eff6ff', border='#bfdbfe', style={} }) => (
   <span style={{ background:bg,color,border:`1px solid ${border}`,borderRadius:10,
     padding:'2px 9px',fontSize:11,fontWeight:700,display:'inline-block',...style }}>
     {children}
@@ -57,7 +59,7 @@ const OnlineDot = ({ ts }) => {
   );
 };
 
-const ActionBtn = ({ icon, label, color='#52b02c', bg='#f0fdf4', border='#bbf7d0',
+const ActionBtn = ({ icon, label, color='#1a56db', bg='#eff6ff', border='#bfdbfe',
   onClick, loading=false, disabled=false, danger=false }) => (
   <button
     disabled={disabled || loading}
@@ -100,14 +102,14 @@ const ADDatePicker = ({ value, onChange, placeholder = 'yyyy-mm-dd', label }) =>
       )}
       <div style={{
         position:'relative', display:'flex', alignItems:'center',
-        border:`1.5px solid ${focused ? '#52b02c' : value ? '#52b02c' : '#d1d5db'}`,
+        border:`1.5px solid ${focused ? '#1a56db' : value ? '#1a56db' : '#d1d5db'}`,
         borderRadius:8, background:'white', overflow:'hidden',
-        boxShadow: focused ? '0 0 0 3px rgba(82,176,44,.1)' : 'none',
+        boxShadow: focused ? '0 0 0 3px rgba(26,86,219,.1)' : 'none',
         transition:'border-color .15s, box-shadow .15s',
         height:38,
       }}>
         {/* Calendar icon */}
-        <span style={{ padding:'0 8px', color: value ? '#52b02c' : '#9ca3af', fontSize:16, flexShrink:0, lineHeight:1 }}>
+        <span style={{ padding:'0 8px', color: value ? '#1a56db' : '#9ca3af', fontSize:16, flexShrink:0, lineHeight:1 }}>
           📅
         </span>
         <input
@@ -166,16 +168,16 @@ const Item = ({ iKey, icon, label, onClick, danger=false, disabled=false, desc, 
       style={{
         display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
         gap:6, padding:'12px 10px', minWidth:100, flex:'1 1 100px', maxWidth:140,
-        background: isOffline ? '#f9fafb' : isActive ? '#f0fdf4' : danger ? '#fff5f5' : 'white',
-        border: `1.5px solid ${isOffline ? '#e5e7eb' : isActive ? '#86efac' : danger ? '#fca5a5' : '#e5e7eb'}`,
+        background: isOffline ? '#f9fafb' : isActive ? '#eff6ff' : danger ? '#fff5f5' : 'white',
+        border: `1.5px solid ${isOffline ? '#e5e7eb' : isActive ? '#93c5fd' : danger ? '#fca5a5' : '#e5e7eb'}`,
         borderRadius:10, cursor: isDisabled ? 'not-allowed' : 'pointer',
         textAlign:'center', opacity: isOffline ? 0.4 : isDisabled ? 0.5 : 1, transition:'background .1s',
-        boxShadow: isActive && !isOffline ? '0 0 0 2px #bbf7d0' : 'none',
+        boxShadow: isActive && !isOffline ? '0 0 0 2px #bfdbfe' : 'none',
       }}
-      onMouseEnter={e=>{ if (!isDisabled) e.currentTarget.style.background = isActive?'#dcfce7': danger?'#fee2e2':'#f0f9ff'; }}
-      onMouseLeave={e=>{ if (!isOffline) e.currentTarget.style.background = isActive?'#f0fdf4': danger?'#fff5f5':'white'; }}>
+      onMouseEnter={e=>{ if (!isDisabled) e.currentTarget.style.background = isActive?'#dbeafe': danger?'#fee2e2':'#f0f9ff'; }}
+      onMouseLeave={e=>{ if (!isOffline) e.currentTarget.style.background = isActive?'#eff6ff': danger?'#fff5f5':'white'; }}>
       <span style={{ fontSize:20 }}>{isBusy ? '⏳' : isOffline ? '🚫' : icon}</span>
-      <div style={{ fontSize:11, fontWeight:700, color: isOffline?'#9ca3af': danger?'#dc2626': isActive?'#166534':'#374151',
+      <div style={{ fontSize:11, fontWeight:700, color: isOffline?'#9ca3af': danger?'#dc2626': isActive?'#1e40af':'#374151',
         lineHeight:1.3, maxWidth:110, wordBreak:'break-word' }}>{label}</div>
     </button>
   );
@@ -251,9 +253,9 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 
         {/* Header */}
         <div className="modal-header"
-          style={{ background:'linear-gradient(135deg,#f0fdf4,#dcfce7)', position:'sticky', top:0, zIndex:10 }}>
+          style={{ position:'sticky', top:0, zIndex:10 }}>
           <div>
-            <h2 style={{ color:'#166534', margin:0 }}>⚙️ Device Control — {device.name}</h2>
+            <h2 style={{ color:'#1e40af', margin:0 }}>⚙️ Device Control — {device.name}</h2>
             <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>
               SN: {sn||'—'} &nbsp;·&nbsp; {cleanIp(device.last_ip)}{device.port?`:${device.port}`:''}
               &nbsp;·&nbsp; <OnlineDot ts={device.last_seen} />
@@ -266,7 +268,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
         {device.user_count != null && (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, padding:'10px 14px', background:'#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
             {[
-              { label:'Users',    value:`${device.user_count}/${device.max_user||'?'}`, color:'#52b02c' },
+              { label:'Users',    value:`${device.user_count}/${device.max_user||'?'}`, color:'#1a56db' },
               { label:'FP Slots', value:`${device.fp_count??'?'}`, color:fpMinus1?'#dc2626':'#7c3aed' },
               { label:'Firmware', value:device.info_firmware||device.firmware_ver||'—', color:'#374151' },
               { label:'Platform', value:device.info_platform||device.platform||'—',     color:'#374151' },
@@ -316,7 +318,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                 onClick={() => { if (!isOffline) { setOpenGroup(key); setActiveItem(null); setEnrollType(null); } }}
                 style={{ flex:1, padding:'9px 6px', border:'none', cursor: isOffline ? 'not-allowed' : 'pointer',
                   fontSize:12, fontWeight:700, textAlign:'center',
-                  background: openGroup === key ? '#52b02c' : 'white',
+                  background: openGroup === key ? '#1a56db' : 'white',
                   color:      openGroup === key ? 'white'   : '#6b7280',
                   borderRight: key !== 'device-cmd' ? '1px solid #e5e7eb' : 'none',
                   transition:'background .15s' }}>
@@ -334,7 +336,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
               <div style={{ display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6,padding:'10px 16px',
                 background:'#f8fafc',borderBottom:'1px solid #f3f4f6' }}>
                 {[
-                  {l:'Users',    v:`${device.user_count||0}/${device.max_user||'?'}`, c:'#52b02c'},
+                  {l:'Users',    v:`${device.user_count||0}/${device.max_user||'?'}`, c:'#1a56db'},
                   {l:'FP Slots', v:`${device.fp_count??'?'}`,                         c:fpMinus1?'#dc2626':'#7c3aed'},
                   {l:'Firmware', v:device.info_firmware||device.firmware_ver||'—',    c:'#374151'},
                   {l:'Platform', v:device.info_platform||device.platform||'—',        c:'#374151'},
@@ -440,7 +442,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
             {/* Export stored users + FP templates as JSON for migration */}
             <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="export-users" icon="⬇️" label="Export Users (JSON)"
               desc="Download all users + FP templates stored in DB for this device as a JSON file"
-              onClick={()=>window.open(`/api/zkteco/export-users?sn=${encodeURIComponent(sn)}`, '_blank')} />
+              onClick={()=>window.open(apiUrl(`/zkteco/export-users?sn=${encodeURIComponent(sn)}`), '_blank')} />
             {/* Push all users already stored in DB back to this device */}
             <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="push-stored" icon="📤" label="Push Stored Users"
               desc="Re-push all users + FP templates already in eHajiri DB to this device (after device reset / new device)"
@@ -564,7 +566,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                   }} />
                 {!usbFile ? (
                   <button onClick={()=>usbInputRef.current?.click()}
-                    style={{ width:'100%',padding:'10px',background:'white',border:'2px dashed #86efac',
+                    style={{ width:'100%',padding:'10px',background:'white',border:'2px dashed #93c5fd',
                       borderRadius:8,color:'#0369a1',fontSize:13,fontWeight:600,cursor:'pointer' }}>
                     📁 Choose .dat file from USB drive
                   </button>
@@ -626,7 +628,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                       Users + fingerprint templates will be stored in DB and pushed to this device.
                     </div>
                     <button onClick={()=>importJsonRef.current?.click()}
-                      style={{ width:'100%',padding:'10px',background:'white',border:'2px dashed #86efac',
+                      style={{ width:'100%',padding:'10px',background:'white',border:'2px dashed #93c5fd',
                         borderRadius:8,color:'#0369a1',fontSize:13,fontWeight:600,cursor:'pointer' }}>
                       📁 Choose users JSON file
                     </button>
@@ -810,7 +812,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                     </div>
                     <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
                       {[
-                        { t:'fp',   icon:'👆', label:'Fingerprint', color:'#52b02c', bg:'#f0fdf4', disabled:fpMinus1, note:fpMinus1?'Not supported (FPCount=-1)':'' },
+                        { t:'fp',   icon:'👆', label:'Fingerprint', color:'#1a56db', bg:'#eff6ff', disabled:fpMinus1, note:fpMinus1?'Not supported (FPCount=-1)':'' },
                         { t:'face', icon:'👤', label:'Face',        color:'#7c3aed', bg:'#f5f3ff', disabled:false },
                       ].map(e=>(
                         <button key={e.t} disabled={e.disabled}
@@ -831,7 +833,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                 ) : (
                   /* Enrollment form */
                   <div>
-                    <div style={{ display:'flex',alignItems:'center',gap:6,marginBottom:10,fontWeight:700,fontSize:13,color:enrollType==='fp'?'#52b02c':'#7c3aed' }}>
+                    <div style={{ display:'flex',alignItems:'center',gap:6,marginBottom:10,fontWeight:700,fontSize:13,color:enrollType==='fp'?'#1a56db':'#7c3aed' }}>
                       {enrollType==='fp'?'👆 Fingerprint Enrollment':'👤 Face Enrollment'}
                       <button onClick={()=>setEnrollType(null)}
                         style={{ background:'none',border:'none',cursor:'pointer',color:'#9ca3af',fontSize:12,marginLeft:'auto' }}>
@@ -864,7 +866,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                     </div>
                     <div style={{ display:'flex',gap:6 }}>
                       <button className="btn btn-primary btn-sm"
-                        style={{ background:enrollType==='fp'?'#52b02c':'#7c3aed', borderColor:enrollType==='fp'?'#52b02c':'#7c3aed' }}
+                        style={{ background:enrollType==='fp'?'#1a56db':'#7c3aed', borderColor:enrollType==='fp'?'#1a56db':'#7c3aed' }}
                         disabled={!formData.enrollPin||!!busy['enroll']}
                         onClick={async()=>{
                           const ep = enrollType==='fp' ? `/zkteco/devices/${id}/enroll-fp` : `/zkteco/devices/${id}/enroll-face`;
@@ -1006,6 +1008,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 const ZKTecoDeviceSettings = () => {
   const { language } = useLanguage();
   const L = (np,en) => language==='np' ? np : en;
+  const { isSuperAdmin } = useAuth();
 
   const [subTab,     setSubTab]     = useState('devices');
   const [devices,    setDevices]    = useState([]);
@@ -1018,13 +1021,15 @@ const ZKTecoDeviceSettings = () => {
   const [userActionBusy,  setUserActionBusy]  = useState(false);
   const [syncing,         setSyncing]         = useState(false);
   const [syncResult,    setSyncResult]    = useState(null);
-  const [importing,     setImporting]     = useState(false);
   const [importModal,   setImportModal]   = useState(false);
-  const [importResult,  setImportResult]  = useState(null);
-  const [emailDomain,   setEmailDomain]   = useState('planetinfosys.com.np');
   const [linkModal,     setLinkModal]     = useState(null);  // device user row being linked
   const [staffList,     setStaffList]     = useState([]);
   const [fingerprints,  setFingerprints]  = useState([]);
+  const [copyTarget,    setCopyTarget]    = useState('');   // selected target device id, Fingerprints tab
+  const [copyingPin,    setCopyingPin]    = useState(null); // pin currently being copied (row-level spinner)
+  const [selectedFpIds, setSelectedFpIds] = useState([]);   // checked rows in Biometrics grid (own selection, separate from Device Users tab's)
+  const [fpActionsOpen, setFpActionsOpen] = useState(false);
+  const [transferModal, setTransferModal] = useState(null); // null | { mode: 'copy'|'moveDelete' }
   const [areas,         setAreas]         = useState([]);
   const [areasLoading,  setAreasLoading]  = useState(false);
   const [areaModal,     setAreaModal]     = useState(false);
@@ -1082,7 +1087,7 @@ const ZKTecoDeviceSettings = () => {
 
   const [logFilter,    setLogFilter]    = useState(() => {
     // Default: From = 3 months ago, To = today
-    const today = new Date();
+    const today = getNepalNow();
     const fmt   = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const from3m = new Date(today); from3m.setMonth(from3m.getMonth() - 3);
     return { sn:'', pin:'', from: fmt(from3m), to: fmt(today) };
@@ -1122,7 +1127,86 @@ const ZKTecoDeviceSettings = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, [cmdFilterOpen]);
 
+  // Close Biometrics-tab "⚡ Actions" dropdown on outside click
+  const fpActionsRef = useRef(null);
+  useEffect(() => {
+    if (!fpActionsOpen) return;
+    const handler = (e) => {
+      if (fpActionsRef.current && !fpActionsRef.current.contains(e.target)) setFpActionsOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [fpActionsOpen]);
+
+  // Opens the bulk transfer modal — pre-fills the source device + checks
+  // whichever staff are already checked in the Biometrics grid, but only if
+  // they all came from the same device (a mixed-device selection can't map
+  // to a single "Transfer From" device, so it opens empty instead).
+  const openTransferModal = (mode) => {
+    setFpActionsOpen(false);
+    const checkedRows = devUsers.filter(u => selectedFpIds.includes(u.id));
+    const uniqueSns = [...new Set(checkedRows.map(u => u.device_sn))];
+    setTransferModal({
+      mode,
+      sourceSn: uniqueSns.length === 1 ? uniqueSns[0] : '',
+      targetId: '',
+      checkedPins: uniqueSns.length === 1 ? checkedRows.map(u => u.pin) : [],
+    });
+  };
+
   const showToast = (msg,type='success') => { setToast({ msg,type }); setTimeout(()=>setToast(null),4000); };
+
+  // Copy one staff member's fingerprint(s) + face photo from the device this
+  // row came from onto whichever device is selected in the "Copy to" dropdown.
+  // Queues DATA UPDATE commands on the target — since ADMS is push-based, the
+  // target device picks these up on its next check-in, not instantly.
+  const copyUserToDevice = async (row) => {
+    const sourceDevice = devices.find(d => d.serial_number === row.device_sn);
+    if (!sourceDevice || !copyTarget) return;
+    if (String(sourceDevice.id) === String(copyTarget)) {
+      showToast('❌ Source and target device are the same', 'error');
+      return;
+    }
+    setCopyingPin(row.pin);
+    try {
+      const r = await api.post(`/zkteco/devices/${copyTarget}/copy-user/${sourceDevice.id}`, { pin: row.pin });
+      showToast(`✅ Copied — ${r.fingerprintCount} fingerprint(s)${r.facePushed ? ' + face' : ''} queued for the target device`, 'success');
+    } catch (err) { showToast(`❌ ${err.message}`, 'error'); }
+    finally { setCopyingPin(null); }
+  };
+
+  // Bulk submit for the Transfer modal — one request covering every checked
+  // staff member; deleteAfter (Delete & Transfer mode) removes each one from
+  // the source device only after their own copy to the target succeeded.
+  const [transferBusy, setTransferBusy] = useState(false);
+  const submitTransfer = async () => {
+    const { mode, sourceSn, targetId, checkedPins } = transferModal;
+    const sourceDevice = devices.find(d => d.serial_number === sourceSn);
+    if (!sourceDevice || !targetId || !checkedPins.length) return;
+    if (mode === 'moveDelete' && !window.confirm(
+      `Delete ${checkedPins.length} staff member(s) from "${sourceDevice.name}" after copying them to the target device?\n` +
+      checkedPins.map(pin => {
+        const u = devUsers.find(x => x.device_sn === sourceSn && x.pin === pin);
+        return `• PIN ${pin} — ${u?.name || '—'}`;
+      }).join('\n')
+    )) return;
+    setTransferBusy(true);
+    try {
+      const r = await api.post(`/zkteco/devices/${targetId}/copy-users/${sourceDevice.id}`,
+        { pins: checkedPins, deleteAfter: mode === 'moveDelete' });
+      const failed = r.results.filter(x => !x.ok);
+      showToast(
+        failed.length
+          ? `⚠️ ${r.results.length - failed.length}/${r.results.length} succeeded — ${failed.length} failed: ${failed.map(f=>`PIN ${f.pin} (${f.error})`).join(', ')}`
+          : `✅ ${r.results.length} staff member(s) ${mode === 'moveDelete' ? 'moved' : 'copied'} to the target device`,
+        failed.length ? 'danger' : 'success'
+      );
+      setTransferModal(null);
+      setSelectedFpIds([]);
+      await loadDevUsers(false);
+    } catch (err) { showToast(`❌ ${err.message}`, 'error'); }
+    finally { setTransferBusy(false); }
+  };
 
   /* ── loaders ── */
   const loadDevices = useCallback(async (silent=false) => {
@@ -1274,18 +1358,6 @@ const ZKTecoDeviceSettings = () => {
     } catch (err) { showToast(err.message,'danger'); }
     finally { setSyncingId(null); }
   };
-  const handleImportToStaff = async () => {
-    setImporting(true);
-    setImportResult(null);
-    try {
-      const r = await api.post('/zkteco/import-to-staff', { emailDomain });
-      setImportResult(r);
-      await loadDevUsers(false);
-      await loadStaff();
-    } catch (err) { showToast(err.message, 'danger'); }
-    finally { setImporting(false); }
-  };
-
   const handleSyncToStaff = async () => {
     setSyncing(true);
     setSyncResult(null);
@@ -1396,12 +1468,12 @@ const ZKTecoDeviceSettings = () => {
 
   /* ── badge helpers ── */
   const vBadge = (v) => {
-    const m={1:['#52b02c','#f0fdf4','#bbf7d0'],2:['#374151','#f3f4f6','#e5e7eb'],3:['#0369a1','#e0f2fe','#bae6fd'],15:['#7c3aed','#f5f3ff','#ddd6fe']};
+    const m={1:['#1a56db','#eff6ff','#bfdbfe'],2:['#374151','#f3f4f6','#e5e7eb'],3:['#0369a1','#e0f2fe','#bae6fd'],15:['#7c3aed','#f5f3ff','#ddd6fe']};
     const [c,bg,b]=m[v]||['#374151','#f3f4f6','#e5e7eb'];
     return <Badge color={c} bg={bg} border={b}>{VERIFY_LABELS[v]||`V${v}`}</Badge>;
   };
   const cBadge = (t) => {
-    const m={0:['#065f46','#d1fae5','#6ee7b7'],1:['#991b1b','#fee2e2','#fca5a5'],2:['#92400e','#fef3c7','#fcd34d'],3:['#166534','#dcfce7','#86efac'],4:['#5b21b6','#ede9fe','#c4b5fd'],5:['#9d174d','#fce7f3','#f9a8d4']};
+    const m={0:['#065f46','#d1fae5','#6ee7b7'],1:['#991b1b','#fee2e2','#fca5a5'],2:['#92400e','#fef3c7','#fcd34d'],3:['#1e40af','#dbeafe','#93c5fd'],4:['#5b21b6','#ede9fe','#c4b5fd'],5:['#9d174d','#fce7f3','#f9a8d4']};
     const [c,bg,b]=m[t]||['#374151','#f3f4f6','#e5e7eb'];
     return <Badge color={c} bg={bg} border={b}>{CHECK_LABELS[t]||`T${t}`}</Badge>;
   };
@@ -1423,7 +1495,7 @@ const ZKTecoDeviceSettings = () => {
     { field:'name', header:'Name | Location', width:175,
       render:(v,row) => (
         <span style={{ display:'inline-flex', alignItems:'center', gap:0 }}>
-          <span style={{ fontWeight:700, color:'#1f2937', fontSize:13 }}>{v}</span>
+          <span style={{ fontWeight:700, color:'#1f2937' }}>{v}</span>
           {row.location && (
             <>
               <span style={{ color:'#d1d5db', margin:'0 6px', fontWeight:300 }}>|</span>
@@ -1434,14 +1506,11 @@ const ZKTecoDeviceSettings = () => {
       )
     },
     { field:'model', header:L('मोडल','Model'), width:120,
-      render: v => <Badge color="#0369a1" bg="#e0f2fe" border="#bae6fd">{v||'Unknown'}</Badge>
-    },
-    { field:'serial_number', header:'S/N', width:130,
-      render: v => v ? <span style={{ fontFamily:'monospace',fontSize:12 }}>{v}</span>
-        : <span style={{ color:'#9ca3af',fontSize:11,fontStyle:'italic' }}>Pending connect</span>
-    },
-    { field:'last_ip', header:'IP', width:140,
-      render:(v,row) => <span style={{ fontFamily:'monospace',fontSize:12 }}>{cleanIp(v)}{row.port?`:${row.port}`:''}</span>
+      // zkteco_devices.model is a static field an admin has to set by hand and
+      // is almost never filled in (stuck at its 'Unknown' default) — the
+      // device's own reported model (info_device_name, from its CHECK
+      // response) is the real live value, so prefer that.
+      render: (v,row) => <Badge color="#0369a1" bg="#e0f2fe" border="#bae6fd">{row.info_device_name || v || 'Unknown'}</Badge>
     },
     { field:'user_count', header:L('Users','Users'), width:110, align:'center',
       render:(v,row) => {
@@ -1455,7 +1524,7 @@ const ZKTecoDeviceSettings = () => {
         if (display === 0 && devCount == null) return <span style={{ color:'#d1d5db' }}>—</span>;
         return (
           <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
-            <span style={{ fontWeight:700, color:'#52b02c', fontFamily:'monospace' }}>
+            <span style={{ fontWeight:700, color:'#1a56db', fontFamily:'monospace' }}>
               {display}
               {max ? <span style={{ fontSize:10, color:'#9ca3af', fontWeight:400 }}>/{max}</span> : ''}
             </span>
@@ -1471,6 +1540,18 @@ const ZKTecoDeviceSettings = () => {
     },
     { field:'total_logs', header:L('लग','Logs'), width:75, align:'center',
       render: v => <span style={{ fontWeight:700,color:'#7c3aed' }}>{v??0}</span>
+    },
+    { field:'face_samples', header:'🙂 Face', width:70, align:'center',
+      render: v => v > 0 ? <span style={{ fontWeight:700 }}>{v}</span> : <span style={{ color:'#d1d5db' }}>0</span>
+    },
+    { field:'finger_samples', header:'👆 Finger', width:75, align:'center',
+      render: v => v > 0 ? <span style={{ fontWeight:700 }}>{v}</span> : <span style={{ color:'#d1d5db' }}>0</span>
+    },
+    { field:'card_samples', header:'💳 Card', width:70, align:'center',
+      render: v => v > 0 ? <span style={{ fontWeight:700 }}>{v}</span> : <span style={{ color:'#d1d5db' }}>0</span>
+    },
+    { field:'pin_samples', header:'🔢 PIN', width:65, align:'center',
+      render: v => v > 0 ? <span style={{ fontWeight:700 }}>{v}</span> : <span style={{ color:'#d1d5db' }}>0</span>
     },
     { field:'last_seen', header:L('अन्तिम','Last Seen'), width:100, render: v => <OnlineDot ts={v} /> },
     { field:'area_name', header:L('Area','Area'), width:120,
@@ -1547,7 +1628,7 @@ const ZKTecoDeviceSettings = () => {
     {
       field:'pin', header:'PIN', width:70, sortable:true,
       render: v => (
-        <strong style={{ fontFamily:'monospace', color:'#52b02c', fontSize:14 }}>{v}</strong>
+        <strong style={{ fontFamily:'monospace', color:'#1a56db' }}>{v}</strong>
       ),
     },
     {
@@ -1605,8 +1686,8 @@ const ZKTecoDeviceSettings = () => {
         <button
           onClick={e=>{ e.stopPropagation(); setLinkModal(row); }}
           style={{
-            background:'#f0fdf4', color:'#52b02c',
-            border:'1px solid #bbf7d0', borderRadius:20,
+            background:'#eff6ff', color:'#1a56db',
+            border:'1px solid #bfdbfe', borderRadius:20,
             padding:'4px 14px', fontSize:12, fontWeight:700, cursor:'pointer',
             transition:'all .15s',
           }}
@@ -1668,7 +1749,7 @@ const ZKTecoDeviceSettings = () => {
 
   const fpColumns = [
     { field:'pin', header:'PIN',
-      render: v => <strong style={{ fontFamily:'monospace', color:'#52b02c', fontSize:14 }}>{v}</strong>,
+      render: v => <strong style={{ fontFamily:'monospace', color:'#1a56db' }}>{v}</strong>,
     },
     { field:'name', header:L('नाम','Name'),
       render: v => <span style={{ fontWeight:600 }}>{v && v !== '—' ? v : <span style={{ color:'#d1d5db' }}>—</span>}</span>,
@@ -1725,7 +1806,7 @@ const ZKTecoDeviceSettings = () => {
         return (
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
             <span style={{ fontSize:15 }}>🔑</span>
-            <span style={{ fontFamily:'monospace', fontSize:13, fontWeight:700, color:'#92400e',
+            <span style={{ fontFamily:'monospace', fontSize:12, fontWeight:700, color:'#92400e',
               background:'#fef3c7', borderRadius:6, padding:'2px 8px', border:'1px solid #fcd34d' }}>
               {v}
             </span>
@@ -1736,6 +1817,23 @@ const ZKTecoDeviceSettings = () => {
     {
       field:'last_sync', header:L('सिंक','Synced'),
       render: v => v ? <span style={{ fontSize:11, color:'#6b7280' }}>{new Date(v).toLocaleDateString()}</span> : '—',
+    },
+    {
+      // Copy this one staff member's fingerprint(s) + face onto whichever
+      // device is picked in the "Copy to device" dropdown above the grid.
+      field:'copy', header:L('प्रतिलिपि','Copy'), sortable:false, filterable:false, align:'center',
+      render: (_, row) => {
+        const hasBiometrics = (row.fp_slots_count || row.fp_count || 0) > 0 || parseInt(row.face_count) > 0;
+        const disabled = !copyTarget || !hasBiometrics || copyingPin === row.pin;
+        return (
+          <button className="btn btn-outline btn-sm" disabled={disabled}
+            title={!hasBiometrics ? 'No fingerprint/face to copy' : !copyTarget ? 'Pick a target device above first' : `Copy to ${devices.find(d=>String(d.id)===String(copyTarget))?.name||'target device'}`}
+            style={{ fontSize:11, padding:'3px 9px', opacity: disabled ? .5 : 1 }}
+            onClick={() => copyUserToDevice(row)}>
+            {copyingPin === row.pin ? '⏳' : '📤'} {L('प्रतिलिपि','Copy')}
+          </button>
+        );
+      },
     },
   ];
 
@@ -1751,7 +1849,7 @@ const ZKTecoDeviceSettings = () => {
       )
     },
     { field:'status', header:'Status', width:90,
-      render:v=>{ const m={PENDING:['#92400e','#fef3c7','#fcd34d'],SENT:['#166534','#dcfce7','#86efac'],DONE:['#065f46','#d1fae5','#6ee7b7']};
+      render:v=>{ const m={PENDING:['#92400e','#fef3c7','#fcd34d'],SENT:['#1e40af','#dbeafe','#93c5fd'],DONE:['#065f46','#d1fae5','#6ee7b7']};
         const [c,bg,b]=m[v]||['#374151','#f3f4f6','#e5e7eb'];
         return <Badge color={c} bg={bg} border={b}>{v}</Badge>; }
     },
@@ -1768,13 +1866,13 @@ const ZKTecoDeviceSettings = () => {
         {subTabs.map(t=>(
           <button key={t.key} onClick={()=>setSubTab(t.key)} style={{
             padding:'8px 14px',background:'none',border:'none',
-            borderBottom:subTab===t.key?'2px solid #52b02c':'2px solid transparent',
-            color:subTab===t.key?'#52b02c':'#6b7280',
+            borderBottom:subTab===t.key?'2px solid #1a56db':'2px solid transparent',
+            color:subTab===t.key?'#1a56db':'#6b7280',
             fontWeight:subTab===t.key?700:400,
             cursor:'pointer',fontSize:12.5,display:'flex',alignItems:'center',gap:5,marginBottom:-2,
           }}>
             {t.icon} {t.label}
-            {t.count>0&&<span style={{ background:'#52b02c',color:'white',borderRadius:9,padding:'0px 5px',fontSize:10,fontWeight:700 }}>{t.count}</span>}
+            {t.count>0&&<span style={{ background:'#1a56db',color:'white',borderRadius:9,padding:'0px 5px',fontSize:10,fontWeight:700 }}>{t.count}</span>}
           </button>
         ))}
         {subTab==='devices'&&(
@@ -1849,7 +1947,7 @@ const ZKTecoDeviceSettings = () => {
                       style={{
                         display:'flex',alignItems:'center',gap:7,
                         padding:'5px 14px',height:32,
-                        background: hasSN ? '#52b02c' : '#6b7280',
+                        background: hasSN ? '#1a56db' : '#6b7280',
                         color:'white',border:'none',borderRadius:6,
                         fontSize:13,fontWeight:700,cursor:'pointer',
                       }}>
@@ -1899,9 +1997,11 @@ const ZKTecoDeviceSettings = () => {
                   </div>
                 )}
 
-                <button className="btn btn-primary btn-sm" onClick={openAdd}>
-                  + {L('डिभाइस थप्नुस','Add Device')}
-                </button>
+                {isSuperAdmin && (
+                  <button className="btn btn-primary btn-sm" onClick={openAdd}>
+                    + {L('डिभाइस थप्नुस','Add Device')}
+                  </button>
+                )}
               </div>
             );
           })()}
@@ -1922,7 +2022,7 @@ const ZKTecoDeviceSettings = () => {
             </div>
             <div style={{ display:'flex',gap:8,alignItems:'center' }}>
               {lastUpdated&&<span style={{ fontSize:11,color:'#9ca3af' }}>{L('अपडेट','Updated')}: {lastUpdated.toLocaleTimeString()}</span>}
-              <span style={{ fontWeight:700,color:'#52b02c',fontSize:13 }}>{logTotal} records</span>
+              <span style={{ fontWeight:700,color:'#1a56db',fontSize:13 }}>{logTotal} records</span>
               <button className="btn btn-outline btn-sm" onClick={()=>loadLogs(1)}>🔃</button>
             </div>
           </div>
@@ -1940,7 +2040,7 @@ const ZKTecoDeviceSettings = () => {
                 <select
                   style={{
                     width:'100%', height:38, padding:'0 32px 0 10px',
-                    border:`1.5px solid ${logFilter.sn?'#52b02c':'#d1d5db'}`,
+                    border:`1.5px solid ${logFilter.sn?'#1a56db':'#d1d5db'}`,
                     borderRadius:8, background:'white', fontSize:13,
                     color:logFilter.sn?'#1f2937':'#9ca3af',
                     cursor:'pointer', outline:'none', appearance:'none',
@@ -1960,7 +2060,7 @@ const ZKTecoDeviceSettings = () => {
                     );
                   })}
                 </select>
-                <svg viewBox="0 0 20 20" fill={logFilter.sn?'#52b02c':'#9ca3af'} width="14" height="14"
+                <svg viewBox="0 0 20 20" fill={logFilter.sn?'#1a56db':'#9ca3af'} width="14" height="14"
                   style={{ position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',pointerEvents:'none' }}>
                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
                 </svg>
@@ -2000,7 +2100,7 @@ const ZKTecoDeviceSettings = () => {
               </button>
               <button className="btn btn-outline btn-sm" style={{ height:38,padding:'0 12px',fontSize:12 }}
                 onClick={()=>{
-                  const today = new Date();
+                  const today = getNepalNow();
                   const fmt  = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
                   const from3m = new Date(today); from3m.setMonth(from3m.getMonth() - 3);
                   const cleared = { sn:'', pin:'', from: fmt(from3m), to: fmt(today) };
@@ -2123,38 +2223,6 @@ const ZKTecoDeviceSettings = () => {
             </div>
           )}
 
-          {/* Import result banner */}
-          {importResult && (
-            <div style={{ background:'#d1fae5',border:'1px solid #6ee7b7',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#065f46' }}>
-              <div style={{ display:'flex',justifyContent:'space-between',alignItems:'flex-start' }}>
-                <div>
-                  <strong>✅ Import {L('सम्पन्न','Complete')}:</strong>
-                  &nbsp;{importResult.created} {L('नयाँ Staff सिर्जित','new staff created')},
-                  &nbsp;{importResult.updated} {L('अपडेट','updated')},
-                  &nbsp;{importResult.skipped} {L('छोडियो','skipped')}
-                  &nbsp;— {L('Email','Email')}: <code style={{ fontSize:12 }}>{emailDomain}</code>
-                </div>
-                <button onClick={()=>setImportResult(null)} style={{ background:'none',border:'none',cursor:'pointer',fontSize:16,color:'inherit' }}>✕</button>
-              </div>
-              {importResult.results?.length > 0 && (
-                <div style={{ marginTop:8,maxHeight:120,overflowY:'auto',background:'#f0fdf4',borderRadius:6,padding:'6px 10px' }}>
-                  {importResult.results.map((r,i)=>(
-                    <div key={i} style={{ fontSize:11,display:'flex',gap:10,padding:'2px 0',borderBottom:'1px solid #bbf7d0' }}>
-                      <span style={{ fontFamily:'monospace',fontWeight:700,minWidth:30 }}>{r.pin}</span>
-                      <span style={{ flex:1 }}>{r.name}</span>
-                      <span style={{ fontFamily:'monospace',color:'#6b7280' }}>{r.email}</span>
-                      <span style={{
-                        background:r.action==='created'?'#059669':r.action==='error'?'#ef4444':'#0369a1',
-                        color:'white',borderRadius:4,padding:'0 6px',fontWeight:700,fontSize:10
-                      }}>{r.action}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-
           {/* Empty state with instructions */}
           {!usersLoading && devUsers.length===0 && (
             <div style={{ textAlign:'center',padding:'36px 20px',color:'#6b7280' }}>
@@ -2181,11 +2249,11 @@ const ZKTecoDeviceSettings = () => {
           {selectedUserIds.length > 0 && (
             <div style={{
               display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
-              background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8,
+              background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8,
               marginBottom:10,
             }}>
               {/* Left — selection count */}
-              <span style={{ fontWeight:700, color:'#166534', fontSize:13, flexShrink:0 }}>
+              <span style={{ fontWeight:700, color:'#1e40af', fontSize:13, flexShrink:0 }}>
                 {selectedUserIds.length} {L('छानिएको','selected')}
               </span>
 
@@ -2202,9 +2270,9 @@ const ZKTecoDeviceSettings = () => {
                   }}
                   style={{ display:'flex',alignItems:'center',gap:6,
                     padding:'6px 16px',background:'white',
-                    border:'1.5px solid #52b02c',borderRadius:7,
-                    color:'#52b02c',fontSize:12,fontWeight:700,cursor:'pointer',
-                    boxShadow:'0 1px 3px rgba(82,176,44,.1)' }}>
+                    border:'1.5px solid #1a56db',borderRadius:7,
+                    color:'#1a56db',fontSize:12,fontWeight:700,cursor:'pointer',
+                    boxShadow:'0 1px 3px rgba(26,86,219,.1)' }}>
                   ✏️ {L('Edit Name','Edit Name')}
                 </button>
               )}
@@ -2295,7 +2363,17 @@ const ZKTecoDeviceSettings = () => {
                 {L('"Get All Users" चलाएपछि यहाँ अपडेट हुन्छ','Updated after running "Get All Users" in ⚙️ Control')}
               </span>
             </div>
-            <div style={{ display:'flex',gap:8 }}>
+            <div style={{ display:'flex',gap:8,alignItems:'center',flexWrap:'wrap' }}>
+              {/* Copy to device — pick a target once, then use "📤 Copy" on any row below to
+                  push that one staff member's fingerprint(s) + face photo onto it */}
+              <span style={{ fontSize:12,fontWeight:600,color:'#374151' }}>
+                📤 {L('डिभाइसमा प्रतिलिपि गर्नुहोस्','Copy to device')}:
+              </span>
+              <select className="form-control" style={{ width:'auto',minWidth:160,fontSize:12,padding:'5px 8px' }}
+                value={copyTarget} onChange={e=>setCopyTarget(e.target.value)}>
+                <option value="">{L('लक्षित डिभाइस छान्नुहोस्','Select target device')}</option>
+                {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
               {/* Export — downloads JSON with users+FP templates for any device */}
               {devUsers.length > 0 && (() => {
                 const sns = [...new Set(devUsers.map(u=>u.device_sn).filter(Boolean))];
@@ -2305,7 +2383,7 @@ const ZKTecoDeviceSettings = () => {
                     <button key={sn} className="btn btn-outline btn-sm"
                       style={{ color:'#059669', borderColor:'#6ee7b7' }}
                       title={`Export all users + FP templates for ${devName} as JSON file (for migration to another device)`}
-                      onClick={() => window.open(`/api/zkteco/export-users?sn=${encodeURIComponent(sn)}`, '_blank')}>
+                      onClick={() => window.open(apiUrl(`/zkteco/export-users?sn=${encodeURIComponent(sn)}`), '_blank')}>
                       📥 Export {devName}
                     </button>
                   );
@@ -2350,12 +2428,41 @@ const ZKTecoDeviceSettings = () => {
             <DataGrid
               columns={fpColumns}
               data={devUsers}
+              rowKey="id"
               defaultPageSize={20}
               showSearch
               compact={false}
               loading={usersLoading}
-              showCheckbox={false}
+              showCheckbox={true}
+              onSelectionChange={setSelectedFpIds}
               autoWidth={true}
+              toolbar={
+                <div ref={fpActionsRef} style={{ position:'relative' }}>
+                  <button className="btn btn-outline btn-sm" onClick={()=>setFpActionsOpen(p=>!p)}>
+                    ⚡ {L('कार्यहरू','Actions')} {selectedFpIds.length > 0 && `(${selectedFpIds.length})`} ▾
+                  </button>
+                  {fpActionsOpen && (
+                    <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:50,
+                      background:'white', border:'1px solid #e5e7eb', borderRadius:8,
+                      boxShadow:'0 8px 24px rgba(0,0,0,.12)', minWidth:240, overflow:'hidden' }}>
+                      <button onClick={()=>openTransferModal('copy')}
+                        style={{ display:'block', width:'100%', textAlign:'left', padding:'10px 14px',
+                          border:'none', background:'white', cursor:'pointer', fontSize:13, color:'#1f2937' }}
+                        onMouseEnter={e=>e.currentTarget.style.background='#f3f4f6'}
+                        onMouseLeave={e=>e.currentTarget.style.background='white'}>
+                        📤 {L('नमूना प्रतिलिपि / स्थानान्तरण गर्नुस्','Copy / Transfer Samples')}
+                      </button>
+                      <button onClick={()=>openTransferModal('moveDelete')}
+                        style={{ display:'block', width:'100%', textAlign:'left', padding:'10px 14px',
+                          border:'none', borderTop:'1px solid #f3f4f6', background:'white', cursor:'pointer', fontSize:13, color:'#dc2626' }}
+                        onMouseEnter={e=>e.currentTarget.style.background='#fef2f2'}
+                        onMouseLeave={e=>e.currentTarget.style.background='white'}>
+                        🗑️➡️ {L('नमूना मेटाउनुस् र स्थानान्तरण गर्नुस्','Delete & Transfer Samples')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              }
             />
           )}
         </div>
@@ -2401,7 +2508,7 @@ const ZKTecoDeviceSettings = () => {
             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
               {['PENDING','SENT','DONE','ERROR'].map(s=>{
                 const count = commands.filter(c=>c.status===s).length;
-                const colors = { PENDING:['#92400e','#fef3c7'], SENT:['#166534','#dcfce7'], DONE:['#065f46','#d1fae5'], ERROR:['#991b1b','#fee2e2'] };
+                const colors = { PENDING:['#92400e','#fef3c7'], SENT:['#1e40af','#dbeafe'], DONE:['#065f46','#d1fae5'], ERROR:['#991b1b','#fee2e2'] };
                 const [c,bg] = colors[s]||['#374151','#f3f4f6'];
                 return count > 0 ? (
                   <span key={s} style={{ background:bg, color:c, borderRadius:10, padding:'2px 10px', fontSize:11, fontWeight:700 }}>
@@ -2417,9 +2524,9 @@ const ZKTecoDeviceSettings = () => {
                 <button className={`btn btn-outline btn-sm ${cmdActiveFilterCount?'active':''}`}
                   onClick={()=>setCmdFilterOpen(o=>!o)}
                   style={{ display:'flex', alignItems:'center', gap:5,
-                    ...(cmdActiveFilterCount ? { background:'#f0fdf4', color:'#52b02c', borderColor:'#bbf7d0' } : {}) }}>
+                    ...(cmdActiveFilterCount ? { background:'#eff6ff', color:'#1a56db', borderColor:'#bfdbfe' } : {}) }}>
                   🔽 {L('फिल्टर','Filter')}{cmdActiveFilterCount>0 && (
-                    <span style={{ background:'#52b02c', color:'white', borderRadius:10, padding:'0 6px', fontSize:10, fontWeight:700 }}>
+                    <span style={{ background:'#1a56db', color:'white', borderRadius:10, padding:'0 6px', fontSize:10, fontWeight:700 }}>
                       {cmdActiveFilterCount}
                     </span>
                   )}
@@ -2492,7 +2599,7 @@ const ZKTecoDeviceSettings = () => {
                 {step:'3',title:'Get All Data',desc:'Click ⚙️ Control → Get All Logs + Get All Users to pull device data into eHajiri'},
               ].map(s=>(
                 <div key={s.step} style={{ display:'flex',gap:14,marginBottom:14 }}>
-                  <div style={{ width:28,height:28,borderRadius:'50%',background:'#52b02c',color:'white',fontWeight:700,fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>{s.step}</div>
+                  <div style={{ width:28,height:28,borderRadius:'50%',background:'#1a56db',color:'white',fontWeight:700,fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>{s.step}</div>
                   <div>
                     <div style={{ fontWeight:600,color:'#1f2937',marginBottom:4 }}>{s.title}</div>
                     <div style={{ fontSize:13,color:'#6b7280' }}>{s.desc}</div>
@@ -2513,122 +2620,11 @@ const ZKTecoDeviceSettings = () => {
         />
       )}
 
-      {/* ══ (old modal removed — shared ImportDeviceUsersModal used instead) ══ */}
-      {false && (
-        <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth:520 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#d1fae5,#f0fdf4)' }}>
-              <h2>📥 {L('Device Users → Staff मा Import','Import Device Users to Staff')}</h2>
-              <button className="modal-close" onClick={()=>setImportModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-
-              {/* What will happen */}
-              <div style={{ background:'#f9fafb',borderRadius:10,padding:'12px 16px',marginBottom:16,border:'1px solid #e5e7eb' }}>
-                <div style={{ fontSize:12,fontWeight:700,color:'#374151',marginBottom:10,textTransform:'uppercase',letterSpacing:'.4px' }}>
-                  {L('यसले के गर्छ','What this does')}
-                </div>
-                <div style={{ display:'flex',flexDirection:'column',gap:8,fontSize:13 }}>
-                  {[
-                    { icon:'🔢', field:L('Attendance Device ID','Attendance Device ID'), value:L('Device PIN नम्बर','Device User PIN') },
-                    { icon:'👤', field:L('Staff Name','Staff Name'),                     value:L('Device User को नाम','Device User Name') },
-                    { icon:'📧', field:L('Email','Email Address'),                       value:`{PIN}@${emailDomain}` },
-                  ].map(row=>(
-                    <div key={row.field} style={{ display:'grid',gridTemplateColumns:'28px 1fr 1fr',gap:8,alignItems:'center' }}>
-                      <span>{row.icon}</span>
-                      <span style={{ fontWeight:600,color:'#1f2937' }}>{row.field}</span>
-                      <span style={{ color:'#059669',fontWeight:600 }}>← {row.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Email domain */}
-              <div className="form-group" style={{ marginBottom:14 }}>
-                <label className="form-label" style={{ fontWeight:700 }}>
-                  📧 {L('Email Domain','Email Domain')}
-                </label>
-                <div style={{ display:'flex',alignItems:'center',gap:0 }}>
-                  <span style={{ background:'#f3f4f6',border:'1px solid #d1d5db',borderRight:'none',borderRadius:'6px 0 0 6px',padding:'8px 10px',fontSize:13,color:'#6b7280',whiteSpace:'nowrap' }}>
-                    {L('PIN','PIN')} @
-                  </span>
-                  <input
-                    className="form-control"
-                    style={{ borderRadius:'0 6px 6px 0',borderLeft:'none' }}
-                    value={emailDomain}
-                    placeholder="planetinfosys.com.np"
-                    onChange={e=>setEmailDomain(e.target.value.trim())}
-                  />
-                </div>
-                <div style={{ fontSize:12,color:'#6b7280',marginTop:4 }}>
-                  {L('उदाहरण','Example')}: PIN=5 → <code>5@{emailDomain||'planetinfosys.com.np'}</code>
-                </div>
-              </div>
-
-              {/* Preview */}
-              {devUsers.length > 0 && (
-                <div style={{ background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 14px',marginBottom:4 }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:'#166534',marginBottom:6 }}>
-                    📋 {L('Preview','Preview')} ({devUsers.length} {L('Device Users','Device Users')})
-                  </div>
-                  <div style={{ maxHeight:130,overflowY:'auto' }}>
-                    <table style={{ width:'100%',fontSize:12,borderCollapse:'collapse' }}>
-                      <thead>
-                        <tr style={{ background:'#dcfce7' }}>
-                          <th style={{ padding:'3px 8px',textAlign:'left' }}>PIN</th>
-                          <th style={{ padding:'3px 8px',textAlign:'left' }}>Name</th>
-                          <th style={{ padding:'3px 8px',textAlign:'left' }}>Email</th>
-                          <th style={{ padding:'3px 8px',textAlign:'left' }}>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {devUsers.slice(0,10).map(u=>(
-                          <tr key={u.id} style={{ borderBottom:'1px solid #bbf7d0' }}>
-                            <td style={{ padding:'3px 8px',fontFamily:'monospace',fontWeight:700,color:'#52b02c' }}>{u.pin}</td>
-                            <td style={{ padding:'3px 8px',fontWeight:600 }}>{u.name||`Staff ${u.pin}`}</td>
-                            <td style={{ padding:'3px 8px',color:'#059669',fontFamily:'monospace',fontSize:11 }}>{u.pin}@{emailDomain||'planetinfosys.com.np'}</td>
-                            <td style={{ padding:'3px 8px' }}>
-                              {u.employee_id
-                                ? <span style={{ background:'#dcfce7',color:'#166534',borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:700 }}>UPDATE</span>
-                                : <span style={{ background:'#d1fae5',color:'#065f46',borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:700 }}>CREATE</span>
-                              }
-                            </td>
-                          </tr>
-                        ))}
-                        {devUsers.length > 10 && (
-                          <tr><td colSpan={4} style={{ padding:'4px 8px',color:'#6b7280',fontSize:11,textAlign:'center' }}>
-                            + {devUsers.length - 10} {L('अरू','more')}...
-                          </td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-outline" onClick={()=>setImportModal(false)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                disabled={importing || !emailDomain}
-                style={{ background:'#059669',borderColor:'#059669' }}
-                onClick={()=>{
-                  setImportModal(false);
-                  handleImportToStaff();
-                }}
-              >
-                {importing ? '⏳ ...' : `📥 ${L('Import गर्नुस','Run Import')}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ══ LINK STAFF MODAL ══ */}
       {linkModal && (
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:520 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>🔗 {L('Staff जोड्नुस','Link Device User to Staff')}</h2>
               <button className="modal-close" onClick={()=>setLinkModal(null)}>✕</button>
             </div>
@@ -2679,7 +2675,7 @@ const ZKTecoDeviceSettings = () => {
                 </div>
               </div>
 
-              <div style={{ background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'8px 14px',fontSize:12,color:'#166534' }}>
+              <div style={{ background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'8px 14px',fontSize:12,color:'#1e40af' }}>
                 ✅ {L(
                   'छानेपछि: यो Device PIN Staff को Attendance Device ID मा सेट हुन्छ र सबै हाजिरी लग पनि जोडिन्छ।',
                   'After selecting: this PIN is saved as the staff\'s Attendance Device ID, and all attendance logs are linked too.'
@@ -2710,7 +2706,7 @@ const ZKTecoDeviceSettings = () => {
       {modal&&(
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:520 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>{editId?`✏️ ${L('डिभाइस सेटिङ','Device Settings')}`:`+ ${L('नयाँ डिभाइस','Add Device')}`}</h2>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
             </div>
@@ -2787,7 +2783,7 @@ const ZKTecoDeviceSettings = () => {
                   <option value={300}>UTC+5:00</option>
                 </select>
                 {editId && (
-                  <div style={{ fontSize:11,color:'#52b02c',marginTop:4 }}>
+                  <div style={{ fontSize:11,color:'#1a56db',marginTop:4 }}>
                     💡 {L('Timezone बदल्दा डिभाइसलाई RELOAD OPTIONS command पठाइन्छ','Changing timezone queues RELOAD OPTIONS — device updates on next poll')}
                   </div>
                 )}
@@ -2869,11 +2865,11 @@ const ZKTecoDeviceSettings = () => {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">{L('कमान्ड','Command Payload')}</label>
-                <input className="form-control" placeholder="C:1001:CHECK"
+                <label className="form-label">{L('कमान्ड','Command')}</label>
+                <input className="form-control" placeholder="CHECK"
                   value={cmdForm.commandPayload} onChange={e=>setCmdForm(p=>({...p,commandPayload:e.target.value}))} />
               </div>
-              <div style={{ fontSize:11,color:'#9ca3af' }}>Examples: <code>C:1001:CHECK</code>, <code>C:1002:REBOOT</code></div>
+              <div style={{ fontSize:11,color:'#9ca3af' }}>Examples: <code>CHECK</code>, <code>REBOOT</code>, <code>RELOAD OPTIONS</code> — no need to prefix an ID, that's generated automatically.</div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setCmdModal(false)}>Cancel</button>
@@ -2900,6 +2896,118 @@ const ZKTecoDeviceSettings = () => {
           </div>
         </div>
       )}
+
+      {/* ══ TRANSFER SAMPLES (bulk copy, or move-with-delete) ══ */}
+      {transferModal && (() => {
+        const { mode, sourceSn, targetId, checkedPins } = transferModal;
+        const isDelete = mode === 'moveDelete';
+        const deviceLabel = (d) => `${d.serial_number || '—'}${d.location ? ' | ' + d.location : ''}`;
+        const sourceStaff = devUsers.filter(u =>
+          u.device_sn === sourceSn && ((u.fp_slots_count || u.fp_count || 0) > 0 || parseInt(u.face_count) > 0));
+        const targetDevices = devices.filter(d => d.serial_number !== sourceSn);
+
+        const staffColumns = [
+          { field:'pin', header:'PIN', width:70, render:v=><span style={{ fontFamily:'monospace', color:'#1a56db', fontWeight:700 }}>{v}</span> },
+          { field:'name', header:'Name', render:(v,row)=>v || row.employee_name || '—' },
+        ];
+        const targetColumns = [
+          {
+            field:'_selected', header:'', width:36, sortable:false, filterable:false, align:'center',
+            render:(_,row) => String(row.id)===String(targetId)
+              ? <span style={{ color:'#1a56db', fontSize:16 }}>●</span>
+              : <span style={{ color:'#d1d5db', fontSize:16 }}>○</span>,
+          },
+          { field:'area_name', header:'Area', width:130, render:v=>v || <span style={{ color:'#d1d5db' }}>—</span> },
+          { field:'serial_number', header:'Serial No.', render:(v,row)=>(
+            <span>
+              <span style={{ fontFamily:'monospace', fontWeight:700 }}>{v || '—'}</span>
+              {row.location && <span style={{ color:'#6b7280' }}> | {row.location}</span>}
+            </span>
+          ) },
+        ];
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal" style={{ width:'min(940px,97%)' }} onClick={e=>e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>{isDelete ? '🗑️➡️ Delete & Transfer Samples' : '📤 Copy / Transfer Samples'}</h2>
+                <button className="modal-close" onClick={()=>setTransferModal(null)}>✕</button>
+              </div>
+              <div className="modal-body">
+                {isDelete && (
+                  <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:8, padding:'8px 12px', marginBottom:14, fontSize:12, color:'#991b1b' }}>
+                    ⚠️ Each staff member checked below is copied to the target device, then <strong>deleted from the source device</strong> only once their own copy succeeds.
+                  </div>
+                )}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                  {/* Transfer From */}
+                  <div>
+                    <label className="form-label">Transfer From</label>
+                    <select className="form-control" value={sourceSn}
+                      onChange={e=>setTransferModal(p=>({ ...p, sourceSn:e.target.value, checkedPins:[] }))}>
+                      <option value="">Select source device</option>
+                      {devices.filter(d=>String(d.id)!==String(targetId)).map(d=>(
+                        <option key={d.id} value={d.serial_number}>{deviceLabel(d)}</option>
+                      ))}
+                    </select>
+                    {sourceSn && (
+                      <div style={{ marginTop:10 }}>
+                        {sourceStaff.length === 0 ? (
+                          <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:12, border:'1px solid #e5e7eb', borderRadius:8 }}>
+                            No staff with fingerprint/face samples on this device
+                          </div>
+                        ) : (
+                          <DataGrid
+                            columns={staffColumns}
+                            data={sourceStaff}
+                            rowKey="pin"
+                            defaultPageSize={8}
+                            compact={true}
+                            showCheckbox={true}
+                            showFilterButton={false}
+                            initialSelected={checkedPins}
+                            onSelectionChange={ids => setTransferModal(p => ({ ...p, checkedPins: ids }))}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {/* Transfer To */}
+                  <div>
+                    <label className="form-label">Transfer To</label>
+                    {targetDevices.length === 0 ? (
+                      <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:12, border:'1px solid #e5e7eb', borderRadius:8 }}>
+                        No other devices available
+                      </div>
+                    ) : (
+                      <DataGrid
+                        columns={targetColumns}
+                        data={targetDevices}
+                        rowKey="id"
+                        defaultPageSize={8}
+                        compact={true}
+                        showCheckbox={false}
+                        showFilterButton={false}
+                        onRowClick={row => setTransferModal(p => ({ ...p, targetId: String(row.id) }))}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-outline" onClick={()=>setTransferModal(null)}>Cancel</button>
+                <button className={isDelete ? 'btn btn-danger' : 'btn btn-primary'}
+                  disabled={!sourceSn || !targetId || !checkedPins.length || transferBusy}
+                  onClick={submitTransfer}>
+                  {transferBusy ? '⏳ Working…' : isDelete
+                    ? `🗑️➡️ Delete & Transfer ${checkedPins.length || ''}`.trim()
+                    : `📤 Copy ${checkedPins.length || ''} Sample(s)`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Toast */}
       {toast&&(

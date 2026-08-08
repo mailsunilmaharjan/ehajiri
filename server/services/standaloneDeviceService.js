@@ -1,4 +1,9 @@
 /**
+ * ⚠ StandAlone SDK code — DISABLED BY DEFAULT, see routes/standaloneDevices.js's
+ * top-of-file note. This client only ever gets called from that (module-flag-
+ * gated) router, so in practice it's unreachable until an admin/superAdmin
+ * turns the StandAlone Device module on from Role Management.
+ *
  * Thin HTTP client for the standalone-bridge process — the x86 .NET helper
  * that wraps ZKTeco's legacy Standalone SDK (zkemkeeper.dll COM control).
  * Electron starts the bridge and passes its port via STANDALONE_BRIDGE_PORT;

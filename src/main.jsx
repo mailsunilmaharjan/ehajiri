@@ -8,6 +8,7 @@ import { DataProvider }     from './context/DataContext.jsx'
 import { SettingsProvider } from './context/SettingsContext.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { installGlobalErrorReporting } from './utils/bugReporter.js'
+import { getTenantPrefix } from './utils/tenantPath.js'
 import './index.css'
 
 // Bug Finder (Settings → Bug Finder): catches crashes outside React's render
@@ -15,10 +16,19 @@ import './index.css'
 // by <ErrorBoundary> below instead.
 installGlobalErrorReporting()
 
+// Registers the (deliberately no-op / non-caching) service worker so the
+// browser recognizes the app as installable — see public/service-worker.js
+// for why it never intercepts/caches anything.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch(() => {})
+  })
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <BrowserRouter>
+      <BrowserRouter basename={getTenantPrefix() || undefined}>
         <LanguageProvider>
           <AuthProvider>
             {/* Settings/Data must sit inside AuthProvider: both refetch from

@@ -42,7 +42,6 @@ function maskEmail(email) {
 }
 
 const EMPTY = { noteName: '', noteType: 'normal', noteDetails: '', usernameTitle: '', username: '', password: '', securityType: 'normal', totpSecret: '', remarks: '' };
-const Bubbles = () => <>{Array.from({ length: 10 }).map((_, i) => <span key={i} className="modal-header-bubble" />)}</>;
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  Gmail Setup Popup — separate modal on top of the note form
@@ -108,7 +107,6 @@ const GmailSetupModal = ({ onClose, onSaved }) => {
     <div className="modal-overlay" style={{ zIndex: 1100 }} {...overlayProps}>
       <div className="modal modal-sm" {...modalProps}>
         <div className="modal-header">
-          <Bubbles />
           <h2>📧 Gmail for Google Authenticator</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
@@ -190,7 +188,7 @@ const GmailSetupModal = ({ onClose, onSaved }) => {
                   {config?.isSet && !unlocked ? 'Close' : 'Cancel'}
                 </button>
                 {(!config?.isSet || unlocked) && (
-                  <button onClick={saveGmail} disabled={saving} style={{ background: '#52b02c', color: '#fff', border: 'none', borderRadius: 7, padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}>
+                  <button onClick={saveGmail} disabled={saving} style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 7, padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}>
                     {saving ? 'Saving…' : (config?.isSet ? 'Update Gmail' : 'Set Gmail')}
                   </button>
                 )}
@@ -409,8 +407,8 @@ const StaffNotes = () => {
       render: v => (
         <span style={{
           padding: '2px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700,
-          background: v === 'credential' ? '#dcfce7' : '#f0fdf4',
-          color:      v === 'credential' ? '#166534' : '#065f46',
+          background: v === 'credential' ? '#dbeafe' : '#f0fdf4',
+          color:      v === 'credential' ? '#1e40af' : '#065f46',
         }}>
           {v === 'credential' ? '🔑 Username Password' : '📄 Normal'}
         </span>
@@ -422,7 +420,7 @@ const StaffNotes = () => {
       render: (_, row) => (
         <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={e => { e.stopPropagation(); openEdit(row); }}
-            style={{ background: '#dcfce7', color: '#166534', border: 'none', borderRadius: 5, padding: '3px 8px', fontSize: 12, cursor: 'pointer' }}>✏️</button>
+            style={{ background: '#dbeafe', color: '#1e40af', border: 'none', borderRadius: 5, padding: '3px 8px', fontSize: 12, cursor: 'pointer' }}>✏️</button>
           <button onClick={e => { e.stopPropagation(); del(row.id); }}
             style={{ background: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: 5, padding: '3px 8px', fontSize: 12, cursor: 'pointer' }}>🗑️</button>
         </div>
@@ -448,7 +446,7 @@ const StaffNotes = () => {
           selectedIds.length === 1 && (
             <button
               onClick={() => openEdit(notes.find(n => n.id === selectedIds[0]))}
-              style={{ background: '#dcfce7', color: '#166534', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              style={{ background: '#dbeafe', color: '#1e40af', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
             >
               ✏️ Edit
             </button>
@@ -463,7 +461,7 @@ const StaffNotes = () => {
           { label: '🔐 Encrypt Note',   icon: '🔐', onClick: (row) => encryptNote(row) },
         ]}
         toolbar={
-          <button onClick={openAdd} style={{ background: '#52b02c', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          <button onClick={openAdd} style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             ＋ Add Note
           </button>
         }
@@ -483,7 +481,6 @@ const StaffNotes = () => {
           <div className="modal modal-md" {...modalProps}>
 
             <div className="modal-header">
-              <Bubbles />
               <h2>{editRow ? '✏️ Edit Note' : '＋ Add Note'}</h2>
               <button className="modal-close" onClick={close}>✕</button>
             </div>
@@ -644,7 +641,7 @@ const StaffNotes = () => {
                             </div>
                             <div style={{ textAlign: 'center' }}>
                               <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>Expires</div>
-                              <div style={{ width: 38, height: 38, borderRadius: '50%', background: totpSecs <= 5 ? '#fee2e2' : '#dcfce7', color: totpSecs <= 5 ? '#dc2626' : '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
+                              <div style={{ width: 38, height: 38, borderRadius: '50%', background: totpSecs <= 5 ? '#fee2e2' : '#dbeafe', color: totpSecs <= 5 ? '#dc2626' : '#1e40af', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>
                                 {totpSecs}s
                               </div>
                             </div>
@@ -705,7 +702,7 @@ const StaffNotes = () => {
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 4 }}>
                 <button onClick={close} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 7, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-                <button onClick={save} disabled={saving} style={{ background: '#52b02c', color: '#fff', border: 'none', borderRadius: 7, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}>
+                <button onClick={save} disabled={saving} style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 7, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}>
                   {saving ? 'Saving…' : (editRow ? 'Update' : 'Save')}
                 </button>
               </div>

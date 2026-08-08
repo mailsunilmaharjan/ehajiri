@@ -44,7 +44,7 @@ const KeyboardMultiSelect = ({ label, options = [], values = [], onChange }) => 
     <div>
       <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:4 }}>
         {label}{values.length > 0 && (
-          <span style={{ marginLeft:6, background:'#52b02c', color:'white', borderRadius:10,
+          <span style={{ marginLeft:6, background:'#1a56db', color:'white', borderRadius:10,
             padding:'0 6px', fontSize:10, fontWeight:700 }}>{values.length}</span>
         )}
       </div>
@@ -62,8 +62,8 @@ const KeyboardMultiSelect = ({ label, options = [], values = [], onChange }) => 
             onClick={() => toggle(opt)}
             style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 8px', fontSize:12.5,
               cursor:'pointer', userSelect:'none',
-              background: highlight === i ? '#f0fdf4' : values.includes(opt) ? '#f8fafc' : 'white' }}>
-            <input type="checkbox" checked={values.includes(opt)} readOnly style={{ accentColor:'#52b02c' }} />
+              background: highlight === i ? '#eff6ff' : values.includes(opt) ? '#f8fafc' : 'white' }}>
+            <input type="checkbox" checked={values.includes(opt)} readOnly style={{ accentColor:'#1a56db' }} />
             {opt}
           </label>
         ))}

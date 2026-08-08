@@ -12,23 +12,21 @@ import DataGrid        from '../DataGrid/DataGrid.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import ViewMonthlyBtn    from './ViewMonthlyBtn.jsx';
-import {
-  adToBS, bsToAD, getBSDays,
-  BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits,
-} from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
+import { staffRankCompare } from '../../utils/branchUtils.js';
 
 /* ── Constants ──────────────────────────────────────────────── */
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
 
 const STATUS_STYLE = {
-  Present          : { bg:'#d1fae5', color:'#065f46', border:'#6ee7b7' },
-  Absent           : { bg:'#fee2e2', color:'#991b1b', border:'#fca5a5' },
+  Present          : { bg:'#f0fdf4', color:'#065f46', border:'#bbf7d0' },
+  Absent           : { bg:'#fff5f5', color:'#991b1b', border:'#fecaca' },
   Weekend          : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
   Leave            : { bg:'#ede9fe', color:'#5b21b6', border:'#c4b5fd' },
   'Public Holiday' : { bg:'#fef3c7', color:'#92400e', border:'#fcd34d' },
-  'Office Visit'   : { bg:'#dcfce7', color:'#166534', border:'#86efac' },
+  'Office Visit'   : { bg:'#dbeafe', color:'#1e40af', border:'#93c5fd' },
 };
 const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
 
@@ -40,13 +38,6 @@ const fmtTime = (iso) => {
 
 const pad = (n) => String(n).padStart(2, '0');
 const isoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 /* ── Searchable Staff Dropdown ──────────────────────────────── */
 const StaffSelect = ({ employees, value, onChange }) => {
@@ -77,16 +68,16 @@ const StaffSelect = ({ employees, value, onChange }) => {
       {/* Trigger */}
       <div onClick={() => setOpen(p => !p)}
         style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-          height:36, padding:'0 10px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
+          height:36, padding:'0 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer',
-          boxShadow:open?'0 0 0 2px rgba(82,176,44,.1)':'none', transition:'all .15s' }}>
+          boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none', transition:'all .15s' }}>
         <span style={{ fontSize:13, color:selected?'#1f2937':'#9ca3af',
           fontWeight:selected?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
           {selected
             ? `${selected.fullName}${selected.deviceId ? ` (${selected.deviceId})` : ''}`
             : '— Select Staff Member —'}
         </span>
-        <svg viewBox="0 0 20 20" fill={open?'#52b02c':'#9ca3af'} width="13" height="13"
+        <svg viewBox="0 0 20 20" fill={open?'#1a56db':'#9ca3af'} width="13" height="13"
           style={{ flexShrink:0, marginLeft:6, transform:open?'rotate(180deg)':'none', transition:'transform .2s' }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
         </svg>
@@ -124,18 +115,18 @@ const StaffSelect = ({ employees, value, onChange }) => {
                 <div key={e.id}
                   onMouseDown={ev=>{ ev.preventDefault(); onChange(String(e.id)); setOpen(false); setSearch(''); }}
                   style={{ display:'flex', alignItems:'center', gap:10, padding:'5px 14px',
-                    cursor:'pointer', background:active?'#f0fdf4':'white',
+                    cursor:'pointer', background:active?'#eff6ff':'white',
                     borderBottom:'1px solid #d1d5db', transition:'background .1s' }}
                   onMouseEnter={ev=>{ if(!active) ev.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#f0fdf4':'white'; }}>
+                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':'white'; }}>
                   {/* Rank badge */}
-                  <div style={{ width:22, height:22, borderRadius:'50%', background:active?'#52b02c':'#f3f4f6',
+                  <div style={{ width:22, height:22, borderRadius:'50%', background:active?'#1a56db':'#f3f4f6',
                     color:active?'white':'#9ca3af', fontSize:10, fontWeight:700, flexShrink:0,
                     display:'flex', alignItems:'center', justifyContent:'center' }}>
                     {idx+1}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:active?700:600, color:active?'#166534':'#1f2937',
+                    <div style={{ fontSize:13, fontWeight:active?700:600, color:active?'#1e40af':'#1f2937',
                       overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                       {e.fullName}
                     </div>
@@ -145,7 +136,7 @@ const StaffSelect = ({ employees, value, onChange }) => {
                     </div>
                   </div>
                   {active && (
-                    <svg viewBox="0 0 20 20" fill="#52b02c" width="14" height="14" style={{ flexShrink:0 }}>
+                    <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14" style={{ flexShrink:0 }}>
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
                     </svg>
                   )}
@@ -190,8 +181,8 @@ const StaffLedger = () => {
   const isHalfMonthlyCtx = location.pathname.includes('/half-monthly/');
 
   const useNP      = settings.defaultCalendar === 'np';
-  const now        = new Date();
-  const todayBS    = adToBS(now);
+  const now        = getNepalNow();
+  const todayBS    = adToBS(getNepalTodayISO());
   const currentFY  = getCurrentFiscalYear(settings.fiscalYears || []);
 
   // Always default to current month — ignore any year/month URL params
@@ -216,10 +207,7 @@ const StaffLedger = () => {
   /* ── Sorted employees filtered by working status ── */
   const sortedEmps = [...employees]
     .filter(e => staffStatus === 'notworking' ? e.active === false : e.active !== false)
-    .sort((a,b) => {
-      const ra=a.rankingOrder??99999, rb=b.rankingOrder??99999;
-      return ra!==rb ? ra-rb : (a.fullName||'').localeCompare(b.fullName||'');
-    });
+    .sort((a,b) => staffRankCompare(a, b, settings));
 
   /* ── Auto-select default employee once the list is available ── */
   useEffect(() => {
@@ -342,7 +330,7 @@ const StaffLedger = () => {
     {
       field:'dateStr', header:L('मिति','Date'),
       render:(v,row)=>(
-        <span style={{ fontSize:13,fontWeight:600,color:row.isWeekend?'#9ca3af':'#1f2937',whiteSpace:'nowrap' }}>
+        <span style={{ fontSize:13,color:row.isWeekend?'#9ca3af':'#1f2937',whiteSpace:'nowrap' }}>
           {fd(v)}
         </span>
       ),
@@ -356,7 +344,7 @@ const StaffLedger = () => {
     {
       field:'_shift', header:L('सिफ्ट','Shift'), sortable:false,
       render:(_,row)=>(
-        <span style={{ fontSize:13,color:'#7c3aed' }}>
+        <span style={{ fontSize:13,color:'#1f2937' }}>
           {!row.isWeekend ? (row.shiftName||'—') : '—'}
         </span>
       ),
@@ -366,10 +354,11 @@ const StaffLedger = () => {
       render:(v,row)=>{
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         const warn=row.punches===1;
+        const onTime=row.lateFormatted==='On Time';
         return(
-          <span style={{ color:warn?'#d97706':'#52b02c', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}
+          <span style={{ color: onTime ? '#1f2937' : (warn?'#f59e0b':'#3b82f6'), fontSize:13, fontWeight: onTime?400:700, whiteSpace:'nowrap' }}
             title={warn?'Single punch only':''}>
-            {fmtTime(v)}{warn&&' ⚠'}
+            {fmtTime(v)}
           </span>
         );
       },
@@ -379,10 +368,11 @@ const StaffLedger = () => {
       render:(v,row)=>{
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         const warn=row.punches===1;
+        const onTime=row.earlyFormatted==='On Time';
         return(
-          <span style={{ color:warn?'#d97706':'#374151', fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}
+          <span style={{ color: onTime ? '#1f2937' : (warn?'#f59e0b':'#6b7280'), fontSize:13, fontWeight: onTime?400:700, whiteSpace:'nowrap' }}
             title={warn?'Single punch only':''}>
-            {fmtTime(v)}{warn&&' ⚠'}
+            {fmtTime(v)}
           </span>
         );
       },
@@ -397,24 +387,32 @@ const StaffLedger = () => {
       field:'lateFormatted', header:L('IN स्थिति','IN Status'),
       render:v=>{
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
+        if (v === 'On Time') return <span style={{ color:'#1f2937', fontSize:13 }}>{v}</span>;
         const isEarly = v.startsWith('Early In');
-        return <span style={{ color: isEarly ? '#059669' : '#dc2626', fontWeight:700, fontSize:13 }}>{v}</span>;
+        return <span style={{ color: isEarly ? '#10b981' : '#ef4444', fontWeight:700, fontSize:13 }}>{v}</span>;
       },
     },
     {
       field:'earlyFormatted', header:L('OUT स्थिति','OUT Status'),
       render:v=>{
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
+        if (v === 'On Time') return <span style={{ color:'#1f2937', fontSize:13 }}>{v}</span>;
         const isLateOut = v.startsWith('Late Out');
-        return <span style={{ color: isLateOut ? '#16a34a' : '#d97706', fontWeight:700, fontSize:13 }}>{v}</span>;
+        return <span style={{ color: isLateOut ? '#3b82f6' : '#f59e0b', fontWeight:700, fontSize:13 }}>{v}</span>;
       },
+    },
+    {
+      field:'otApprovedFormatted', header:L('ओटी','OT'), align:'center',
+      render:v=>(emp?.eligibleForOt && v)
+        ?<span style={{ color:'#059669', fontSize:13, fontWeight:700 }}>{v}</span>
+        :<span style={{ color:'#d1d5db', fontSize:13 }}>—</span>,
     },
     {
       field:'status', header:L('स्थिति','Status'),
       render:(v,row)=>{
         if (v === 'On Leave') {
           /* Badge only — no leave name below */
-          return <Pill bg="#f0fdf4" color="#166534" border="#bbf7d0">{L('बिदामा','On Leave')}</Pill>;
+          return <Pill bg="#eff6ff" color="#1e40af" border="#bfdbfe">{L('बिदामा','On Leave')}</Pill>;
         }
         const s=statusStyle(v);
         return <Pill bg={s.bg} color={s.color} border={s.border}>{v}</Pill>;
@@ -426,7 +424,7 @@ const StaffLedger = () => {
         if (row.leaveInfo) {
           const parts = [];
           if (row.leaveInfo.typeName) parts.push(
-            <span key="type" style={{ fontWeight:700, color:'#166534' }}>{row.leaveInfo.typeName}</span>
+            <span key="type" style={{ fontWeight:700, color:'#1e40af' }}>{row.leaveInfo.typeName}</span>
           );
           if (row.leaveInfo.reason) parts.push(
             <span key="reason" style={{ color:'#374151' }}>{row.leaveInfo.reason}</span>
@@ -481,7 +479,7 @@ const StaffLedger = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -536,13 +534,13 @@ const StaffLedger = () => {
                   <span>·</span>
                   <span>Leave: <strong style="color:#5b21b6">${s.leaveCount||0}</strong></span>
                   <span>·</span>
-                  <span>Office Visit: <strong style="color:#166534">${visitCount}</strong></span>
+                  <span>Office Visit: <strong style="color:#1e40af">${visitCount}</strong></span>
                   <span>·</span>
                   <span>Late In: <strong style="color:#dc2626">${s.lateCount||0}</strong></span>
                   <span>·</span>
                   <span>Early Out: <strong style="color:#d97706">${s.earlyCount||0}</strong></span>
                   <span>·</span>
-                  <span>Att. Rate: <strong style="color:#52b02c">${s.attendanceRate||0}%</strong></span>
+                  <span>Att. Rate: <strong style="color:#1a56db">${s.attendanceRate||0}%</strong></span>
                   <span>·</span>
                   <span>Present in Holiday: <strong style="color:#92400e">${presentInHoliday}</strong></span>
                   <span>·</span>
@@ -554,11 +552,12 @@ const StaffLedger = () => {
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;background:#efefef;color:#6b7280;font-weight:600">${i+1}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;font-weight:600">${fd(r.dateStr)||r.dateStr||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.dayFull?r.dayFull.slice(0,3):''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace;color:#52b02c;font-weight:700">${r.timeIn?fmtTime(r.timeIn):''}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace;color:#1a56db;font-weight:700">${r.timeIn?fmtTime(r.timeIn):''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.timeOut?fmtTime(r.timeOut):''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;color:#0369a1;font-weight:700">${r.totalFormatted||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;color:${r.lateFormatted?.startsWith('Late')?'#dc2626':'#059669'}">${r.lateFormatted||''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.earlyFormatted?.startsWith('Early Out')?'#d97706':'#16a34a'}">${r.earlyFormatted||''}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.earlyFormatted?.startsWith('Early Out')?'#d97706':'#2563eb'}">${r.earlyFormatted||''}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;color:#059669;font-weight:700">${(emp?.eligibleForOt && r.otApprovedFormatted)||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.status||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;font-size:9px">${r.remarks||''}</td>
               </tr>`).join('');
@@ -574,6 +573,7 @@ const StaffLedger = () => {
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">Total Hrs</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">IN Status</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">OUT Status</th>
+                    <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">OT</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">Status</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef;text-align:left">Remarks</th>
                   </tr></thead>
@@ -583,7 +583,7 @@ const StaffLedger = () => {
             }}
             title="Print"
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15">
               <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9h8v3H6v-3zm8-4a1 1 0 110 2 1 1 0 010-2z" clipRule="evenodd"/>
@@ -602,14 +602,16 @@ const StaffLedger = () => {
               const presentInWeekend2 = days.filter(r => r.isWeekend      && r.timeIn).length;
               // Staff info + summary as extra CSV rows after company header
               const staffInfoRow = `"Staff Name: ${emp.fullName||''}","Post: ${emp.postShort||emp.position||''}","Dept: ${emp.deptShort||emp.department||''}","Grade: ${emp.grade||''}","Mode: ${emp.mode||''}","Branch: ${emp.branchShort||emp.branch||''}"`;
-              const summaryRow = `"Present: ${s.presentCount||0}  Absent: ${s.absentCount||0}  Leave: ${s.leaveCount||0}  Office Visit: ${visitCount2}  Late In: ${s.lateCount||0}  Early Out: ${s.earlyCount||0}  Att.Rate: ${s.attendanceRate||0}%  Present in Holiday: ${presentInHoliday2}  Present in Weekend: ${presentInWeekend2}"`;
-              const header = ['SN','Date','Day','Time In','Time Out','Total Hrs','IN Status','OUT Status','Status','Remarks'];
+              const summaryRow = `"Present: ${s.presentCount||0}  Absent: ${s.absentCount||0}  Leave: ${s.leaveCount||0}  Office Visit: ${visitCount2}  Late In: ${s.lateCount||0}  Early Out: ${s.earlyCount||0}  Att.Rate: ${s.attendanceRate||0}%  Present in Holiday: ${presentInHoliday2}  Present in Weekend: ${presentInWeekend2}${emp?.eligibleForOt ? `  Total OT: ${s.otApprovedFormatted||'0:00'}` : ''}"`;
+              const header = ['SN','Date','Day','Time In','Time Out','Total Hrs','IN Status','OUT Status','OT','Status','Remarks'];
               const dataRows = days.map(r => [
                 r.sn, fd(r.dateStr)||r.dateStr, r.dayFull,
                 r.timeIn  ? fmtTime(r.timeIn)  : '',
                 r.timeOut ? fmtTime(r.timeOut) : '',
-                r.totalFormatted||'', r.lateFormatted||'',
+                r.totalFormatted||'',
+                r.lateFormatted||'',
                 r.earlyFormatted||'',
+                (emp?.eligibleForOt && r.otApprovedFormatted)||'',
                 r.status, r.remarks||''
               ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
               const excelContent = getExcelHeaderRows(settings, language, reportTitle, periodLabel())
@@ -670,7 +672,7 @@ const StaffLedger = () => {
             {[1,2].map(h=>(
               <button key={h} onClick={()=>setHalf(h)}
                 style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                  background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',
+                  background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',
                   transition:'background .15s' }}>
                 {h===1 ? L('पहिलो अर्ध','1st Half') : L('दोस्रो अर्ध','2nd Half')}
               </button>
@@ -684,7 +686,7 @@ const StaffLedger = () => {
         {/* Staff selector — hidden for staff-role users (locked to their own record) */}
         {isStaffLogin ? (
           <span style={{ fontSize:13,fontWeight:600,color:'#1f2937',
-            background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,
+            background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,
             padding:'5px 14px',flexShrink:0 }}>
             👤 {sortedEmps.find(e=>String(e.id)===empId)?.fullName || '—'}
           </span>
@@ -695,7 +697,7 @@ const StaffLedger = () => {
               {[['working',L('कार्यरत','Working')],['notworking',L('अवकाश','Not Working')]].map(([v,label])=>(
                 <button key={v} onClick={()=>{ setStaffStatus(v); setEmpId(''); }}
                   style={{ padding:'5px 14px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,
-                    background:staffStatus===v?'#52b02c':'white',
+                    background:staffStatus===v?'#1a56db':'white',
                     color:staffStatus===v?'white':'#374151',transition:'background .15s' }}>
                   {label}
                 </button>
@@ -743,51 +745,42 @@ const StaffLedger = () => {
 
         {/* Staff info card */}
         <div style={{ flex:1, background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10,
-          padding:'10px 16px', borderLeft:'4px solid #52b02c' }}>
-          {/* Top row: name + FY badge + period */}
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-            flexWrap:'wrap', gap:8, marginBottom:6 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <span style={{ fontSize:15, fontWeight:800, color:'#1f2937' }}>{emp.fullName}</span>
-              {emp.empCode && (
-                <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:6,
-                  padding:'1px 8px', fontSize:11, fontWeight:700 }}>{emp.empCode}</span>
-              )}
+          padding:'10px 16px', borderLeft:'4px solid #1a56db' }}>
+          {/* Name + Post | Dept | Branch | Grade | Mode — all on one line */}
+          <div style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:10 }}>
+            <span style={{ fontSize:15, fontWeight:800, color:'#1f2937', whiteSpace:'nowrap' }}>{emp.fullName}</span>
+            <div style={{ display:'flex', gap:0, flexWrap:'wrap', fontSize:12,
+              border:'1px solid #e2e8f0', borderRadius:8, overflow:'hidden', width:'fit-content' }}>
+              {[
+                { show: emp.position && emp.position !== '—',
+                  icon:'🎖️', label:L('पद','Post'),
+                  value: (settings.posts||[]).find(p=>p.name===emp.position)?.shortName || (emp.postShort !== '—' ? emp.postShort : null) || emp.position },
+                { show: emp.department && emp.department !== '—',
+                  icon:'🏗️', label:L('विभाग','Dept'),
+                  value: (settings.departments||[]).find(d=>d.name===emp.department)?.shortName || (emp.deptShort !== '—' ? emp.deptShort : null) || emp.department },
+                { show: emp.branch && emp.branch !== '—',
+                  icon:'🏪', label:L('शाखा','Branch'),
+                  value: (settings.branches||[]).find(b=>b.name===emp.branch)?.shortName || (emp.branchShort !== '—' ? emp.branchShort : null) || emp.branch },
+                { show: !!emp.grade,  icon:'🎓', label:L('ग्रेड','Grade'),    value: emp.grade },
+                { show: !!emp.mode,   icon:'💼', label:L('नियुक्ति','Mode'), value: emp.mode  },
+              ].filter(f => f.show).map((f, i, arr) => (
+                <div key={f.label} style={{
+                  display:'inline-flex', flexDirection:'row', alignItems:'center', gap:5,
+                  padding:'6px 14px',
+                  borderRight: i < arr.length - 1 ? '1px solid #e2e8f0' : 'none',
+                  background: '#f8fafc',
+                }}>
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:4,
+                    fontSize:11, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>
+                    <span>{f.icon}</span>
+                    {f.label} :
+                  </span>
+                  <span style={{ fontSize:12, fontWeight:400, color:'#111827', whiteSpace:'nowrap' }}>
+                    {f.value}
+                  </span>
+                </div>
+              ))}
             </div>
-          </div>
-
-          {/* Info row: Post | Dept | Branch | Grade | Mode */}
-          <div style={{ display:'flex', gap:0, flexWrap:'wrap', fontSize:12, marginTop:6,
-            border:'1px solid #e2e8f0', borderRadius:8, overflow:'hidden', width:'fit-content' }}>
-            {[
-              { show: emp.position && emp.position !== '—',
-                icon:'🎖️', label:L('पद','Post'),
-                value: (settings.posts||[]).find(p=>p.name===emp.position)?.shortName || (emp.postShort !== '—' ? emp.postShort : null) || emp.position },
-              { show: emp.department && emp.department !== '—',
-                icon:'🏗️', label:L('विभाग','Dept'),
-                value: (settings.departments||[]).find(d=>d.name===emp.department)?.shortName || (emp.deptShort !== '—' ? emp.deptShort : null) || emp.department },
-              { show: emp.branch && emp.branch !== '—',
-                icon:'🏪', label:L('शाखा','Branch'),
-                value: (settings.branches||[]).find(b=>b.name===emp.branch)?.shortName || (emp.branchShort !== '—' ? emp.branchShort : null) || emp.branch },
-              { show: !!emp.grade,  icon:'🎓', label:L('ग्रेड','Grade'),    value: emp.grade },
-              { show: !!emp.mode,   icon:'💼', label:L('नियुक्ति','Mode'), value: emp.mode  },
-            ].filter(f => f.show).map((f, i, arr) => (
-              <div key={f.label} style={{
-                display:'inline-flex', flexDirection:'row', alignItems:'center', gap:5,
-                padding:'6px 14px',
-                borderRight: i < arr.length - 1 ? '1px solid #e2e8f0' : 'none',
-                background: '#f8fafc',
-              }}>
-                <span style={{ display:'inline-flex', alignItems:'center', gap:4,
-                  fontSize:11, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>
-                  <span>{f.icon}</span>
-                  {f.label} :
-                </span>
-                <span style={{ fontSize:12, fontWeight:400, color:'#111827', whiteSpace:'nowrap' }}>
-                  {f.value}
-                </span>
-              </div>
-            ))}
           </div>
 
           {/* Summary pills — compact */}
@@ -799,9 +792,12 @@ const StaffLedger = () => {
                 { label:L('Leave','Leave'),             value:summary.leaveCount,             c:'#ede9fe', tc:'#5b21b6' },
                 { label:L('Late','Late'),               value:summary.lateCount,              c:'#fef3c7', tc:'#92400e' },
                 { label:L('Early Out','OUT Issues'),    value:summary.earlyCount,             c:'#fef3c7', tc:'#92400e' },
-                { label:L('Att. Rate','Att. Rate'),    value:`${summary.attendanceRate}%`,    c:'#f0fdf4', tc:'#52b02c' },
+                { label:L('Att. Rate','Att. Rate'),    value:`${summary.attendanceRate}%`,    c:'#eff6ff', tc:'#1a56db' },
                 { label:L('P in Holiday','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
                 { label:L('P in Weekend','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
+                ...(emp?.eligibleForOt ? [
+                  { label:L('Total OT','Total OT'), value:summary.otApprovedFormatted || '0:00', c:'#d1fae5', tc:'#059669' },
+                ] : []),
               ].map(s=>(
                 <div key={s.label} style={{ background:s.c, border:`1px solid ${s.tc}22`,
                   borderRadius:6, padding:'3px 10px', textAlign:'center' }}>
@@ -946,7 +942,6 @@ const StaffLedger = () => {
           <span><strong style={{ color:'#dc2626' }}>Late: HH:mm</strong> = {L('ढिलो आएको','Late arrival')}</span>
           <span><strong style={{ color:'#d97706' }}>Early: HH:mm</strong> = {L('चाँडो गएको','Left early')}</span>
           <span><strong style={{ color:'#059669' }}>OT HH:mm</strong> = {L('ओभरटाइम','Overtime')}</span>
-          <span><strong style={{ color:'#d97706' }}>⚠</strong> = {L('एकै पञ्च','Single punch')}</span>
         </div>
       )}
     </div>

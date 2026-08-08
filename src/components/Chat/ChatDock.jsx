@@ -16,12 +16,12 @@ const ContactsPopup = ({ onClose, employees, onlineIds, onPick }) => {
     }), [employees, onlineIds, search]);
 
   return (
-    <div style={{ position: 'absolute', bottom: '100%', right: 0, marginBottom: 8, width: 290, height: 400,
+    <div className="chat-contacts-popup" style={{ position: 'absolute', bottom: '100%', right: 0, marginBottom: 8, width: 340, height: 400,
       background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,.18)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#52b02c', flexShrink: 0 }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>💬 Chat</span>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 15 }}>✕</button>
+      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ffffff', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
+        <span style={{ color: '#111827', fontWeight: 700, fontSize: 13 }}>💬 Chat</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 15 }}>✕</button>
       </div>
       <div style={{ padding: 8, borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search staff…"
@@ -86,7 +86,7 @@ const ChatDock = () => {
   if (!currentUser) return null;
 
   return (
-    <div style={{ position: 'fixed', right: 20, bottom: 0, zIndex: 1000,
+    <div className="chat-dock-root" style={{ position: 'fixed', right: 20, bottom: 0, zIndex: 1000,
       display: 'flex', alignItems: 'flex-end', gap: 10 }}>
 
       {openWindows.map(w => {
@@ -111,7 +111,7 @@ const ChatDock = () => {
           );
         }
         return (
-          <div key={w.id} style={{ width: 300, height: 380, background: '#fff',
+          <div key={w.id} className="chat-window" style={{ width: 360, height: 420, background: '#fff',
             border: '1px solid #e5e7eb', borderRadius: '10px 10px 0 0', boxShadow: '0 -4px 20px rgba(0,0,0,.15)',
             display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <ChatThread
@@ -134,7 +134,7 @@ const ChatDock = () => {
           />
         )}
         <button onClick={() => setShowContacts(p => !p)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#52b02c', color: '#fff',
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1a56db', color: '#fff',
             border: 'none', borderRadius: '10px 10px 0 0', padding: '9px 16px', cursor: 'pointer',
             fontSize: 13, fontWeight: 700, boxShadow: '0 -2px 10px rgba(0,0,0,.12)' }}>
           💬 Chat
@@ -144,6 +144,13 @@ const ChatDock = () => {
           )}
         </button>
       </div>
+
+      <style>{`
+        @media (max-width: 480px) {
+          .chat-window, .chat-contacts-popup { width: calc(100vw - 24px) !important; }
+          .chat-dock-root { right: 12px !important; }
+        }
+      `}</style>
     </div>
   );
 };

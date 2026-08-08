@@ -141,6 +141,25 @@ export async function sendMissingAttendanceApplication({ to, fullName, date, che
   });
 }
 
+export async function sendManualPostingApplication({ to, fullName, date, checkIn, checkOut, remark }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.manualPosting) return { skipped: true };
+  return sendEmail({
+    to, subject: `eHajiri TMS — Manual Attendance Entry: ${fullName}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:480px">
+      <h2 style="color:#1a56db">Manual Attendance Entry</h2>
+      <p>A manual attendance entry was posted for <strong>${fullName}</strong>.</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><td style="padding:6px 0;color:#6b7280">Date</td><td><strong>${date}</strong></td></tr>
+        ${checkIn  ? `<tr><td style="padding:6px 0;color:#6b7280">Check In</td><td><strong>${checkIn}</strong></td></tr>`  : ''}
+        ${checkOut ? `<tr><td style="padding:6px 0;color:#6b7280">Check Out</td><td><strong>${checkOut}</strong></td></tr>` : ''}
+        ${remark   ? `<tr><td style="padding:6px 0;color:#6b7280">Remark</td><td>${remark}</td></tr>` : ''}
+      </table>
+      <p style="color:#6b7280;font-size:12px;margin-top:16px">Please log in to eHajiri TMS to review this entry.</p>
+    </div>`,
+  });
+}
+
 /* ── Daily digest row list → HTML table rows ── */
 const digestRows = (rows) => rows.map(r => `
   <tr>
@@ -148,16 +167,36 @@ const digestRows = (rows) => rows.map(r => `
     <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;color:#374151">${r.detail || '—'}</td>
   </tr>`).join('');
 
-export async function sendLateEarlyDigest({ to, fullName, isSelf, scopeLabel, date, rows }) {
+export async function sendLateInDigest({ to, fullName, isSelf, scopeLabel, date, rows }) {
   const cfg = await getEmailConfig();
   if (!cfg?.notifications?.lateEarlyNotification) return { skipped: true };
   const intro = isSelf
-    ? `<p>Hello <strong>${fullName}</strong>, this is a record of your Late In / Early Out on <strong>${date}</strong>:</p>`
-    : `<p>The following staff in <strong>${scopeLabel}</strong> were Late In / Early Out on <strong>${date}</strong>:</p>`;
+    ? `<p>Hello <strong>${fullName}</strong>, this is a record of your Late In on <strong>${date}</strong>:</p>`
+    : `<p>The following staff in <strong>${scopeLabel}</strong> were Late In on <strong>${date}</strong>:</p>`;
   return sendEmail({
-    to, subject: `eHajiri TMS — Late In / Early Out Report: ${date}`,
+    to, subject: `eHajiri TMS — Late In Report: ${date}`,
     html: `<div style="font-family:sans-serif;padding:24px;max-width:520px">
-      <h2 style="color:#d97706">⏰ Late In / Early Out Report</h2>
+      <h2 style="color:#d97706">⏰ Late In Report</h2>
+      ${intro}
+      <table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><th style="text-align:left;padding:5px 8px;background:#fffbeb;color:#92400e">Name</th>
+            <th style="text-align:left;padding:5px 8px;background:#fffbeb;color:#92400e">Detail</th></tr>
+        ${digestRows(rows)}
+      </table>
+    </div>`,
+  });
+}
+
+export async function sendEarlyOutDigest({ to, fullName, isSelf, scopeLabel, date, rows }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.lateEarlyNotification) return { skipped: true };
+  const intro = isSelf
+    ? `<p>Hello <strong>${fullName}</strong>, this is a record of your Early Out on <strong>${date}</strong>:</p>`
+    : `<p>The following staff in <strong>${scopeLabel}</strong> left Early on <strong>${date}</strong>:</p>`;
+  return sendEmail({
+    to, subject: `eHajiri TMS — Early Out Report: ${date}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:520px">
+      <h2 style="color:#d97706">🚪 Early Out Report</h2>
       ${intro}
       <table style="width:100%;border-collapse:collapse;margin-top:12px">
         <tr><th style="text-align:left;padding:5px 8px;background:#fffbeb;color:#92400e">Name</th>

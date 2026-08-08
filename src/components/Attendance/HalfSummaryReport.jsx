@@ -8,18 +8,12 @@ import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
-import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
+import { branchAbbr } from '../../utils/branchUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 const abbrev = (name) => {
   if (!name) return '—';
@@ -30,8 +24,8 @@ const abbrev = (name) => {
 
 /* ── Shared cell styles (matches DataGrid .dg-th) ── */
 const TH_BASE = {
-  background:'#efefef', color:'#374151', fontWeight:700, fontSize:12,
-  padding:'6px 10px', borderRight:'1px solid #dedede', borderBottom:'1px solid #dedede',
+  background:'#efefef', color:'#374151', fontWeight:700, fontSize:12.5,
+  padding:'4px 8px', borderRight:'1px solid #dedede', borderBottom:'1px solid #dedede',
   whiteSpace:'nowrap', textAlign:'center', userSelect:'none',
 };
 const TH_GRP     = { ...TH_BASE, background:'#e4e4e4', borderBottom:'none', paddingBottom:3 };
@@ -39,9 +33,9 @@ const TH_SUB     = { ...TH_BASE, paddingTop:3, fontSize:11, color:'#6b7280' };
 const TH_WKD     = { ...TH_GRP, color:'#6b7280' };
 const TH_HOL     = { ...TH_GRP, background:'#fef3c7', color:'#92400e' };
 const TH_HOL_SUB = { ...TH_SUB, background:'#fef9e7', color:'#92400e' };
-const TH_OV      = { ...TH_BASE, background:'#f0fdf4', color:'#166534' };
+const TH_OV      = { ...TH_BASE, background:'#eff6ff', color:'#1e40af' };
 const TD_BASE    = {
-  padding:'5px 8px', fontSize:12, color:'#374151',
+  padding:'3px 8px', fontSize:12.5, color:'#374151',
   borderRight:'1px solid #e5e7eb', borderBottom:'1px solid #f3f4f6',
   verticalAlign:'middle', whiteSpace:'nowrap', textAlign:'center',
 };
@@ -90,9 +84,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         boxShadow:'0 20px 60px rgba(0,0,0,.18)', overflow:'visible', position:'relative',
       }} onClick={e => e.stopPropagation()}>
 
-        <div style={{ padding:'18px 24px 14px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'18px 24px 14px', background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:17, fontWeight:700, color:'#166534' }}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#1e40af' }}>
             {L('एडभान्स खोज','Advance Search')}
           </span>
           <button onClick={onClose}
@@ -113,7 +107,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
                     onClick={() => { set('_status', v); set('staffId', ''); }}
                     style={{ flex:1, padding:'8px 12px', border:'none', cursor:'pointer',
                       fontSize:13, fontWeight:600, transition:'background .15s',
-                      background: (local._status || 'working') === v ? '#52b02c' : 'white',
+                      background: (local._status || 'working') === v ? '#1a56db' : 'white',
                       color: (local._status || 'working') === v ? 'white' : '#374151' }}>
                     {label}
                   </button>
@@ -179,10 +173,10 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           </button>
           <button onClick={() => { onApply(local); onClose(); }}
             style={{ padding:'8px 24px', border:'none', borderRadius:8,
-              background:'#52b02c', color:'white', fontSize:14, fontWeight:700,
-              cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}
-            onMouseEnter={e=>e.currentTarget.style.background='#166534'}
-            onMouseLeave={e=>e.currentTarget.style.background='#52b02c'}>
+              background:'#1a56db', color:'white', fontSize:14, fontWeight:700,
+              cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
+            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -202,9 +196,9 @@ const HalfSummaryReport = () => {
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
-  const now     = new Date();
+  const now     = getNepalNow();
   const useNP   = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
 
   const urlYear  = parseInt(searchParams.get('year'));
   const urlMonth = parseInt(searchParams.get('month'));
@@ -310,6 +304,7 @@ const HalfSummaryReport = () => {
       <td style="padding:4px 6px;border:1px solid #dedede">${r.fullName}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${abbrev(r.position)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${abbrev(r.department)}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${branchAbbr(r.branch, settings)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.totalWorkingDays}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.weekendDays||0}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.weekendPresent||0}</td>
@@ -328,7 +323,7 @@ const HalfSummaryReport = () => {
     </tr>`).join('');
     const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:10px">
       <thead><tr>
-        ${['SN','Staff','Post','Dept','Total','Wkd Day','Wkd Pres','Hol Day','Hol Pres','Leave','OV','Present','Absent','Worked Hr','Lack Hr','Late','Early','Att%','OT']
+        ${['SN','Staff','Post','Dept','Branch','Total','Wkd Day','Wkd Pres','Hol Day','Hol Pres','Leave','OV','Present','Absent','Worked Hr','Lack Hr','Late','Early','Att%','OT']
           .map(h=>`<th style="padding:4px 5px;border:1px solid #dedede;background:#efefef">${h}</th>`).join('')}
       </tr></thead>
       <tbody>${dataRows}</tbody>
@@ -338,12 +333,12 @@ const HalfSummaryReport = () => {
 
   const exportCSV = () => {
     if (!rows.length) return;
-    const headers = ['SN','Staff','Post','Department','Total',
+    const headers = ['SN','Staff','Post','Department','Branch','Total',
       'Weekend Day','Weekend Present','Holiday Day','Holiday Present',
       'Leave','Official Visit','Present','Absent',
       'Worked Hr','Lack Hr','Late In','Early Out','Att. %','OT'];
     const dataRows = rows.map((r, i) => [
-      i+1, r.fullName, r.position||'', r.department||'', r.totalWorkingDays,
+      i+1, r.fullName, r.position||'', r.department||'', r.branch||'', r.totalWorkingDays,
       r.weekendDays||0, r.weekendPresent||0,
       r.holidayDays||0, r.holidayPresent||0,
       r.leaveDays, r.officialVisitDays||0,
@@ -366,7 +361,7 @@ const HalfSummaryReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -386,7 +381,7 @@ const HalfSummaryReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -425,7 +420,7 @@ const HalfSummaryReport = () => {
           {[1,2].map(h=>(
             <button key={h} onClick={()=>setHalf(h)}
               style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',
+                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',
                 transition:'background .15s' }}>
               {h===1?L('पहिलो अर्ध','1st Half'):L('दोस्रो अर्ध','2nd Half')}
             </button>
@@ -452,7 +447,7 @@ const HalfSummaryReport = () => {
           </svg>
           {L('एडभान्स खोज','Advance Search')}
           {activeFilterCount > 0 && (
-            <span style={{ background:'#52b02c',color:'white',borderRadius:'50%',
+            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
               fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
           )}
@@ -503,6 +498,7 @@ const HalfSummaryReport = () => {
                 </th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('पद','Post')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('विभाग','Dept.')}</th>
+                <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('शाखा','Branch')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('कार्य दिन','Total')}</th>
                 <th colSpan={2} style={{ ...TH_WKD }}>{L('विकेन्ड','Weekend')}</th>
                 <th colSpan={2} style={{ ...TH_HOL }}>{L('सार्वजनिक बिदा','Holiday')}</th>
@@ -527,7 +523,7 @@ const HalfSummaryReport = () => {
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={20} style={{ textAlign:'center',padding:'40px',color:'#9ca3af',fontSize:13 }}>
+                  <td colSpan={21} style={{ textAlign:'center',padding:'40px',color:'#9ca3af',fontSize:13 }}>
                     {search || activeFilterCount > 0
                       ? L('कुनै कर्मचारी भेटिएन','No staff found matching the filters')
                       : L('डेटा छैन','No data')}
@@ -536,18 +532,21 @@ const HalfSummaryReport = () => {
               )}
               {rows.map((r, idx) => (
                 <tr key={r.id}
-                  style={{ background: idx%2===0 ? 'white' : '#f9fafb' }}
-                  onMouseEnter={e=>e.currentTarget.style.background='#f0fdf4'}
-                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f9fafb'}>
+                  style={{ background: idx%2===0 ? 'white' : '#f3f4f6' }}
+                  onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
+                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f3f4f6'}>
                   <td style={{ ...TD_BASE, background:'#efefef', fontWeight:700, color:'#6b7280', borderRight:'1px solid #dedede' }}>
                     {idx+1}
                   </td>
-                  <td style={{ ...TD_BASE, textAlign:'left', fontWeight:700, color:'#1f2937' }}>{r.fullName}</td>
-                  <td style={{ ...TD_BASE, color:'#0369a1', fontWeight:700 }} title={r.position}>
+                  <td style={{ ...TD_BASE, textAlign:'left', color:'#1f2937' }}>{r.fullName}</td>
+                  <td style={{ ...TD_BASE, color:'#1f2937' }} title={r.position}>
                     {(settings.posts||[]).find(p=>p.name===r.position)?.shortName || r.postShort || r.position || '—'}
                   </td>
-                  <td style={{ ...TD_BASE, color:'#059669', fontWeight:700 }} title={r.department}>
+                  <td style={{ ...TD_BASE, color:'#1f2937' }} title={r.department}>
                     {(settings.departments||[]).find(d=>d.name===r.department)?.shortName || r.deptShort || r.department || '—'}
+                  </td>
+                  <td style={{ ...TD_BASE, color:'#1f2937' }} title={r.branch}>
+                    {branchAbbr(r.branch, settings)}
                   </td>
                   <td style={{ ...TD_BASE, fontWeight:700 }}>{r.totalWorkingDays}</td>
                   <td style={{ ...TD_BASE, color:'#6b7280', fontWeight:700 }}>{r.weekendDays||0}</td>
@@ -555,17 +554,17 @@ const HalfSummaryReport = () => {
                   <td style={{ ...TD_BASE, color:'#92400e', fontWeight:700 }}>{r.holidayDays||0}</td>
                   <td style={TD_BASE}><Pill v={r.holidayPresent||0} bg="#fef3c7" color="#92400e" /></td>
                   <td style={TD_BASE}><Pill v={r.leaveDays} bg="#ede9fe" color="#5b21b6" /></td>
-                  <td style={TD_BASE}><Pill v={r.officialVisitDays||0} bg="#dcfce7" color="#166534" /></td>
+                  <td style={TD_BASE}><Pill v={r.officialVisitDays||0} bg="#dbeafe" color="#1e40af" /></td>
                   <td style={{ ...TD_BASE, background:'#f0fdf4' }}><Pill v={r.presentDays} bg="#d1fae5" color="#065f46" /></td>
                   <td style={{ ...TD_BASE, background: r.absentDays>0?'#fff5f5':'inherit' }}><Pill v={r.absentDays} bg="#fee2e2" color="#991b1b" /></td>
                   <td style={TD_BASE}>
                     {r.workedHrsFormatted && r.workedHrsFormatted !== '0:00'
-                      ? <span style={{ color:'#0369a1', fontSize:12, fontWeight:700 }}>{r.workedHrsFormatted}</span>
+                      ? <span style={{ color:'#0369a1', fontWeight:700 }}>{r.workedHrsFormatted}</span>
                       : <span style={{ color:'#d1d5db' }}>0:00</span>}
                   </td>
                   <td style={TD_BASE}>
                     {r.lackHrsFormatted && r.lackHrsFormatted !== '0:00'
-                      ? <span style={{ color:'#dc2626', fontSize:12, fontWeight:700 }}>{r.lackHrsFormatted}</span>
+                      ? <span style={{ color:'#dc2626', fontWeight:700 }}>{r.lackHrsFormatted}</span>
                       : <span style={{ color:'#d1d5db' }}>0:00</span>}
                   </td>
                   <td style={TD_BASE}>
@@ -581,7 +580,7 @@ const HalfSummaryReport = () => {
                   <td style={TD_BASE}><Rate v={r.attendanceRate} /></td>
                   <td style={TD_BASE}>
                     {r.otFormatted && r.otFormatted !== '—'
-                      ? <span style={{ color:'#059669', fontSize:12, fontWeight:700 }}>{r.otFormatted}</span>
+                      ? <span style={{ color:'#059669', fontWeight:700 }}>{r.otFormatted}</span>
                       : <span style={{ color:'#d1d5db' }}>—</span>}
                   </td>
                 </tr>

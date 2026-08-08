@@ -1,9 +1,17 @@
 ﻿// ══════════════════════════════════════════════
 //  eHajiri — API Client (fetch-based)
-//  All requests go through /api (Vite proxies → :5000)
+//  All requests go through /api (Vite proxies → :5000), or through
+//  /t/<subdomain>/api when reached via the shared-login hub's path-based
+//  tenant routing — see utils/tenantPath.js.
 // ══════════════════════════════════════════════
+import { getTenantPrefix } from '../utils/tenantPath.js';
 
-const BASE = '/api';
+const BASE = `${getTenantPrefix()}/api`;
+
+// For the handful of call sites that can't go through the api.* wrapper
+// above (EventSource, raw fetch for file upload/download, window.open,
+// plain href) — same BASE, so they stay correctly tenant-prefixed too.
+export const apiUrl = (path) => `${BASE}${path}`;
 
 const TOKEN_KEY = 'auth_token';
 

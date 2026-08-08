@@ -28,7 +28,7 @@ function readAppVersion() {
 }
 
 export const APP_VERSION = readAppVersion();
-export const DB_VERSION  = 72;
+export const DB_VERSION  = 87;
 
 /** Human-readable changelog shown in the UI */
 export const VERSION_HISTORY = [
@@ -67,5 +67,11 @@ export const VERSION_HISTORY = [
     dbVersion  : 72,
     releaseDate: '2026-07-14',
     notes      : 'Clicking the eHajiri desktop logo while the app is running now opens the application dashboard in the browser instead of the Monitor popup (the Monitor still appears while the server is starting up).',
+  },
+  {
+    appVersion : '1.0.21',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : 'Task page: Assign Task is now a multi-select staff checkbox grid (Name/Post/Department/Branch), Description is a rich-text editor, Contact Person picker uses checkboxes; new right-side Followup History panel per task (call/email/WhatsApp/SMS log, next-followup scheduling, hand-over to another staff member).',
   },
 ];

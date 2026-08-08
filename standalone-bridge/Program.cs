@@ -1,8 +1,30 @@
+// StandAlone SDK code (legacy ZKTeco zkemkeeper.dll COM control) — DISABLED
+// BY DEFAULT on the Node side. This process is only ever spawned by
+// server/services/standaloneBridgeLauncher.js, which is itself gated behind
+// FLAG_KEYS.standaloneDevice (default OFF — Settings -> Role Management ->
+// Module Controls). On a fresh install this .exe never even starts.
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using StandaloneBridge.ComBridge;
 using StandaloneBridge.Http;
+using StandaloneBridge.Sync;
+
+// Remote-sync mode: a config file dropped next to this exe (see
+// Sync/RemoteSyncAgent.cs) means it's running standalone at a site, holding
+// the device connection itself and pushing logs out over the network,
+// instead of the default HTTP-server mode below (which the Electron-spawned
+// copy of this same exe uses so the co-located Node server can pull from it
+// over loopback). Checked first and never falls through — the two modes are
+// mutually exclusive for a given install.
+var syncConfigPath = Path.Combine(AppContext.BaseDirectory, "sync-config.json");
+if (File.Exists(syncConfigPath))
+{
+    var config = JsonSerializer.Deserialize<SyncAgentConfig>(File.ReadAllText(syncConfigPath))
+        ?? throw new InvalidOperationException("sync-config.json is empty or invalid");
+    await RemoteSyncAgent.RunAsync(config);
+    return;
+}
 
 var startedAt = DateTime.UtcNow;
 var sessions = new SessionManager();

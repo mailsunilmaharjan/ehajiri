@@ -52,7 +52,7 @@ const LeaveManagement = () => {
     )},
     { field: 'fromDate', header: t('From Date'), width: 120, render: v => fd(v) },
     { field: 'toDate',   header: t('To Date'),   width: 120, render: v => fd(v) },
-    { field: 'days', header: t('Days'), width: 70, align: 'center', render: v => <span style={{ fontWeight: 600, color: '#52b02c' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</span> },
+    { field: 'days', header: t('Days'), width: 70, align: 'center', render: v => <span style={{ fontWeight: 600, color: '#1a56db' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</span> },
     { field: 'reason', header: t('Reason'), width: 160, render: v => <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{v}</span> },
     { field: 'appliedDate', header: t('Applied Date'), width: 120, render: v => fd(v) },
     { field: 'status', header: t('Status'), width: 120, render: v => <StatusBadge status={v} /> },

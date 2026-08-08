@@ -106,6 +106,40 @@ ehajiri/
   automatically via `prepackage`/`premake` hooks).
 - UI: Settings → "StandAlone Device" tab.
 
+#### Remote Sync Agent — for devices not on the same machine as the server
+
+The default StandAlone flow above only works when the full eHajiri desktop
+app (Electron + Node) runs on the same machine as the device — the bridge
+opens a loopback HTTP server that Node calls into. If eHajiri is hosted
+centrally for a tenant (their server isn't on the same LAN as their device
+at all), use **remote-sync mode** instead: the *same* `StandaloneBridge.exe`
+switches modes when a `sync-config.json` sits next to it (see
+`standalone-bridge/Program.cs` and `standalone-bridge/Sync/RemoteSyncAgent.cs`)
+— instead of waiting for Node to call in, it holds the device connection
+itself and POSTs fetched attendance logs out to the tenant's eHajiri server
+over the network.
+
+- **Generate a config**: Settings → StandAlone Device → open a device →
+  "Remote Sync" tab → "Generate Sync Token". This mints a per-device bearer
+  token (`standalone_devices.sync_token`) and returns a ready-to-save
+  `sync-config.json` (device IP/port/password + the tenant's server URL +
+  the token + a poll interval).
+- **Deploy**: copy `standalone-bridge/publish/StandaloneBridge.exe` (from
+  `npm run build:bridge`) plus that `sync-config.json` into the same folder
+  on any PC on the device's LAN, then run the exe. It logs to console and to
+  `%LOCALAPPDATA%\eHajiri\sync-agent.log`.
+- **Keep it running unattended**: this box already runs production services
+  under NSSM — wrapping the exe the same way (`nssm install ...`) is the
+  simplest way to keep it alive across reboots at a remote site without a
+  user logged in.
+- **Revoke**: same tab → "Revoke Token" immediately stops that config.json
+  from being able to push logs (e.g. a decommissioned site or a leaked file).
+- Server side: `POST /api/standalone-sync/logs` (server/routes/standaloneSync.js),
+  authenticated by `standaloneSyncTokenGuard.js` (a device bearer token, not a
+  user JWT — this runs with nobody logged in) instead of `authGuard`. Reuses
+  the same `saveAttlogs()` as every other ZKTeco ingestion path, so synced
+  punches show up in the normal Attendance reports with no report-side changes.
+
 ---
 
 ## Release / Deployment

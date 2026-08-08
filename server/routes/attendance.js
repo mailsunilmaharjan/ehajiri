@@ -9,8 +9,11 @@ import { registerClient, broadcastNotification } from '../services/liveNotificat
 import { buildPunchNotification }                from '../services/punchNotification.js';
 import { logError } from '../utils/logError.js';
 import { resolveEmployeeScope, isEmployeeScopedUser } from './attendanceScope.js';
+import { resolveOrgEmployeeIds } from './orgScope.js';
 import { notifyUsers } from '../services/internalMessages.js';
-import { sendMissingAttendanceApplication } from '../services/emailService.js';
+import { sendMissingAttendanceApplication, sendManualPostingApplication } from '../services/emailService.js';
+import { requireRole } from '../middleware/roleGuard.js';
+import { logAudit } from '../services/auditLog.js';
 
 const router = express.Router();
 
@@ -20,8 +23,10 @@ const minsToHHMM = (mins) => `${pad2(Math.floor(mins / 60))}:${pad2(mins % 60)}`
 
 // Nepal is UTC+5:45 — shift times stored as Nepal local, punches stored as UTC.
 // This converts a Nepal-local HH:MM on a given date to the equivalent UTC Date object.
-const NEPAL_MS = (5 * 60 + 45) * 60000; // 345 min in ms
-const shiftToUTC = (y, m, d, h, min) => new Date(Date.UTC(y, m - 1, d, h, min) - NEPAL_MS);
+// Exported for attendanceNotificationScheduler.js, which needs the same
+// conversion to know when "N minutes after shift start/end" has elapsed.
+export const NEPAL_MS = (5 * 60 + 45) * 60000; // 345 min in ms
+export const shiftToUTC = (y, m, d, h, min) => new Date(Date.UTC(y, m - 1, d, h, min) - NEPAL_MS);
 
 /**
  * Returns a Map of "employeeId-YYYY-MM-DD" â†’ approvedOTMinutes for all APPROVED
@@ -46,6 +51,32 @@ const loadApprovedOTMap = async (startDate, endDate) => {
 const loadApprovedOTSet = async (startDate, endDate) => {
   const m = await loadApprovedOTMap(startDate, endDate);
   return new Set(m.keys());
+};
+
+/**
+ * Returns a Map of employee_id → total APPROVED OT minutes across the whole
+ * range — the true "Total OT that has been approved" figure the OT Approval
+ * page itself reports, unlike the per-report OT figures elsewhere in this
+ * file which only accumulate OT on days that also independently tripped a
+ * raw late-checkout/present condition (missing e.g. a weekend/holiday OT
+ * grant that doesn't hit that condition). Exported for the report routes
+ * below that need a correct period total rather than a per-day value.
+ */
+export const loadApprovedOTSumMap = async (startDate, endDate) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT employee_id, COALESCE(SUM(ot_minutes), 0)::int AS total
+       FROM overtime_approvals
+       WHERE status = 'approved' AND date BETWEEN $1 AND $2
+       GROUP BY employee_id`,
+      [startDate, endDate]
+    );
+    const m = new Map();
+    rows.forEach(r => m.set(r.employee_id, r.total || 0));
+    return m;
+  } catch {
+    return new Map();
+  }
 };
 
 /**
@@ -86,58 +117,233 @@ const makeHolidayChecker = (holidays) => (dateStr) => {
   return h?.name || null;
 };
 
+// â”€â”€ Duty roster rotation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// A roster row can carry more than one shift (Create/Edit Roster's multi-select) —
+// shiftIds is the selection in the order checked, and the shift that applies on
+// any given date within [dateFrom, dateTo] cycles through that list one-per-day
+// starting at dateFrom (day 0 = shiftIds[0], day 1 = shiftIds[1], ... wrapping).
+// A single-shift roster (shiftIds.length === 1) always resolves to that one shift,
+// same as before multi-select existed.
+function loadShiftsById(rows) {
+  const map = {};
+  for (const s of rows) {
+    map[s.id] = {
+      id: s.id,
+      name: s.name,
+      startTime: s.start_time?.toString().substring(0, 5) || null,
+      endTime:   s.end_time?.toString().substring(0, 5)   || null,
+      graceSt:   s.grace_period_start ?? 0,
+      graceEd:   s.grace_period_end   ?? 0,
+      workHours: s.work_hours || 8,
+      isOff:     !!s.is_off,
+      winterPolicyEnabled: !!s.winter_policy_enabled,
+      winterPolicy:        s.winter_policy || null,
+    };
+  }
+  return map;
+}
+
+function resolveRotationShift(entry, dateStr, shiftsById) {
+  const ids = (entry.shiftIds && entry.shiftIds.length) ? entry.shiftIds : (entry.shiftId ? [entry.shiftId] : []);
+  if (!ids.length) return null;
+  const dayIndex = Math.round((new Date(dateStr) - new Date(entry.dateFrom)) / 86400000);
+  const idx = ((dayIndex % ids.length) + ids.length) % ids.length; // safe for any sign
+  const shift = shiftsById[ids[idx]] || null;
+  if (!shift) return null;
+  // Apply the shift's own Winter Facilities Policy override (if any) for
+  // this specific date — see resolveWinterShift() below. Returns a copy so
+  // the cached shiftsById entry (reused across every date it's rotated to)
+  // is never mutated.
+  const eff = resolveWinterShift(dateStr, shift.startTime, shift.endTime, shift.graceSt, shift.graceEd,
+                                  shift.winterPolicyEnabled, shift.winterPolicy);
+  return { ...shift, startTime: eff.shiftStart, endTime: eff.shiftEnd, graceSt: eff.graceStart, graceEd: eff.graceEnd };
+}
+
+// Among roster entries that all directly cover the same date (e.g. a
+// single-day Calendar View override landing inside a broader date-range
+// roster), the most specific one should win — the narrower the date span,
+// the more deliberately targeted it is. Ties (equal span) break toward the
+// most recently created (highest id).
+function pickMostSpecificEntry(candidates) {
+  if (candidates.length <= 1) return candidates[0] || null;
+  const span = (e) => (new Date(e.dateTo) - new Date(e.dateFrom));
+  return candidates.slice().sort((a, b) => span(a) - span(b) || (b.id || 0) - (a.id || 0))[0];
+}
+
 // â”€â”€ Load all duty roster entries overlapping a date range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Returns map: empId â†’ [ { dateFrom, dateTo, offDays, shiftName, shiftStart, shiftEnd, graceSt, graceEd, workHours } ]
-const loadRosterMap = async (startDate, endDate) => {
+// Returns map: empId â†’ [ { dateFrom, dateTo, offDays, shiftIds, shiftId } ], plus a
+// non-enumerable _shiftsById lookup (shift id â†’ resolved fields) that
+// getEffectiveRoster() uses to resolve the correct day's shift via rotation —
+// attached to the map itself so callers don't need to thread a second value
+// through everywhere loadRosterMap() is already called.
+export const loadRosterMap = async (startDate, endDate) => {
   try {
-    const { rows } = await pool.query(`
-      SELECT dr.employee_id,
-             dr.date_from::text  AS date_from,
-             dr.date_to::text    AS date_to,
-             dr.off_days,
-             s.name              AS shift_name,
-             s.start_time        AS shift_start,
-             s.end_time          AS shift_end,
-             s.grace_period_start AS grace_st,
-             s.grace_period_end   AS grace_ed,
-             s.work_hours
-      FROM   duty_roster dr
-      LEFT   JOIN shifts s ON s.id = dr.shift_id
-      WHERE  (dr.date_from <= $2 AND dr.date_to >= $1)
-          OR dr.id IN (
-               SELECT DISTINCT ON (employee_id) id
-               FROM   duty_roster
-               WHERE  date_to < $1
-               ORDER  BY employee_id, date_to DESC, created_at DESC
-             )
-      ORDER  BY dr.employee_id, dr.date_to DESC
-    `, [startDate, endDate]);
+    const [rosterRes, shiftsRes] = await Promise.all([
+      pool.query(`
+        SELECT dr.id,
+               dr.employee_id,
+               dr.date_from::text  AS date_from,
+               dr.date_to::text    AS date_to,
+               dr.off_days,
+               dr.shift_id,
+               dr.shift_ids
+        FROM   duty_roster dr
+        WHERE  (dr.date_from <= $2 AND dr.date_to >= $1)
+            OR dr.id IN (
+                 SELECT DISTINCT ON (employee_id) id
+                 FROM   duty_roster
+                 WHERE  date_to < $1
+                 ORDER  BY employee_id, date_to DESC, created_at DESC
+               )
+        ORDER  BY dr.employee_id, dr.date_to DESC
+      `, [startDate, endDate]),
+      pool.query(`SELECT id, name, start_time, end_time, grace_period_start, grace_period_end, work_hours, is_off, winter_policy_enabled, winter_policy FROM shifts`),
+    ]);
     const map = {};
-    for (const r of rows) {
+    for (const r of rosterRes.rows) {
       if (!map[r.employee_id]) map[r.employee_id] = [];
       map[r.employee_id].push({
-        dateFrom:   String(r.date_from).split('T')[0],
-        dateTo:     String(r.date_to).split('T')[0],
-        offDays:    Array.isArray(r.off_days) ? r.off_days : [],
-        shiftName:  r.shift_name  || null,
-        shiftStart: r.shift_start?.toString().substring(0, 5) || null,
-        shiftEnd:   r.shift_end?.toString().substring(0, 5)   || null,
-        graceSt:    r.grace_st  ?? 0,
-        graceEd:    r.grace_ed  ?? 0,
-        workHours:  r.work_hours || 8,
+        id:       r.id,
+        dateFrom: String(r.date_from).split('T')[0],
+        dateTo:   String(r.date_to).split('T')[0],
+        offDays:  Array.isArray(r.off_days) ? r.off_days : [],
+        shiftIds: Array.isArray(r.shift_ids) ? r.shift_ids : (r.shift_id ? [r.shift_id] : []),
+        shiftId:  r.shift_id,
       });
     }
+    Object.defineProperty(map, '_shiftsById', { value: loadShiftsById(shiftsRes.rows), enumerable: false });
     return map;
   } catch { return {}; }
 };
 
-// Returns the first roster entry active for empId on dateStr, or null
-const getEffectiveRoster = (rosterMap, empId, dateStr) => {
+// Returns the roster entry active for empId on dateStr (or the most recent
+// past one as a fallback), resolved to THAT date's effective shift — same
+// flat shape report code has always read (shiftName/shiftStart/shiftEnd/
+// graceSt/graceEd/workHours/offDays), plus isOff for Day Off/Night Off.
+// Returns null if there's no roster entry at all for this employee.
+export const getEffectiveRoster = (rosterMap, empId, dateStr) => {
   const entries = rosterMap[empId] || [];
-  return entries.find(e => e.dateFrom <= dateStr && e.dateTo >= dateStr) ||
-         entries.filter(e => e.dateTo < dateStr).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
-         null;
+  const covering = entries.filter(e => e.dateFrom <= dateStr && e.dateTo >= dateStr);
+  const exact = pickMostSpecificEntry(covering);
+  const entry = exact ||
+                entries.filter(e => e.dateTo < dateStr).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
+                null;
+  if (!entry) return null;
+  const shift = resolveRotationShift(entry, dateStr, rosterMap._shiftsById || {});
+  return {
+    dateFrom: entry.dateFrom, dateTo: entry.dateTo, offDays: entry.offDays,
+    shiftId:    shift?.id        ?? null,
+    shiftName:  shift?.name      ?? null,
+    shiftStart: shift?.startTime ?? null,
+    shiftEnd:   shift?.endTime   ?? null,
+    graceSt:    shift?.graceSt   ?? 0,
+    graceEd:    shift?.graceEd   ?? 0,
+    workHours:  shift?.workHours ?? 8,
+    // Day Off/Night Off is a specific date-range designation, not an ongoing
+    // pattern — only honor it when this entry actually covers dateStr, never
+    // when it's being used as a "last known shift" fallback for a future date
+    // past its range (otherwise a single-day Day Off would mark every day
+    // after it as off too, forever, until the next roster entry is created).
+    isOff:      exact ? !!shift?.isOff : false,
+  };
 };
+
+// A roster entry only overrides the company-wide weekend pattern with its own
+// offDays when it assigns a shift OTHER than the system default — a staff
+// member still nominally on the default shift always follows the live
+// weekend setting, so changing that setting takes effect immediately without
+// having to touch every existing roster row (previously, ANY roster entry —
+// even one just re-affirming the default shift — froze that employee onto
+// whatever weekend pattern was snapshotted into its offDays at creation time,
+// so a later company-wide weekend change silently stopped applying to them).
+// Day Off/Night Off (`roster.isOff`, the shift literally resolved for this
+// exact date) always counts as weekend regardless of default vs custom shift.
+export function isRosterWeekend(roster, dayKey, weekends, defaultShiftId) {
+  if (roster?.isOff) return true;
+  const usesNonDefaultShift = roster?.shiftId != null && defaultShiftId != null && roster.shiftId !== defaultShiftId;
+  const effOffDays = (usesNonDefaultShift && roster.offDays?.length > 0) ? roster.offDays : weekends;
+  return effOffDays.includes(dayKey);
+}
+
+// Groups raw punch timestamps into "shift-days" instead of plain calendar
+// dates — needed because a shift that crosses midnight (e.g. 18:00-02:00)
+// splits one overnight session across two calendar dates, and every report
+// that used to just GROUP BY check_time::date paired the wrong punches
+// together (a morning checkout landing on day N+1 got matched with day
+// N+1's own evening check-in, producing a nonsensical ~12h "shift" while
+// day N showed a check-in with no checkout at all).
+//
+// Rule: a punch before noon rolls back onto the PREVIOUS calendar date when
+// that previous date's effective shift for this employee crosses midnight
+// (shiftEnd < shiftStart) — i.e. it's the tail end of last night's session,
+// not a fresh same-day check-in. Everything else groups by its own plain
+// calendar date, same as before.
+//
+// Known limitation: on the exact day a roster transitions from a night
+// shift to a day shift, an early check-in for the new day shift could still
+// misattribute back a day if it lands before noon — a rotation-boundary
+// edge case, not the general case this fixes.
+//
+// punchTimestamps: Date/timestamptz values for ONE employee, any source.
+// Returns Map<'YYYY-MM-DD', { timeIn: Date, timeOut: Date, punchCount }>.
+export function bucketPunchesByShiftDay(punchTimestamps, empId, rosterMap, defaultShift) {
+  const buckets = new Map();
+  const crossesMidnightCache = new Map();
+
+  const shiftCrossesMidnight = (dateStr) => {
+    if (crossesMidnightCache.has(dateStr)) return crossesMidnightCache.get(dateStr);
+    const roster = getEffectiveRoster(rosterMap, empId, dateStr);
+    const start = roster?.shiftStart || defaultShift?.start_time?.toString().substring(0, 5);
+    const end   = roster?.shiftEnd   || defaultShift?.end_time?.toString().substring(0, 5);
+    const crosses = !!(start && end && end < start);
+    crossesMidnightCache.set(dateStr, crosses);
+    return crosses;
+  };
+
+  for (const raw of punchTimestamps) {
+    if (!raw) continue;
+    const ts = raw instanceof Date ? raw : new Date(raw);
+    // Nepal-local calendar date this instant falls on — shift forward by
+    // the Nepal offset and read UTC fields, mirroring shiftToUTC's inverse,
+    // so this doesn't depend on the server OS's own timezone setting.
+    const local = new Date(ts.getTime() + NEPAL_MS);
+    const Y = local.getUTCFullYear(), M = local.getUTCMonth() + 1, D = local.getUTCDate();
+    let dateStr = `${Y}-${String(M).padStart(2, '0')}-${String(D).padStart(2, '0')}`;
+
+    const noon = shiftToUTC(Y, M, D, 12, 0);
+    if (ts < noon) {
+      const prevDateStr = new Date(Date.UTC(Y, M - 1, D - 1)).toISOString().split('T')[0];
+      if (shiftCrossesMidnight(prevDateStr)) dateStr = prevDateStr;
+    }
+
+    const bucket = buckets.get(dateStr) || { timeIn: null, timeOut: null, punchCount: 0 };
+    if (!bucket.timeIn  || ts < bucket.timeIn)  bucket.timeIn  = ts;
+    if (!bucket.timeOut || ts > bucket.timeOut) bucket.timeOut = ts;
+    bucket.punchCount++;
+    buckets.set(dateStr, bucket);
+  }
+  return buckets;
+}
+
+// ── Winter Facilities Policy — a shift can carry an alternate start/end time
+// + grace periods that apply only within a configured [startDate, endDate]
+// AD-date range (e.g. 10:00-17:00 normally, 10:00-16:00 in winter); outside
+// that range (or when the policy is off/unset) the shift's normal resolved
+// start/end/grace apply unchanged. `date` and the policy's startDate/endDate
+// are all plain 'YYYY-MM-DD' AD strings, so they compare lexicographically.
+function resolveWinterShift(date, shiftStart, shiftEnd, graceStart, graceEnd, winterPolicyEnabled, winterPolicy) {
+  const normal = { shiftStart, shiftEnd, graceStart, graceEnd };
+  if (!winterPolicyEnabled || !winterPolicy) return normal;
+  const wp = typeof winterPolicy === 'string' ? JSON.parse(winterPolicy) : winterPolicy;
+  if (!wp?.startDate || !wp?.endDate) return normal;
+  if (date < wp.startDate || date > wp.endDate) return normal;
+  return {
+    shiftStart : wp.startTime || shiftStart,
+    shiftEnd   : wp.endTime   || shiftEnd,
+    graceStart : wp.gracePeriodStart ?? graceStart,
+    graceEnd   : wp.gracePeriodEnd   ?? graceEnd,
+  };
+}
 
 // ── Core per-day attendance computation (shared by the /daily route and the
 //    daily notification scheduler — single source of truth for
@@ -145,7 +351,7 @@ const getEffectiveRoster = (rosterMap, empId, dateStr) => {
 export async function computeDailyAttendance(date) {
     // â”€â”€ 1. Effective weekends + public holidays for the date â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [wkRes, publicHolidays] = await Promise.all([
-      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [date]),
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [date]),
       loadPublicHolidays(),
     ]);
     const weekends    = wkRes.rows[0]?.weekends || ['Sat'];
@@ -159,35 +365,14 @@ export async function computeDailyAttendance(date) {
     const isWeekend  = weekends.includes(dayKey);
     const holidayName = getHoliday(date);  // null when not a PH
 
-    // â”€â”€ 2. Main query: staff + shifts + logs + leaves + visits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ 2. Main query: staff + shifts + leaves + visits (attendance punches
+    //    are fetched + bucketed separately below — see step 2b — since a
+    //    shift crossing midnight needs roster-aware shift-day bucketing that
+    //    a plain `check_time::date = $1` filter can't express: the checkout
+    //    for a shift starting on $1 lands on $1+1's calendar date and would
+    //    be silently excluded by that filter). â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const { rows } = await pool.query(`
       WITH
-      /* first / last punch per employee on this date — ZKTeco + manual */
-      punches AS (
-        SELECT employee_id,
-               MIN(time_in)     AS time_in,
-               MAX(time_out)    AS time_out,
-               SUM(cnt)::int    AS punch_count
-        FROM (
-          SELECT employee_id,
-                 MIN(check_time) AS time_in,
-                 MAX(check_time) AS time_out,
-                 COUNT(*)        AS cnt
-          FROM   zkteco_attendance_logs
-          WHERE  check_time::date = $1::date AND employee_id IS NOT NULL
-          GROUP  BY employee_id
-          UNION ALL
-          SELECT employee_id,
-                 (date + check_in)::timestamp::timestamptz  AS time_in,
-                 CASE WHEN check_out IS NOT NULL
-                      THEN (date + check_out)::timestamp::timestamptz
-                      ELSE NULL END                         AS time_out,
-                 CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt
-          FROM   attendance_manual_postings
-          WHERE  date = $1::date AND check_in IS NOT NULL
-        ) src
-        GROUP BY employee_id
-      ),
       /* default shift fallback */
       def_shift AS (
         SELECT * FROM shifts WHERE make_default = TRUE LIMIT 1
@@ -202,6 +387,7 @@ export async function computeDailyAttendance(date) {
         u.shift             AS shift_code,
         u.mode,
         u.grade,
+        u.eligible_for_ot,
 
         /* shift fields — roster shift > employee shift > default */
         COALESCE(rs.name,               s.name,               ds.name)               AS shift_name,
@@ -210,7 +396,16 @@ export async function computeDailyAttendance(date) {
         COALESCE(rs.grace_period_start, s.grace_period_start, ds.grace_period_start, 0) AS grace_start,
         COALESCE(rs.grace_period_end,   s.grace_period_end,   ds.grace_period_end,   0) AS grace_end,
         COALESCE(rs.work_hours,         s.work_hours,         ds.work_hours,         8) AS work_hours,
+        COALESCE(rs.winter_policy_enabled, s.winter_policy_enabled, ds.winter_policy_enabled, FALSE) AS winter_policy_enabled,
+        COALESCE(rs.winter_policy,         s.winter_policy,         ds.winter_policy)         AS winter_policy,
         dr.off_days AS roster_off_days,
+        dr.shift_id AS roster_shift_id,
+        ds.id       AS default_shift_id,
+        /* Day Off/Night Off only applies for a roster entry that actually
+           covers this date (prio=1) — never carried forward from the
+           most-recent-past fallback (prio=2), or a single-day Day Off would
+           mark every subsequent day as off too, forever. */
+        CASE WHEN dr.prio = 1 THEN COALESCE(rs.is_off, FALSE) ELSE FALSE END AS roster_is_off,
 
         /* post short name — fallback to first 5 chars of name */
         COALESCE(NULLIF(TRIM(p.short_name),''), LEFT(p.name,5))  AS post_short,
@@ -223,11 +418,6 @@ export async function computeDailyAttendance(date) {
         /* branch short name */
         COALESCE(NULLIF(TRIM(br.short_name),''), LEFT(br.name,4)) AS branch_short,
         br.name       AS branch_name,
-
-        /* attendance */
-        al.time_in,
-        al.time_out,
-        al.punch_count,
 
         /* leave (approved, covers this date) */
         l.id          AS leave_id,
@@ -248,17 +438,29 @@ export async function computeDailyAttendance(date) {
       FROM   users u
       CROSS  JOIN LATERAL (SELECT * FROM def_shift) ds
       LEFT   JOIN shifts      s   ON s.code  = u.shift
-      /* duty roster: entry covering this date, or most recent past entry as fallback */
+      /* duty roster: entry covering this date, or most recent past entry as fallback.
+         shift_id resolves through shift_ids (rotation: cycles through the selected
+         shifts one per day, starting at date_from) when set, falling back to the
+         single shift_id column for older rows that predate multi-shift rosters. */
       LEFT   JOIN LATERAL (
-        SELECT sub.off_days, sub.shift_id
+        SELECT sub.off_days, sub.prio,
+               CASE
+                 WHEN sub.shift_ids IS NOT NULL AND jsonb_array_length(sub.shift_ids) > 0 THEN
+                   (sub.shift_ids ->> MOD(MOD(($1::date - sub.date_from), jsonb_array_length(sub.shift_ids))
+                                          + jsonb_array_length(sub.shift_ids), jsonb_array_length(sub.shift_ids)))::int
+                 ELSE sub.shift_id
+               END AS shift_id
         FROM (
-          (SELECT dr2.off_days, dr2.shift_id, 1 AS prio
+          (SELECT dr2.off_days, dr2.shift_id, dr2.shift_ids, dr2.date_from, 1 AS prio
            FROM   duty_roster dr2
            WHERE  dr2.employee_id = u.id
              AND  $1::date BETWEEN dr2.date_from AND dr2.date_to
-           ORDER  BY dr2.created_at DESC LIMIT 1)
+           /* Most specific (narrowest span) roster entry wins when more than
+              one directly covers this date — e.g. a single-day Calendar View
+              override landing inside a broader date-range roster. */
+           ORDER  BY (dr2.date_to - dr2.date_from) ASC, dr2.created_at DESC LIMIT 1)
           UNION ALL
-          (SELECT dr2.off_days, dr2.shift_id, 2 AS prio
+          (SELECT dr2.off_days, dr2.shift_id, dr2.shift_ids, dr2.date_from, 2 AS prio
            FROM   duty_roster dr2
            WHERE  dr2.employee_id = u.id
              AND  dr2.date_to < $1::date
@@ -269,7 +471,6 @@ export async function computeDailyAttendance(date) {
       LEFT   JOIN posts       p   ON p.name  = u.position
       LEFT   JOIN departments d   ON d.name  = u.department
       LEFT   JOIN branches    br  ON br.name = u.branch
-      LEFT   JOIN punches     al  ON al.employee_id = u.id
       LEFT   JOIN leaves      l   ON l.employee_id = u.id
                                  AND l.status = 'approved'
                                  AND $1::date BETWEEN l.from_date AND l.to_date
@@ -282,8 +483,60 @@ export async function computeDailyAttendance(date) {
       LEFT   JOIN users       ov_appr ON ov_appr.id = ov.approved_by
       LEFT   JOIN users       ov_reco ON ov_reco.id = ov.recommended_by
       WHERE  u.active = TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
-      ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
+      ORDER  BY br.ranking_order ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [date]);
+
+    // â”€â”€ 2b. Attendance punches for this date, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Widen by a day on each side: a shift starting the evening before
+    // $1 needs $1-1 available so bucketPunchesByShiftDay can tell it was a
+    // night shift, and one starting on $1 needs $1+1 for its own checkout.
+    {
+      const empIds = rows.map(r => r.id);
+      if (empIds.length) {
+        // Pure UTC-based date math (Date.UTC + JS's own day/month rollover)
+        // — deliberately avoids new Date(dateString) + getDate()/setDate(),
+        // which read/write LOCAL calendar fields and would silently shift by
+        // a day depending on the server OS's own timezone (confirmed
+        // America/Los_Angeles on this box, per db.js's own comment).
+        const [Y, M, D] = date.split('-').map(Number);
+        const rangeStart = new Date(Date.UTC(Y, M - 1, D - 1)).toISOString().split('T')[0];
+        const rangeEnd   = new Date(Date.UTC(Y, M - 1, D + 1)).toISOString().split('T')[0];
+
+        const [rawPunchRes, rosterMap, defShiftRes, otSumMap] = await Promise.all([
+          pool.query(`
+            SELECT employee_id, check_time FROM zkteco_attendance_logs
+            WHERE  employee_id = ANY($1::int[]) AND check_time::date BETWEEN $2 AND $3
+            UNION ALL
+            SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+            FROM   attendance_manual_postings
+            WHERE  employee_id = ANY($1::int[]) AND date BETWEEN $2 AND $3 AND check_in IS NOT NULL AND status = 'approved'
+            UNION ALL
+            SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+            FROM   attendance_manual_postings
+            WHERE  employee_id = ANY($1::int[]) AND date BETWEEN $2 AND $3 AND check_out IS NOT NULL AND status = 'approved'
+          `, [empIds, rangeStart, rangeEnd]),
+          loadRosterMap(rangeStart, rangeEnd),
+          pool.query(`SELECT * FROM shifts WHERE make_default = TRUE LIMIT 1`),
+          loadApprovedOTSumMap(date, date),
+        ]);
+        const defaultShift = defShiftRes.rows[0];
+
+        const punchesByEmp = new Map();
+        for (const r of rawPunchRes.rows) {
+          if (!punchesByEmp.has(r.employee_id)) punchesByEmp.set(r.employee_id, []);
+          punchesByEmp.get(r.employee_id).push(r.check_time);
+        }
+
+        for (const row of rows) {
+          const buckets = bucketPunchesByShiftDay(punchesByEmp.get(row.id) || [], row.id, rosterMap, defaultShift);
+          const today = buckets.get(date);
+          row.time_in     = today?.timeIn     ?? null;
+          row.time_out    = today?.timeOut    ?? null;
+          row.punch_count = today?.punchCount ?? null;
+          row.ot_approved_mins = otSumMap.get(row.id) || 0;
+        }
+      }
+    }
 
     // â”€â”€ 3. Load attendance remarks for this date (graceful if table not yet migrated) â”€â”€
     const remarksMap = {};
@@ -302,7 +555,7 @@ export async function computeDailyAttendance(date) {
          FROM   attendance_manual_postings mp
          LEFT   JOIN users ru ON ru.id = mp.recommended_by
          LEFT   JOIN users au ON au.id = mp.approved_by
-         WHERE  mp.date = $1
+         WHERE  mp.date = $1 AND mp.status = 'approved'
            AND  (mp.recommended_by IS NOT NULL OR mp.approved_by IS NOT NULL
                  OR (mp.remark IS NOT NULL AND mp.remark != ''))`, [date]
       );
@@ -323,17 +576,29 @@ export async function computeDailyAttendance(date) {
     // ── 4. Compute derived fields (Late In, Early Out, OT, Status) per row ──
     const computed = rows.map(r => {
       const {
-        time_in, time_out, shift_start, shift_end,
-        grace_start, grace_end, work_hours,
+        time_in, time_out,
+        shift_start: rawShiftStart, shift_end: rawShiftEnd,
+        grace_start: rawGraceStart, grace_end: rawGraceEnd, work_hours,
+        winter_policy_enabled, winter_policy,
         leave_id, leave_type_name, visit_id, visit_purpose, visit_location,
         leave_appr_name, leave_reco_name, leave_reason, leave_comment,
         visit_appr_name, visit_reco_name,
-        roster_off_days,
+        roster_off_days, roster_is_off, roster_shift_id, default_shift_id,
       } = r;
 
-      // Per-employee weekend: roster off_days override system weekends for this date
-      const empOffDays   = (roster_off_days && roster_off_days.length > 0) ? roster_off_days : weekends;
-      const isEmpWeekend = empOffDays.includes(dayKey);
+      // Winter Facilities Policy — swap in the shift's winter start/end/grace
+      // when `date` falls inside the configured winter range.
+      const { shiftStart: shift_start, shiftEnd: shift_end, graceStart: grace_start, graceEnd: grace_end } =
+        resolveWinterShift(date, rawShiftStart, rawShiftEnd, rawGraceStart, rawGraceEnd, winter_policy_enabled, winter_policy);
+
+      // Per-employee weekend: today's roster shift being Day Off/Night Off
+      // (roster_is_off) always counts as weekend; otherwise the roster's own
+      // off_days only override the company-wide weekend when this employee is
+      // actually on a non-default shift — see isRosterWeekend().
+      const isEmpWeekend = isRosterWeekend(
+        { isOff: roster_is_off, offDays: roster_off_days, shiftId: roster_shift_id },
+        dayKey, weekends, default_shift_id,
+      );
 
       // â”€â”€ Attendance time calculation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       let totalHrs = null, lateIn = null, earlyOut = null, ot = null;
@@ -427,8 +692,8 @@ export async function computeDailyAttendance(date) {
         branchName          : r.branch_name || r.branch || '—',
         shiftCode           : r.shift_code  || null,
         shiftName           : r.shift_name  || '—',
-        shiftStart          : r.shift_start || null,
-        shiftEnd            : r.shift_end   || null,
+        shiftStart          : shift_start || null,
+        shiftEnd            : shift_end   || null,
         mode                : r.mode        || null,
         grade               : r.grade       || null,
         punchCount          : r.punch_count || 0,
@@ -438,6 +703,9 @@ export async function computeDailyAttendance(date) {
         lateIn,
         earlyOut,
         ot,
+        eligibleForOt       : !!r.eligible_for_ot,
+        otApprovedMins      : r.ot_approved_mins || 0,
+        otApprovedFormatted : r.eligible_for_ot && r.ot_approved_mins ? minsToHHMM(r.ot_approved_mins) : null,
         status,
         remarks,
         // raw flags for filtering
@@ -458,9 +726,13 @@ router.get('/daily', async (req, res) => {
   const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
   try {
     const { dayKey, isWeekend, weekends, rows: computed } = await computeDailyAttendance(date);
-    const scopedRows = isScoped
+    let scopedRows = isScoped
       ? computed.filter(r => String(r.id) === String(scopeEmployeeId))
       : computed;
+    if (!isScoped && req.query.orgScope === '1') {
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids) scopedRows = computed.filter(r => ids.includes(r.id));
+    }
     res.json({ date, dayKey, isWeekend, weekends, rows: scopedRows });
   } catch (err) {
     logError('[Attendance/daily]', err);
@@ -502,7 +774,8 @@ router.get('/staff-ledger', async (req, res) => {
                br.name AS branch_name_full,
                s.name AS shift_name, s.start_time AS shift_start,
                s.end_time AS shift_end, s.grace_period_start AS grace_st,
-               s.grace_period_end AS grace_ed
+               s.grace_period_end AS grace_ed,
+               s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
          FROM  users u
          LEFT  JOIN posts       p  ON p.name=u.position
          LEFT  JOIN departments d  ON d.name=u.department
@@ -511,10 +784,13 @@ router.get('/staff-ledger', async (req, res) => {
          WHERE u.id=$1`
       : `SELECT u.*, s.name AS shift_name, s.start_time AS shift_start,
                s.end_time AS shift_end, s.grace_period_start AS grace_st,
-               s.grace_period_end AS grace_ed
+               s.grace_period_end AS grace_ed,
+               s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
          FROM  users u
          LEFT  JOIN shifts s ON s.code=u.shift
-         WHERE u.active=TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin')) ORDER BY u.ranking_order ASC NULLS LAST,u.full_name ASC`;
+         WHERE u.active=TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
+         ORDER BY (SELECT b.ranking_order FROM branches b WHERE b.name = u.branch) ASC NULLS LAST,
+                  u.ranking_order ASC NULLS LAST, u.full_name ASC`;
 
     const empRes = await pool.query(empQ, employeeId ? [employeeId] : []);
     if (!empRes.rows.length) return res.json({ employee:null, days:[], summary:{} });
@@ -522,7 +798,7 @@ router.get('/staff-ledger', async (req, res) => {
 
     // â”€â”€ Weekends + public holidays â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [wkRes, publicHolidays] = await Promise.all([
-      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date<=$1 ORDER BY effective_date DESC LIMIT 1`, [endDate]),
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date<=$1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [endDate]),
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
@@ -538,65 +814,90 @@ router.get('/staff-ledger', async (req, res) => {
     const graceSt    = emp.grace_st  || defShift?.grace_period_start || 0;
     const graceEd    = emp.grace_ed  || defShift?.grace_period_end   || 0;
     const shiftName  = emp.shift_name || defShift?.name || '—';
+    // Winter policy source: the employee's own shift if they have one, else the org default shift.
+    const shiftWinterEnabled = emp.shift_start ? emp.shift_winter_enabled : defShift?.winter_policy_enabled;
+    const shiftWinterPolicy  = emp.shift_start ? emp.shift_winter_policy  : defShift?.winter_policy;
 
     // â”€â”€ Duty roster entries for this employee in the period â”€â”€â”€â”€â”€â”€â”€
-    const rosterRes = await pool.query(`
-      SELECT dr.date_from::text AS date_from, dr.date_to::text AS date_to, dr.off_days,
-             s.name AS shift_name, s.start_time AS shift_start, s.end_time AS shift_end,
-             s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed
-      FROM   duty_roster dr
-      LEFT   JOIN shifts s ON s.id = dr.shift_id
-      WHERE  dr.employee_id = $1
-        AND  ((dr.date_from <= $2 AND dr.date_to >= $3)
-           OR dr.id = (SELECT id FROM duty_roster WHERE employee_id=$1 AND date_to < $3
-                       ORDER BY date_to DESC, created_at DESC LIMIT 1))
-      ORDER  BY dr.date_to DESC
-    `, [emp.id, endDate, startDate]);
+    const [rosterRes, ledgerShiftsRes] = await Promise.all([
+      pool.query(`
+        SELECT dr.id, dr.date_from::text AS date_from, dr.date_to::text AS date_to, dr.off_days,
+               dr.shift_id, dr.shift_ids
+        FROM   duty_roster dr
+        WHERE  dr.employee_id = $1
+          AND  ((dr.date_from <= $2 AND dr.date_to >= $3)
+             OR dr.id = (SELECT id FROM duty_roster WHERE employee_id=$1 AND date_to < $3
+                         ORDER BY date_to DESC, created_at DESC LIMIT 1))
+        ORDER  BY dr.date_to DESC
+      `, [emp.id, endDate, startDate]),
+      pool.query(`SELECT id, name, start_time, end_time, grace_period_start, grace_period_end, work_hours, is_off, winter_policy_enabled, winter_policy FROM shifts`),
+    ]);
+    const ledgerShiftsById = loadShiftsById(ledgerShiftsRes.rows);
     const rosterEntries = rosterRes.rows.map(r => ({
-      dateFrom:   String(r.date_from).split('T')[0],
-      dateTo:     String(r.date_to).split('T')[0],
-      offDays:    Array.isArray(r.off_days) ? r.off_days : [],
-      shiftName:  r.shift_name || null,
-      shiftStart: r.shift_start?.toString().substring(0, 5) || null,
-      shiftEnd:   r.shift_end?.toString().substring(0, 5)   || null,
-      graceSt:    r.grace_st ?? 0,
-      graceEd:    r.grace_ed ?? 0,
+      id:       r.id,
+      dateFrom: String(r.date_from).split('T')[0],
+      dateTo:   String(r.date_to).split('T')[0],
+      offDays:  Array.isArray(r.off_days) ? r.off_days : [],
+      shiftIds: Array.isArray(r.shift_ids) ? r.shift_ids : (r.shift_id ? [r.shift_id] : []),
+      shiftId:  r.shift_id,
     }));
-    const getEmpRoster = (ds) =>
-      rosterEntries.find(e => e.dateFrom <= ds && e.dateTo >= ds) ||
-      rosterEntries.filter(e => e.dateTo < ds).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
-      null;
+    // Resolves rotation + Day Off/Night Off for the given date — same flat
+    // shape (shiftName/shiftStart/shiftEnd/graceSt/graceEd/offDays/isOff)
+    // every consumer below already expects.
+    const getEmpRoster = (ds) => {
+      const covering = rosterEntries.filter(e => e.dateFrom <= ds && e.dateTo >= ds);
+      const exact = pickMostSpecificEntry(covering);
+      const entry = exact ||
+                    rosterEntries.filter(e => e.dateTo < ds).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
+                    null;
+      if (!entry) return null;
+      const shift = resolveRotationShift(entry, ds, ledgerShiftsById);
+      return {
+        offDays: entry.offDays,
+        shiftId:    shift?.id        ?? null,
+        shiftName:  shift?.name      ?? null,
+        shiftStart: shift?.startTime ?? null,
+        shiftEnd:   shift?.endTime   ?? null,
+        graceSt:    shift?.graceSt   ?? 0,
+        graceEd:    shift?.graceEd   ?? 0,
+        // Only honor Day Off/Night Off when this entry actually covers ds —
+        // see getEffectiveRoster's comment above for why the past-entry
+        // fallback must never carry isOff forward.
+        isOff:      exact ? !!shift?.isOff : false,
+      };
+    };
 
-    // â”€â”€ Attendance logs for the period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const logsRes = await pool.query(`
-      SELECT day,
-             MIN(time_in)  AS time_in,
-             MAX(time_out) AS time_out,
-             SUM(cnt)::int AS punches
-      FROM (
-        SELECT check_time::date AS day,
-               MIN(check_time)  AS time_in,
-               MAX(check_time)  AS time_out,
-               COUNT(*)::int    AS cnt
-        FROM   zkteco_attendance_logs
-        WHERE  employee_id=$1 AND check_time::date BETWEEN $2 AND $3
-        GROUP  BY check_time::date
-        UNION ALL
-        SELECT date AS day,
-               (date + check_in)::timestamp::timestamptz AS time_in,
-               CASE WHEN check_out IS NOT NULL
-                    THEN (date + check_out)::timestamp::timestamptz
-                    ELSE NULL END AS time_out,
-               CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt
-        FROM   attendance_manual_postings
-        WHERE  employee_id=$1 AND date BETWEEN $2 AND $3 AND check_in IS NOT NULL
-      ) src
-      GROUP BY day`,
-      [emp.id, startDate, endDate]
+    // â”€â”€ Attendance logs for the period, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Widened by a day on each side: a shift crossing midnight (e.g.
+    // 18:00-02:00) splits one overnight session's punches across two
+    // calendar dates — the extra day lets bucketPunchesByShiftDay see
+    // "yesterday" to correctly roll an early-morning checkout back onto the
+    // shift-day it actually belongs to, instead of grouping by plain
+    // calendar date and pairing the wrong punches together.
+    const rangeStart = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEnd   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const rawLogsRes = await pool.query(`
+      SELECT check_time FROM zkteco_attendance_logs
+      WHERE  employee_id=$1 AND check_time::date BETWEEN $2 AND $3
+      UNION ALL
+      SELECT (date + check_in)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  employee_id=$1 AND date BETWEEN $2 AND $3 AND check_in IS NOT NULL AND status = 'approved'
+      UNION ALL
+      SELECT (date + check_out)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  employee_id=$1 AND date BETWEEN $2 AND $3 AND check_out IS NOT NULL AND status = 'approved'`,
+      [emp.id, rangeStart, rangeEnd]
     );
+    // Wrap this endpoint's own already-loaded roster data into the shape
+    // getEffectiveRoster()/bucketPunchesByShiftDay() expect from loadRosterMap,
+    // rather than issuing a second, redundant roster query.
+    const rosterMapForBucketing = { [emp.id]: rosterEntries };
+    Object.defineProperty(rosterMapForBucketing, '_shiftsById', { value: ledgerShiftsById, enumerable: false });
+    const shiftBuckets = bucketPunchesByShiftDay(rawLogsRes.rows.map(r => r.check_time), emp.id, rosterMapForBucketing, defShift);
     const logsByDay = {};
-    for (const r of logsRes.rows) {
-      logsByDay[toDateStr(r.day)] = r;
+    for (const [dateStr, b] of shiftBuckets) {
+      logsByDay[dateStr] = { time_in: b.timeIn, time_out: b.timeOut, punches: b.punchCount };
     }
 
     // â”€â”€ Approved leaves â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -643,12 +944,13 @@ router.get('/staff-ledger', async (req, res) => {
       }
     }
 
-    // â”€â”€ Load approved OT with stored minutes + approver name (for Remarks) â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Load approved OT with stored minutes + approver name/date/comment (for Remarks) â”€â”€
     const approvedOTSet = await loadApprovedOTMap(startDate, endDate); // key â†’ ot_minutes
-    const approvedOTDetails = new Map(); // key â†’ { approverName, otMins }
+    const approvedOTDetails = new Map(); // key â†’ { approverName, otMins, approvedDate, comment }
     try {
       const { rows: otRows } = await pool.query(`
-        SELECT oa.employee_id, oa.date::text AS dt, oa.ot_minutes, u.full_name AS approver_name
+        SELECT oa.employee_id, oa.date::text AS dt, oa.ot_minutes, oa.comment,
+               oa.approved_date::text AS approved_date, u.full_name AS approver_name
         FROM overtime_approvals oa
         LEFT JOIN users u ON u.id = oa.approved_by
         WHERE oa.status = 'approved' AND oa.date BETWEEN $1 AND $2
@@ -656,6 +958,8 @@ router.get('/staff-ledger', async (req, res) => {
       otRows.forEach(r => approvedOTDetails.set(`${r.employee_id}-${r.dt}`, {
         approverName: r.approver_name || null,
         otMins: r.ot_minutes || 0,
+        approvedDate: r.approved_date || null,
+        comment: r.comment || null,
       }));
     } catch (_) { /* overtime_approvals may not exist yet */ }
 
@@ -681,7 +985,7 @@ router.get('/staff-ledger', async (req, res) => {
          FROM   attendance_manual_postings mp
          LEFT   JOIN users ru ON ru.id = mp.recommended_by
          LEFT   JOIN users au ON au.id = mp.approved_by
-         WHERE  mp.employee_id = $1 AND mp.date BETWEEN $2 AND $3
+         WHERE  mp.employee_id = $1 AND mp.date BETWEEN $2 AND $3 AND mp.status = 'approved'
            AND  (mp.recommended_by IS NOT NULL OR mp.approved_by IS NOT NULL
                  OR (mp.remark IS NOT NULL AND mp.remark != ''))`,
         [emp.id, startDate, endDate]
@@ -718,13 +1022,14 @@ router.get('/staff-ledger', async (req, res) => {
 
       // Roster override for this specific day
       const dayRoster    = getEmpRoster(dateStr);
-      const effOffDays   = dayRoster?.offDays?.length > 0 ? dayRoster.offDays : weekends;
-      const isWeekend    = effOffDays.includes(dayKey);
-      // Effective shift times: roster > employee default > system default
-      const effShiftStart = dayRoster?.shiftStart || shiftStart;
-      const effShiftEnd   = dayRoster?.shiftEnd   || shiftEnd;
-      const effGraceSt    = dayRoster?.graceSt    != null ? dayRoster.graceSt    : graceSt;
-      const effGraceEd    = dayRoster?.graceEd    != null ? dayRoster.graceEd    : graceEd;
+      const isWeekend    = isRosterWeekend(dayRoster, dayKey, weekends, defShift?.id);
+      // Effective shift times: roster (already winter-adjusted by resolveRotationShift)
+      // > employee default/system default, winter-adjusted here per-date.
+      const fallbackShift = resolveWinterShift(dateStr, shiftStart, shiftEnd, graceSt, graceEd, shiftWinterEnabled, shiftWinterPolicy);
+      const effShiftStart = dayRoster?.shiftStart || fallbackShift.shiftStart;
+      const effShiftEnd   = dayRoster?.shiftEnd   || fallbackShift.shiftEnd;
+      const effGraceSt    = dayRoster?.graceSt    != null ? dayRoster.graceSt    : fallbackShift.graceStart;
+      const effGraceEd    = dayRoster?.graceEd    != null ? dayRoster.graceEd    : fallbackShift.graceEnd;
 
       if (!isWeekend) totalWorkingDays++;
 
@@ -795,14 +1100,9 @@ router.get('/staff-ledger', async (req, res) => {
             if (approvedOTSet.has(otKey)) {
               const detail       = approvedOTDetails.get(otKey);
               const approvedMins = detail?.otMins ?? rawOutDiff;
-              const otStr        = minsToHHMM(approvedMins);
-              outStatusStr  = `OT ${otStr}`;
+              outStatusStr  = `OT ${minsToHHMM(approvedMins)}`;
               otMinDay      = approvedMins;
               otMins       += approvedMins;
-              const otRemark = detail?.approverName
-                ? `OT: ${otStr} | App. by: ${detail.approverName}`
-                : `OT: ${otStr}`;
-              remarks = remarks ? `${remarks} | ${otRemark}` : otRemark;
             } else {
               outStatusStr = `Late Out ${minsToHHMM(rawOutDiff)}`;
             }
@@ -812,7 +1112,6 @@ router.get('/staff-ledger', async (req, res) => {
           if (worked > 0) { totalMinDay = worked; totalMins += worked; }
         }
 
-        // OT remark already appended above (inside the approved OT block); preserve it
         if (visit) {
           const vMeta = [];
           if (visit.reco_name) vMeta.push(`Recom. by ${visit.reco_name}`);
@@ -844,11 +1143,32 @@ router.get('/staff-ledger', async (req, res) => {
         }
       }
 
+      // Total approved OT for this exact day — independent of the OUT-status
+      // narrative above (which only ever flags OT when the raw checkout also
+      // happened to land after shift end); this is the OT column's value and
+      // must reflect whatever the OT Approval page actually approved.
+      const otApprovedDetailDay = approvedOTDetails.get(`${emp.id}-${dateStr}`);
+      const otApprovedMinsDay   = otApprovedDetailDay?.otMins ?? 0;
+
+      // Surface who approved it, when, and any comment left on the OT
+      // Approval page — independent of whatever else is already in remarks
+      // (leave/visit/holiday text), so it shows up regardless of status.
+      if (otApprovedMinsDay > 0) {
+        const otParts = [`OT ✅ ${minsToHHMM(otApprovedMinsDay)}`];
+        if (otApprovedDetailDay?.approverName) {
+          otParts.push(`App. by: ${otApprovedDetailDay.approverName}${otApprovedDetailDay.approvedDate ? ` on ${otApprovedDetailDay.approvedDate}` : ''}`);
+        }
+        if (otApprovedDetailDay?.comment) otParts.push(`Reason: ${otApprovedDetailDay.comment}`);
+        const otRemark = otParts.join(' | ');
+        remarks = remarks ? `${remarks} | ${otRemark}` : otRemark;
+      }
+
       days.push({
         sn, dateStr, dayKey, dayFull, isWeekend,
         shiftName       : dayRoster?.shiftName || shiftName,
         shiftStart      : effShiftStart,
         shiftEnd        : effShiftEnd,
+        hasRoster       : !!dayRoster,
         status, timeIn, timeOut,
         punches         : log?.punches || 0,
         lateMins, earlyMins, otMins:otMinDay, totalMins:totalMinDay,
@@ -856,17 +1176,28 @@ router.get('/staff-ledger', async (req, res) => {
         earlyFormatted  : outStatusStr,
         otFormatted     : otMinDay   ? minsToHHMM(otMinDay)   : null,
         totalFormatted  : totalMinDay? minsToHHMM(totalMinDay): null,
+        otApprovedMins      : otApprovedMinsDay,
+        otApprovedFormatted : otApprovedMinsDay ? minsToHHMM(otApprovedMinsDay) : null,
         remarks, leave, hasVisit:!!visit, isPublicHoliday: !!phName, holidayName: phName||null,
       });
 
       cur.setDate(cur.getDate() + 1);  // advance to next day
     }
 
+    // Total approved OT across the whole period — a plain SUM over
+    // overtime_approvals, unlike `otMins` above which only accumulates on
+    // days that also independently tripped the late-checkout condition (so
+    // e.g. a weekend/holiday OT grant wouldn't show up in that total).
+    const otApprovedSumMap  = await loadApprovedOTSumMap(startDate, endDate);
+    const otApprovedMinsSum = otApprovedSumMap.get(emp.id) || 0;
+
     const summary = {
       totalWorkingDays, presentCount, absentCount, leaveCount,
       lateCount, earlyCount, otMins, totalMins,
       attendanceRate: totalWorkingDays>0 ? Math.round((presentCount+leaveCount)/totalWorkingDays*100) : 0,
       otFormatted   : otMins>0 ? minsToHHMM(otMins) : '0:00',
+      otApprovedMins      : otApprovedMinsSum,
+      otApprovedFormatted : otApprovedMinsSum > 0 ? minsToHHMM(otApprovedMinsSum) : '0:00',
     };
 
     res.json({
@@ -877,6 +1208,7 @@ router.get('/staff-ledger', async (req, res) => {
         branch: emp.branch || '—', branchShort: emp.branch_short || '—',
         grade: emp.grade || null, mode: emp.mode || null,
         shiftName, shiftStart, shiftEnd, joinDate: emp.join_date,
+        eligibleForOt: !!emp.eligible_for_ot,
       },
       period: { startDate, endDate, totalWorkingDays },   // no year/month/half — derived from startDate
       days,
@@ -912,7 +1244,7 @@ router.get('/half-monthly', async (req, res) => {
   try {
     // â”€â”€ Effective weekends + public holidays for the period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [wkRes, publicHolidays] = await Promise.all([
-      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [endDate]),
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [endDate]),
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
@@ -943,20 +1275,26 @@ router.get('/half-monthly', async (req, res) => {
     // â”€â”€ All active employees (with per-employee shift info) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
-             u.department, u.position, u.shift,
+             u.department, u.position, u.branch, u.shift, u.eligible_for_ot,
              s.start_time AS shift_start, s.end_time AS shift_end,
-             s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed
+             s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed,
+             s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
       FROM   users u
       LEFT   JOIN shifts s ON s.code = u.shift
       WHERE  u.active=TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
-      ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
+      ORDER  BY (SELECT b.ranking_order FROM branches b WHERE b.name = u.branch) ASC NULLS LAST,
+               u.ranking_order ASC NULLS LAST, u.full_name ASC
     `);
     const employees = isScoped
       ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
       : empRes.rows;
 
     // â”€â”€ Duty roster map for the period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const rosterMapHalf = await loadRosterMap(startDate, endDate);
+    // Widened by a day each side — bucketPunchesByShiftDay (below) needs to
+    // resolve "yesterday"'s shift at the range's start boundary.
+    const rangeStartHalf = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEndHalf   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const rosterMapHalf = await loadRosterMap(rangeStartHalf, rangeEndHalf);
 
     // â”€â”€ Build all calendar dates in range (for per-employee iteration) â”€
     const allDatesHalf = [];
@@ -969,39 +1307,37 @@ router.get('/half-monthly', async (req, res) => {
       curAllH.setDate(curAllH.getDate() + 1);
     }
 
-    // â”€â”€ Attendance logs for period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const logsRes = await pool.query(`
-      SELECT employee_id, day,
-             MIN(time_in)  AS time_in,
-             MAX(time_out) AS time_out,
-             SUM(cnt)::int AS punches
-      FROM (
-        SELECT employee_id, check_time::date AS day,
-               MIN(check_time) AS time_in,
-               MAX(check_time) AS time_out,
-               COUNT(*)::int   AS cnt
-        FROM   zkteco_attendance_logs
-        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
-        GROUP  BY employee_id, check_time::date
-        UNION ALL
-        SELECT employee_id, date AS day,
-               (date + check_in)::timestamp::timestamptz AS time_in,
-               CASE WHEN check_out IS NOT NULL
-                    THEN (date + check_out)::timestamp::timestamptz
-                    ELSE NULL END AS time_out,
-               CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt
-        FROM   attendance_manual_postings
-        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL
-      ) src
-      GROUP BY employee_id, day
-    `, [startDate, endDate]);
+    // â”€â”€ Attendance logs for period, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Raw punches only (widened range) — bucketPunchesByShiftDay does the
+    // MIN/MAX aggregation per employee below, roster-aware, instead of a
+    // plain GROUP BY check_time::date (which pairs the wrong punches
+    // together for a shift that crosses midnight).
+    const rawLogsResHalf = await pool.query(`
+      SELECT employee_id, check_time FROM zkteco_attendance_logs
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      UNION ALL
+      SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      UNION ALL
+      SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+    `, [rangeStartHalf, rangeEndHalf]);
 
+    const rawByEmpHalf = new Map();
+    for (const r of rawLogsResHalf.rows) {
+      if (!rawByEmpHalf.has(r.employee_id)) rawByEmpHalf.set(r.employee_id, []);
+      rawByEmpHalf.get(r.employee_id).push(r.check_time);
+    }
     const logsMap = {};  // empId → { ‘YYYY-MM-DD’: { timeIn, timeOut, punches } }
-    for (const r of logsRes.rows) {
-      if (!logsMap[r.employee_id]) logsMap[r.employee_id] = {};
-      logsMap[r.employee_id][toDateStr(r.day)] = {
-        timeIn: r.time_in, timeOut: r.time_out, punches: r.punches,
-      };
+    for (const emp of employees) {
+      const buckets = bucketPunchesByShiftDay(rawByEmpHalf.get(emp.id) || [], emp.id, rosterMapHalf, defShift);
+      logsMap[emp.id] = {};
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate) continue;
+        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount };
+      }
     }
 
     // â”€â”€ Leaves for period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1039,8 +1375,10 @@ router.get('/half-monthly', async (req, res) => {
       }
     }
 
-    // â”€â”€ Approved OT map — key â†’ manager-set ot_minutes value â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const halfApprovedOTSet = await loadApprovedOTMap(startDate, endDate);
+    // â”€â”€ Approved OT — true period total per employee (not gated on a
+    // matching raw late-checkout condition, unlike the old per-day
+    // accumulation this replaces — see loadApprovedOTSumMap's own comment) â”€â”€
+    const halfApprovedOTSumMap = await loadApprovedOTSumMap(startDate, endDate);
 
     // â”€â”€ Per-employee analytics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const pad2   = (n) => String(Math.round(n)).padStart(2,'0');
@@ -1051,26 +1389,23 @@ router.get('/half-monthly', async (req, res) => {
       const empLeave = new Set(leaveMap[emp.id] || []);
       const empVisit = visitMap2[emp.id] || new Set();
 
-      // Per-employee roster entries
-      const empRosterEntriesH = rosterMapHalf[emp.id] || [];
-      const getEmpRosterH = (ds) =>
-        empRosterEntriesH.find(e => e.dateFrom <= ds && e.dateTo >= ds) ||
-        empRosterEntriesH.filter(e => e.dateTo < ds).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
-        null;
+      // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
+      const getEmpRosterH = (ds) => getEffectiveRoster(rosterMapHalf, emp.id, ds);
 
       // Employee's own shift (fallback to default)
       const empShiftStartH = emp.shift_start?.toString().substring(0,5) || defShift?.start_time?.toString().substring(0,5) || '10:00';
       const empShiftEndH   = emp.shift_end?.toString().substring(0,5)   || defShift?.end_time?.toString().substring(0,5)   || '17:00';
       const empGraceStH    = emp.grace_st ?? defShift?.grace_period_start ?? 0;
       const empGraceEdH    = emp.grace_ed ?? defShift?.grace_period_end   ?? 0;
+      const empWinterEnabledH = emp.shift_start ? emp.shift_winter_enabled : defShift?.winter_policy_enabled;
+      const empWinterPolicyH  = emp.shift_start ? emp.shift_winter_policy  : defShift?.winter_policy;
 
       // Compute per-employee working days (roster off days override system weekends)
       let empTotalWorkingDays = 0;
       const empWorkingDatesH = [];
       for (const { dateStr, dayKey } of allDatesHalf) {
         const roster   = getEmpRosterH(dateStr);
-        const effOff   = roster?.offDays?.length > 0 ? roster.offDays : weekends;
-        const isEmpWkd = effOff.includes(dayKey);
+        const isEmpWkd = isRosterWeekend(roster, dayKey, weekends, defShift?.id);
         const phName2  = getHoliday(dateStr);
         if (!isEmpWkd && !phName2) {
           empWorkingDatesH.push({ dateStr, dayKey, roster });
@@ -1079,8 +1414,11 @@ router.get('/half-monthly', async (req, res) => {
       }
 
       let presentDays = 0, absentDays = 0, leaveDays = 0;
-      let lateCount = 0, earlyCount = 0, otMinutes = 0, totalMins = 0;
+      let lateCount = 0, earlyCount = 0, totalMins = 0;
       let lateMinsTotal = 0, earlyMinsTotal = 0;
+      // True period total for this employee — a plain sum of approved OT
+      // records, independent of the per-day late-checkout math below.
+      const otMinutes = halfApprovedOTSumMap.get(emp.id) || 0;
 
       for (const { dateStr, roster } of empWorkingDatesH) {
         if (empLeave.has(dateStr)) { leaveDays++; continue; }
@@ -1092,11 +1430,13 @@ router.get('/half-monthly', async (req, res) => {
         const inDt  = new Date(log.timeIn);
         const outDt = (log.timeOut && log.punches >= 2) ? new Date(log.timeOut) : null;
 
-        // Effective shift: roster > employee > default
-        const shiftStart = roster?.shiftStart || empShiftStartH;
-        const shiftEnd   = roster?.shiftEnd   || empShiftEndH;
-        const graceSt    = roster?.graceSt    != null ? roster.graceSt    : empGraceStH;
-        const graceEd    = roster?.graceEd    != null ? roster.graceEd    : empGraceEdH;
+        // Effective shift: roster (already winter-adjusted) > employee > default,
+        // with the employee/default fallback winter-adjusted here per-date.
+        const fallbackShiftH = resolveWinterShift(dateStr, empShiftStartH, empShiftEndH, empGraceStH, empGraceEdH, empWinterEnabledH, empWinterPolicyH);
+        const shiftStart = roster?.shiftStart || fallbackShiftH.shiftStart;
+        const shiftEnd   = roster?.shiftEnd   || fallbackShiftH.shiftEnd;
+        const graceSt    = roster?.graceSt    != null ? roster.graceSt    : fallbackShiftH.graceStart;
+        const graceEd    = roster?.graceEd    != null ? roster.graceEd    : fallbackShiftH.graceEnd;
 
         const [sh, sm] = shiftStart.split(':').map(Number);
         const [eh, em] = shiftEnd.split(':').map(Number);
@@ -1112,12 +1452,6 @@ router.get('/half-monthly', async (req, res) => {
         if (outDt) {
           const earlyMins = Math.round((eDt - outDt) / 60000) - graceEd;
           if (earlyMins > 0) { earlyCount++; earlyMinsTotal += earlyMins; }
-
-          const otMinsRaw = Math.round((outDt - eDt) / 60000);
-          if (otMinsRaw > 0) {
-            const approvedMins = halfApprovedOTSet.get(`${emp.id}-${dateStr}`);
-            if (approvedMins !== undefined) otMinutes += approvedMins;
-          }
 
           const worked = Math.round((outDt - inDt) / 60000);
           if (worked > 0) totalMins += worked;
@@ -1145,6 +1479,8 @@ router.get('/half-monthly', async (req, res) => {
         fullName     : emp.fullName,
         department   : emp.department || '—',
         position     : emp.position   || '—',
+        branch       : emp.branch     || '—',
+        eligibleForOt: !!emp.eligible_for_ot,
         totalWorkingDays: empTotalWorkingDays,
         presentDays,
         absentDays,
@@ -1164,7 +1500,7 @@ router.get('/half-monthly', async (req, res) => {
         officialVisitDays,
         workedHrsFormatted : totalMins > 0 ? toHHMM(totalMins)  : '0:00',
         lackHrsFormatted   : lackMins  > 0 ? toHHMM(lackMins)   : '0:00',
-        otFormatted        : otMinutes > 0 ? toHHMM(otMinutes)  : '—',
+        otFormatted        : (emp.eligible_for_ot && otMinutes > 0) ? toHHMM(otMinutes) : '—',
         avgLateFormatted   : lateCount > 0 ? toHHMM(Math.round(lateMinsTotal/lateCount)) : '—',
       };
     });
@@ -1235,28 +1571,39 @@ router.get('/monthly', async (req, res) => {
   const now   = new Date();
   const year  = parseInt(req.query.year)  || now.getFullYear();
   const month = parseInt(req.query.month) || (now.getMonth() + 1);
+  const pad   = (n) => String(n).padStart(2,'0');
 
-  const pad = (n) => String(n).padStart(2,'0');
-  const lastDayOfMonth = new Date(year, month, 0).getDate();
-  const startDate = `${year}-${pad(month)}-01`;
-  const endDate   = `${year}-${pad(month)}-${pad(lastDayOfMonth)}`;
+  // Accept explicit startDate/endDate (Nepali/BS-month mode — a BS month
+  // doesn't align to a single AD year/month, so it can't be expressed as
+  // one) OR fall back to the plain AD year/month pair, same convention as
+  // /half-in-out and friends.
+  let startDate = req.query.startDate;
+  let endDate   = req.query.endDate;
+  if (!startDate || !endDate) {
+    const lastDayOfMonth = new Date(year, month, 0).getDate();
+    startDate = `${year}-${pad(month)}-01`;
+    endDate   = `${year}-${pad(month)}-${pad(lastDayOfMonth)}`;
+  }
+  const totalDays = Math.round((new Date(endDate + 'T00:00:00') - new Date(startDate + 'T00:00:00')) / 86400000) + 1;
 
   try {
     const [wkRes, publicHolidays] = await Promise.all([
-      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [endDate]),
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [endDate]),
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
     const getHoliday = makeHolidayChecker(publicHolidays);
     const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-    // Working days = non-weekend, non-public-holiday days in the month
+    // Working days = non-weekend, non-public-holiday days in the period.
+    // Iterates startDate → endDate directly (rather than day-1..lastDayOfMonth
+    // of a single year/month) so this works whether the range is a plain AD
+    // month or an arbitrary BS-month-derived AD span.
     const workingDays = [];
     let weekendDays = 0, holidayDays = 0;
-    for (let d = 1; d <= lastDayOfMonth; d++) {
-      const dt      = new Date(year, month - 1, d);
+    for (let dt = new Date(startDate + 'T00:00:00'), endDt = new Date(endDate + 'T00:00:00'); dt <= endDt; dt.setDate(dt.getDate() + 1)) {
       const key     = DOW[dt.getDay()];
-      const dateStr = `${year}-${pad(month)}-${pad(d)}`;
+      const dateStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
       if (weekends.includes(key)) weekendDays++;
       else if (getHoliday(dateStr)) holidayDays++;
       else workingDays.push(dateStr);
@@ -1269,13 +1616,15 @@ router.get('/monthly', async (req, res) => {
     const hmActiveParam = req.query.active !== 'false';
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
-             u.department, u.position, u.shift,
+             u.department, u.position, u.branch, u.shift, u.eligible_for_ot,
              s.start_time AS shift_start, s.end_time AS shift_end,
-             s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed
+             s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed,
+             s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
       FROM   users u
       LEFT   JOIN shifts s ON s.code = u.shift
       WHERE  u.active=$1 AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
-      ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
+      ORDER  BY (SELECT b.ranking_order FROM branches b WHERE b.name = u.branch) ASC NULLS LAST,
+               u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [hmActiveParam]);
     const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
     // Stats are computed over EVERY active employee regardless of scope — a scoped
@@ -1286,43 +1635,50 @@ router.get('/monthly', async (req, res) => {
     const employees = empRes.rows;
 
     // â”€â”€ Duty roster map for the month â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const rosterMapMon = await loadRosterMap(startDate, endDate);
+    // Widened a day each side — bucketPunchesByShiftDay needs "yesterday"'s
+    // shift resolvable even for the 1st of the month.
+    const rangeStartMon = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEndMon   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const rosterMapMon = await loadRosterMap(rangeStartMon, rangeEndMon);
 
-    // â”€â”€ Build all calendar dates in the month â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Build all calendar dates in the period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const allDatesMon = [];
-    for (let d = 1; d <= lastDayOfMonth; d++) {
-      const dt      = new Date(year, month - 1, d);
+    for (let dt = new Date(startDate + 'T00:00:00'), endDt = new Date(endDate + 'T00:00:00'); dt <= endDt; dt.setDate(dt.getDate() + 1)) {
       const dayKey  = DOW[dt.getDay()];
-      const dateStr = `${year}-${pad(month)}-${pad(d)}`;
+      const dateStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
       allDatesMon.push({ dateStr, dayKey });
     }
 
-    const logsRes = await pool.query(`
-      SELECT employee_id, day,
-             MIN(time_in) AS time_in, MAX(time_out) AS time_out, SUM(cnt)::int AS punches
-      FROM (
-        SELECT employee_id, check_time::date AS day,
-               MIN(check_time) AS time_in, MAX(check_time) AS time_out, COUNT(*)::int AS cnt
-        FROM zkteco_attendance_logs
-        WHERE check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
-        GROUP BY employee_id, check_time::date
-        UNION ALL
-        SELECT employee_id, date AS day,
-               (date + check_in)::timestamp::timestamptz AS time_in,
-               CASE WHEN check_out IS NOT NULL
-                    THEN (date + check_out)::timestamp::timestamptz
-                    ELSE NULL END AS time_out,
-               CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt
-        FROM attendance_manual_postings
-        WHERE date BETWEEN $1 AND $2 AND check_in IS NOT NULL
-      ) src
-      GROUP BY employee_id, day
-    `, [startDate, endDate]);
+    // â”€â”€ Attendance logs for the month, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Raw punches only (widened range) — bucketPunchesByShiftDay aggregates
+    // per employee below, roster-aware, instead of GROUP BY check_time::date
+    // (which mispairs punches for a shift that crosses midnight).
+    const rawLogsResMon = await pool.query(`
+      SELECT employee_id, check_time FROM zkteco_attendance_logs
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      UNION ALL
+      SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      UNION ALL
+      SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+    `, [rangeStartMon, rangeEndMon]);
 
+    const rawByEmpMon = new Map();
+    for (const r of rawLogsResMon.rows) {
+      if (!rawByEmpMon.has(r.employee_id)) rawByEmpMon.set(r.employee_id, []);
+      rawByEmpMon.get(r.employee_id).push(r.check_time);
+    }
     const logsMap = {};
-    for (const r of logsRes.rows) {
-      if (!logsMap[r.employee_id]) logsMap[r.employee_id] = {};
-      logsMap[r.employee_id][toDateStr(r.day)] = { timeIn: r.time_in, timeOut: r.time_out, punches: r.punches };
+    for (const emp of employees) {
+      const buckets = bucketPunchesByShiftDay(rawByEmpMon.get(emp.id) || [], emp.id, rosterMapMon, defShift);
+      logsMap[emp.id] = {};
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate) continue;
+        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount };
+      }
     }
 
     const leavesRes = await pool.query(`
@@ -1344,33 +1700,31 @@ router.get('/monthly', async (req, res) => {
     const pad2   = (n) => String(Math.round(n)).padStart(2,'0');
     const toHHMM = (mins) => `${pad2(Math.floor(Math.abs(mins)/60))}:${pad2(Math.abs(mins)%60)}`;
 
-    // Only approved OT counts in monthly report — use manager-set value
-    const monthlyApprovedOTSet = await loadApprovedOTMap(startDate, endDate);
+    // True period total per employee — see loadApprovedOTSumMap's comment
+    // for why this replaces the old per-day-conditional accumulation.
+    const monthlyApprovedOTSumMap = await loadApprovedOTSumMap(startDate, endDate);
 
     let stats = employees.map(emp => {
       const empLogs  = logsMap[emp.id] || {};
       const empLeave = new Set(leaveMap[emp.id] || []);
 
-      // Per-employee roster entries
-      const empRosterEntriesM = rosterMapMon[emp.id] || [];
-      const getEmpRosterM = (ds) =>
-        empRosterEntriesM.find(e => e.dateFrom <= ds && e.dateTo >= ds) ||
-        empRosterEntriesM.filter(e => e.dateTo < ds).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
-        null;
+      // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
+      const getEmpRosterM = (ds) => getEffectiveRoster(rosterMapMon, emp.id, ds);
 
       // Employee's own shift (fallback to default)
       const empShiftStartM = emp.shift_start?.toString().substring(0,5) || defShift?.start_time?.toString().substring(0,5) || '10:00';
       const empShiftEndM   = emp.shift_end?.toString().substring(0,5)   || defShift?.end_time?.toString().substring(0,5)   || '17:00';
       const empGraceStM    = emp.grace_st ?? defShift?.grace_period_start ?? 0;
       const empGraceEdM    = emp.grace_ed ?? defShift?.grace_period_end   ?? 0;
+      const empWinterEnabledM = emp.shift_start ? emp.shift_winter_enabled : defShift?.winter_policy_enabled;
+      const empWinterPolicyM  = emp.shift_start ? emp.shift_winter_policy  : defShift?.winter_policy;
 
       // Compute per-employee working days (roster off days override system weekends)
       let empTotalWorkingDays = 0;
       const empWorkingDatesM = [];
       for (const { dateStr, dayKey } of allDatesMon) {
         const roster   = getEmpRosterM(dateStr);
-        const effOff   = roster?.offDays?.length > 0 ? roster.offDays : weekends;
-        const isEmpWkd = effOff.includes(dayKey);
+        const isEmpWkd = isRosterWeekend(roster, dayKey, weekends, defShift?.id);
         const phName3  = getHoliday(dateStr);
         if (!isEmpWkd && !phName3) {
           empWorkingDatesM.push({ dateStr, roster });
@@ -1379,7 +1733,13 @@ router.get('/monthly', async (req, res) => {
       }
 
       let presentDays=0, absentDays=0, leaveDays=0, lateCount=0, earlyCount=0;
-      let otMinutes=0, totalMins=0, lateMinsTotal=0, earlyMinsTotal=0;
+      let totalMins=0, lateMinsTotal=0, earlyMinsTotal=0;
+      // Missing Attendance — checked in but never checked out (single punch),
+      // so the day counts as Present above but has no real worked-hours data.
+      // Extra Shift — minutes actually worked beyond the day's own scheduled
+      // shift length, on top of whatever's separately approved as OT.
+      let missingAttendanceDays = 0, extraShiftMinutes = 0;
+      const otMinutes = monthlyApprovedOTSumMap.get(emp.id) || 0;
 
       for (const { dateStr, roster } of empWorkingDatesM) {
         if (empLeave.has(dateStr)) { leaveDays++; continue; }
@@ -1388,12 +1748,15 @@ router.get('/monthly', async (req, res) => {
         presentDays++;
         const inDt  = new Date(log.timeIn);
         const outDt = (log.timeOut && log.punches >= 2) ? new Date(log.timeOut) : null;
+        if (!outDt) missingAttendanceDays++;
 
-        // Effective shift: roster > employee > default
-        const shiftStart = roster?.shiftStart || empShiftStartM;
-        const shiftEnd   = roster?.shiftEnd   || empShiftEndM;
-        const graceSt    = roster?.graceSt    != null ? roster.graceSt    : empGraceStM;
-        const graceEd    = roster?.graceEd    != null ? roster.graceEd    : empGraceEdM;
+        // Effective shift: roster (already winter-adjusted) > employee > default,
+        // with the employee/default fallback winter-adjusted here per-date.
+        const fallbackShiftM = resolveWinterShift(dateStr, empShiftStartM, empShiftEndM, empGraceStM, empGraceEdM, empWinterEnabledM, empWinterPolicyM);
+        const shiftStart = roster?.shiftStart || fallbackShiftM.shiftStart;
+        const shiftEnd   = roster?.shiftEnd   || fallbackShiftM.shiftEnd;
+        const graceSt    = roster?.graceSt    != null ? roster.graceSt    : fallbackShiftM.graceStart;
+        const graceEd    = roster?.graceEd    != null ? roster.graceEd    : fallbackShiftM.graceEnd;
 
         const [sh, sm] = shiftStart.split(':').map(Number);
         const [eh, em] = shiftEnd.split(':').map(Number);
@@ -1406,13 +1769,10 @@ router.get('/monthly', async (req, res) => {
         if (outDt) {
           const earlyMins = Math.round((eDt - outDt) / 60000) - graceEd;
           if (earlyMins > 0) { earlyCount++; earlyMinsTotal += earlyMins; }
-          const otMinsRaw = Math.round((outDt - eDt) / 60000);
-          if (otMinsRaw > 0) {
-            const approvedMins = monthlyApprovedOTSet.get(`${emp.id}-${dateStr}`);
-            if (approvedMins !== undefined) otMinutes += approvedMins;
-          }
           const worked = Math.round((outDt - inDt) / 60000);
           if (worked > 0) totalMins += worked;
+          const scheduledMins = Math.round((eDt - sDt) / 60000);
+          if (worked > scheduledMins) extraShiftMinutes += (worked - scheduledMins);
         }
       }
 
@@ -1420,11 +1780,13 @@ router.get('/monthly', async (req, res) => {
       const punctualityScore = presentDays > 0 ? Math.round(((presentDays-lateCount)/presentDays)*100) : 0;
       return {
         id:emp.id, empCode:emp.empCode, fullName:emp.fullName,
-        department:emp.department||'—', position:emp.position||'—',
+        department:emp.department||'—', position:emp.position||'—', branch:emp.branch||'—',
+        eligibleForOt: !!emp.eligible_for_ot,
         totalWorkingDays: empTotalWorkingDays, presentDays, absentDays, leaveDays,
         lateCount, earlyCount, otMinutes, totalMins, lateMinsTotal, earlyMinsTotal,
+        missingAttendanceDays, extraShiftMinutes,
         attendanceRate, punctualityScore,
-        otFormatted     : otMinutes>0 ? toHHMM(otMinutes) : '—',
+        otFormatted     : (emp.eligible_for_ot && otMinutes>0) ? toHHMM(otMinutes) : '—',
         avgLateFormatted: lateCount>0 ? toHHMM(Math.round(lateMinsTotal/lateCount)) : '—',
       };
     });
@@ -1448,6 +1810,9 @@ router.get('/monthly', async (req, res) => {
         attendance  : rankOf('presentDays'),
       };
       stats = stats.filter(s => String(s.id) === String(scopeEmployeeId));
+    } else if (req.query.orgScope === '1') {
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids) stats = stats.filter(s => ids.includes(s.id));
     }
 
     const sortBy = (key, asc=false) => [...stats].sort((a,b)=>asc?a[key]-b[key]:b[key]-a[key]);
@@ -1480,7 +1845,7 @@ router.get('/monthly', async (req, res) => {
     if (totalOTMins>0) insights.push({ type:'positive', icon:'💪', text:`Total monthly OT: ${Math.round(totalOTMins/60)} hours. Top: ${mostOT[0]?.fullName||'—'} (${mostOT[0]?.otFormatted||'—'}).` });
 
     res.json({
-      period: { year, month, startDate, endDate, totalDays: lastDayOfMonth, totalWorkingDays, weekendDays, holidayDays },
+      period: { year, month, startDate, endDate, totalDays, totalWorkingDays, weekendDays, holidayDays },
       summary: { totalEmp, totalPresent, totalAbsent, totalLeave, totalLate, totalOTMins, avgAttRate, perfectAtt },
       rankings: { topPunctual, mostLate, mostEarlyOut, mostAbsent, mostOT, mostPresent },
       insights, allStats: stats,
@@ -1514,7 +1879,7 @@ router.get('/half-in-out', async (req, res) => {
 
   try {
     const [wkRes, publicHolidays] = await Promise.all([
-      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [endDate]),
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [endDate]),
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
@@ -1543,13 +1908,13 @@ router.get('/half-in-out', async (req, res) => {
                NULLIF(TRIM(COALESCE(p.short_name,'')), '')  AS "postShort",
                NULLIF(TRIM(COALESCE(dd.short_name,'')), '') AS "deptShort",
                NULLIF(TRIM(COALESCE(br.short_name,'')), '') AS "branchShort",
-               u.position, u.department, u.branch
+               u.position, u.department, u.branch, u.eligible_for_ot
         FROM   users u
         LEFT JOIN posts       p  ON p.name  = u.position
         LEFT JOIN departments dd ON dd.name = u.department
         LEFT JOIN branches    br ON br.name = u.branch
         WHERE  u.active = TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
-        ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
+        ORDER  BY br.ranking_order ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC
       `),
       pool.query(`
         SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type
@@ -1585,44 +1950,56 @@ router.get('/half-in-out', async (req, res) => {
       }
     }
 
-    const logsRes = await pool.query(`
-      SELECT employee_id, day,
-             MIN(time_in) AS time_in, MAX(time_out) AS time_out, SUM(cnt)::int AS punches
-      FROM (
-        SELECT employee_id, check_time::date AS day,
-               MIN(check_time) AS time_in, MAX(check_time) AS time_out, COUNT(*)::int AS cnt
-        FROM   zkteco_attendance_logs
-        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
-        GROUP  BY employee_id, check_time::date
-        UNION ALL
-        SELECT employee_id, date AS day,
-               (date + check_in)::timestamp::timestamptz AS time_in,
-               CASE WHEN check_out IS NOT NULL
-                    THEN (date + check_out)::timestamp::timestamptz
-                    ELSE NULL END AS time_out,
-               CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt
-        FROM   attendance_manual_postings
-        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL
-      ) src
-      GROUP BY employee_id, day
-    `, [startDate, endDate]);
-
     // Default shift for OT calculation
     const shiftRes = await pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`);
     const defShift  = shiftRes.rows[0];
     const shiftEnd  = defShift?.end_time?.toString().substring(0,5) || '17:00';
 
-    // Approved OT from overtime_approvals (manager-set, authoritative)
-    const approvedOTMap = await loadApprovedOTMap(startDate, endDate);
+    // Approved OT from overtime_approvals (manager-set, authoritative) — per
+    // day for the OT row, and a true period sum for the Total OT column.
+    const approvedOTMap    = await loadApprovedOTMap(startDate, endDate);
+    const approvedOTSumMap = await loadApprovedOTSumMap(startDate, endDate);
 
+    // â”€â”€ Attendance logs, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Widened by a day each side + roster map, so bucketPunchesByShiftDay can
+    // correctly roll an early-morning checkout back onto the shift-day it
+    // actually belongs to for a shift crossing midnight (a plain GROUP BY
+    // check_time::date pairs the wrong punches together in that case).
+    const rangeStartIO = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEndIO   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const [rawLogsResIO, rosterMapIO] = await Promise.all([
+      pool.query(`
+        SELECT employee_id, check_time FROM zkteco_attendance_logs
+        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+        UNION ALL
+        SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+        FROM   attendance_manual_postings
+        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+        UNION ALL
+        SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+        FROM   attendance_manual_postings
+        WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+      `, [rangeStartIO, rangeEndIO]),
+      loadRosterMap(rangeStartIO, rangeEndIO),
+    ]);
+
+    const rawByEmpIO = new Map();
+    for (const r of rawLogsResIO.rows) {
+      if (!rawByEmpIO.has(r.employee_id)) rawByEmpIO.set(r.employee_id, []);
+      rawByEmpIO.get(r.employee_id).push(r.check_time);
+    }
     const logsMap = {};
-    for (const r of logsRes.rows) {
-      if (!logsMap[r.employee_id]) logsMap[r.employee_id] = {};
-      logsMap[r.employee_id][toDateStr(r.day)] = {
-        timeIn:  r.time_in,
-        timeOut: r.punches >= 2 ? r.time_out : null,
-        punches: r.punches,
-      };
+    for (const emp of empRes.rows) {
+      const buckets = bucketPunchesByShiftDay(rawByEmpIO.get(emp.id) || [], emp.id, rosterMapIO, defShift);
+      logsMap[emp.id] = {};
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate) continue;
+        logsMap[emp.id][dateStr] = {
+          timeIn:  b.timeIn,
+          timeOut: b.punchCount >= 2 ? b.timeOut : null,
+          punches: b.punchCount,
+        };
+      }
     }
 
     const [seH, seM] = shiftEnd.split(':').map(Number);
@@ -1669,12 +2046,16 @@ router.get('/half-in-out', async (req, res) => {
         return sum + h*60 + m;
       }, 0);
 
+      const totalApprovedOTMins = approvedOTSumMap.get(emp.id) || 0;
       return {
         id: emp.id, empCode: emp.empCode, fullName: emp.fullName,
         postShort:   emp.postShort   || abbrev(emp.position)   || '—',
         deptShort:   emp.deptShort   || abbrev(emp.department) || '—',
         branchShort: emp.branchShort || abbrev(emp.branch)     || '—',
+        eligibleForOt: !!emp.eligible_for_ot,
         totalWorkedHrs: totalWorkedMins > 0 ? minsToHHMM(totalWorkedMins) : '—',
+        totalApprovedOTMins,
+        totalApprovedOTFormatted: (emp.eligible_for_ot && totalApprovedOTMins > 0) ? minsToHHMM(totalApprovedOTMins) : '—',
         days,
       };
     });
@@ -1705,13 +2086,16 @@ router.get('/half-late-early', async (req, res) => {
   }
 
   try {
-    const [wkRes, publicHolidays] = await Promise.all([
-      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [endDate]),
+    const [wkRes, publicHolidays, defShiftRes] = await Promise.all([
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [endDate]),
       loadPublicHolidays(),
+      pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
     const getHoliday = makeHolidayChecker(publicHolidays);
     const DOW        = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const defShift   = defShiftRes.rows[0];
+    const defShiftId = defShift?.id ?? null;
 
     // Build working dates list
     const workingDates = [];
@@ -1735,7 +2119,9 @@ router.get('/half-late-early', async (req, res) => {
              COALESCE(s.start_time,  ds.start_time)  AS "shiftStart",
              COALESCE(s.end_time,    ds.end_time)    AS "shiftEnd",
              COALESCE(s.grace_period_start, ds.grace_period_start, 0) AS "graceSt",
-             COALESCE(s.grace_period_end,   ds.grace_period_end,   0) AS "graceEd"
+             COALESCE(s.grace_period_end,   ds.grace_period_end,   0) AS "graceEd",
+             COALESCE(s.winter_policy_enabled, ds.winter_policy_enabled, FALSE) AS "winterEnabled",
+             COALESCE(s.winter_policy,         ds.winter_policy)                AS "winterPolicy"
       FROM   users u
       CROSS  JOIN LATERAL (SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1) ds
       LEFT JOIN shifts       s  ON s.code = u.shift
@@ -1743,44 +2129,51 @@ router.get('/half-late-early', async (req, res) => {
       LEFT JOIN departments  dd ON LOWER(TRIM(dd.name)) = LOWER(TRIM(u.department))
       LEFT JOIN branches     br ON LOWER(TRIM(br.name)) = LOWER(TRIM(u.branch))
       WHERE  u.active = $1 AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
-      ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
+      ORDER  BY br.ranking_order ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [req.query.active !== 'false']);
 
-    // Attendance logs for the period
-    const logsRes = await pool.query(`
-      SELECT employee_id, day,
-             MIN(time_in) AS time_in, MAX(time_out) AS time_out, SUM(cnt)::int AS punches
-      FROM (
-        SELECT employee_id, check_time::date AS day,
-               MIN(check_time) AS time_in, MAX(check_time) AS time_out, COUNT(*)::int AS cnt
-        FROM   zkteco_attendance_logs
-        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
-        GROUP  BY employee_id, check_time::date
-        UNION ALL
-        SELECT employee_id, date AS day,
-               (date + check_in)::timestamp::timestamptz AS time_in,
-               CASE WHEN check_out IS NOT NULL
-                    THEN (date + check_out)::timestamp::timestamptz
-                    ELSE NULL END AS time_out,
-               CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt
-        FROM   attendance_manual_postings
-        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL
-      ) src
-      GROUP BY employee_id, day
-    `, [startDate, endDate]);
+    // Load duty roster map for the period — widened a day each side so
+    // bucketPunchesByShiftDay (below) can resolve "yesterday"'s shift even
+    // at the range's start boundary.
+    const rangeStartLE = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEndLE   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const rosterMapLE = await loadRosterMap(rangeStartLE, rangeEndLE);
 
-    const logsMap = {};
-    for (const r of logsRes.rows) {
-      if (!logsMap[r.employee_id]) logsMap[r.employee_id] = {};
-      logsMap[r.employee_id][toDateStr(r.day)] = {
-        timeIn:  r.time_in,
-        timeOut: r.punches >= 2 ? r.time_out : null,
-        punches: r.punches,
-      };
+    // â”€â”€ Attendance logs for the period, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Raw punches only (widened range) — bucketPunchesByShiftDay aggregates
+    // per employee below instead of GROUP BY check_time::date, which pairs
+    // the wrong punches together for a shift crossing midnight.
+    const rawLogsResLE = await pool.query(`
+      SELECT employee_id, check_time FROM zkteco_attendance_logs
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      UNION ALL
+      SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      UNION ALL
+      SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+    `, [rangeStartLE, rangeEndLE]);
+
+    const rawByEmpLE = new Map();
+    for (const r of rawLogsResLE.rows) {
+      if (!rawByEmpLE.has(r.employee_id)) rawByEmpLE.set(r.employee_id, []);
+      rawByEmpLE.get(r.employee_id).push(r.check_time);
     }
-
-    // Load duty roster map for the period
-    const rosterMapLE = await loadRosterMap(startDate, endDate);
+    const logsMap = {};
+    for (const emp of empRes.rows) {
+      const buckets = bucketPunchesByShiftDay(rawByEmpLE.get(emp.id) || [], emp.id, rosterMapLE, defShift);
+      logsMap[emp.id] = {};
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate) continue;
+        logsMap[emp.id][dateStr] = {
+          timeIn:  b.timeIn,
+          timeOut: b.punchCount >= 2 ? b.timeOut : null,
+          punches: b.punchCount,
+        };
+      }
+    }
 
     // Build all calendar dates for per-employee working-day computation
     const allDatesLE = [];
@@ -1800,30 +2193,30 @@ router.get('/half-late-early', async (req, res) => {
     const records = [];
     for (const emp of employees) {
       const empLogs = logsMap[emp.id] || {};
-      const empRosterEntriesLE = rosterMapLE[emp.id] || [];
-      const getEmpRosterLE = (ds) =>
-        empRosterEntriesLE.find(e => e.dateFrom <= ds && e.dateTo >= ds) ||
-        empRosterEntriesLE.filter(e => e.dateTo < ds).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
-        null;
+      // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
+      const getEmpRosterLE = (ds) => getEffectiveRoster(rosterMapLE, emp.id, ds);
 
       const empShiftStartLE = emp.shiftStart?.toString().substring(0,5) || '10:00';
       const empShiftEndLE   = emp.shiftEnd?.toString().substring(0,5)   || '17:00';
       const empGraceStLE    = emp.graceSt || 0;
       const empGraceEdLE    = emp.graceEd || 0;
+      const empWinterEnabledLE = emp.winterEnabled;
+      const empWinterPolicyLE  = emp.winterPolicy;
 
       for (const { dateStr, dayKey } of allDatesLE) {
-        const roster   = getEmpRosterLE(dateStr);
-        const effOff   = roster?.offDays?.length > 0 ? roster.offDays : weekends;
-        if (effOff.includes(dayKey) || getHoliday(dateStr)) continue;  // off day / holiday — skip
+        const roster = getEmpRosterLE(dateStr);
+        if (isRosterWeekend(roster, dayKey, weekends, defShiftId) || getHoliday(dateStr)) continue;  // off day / holiday — skip
 
         const log = empLogs[dateStr];
         if (!log || !log.timeIn) continue;  // absent — skip
 
-        // Effective shift: roster > employee default
-        const shiftStart = roster?.shiftStart || empShiftStartLE;
-        const shiftEnd   = roster?.shiftEnd   || empShiftEndLE;
-        const graceSt    = roster?.graceSt    != null ? roster.graceSt    : empGraceStLE;
-        const graceEd    = roster?.graceEd    != null ? roster.graceEd    : empGraceEdLE;
+        // Effective shift: roster (already winter-adjusted) > employee default,
+        // with the employee/default fallback winter-adjusted here per-date.
+        const fallbackShiftLE = resolveWinterShift(dateStr, empShiftStartLE, empShiftEndLE, empGraceStLE, empGraceEdLE, empWinterEnabledLE, empWinterPolicyLE);
+        const shiftStart = roster?.shiftStart || fallbackShiftLE.shiftStart;
+        const shiftEnd   = roster?.shiftEnd   || fallbackShiftLE.shiftEnd;
+        const graceSt    = roster?.graceSt    != null ? roster.graceSt    : fallbackShiftLE.graceStart;
+        const graceEd    = roster?.graceEd    != null ? roster.graceEd    : fallbackShiftLE.graceEnd;
 
         const [dy, mo, dd] = dateStr.split('-').map(Number);
         const [sh, sm] = shiftStart.split(':').map(Number);
@@ -1894,13 +2287,26 @@ router.get('/present-absent', async (req, res) => {
   }
 
   try {
-    const [wkRes, publicHolidays] = await Promise.all([
-      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC LIMIT 1`, [endDate]),
+    const [wkRes, publicHolidays, defShiftRes] = await Promise.all([
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [endDate]),
       loadPublicHolidays(),
+      pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
     const getHoliday = makeHolidayChecker(publicHolidays);
     const DOW        = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const defShift   = defShiftRes.rows[0];
+    const defShiftId = defShift?.id ?? null;
+    // Per-employee roster override (Day Off/Night Off, custom off-days, shift
+    // rotation) — this endpoint used to only ever apply the company-wide
+    // weekend, so a staff member's own roster (e.g. off day moved from Sat to
+    // Sun, or a duty assigned across a date range) never showed up here even
+    // though it worked correctly on Daily/Monthly/Half-Monthly. Widened a day
+    // each side so bucketPunchesByShiftDay (below) can resolve "yesterday"'s
+    // shift even at the range's start boundary.
+    const rangeStartPA = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEndPA   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const rosterMapPA = await loadRosterMap(rangeStartPA, rangeEndPA);
 
     // Build dates by iterating startDate â†’ endDate
     const dates = [];
@@ -1922,7 +2328,7 @@ router.get('/present-absent', async (req, res) => {
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
              u.branch, u.department, u.position, u.grade, u.mode,
-             u.timing_type AS "timingType", u.shift,
+             u.timing_type AS "timingType", u.shift, u.eligible_for_ot,
              NULLIF(TRIM(COALESCE(p.short_name,'')),  '') AS "postShort",
              NULLIF(TRIM(COALESCE(dd.short_name,'')), '') AS "deptShort",
              NULLIF(TRIM(COALESCE(br.short_name,'')), '') AS "branchShort"
@@ -1931,35 +2337,44 @@ router.get('/present-absent', async (req, res) => {
       LEFT JOIN departments dd ON LOWER(TRIM(dd.name)) = LOWER(TRIM(u.department))
       LEFT JOIN branches    br ON LOWER(TRIM(br.name)) = LOWER(TRIM(u.branch))
       WHERE  u.active = $1 AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
-      ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
+      ORDER  BY br.ranking_order ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [activeParam]);
     const employees = isScoped
       ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
       : empRes.rows;
 
-    // Attendance logs
-    const logsRes = await pool.query(`
-      SELECT employee_id, day, SUM(cnt)::int AS punches, MIN(time_in) AS time_in
-      FROM (
-        SELECT employee_id, check_time::date AS day, COUNT(*) AS cnt,
-               MIN(check_time) AS time_in
-        FROM   zkteco_attendance_logs
-        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
-        GROUP  BY employee_id, check_time::date
-        UNION ALL
-        SELECT employee_id, date AS day,
-               CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt,
-               (date + check_in)::timestamp::timestamptz AS time_in
-        FROM   attendance_manual_postings
-        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL
-      ) src
-      GROUP BY employee_id, day
-    `, [startDate, endDate]);
+    // â”€â”€ Attendance logs, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Raw punches (widened range) — bucketPunchesByShiftDay aggregates per
+    // employee below instead of GROUP BY check_time::date, which could show
+    // a night-shift employee "Present" on both calendar dates a single
+    // overnight session happens to touch (or miss it on the day it actually
+    // belongs to), instead of once on the correct shift-day.
+    const rawLogsResPA = await pool.query(`
+      SELECT employee_id, check_time FROM zkteco_attendance_logs
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      UNION ALL
+      SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      UNION ALL
+      SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+    `, [rangeStartPA, rangeEndPA]);
 
+    const rawByEmpPA = new Map();
+    for (const r of rawLogsResPA.rows) {
+      if (!rawByEmpPA.has(r.employee_id)) rawByEmpPA.set(r.employee_id, []);
+      rawByEmpPA.get(r.employee_id).push(r.check_time);
+    }
     const logsMap = {};
-    for (const r of logsRes.rows) {
-      if (!logsMap[r.employee_id]) logsMap[r.employee_id] = {};
-      logsMap[r.employee_id][toDateStr(r.day)] = { hasIn: !!r.time_in, punches: parseInt(r.punches, 10) || 0 };
+    for (const emp of empRes.rows) {
+      const buckets = bucketPunchesByShiftDay(rawByEmpPA.get(emp.id) || [], emp.id, rosterMapPA, defShift);
+      logsMap[emp.id] = {};
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate) continue;
+        logsMap[emp.id][dateStr] = { hasIn: !!b.timeIn, punches: b.punchCount };
+      }
     }
 
     // Approved leaves (include half_day flag)
@@ -2000,6 +2415,9 @@ router.get('/present-absent', async (req, res) => {
       }
     }
 
+    // Approved OT total per employee for the period — "Sum Total OT" column
+    const approvedOTSumMapPA = await loadApprovedOTSumMap(startDate, endDate);
+
     // Build per-employee day matrix
     const employees_out = employees.map(emp => {
       const empLogs      = logsMap[emp.id]      || {};
@@ -2010,7 +2428,7 @@ router.get('/present-absent', async (req, res) => {
       let totalP=0, totalAB=0, totalL=0, totalOV=0, totalPH=0, totalH=0;
       const days = {};
 
-      for (const { date, isWeekend, isHoliday } of dates) {
+      for (const { date, dayKey, isHoliday } of dates) {
         const log      = empLogs[date];
         const leave    = empLeave.has(date);
         const halfLeave= empHalfLeave.has(date);
@@ -2018,7 +2436,14 @@ router.get('/present-absent', async (req, res) => {
         const punches  = log?.punches || 0;
         let st;
 
-        if (isWeekend)                   { st='H';  totalH++;  }
+        // Roster override: Day Off/Night Off shift, or a custom recurring
+        // off-day, replaces the company-wide weekend for this employee/date —
+        // but only when this employee is actually on a non-default shift; see
+        // isRosterWeekend().
+        const roster       = getEffectiveRoster(rosterMapPA, emp.id, date);
+        const empIsWeekend = isRosterWeekend(roster, dayKey, weekends, defShiftId);
+
+        if (empIsWeekend)                { st='H';  totalH++;  }
         else if (leave)                  { st='L';  totalL++;  }
         else if (halfLeave)              { st='LH'; totalL++;  }  // Half-day leave
         else if (log?.hasIn && isHoliday){ st='PP'; totalP++;  }  // Present on Public Holiday
@@ -2031,6 +2456,7 @@ router.get('/present-absent', async (req, res) => {
         days[date] = st;
       }
 
+      const otApprovedMins = approvedOTSumMapPA.get(emp.id) || 0;
       return {
         id: emp.id, empCode: emp.empCode, fullName: emp.fullName,
         branch: emp.branch || '', department: emp.department || '',
@@ -2040,6 +2466,9 @@ router.get('/present-absent', async (req, res) => {
         postShort:   emp.postShort   || abbrev(emp.position)   || '—',
         deptShort:   emp.deptShort   || abbrev(emp.department) || '—',
         branchShort: emp.branchShort || abbrev(emp.branch)     || '—',
+        eligibleForOt: !!emp.eligible_for_ot,
+        otApprovedMins,
+        otApprovedFormatted: (emp.eligible_for_ot && otApprovedMins > 0) ? minsToHHMM(otApprovedMins) : '—',
         days, totalP, totalAB, totalL, totalOV, totalPH, totalH,
       };
     });
@@ -2051,6 +2480,134 @@ router.get('/present-absent', async (req, res) => {
     });
   } catch (err) {
     logError('[attendance/present-absent]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// â”€â”€ GET /trend â€” daily present/absent/leave counts over a rolling window,
+// for the Dashboard's trend sparkline. Deliberately modeled on /present-absent's
+// range-query pattern (a handful of BETWEEN-bounded queries regardless of range
+// length) rather than looping computeDailyAttendance() per day, which would mean
+// up to 5 sequential DB round-trips PER day (incl. a per-employee LATERAL join) â€”
+// too expensive to run 7-30 times in one request.
+router.get('/trend', async (req, res) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 7));
+  const endDate = (req.query.end || new Date().toISOString().split('T')[0]).trim();
+
+  const endD   = new Date(endDate + 'T00:00:00');
+  const startD = new Date(endD);
+  startD.setDate(startD.getDate() - (days - 1));
+  const startDate = `${startD.getFullYear()}-${pad(startD.getMonth() + 1)}-${pad(startD.getDate())}`;
+
+  try {
+    const [wkRes, publicHolidays] = await Promise.all([
+      pool.query(`SELECT weekends FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date DESC, id DESC LIMIT 1`, [endDate]),
+      loadPublicHolidays(),
+    ]);
+    const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
+    const getHoliday = makeHolidayChecker(publicHolidays);
+    const DOW        = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    // Note: unlike computeDailyAttendance(), this uses only company-wide
+    // weekend_history (no per-employee duty-roster off-day override) â€” an
+    // acceptable simplification for a sparkline, not for authoritative reports.
+    const dates = [];
+    let cur = new Date(startDate + 'T00:00:00');
+    const lastD = new Date(endDate + 'T00:00:00');
+    while (cur <= lastD) {
+      const dayKey  = DOW[cur.getDay()];
+      const dateStr = `${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`;
+      dates.push({ date: dateStr, isWeekend: weekends.includes(dayKey), isHoliday: !!getHoliday(dateStr) });
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
+    const empRes = await pool.query(
+      `SELECT u.id FROM users u WHERE u.active = true AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))`
+    );
+    let employeeIds = empRes.rows.map(r => r.id);
+    if (isScoped) {
+      employeeIds = employeeIds.filter(id => String(id) === String(scopeEmployeeId));
+    } else if (req.query.orgScope === '1') {
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids) employeeIds = employeeIds.filter(id => ids.includes(id));
+    }
+    const idSet = new Set(employeeIds.map(String));
+
+    // Raw punches (widened range) bucketed by shift-day per employee — a
+    // plain GROUP BY check_time::date could show a night-shift employee
+    // present on the wrong calendar date (or miss/double-count them across
+    // the two dates one overnight session touches). Still keeps this
+    // endpoint's own documented simplification of company-wide-only
+    // weekend/holiday detection above — only the punch grouping is fixed.
+    const rangeStartTr = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEndTr   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const [rawLogsResTr, rosterMapTr, defShiftResTr] = await Promise.all([
+      pool.query(`
+        SELECT employee_id, check_time FROM zkteco_attendance_logs
+        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+        UNION ALL
+        SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+        FROM   attendance_manual_postings
+        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+        UNION ALL
+        SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+        FROM   attendance_manual_postings
+        WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+      `, [rangeStartTr, rangeEndTr]),
+      loadRosterMap(rangeStartTr, rangeEndTr),
+      pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
+    ]);
+    const defShiftTr = defShiftResTr.rows[0];
+
+    const rawByEmpTr = new Map();
+    for (const r of rawLogsResTr.rows) {
+      if (!rawByEmpTr.has(r.employee_id)) rawByEmpTr.set(r.employee_id, []);
+      rawByEmpTr.get(r.employee_id).push(r.check_time);
+    }
+    const presentMap = {}; // dateStr -> Set of employeeIds with a punch that shift-day
+    for (const empId of employeeIds) {
+      const buckets = bucketPunchesByShiftDay(rawByEmpTr.get(empId) || [], empId, rosterMapTr, defShiftTr);
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate || !b.timeIn) continue;
+        if (!presentMap[dateStr]) presentMap[dateStr] = new Set();
+        presentMap[dateStr].add(String(empId));
+      }
+    }
+
+    const leavesRes = await pool.query(`
+      SELECT l.employee_id, l.from_date, l.to_date
+      FROM   leaves l WHERE l.status='approved' AND l.from_date <= $2 AND l.to_date >= $1
+    `, [startDate, endDate]);
+    const leaveMap = {}; // dateStr -> Set of employeeIds on approved leave
+    for (const l of leavesRes.rows) {
+      const from = new Date(l.from_date), to = new Date(l.to_date);
+      for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+        const ds = d.toISOString().split('T')[0];
+        if (ds >= startDate && ds <= endDate) {
+          if (!leaveMap[ds]) leaveMap[ds] = new Set();
+          leaveMap[ds].add(String(l.employee_id));
+        }
+      }
+    }
+
+    const out = dates.map(({ date, isWeekend, isHoliday }) => {
+      if (isWeekend || isHoliday) return { date, present: 0, absent: 0, leave: 0 };
+      const presentSet = presentMap[date] || new Set();
+      const leaveSet    = leaveMap[date]  || new Set();
+      let present = 0, absent = 0, leave = 0;
+      for (const id of idSet) {
+        if (presentSet.has(id))    present++;
+        else if (leaveSet.has(id)) leave++;
+        else                       absent++;
+      }
+      return { date, present, absent, leave };
+    });
+
+    res.json({ days: out });
+  } catch (err) {
+    logError('[Attendance/trend]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2090,9 +2647,10 @@ router.get('/yearly-analytics', async (req, res) => {
   try {
     const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
     const [wkRows, publicHolidays, empRows, shiftRow] = await Promise.all([
-      pool.query(`SELECT weekends, effective_date FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date ASC`, [endDate]),
+      pool.query(`SELECT weekends, effective_date FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date ASC, id ASC`, [endDate]),
       loadPublicHolidays(),
-      pool.query(`SELECT id, employee_id AS "empCode", full_name AS "fullName", department, position, shift, join_date AS "joinDate" FROM users WHERE active=TRUE AND (is_system IS NOT TRUE AND role NOT IN ('superAdmin')) ORDER BY ranking_order ASC NULLS LAST, full_name ASC`),
+      pool.query(`SELECT id, employee_id AS "empCode", full_name AS "fullName", department, position, shift, join_date AS "joinDate" FROM users WHERE active=TRUE AND (is_system IS NOT TRUE AND role NOT IN ('superAdmin'))
+        ORDER BY (SELECT b.ranking_order FROM branches b WHERE b.name = branch) ASC NULLS LAST, ranking_order ASC NULLS LAST, full_name ASC`),
       pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
 
@@ -2114,7 +2672,14 @@ router.get('/yearly-analytics', async (req, res) => {
       return wds;
     };
 
-    // All working days in the year (weekends + public holidays excluded)
+    // All days in the year, unfiltered — kept alongside the company-wide
+    // workingDays list below so each employee's roster (Day Off/Night Off,
+    // or a custom recurring off-day) can correctly turn a normally-working
+    // day into non-working FOR THEM, or vice versa, instead of every
+    // employee being stuck with the same company-wide weekend regardless of
+    // what's actually on their roster.
+    const allYearDates = [];
+    // All working days in the year (weekends + public holidays excluded) — company-wide default
     const workingDays = [];
     let yearTotalDays = 0, yearWeekendDays = 0, yearHolidayDays = 0;
     const cur = new Date(adYear, 0, 1);
@@ -2122,43 +2687,53 @@ router.get('/yearly-analytics', async (req, res) => {
     while (cur <= end) {
       const ds  = `${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`;
       const dow = DOW_KEYS[cur.getDay()];
+      const isWkd = getWeekends(ds).includes(dow);
+      const holidayName = getHoliday(ds);
       yearTotalDays++;
-      if (getWeekends(ds).includes(dow)) yearWeekendDays++;
-      else if (getHoliday(ds))           yearHolidayDays++;
+      if (isWkd) yearWeekendDays++;
+      else if (holidayName) yearHolidayDays++;
       else workingDays.push(ds);
+      allYearDates.push({ ds, dow, isHoliday: !!holidayName });
       cur.setDate(cur.getDate()+1);
     }
     // globalWorkingDays used only for the year total chip in the summary
     const globalWorkingDays = workingDays.length;
+    // Widened a day each side — bucketPunchesByShiftDay needs "yesterday"'s
+    // shift resolvable even for Jan 1st.
+    const rangeStartYr = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEndYr   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const rosterMapYr = await loadRosterMap(rangeStartYr, rangeEndYr);
 
-    // Fetch entire year's punch logs in one query
-    const logsRes = await pool.query(`
-      SELECT employee_id, day,
-             MIN(time_in) AS time_in, MAX(time_out) AS time_out, SUM(cnt)::int AS punches
-      FROM (
-        SELECT employee_id, check_time::date AS day,
-               MIN(check_time) AS time_in, MAX(check_time) AS time_out, COUNT(*)::int AS cnt
-        FROM zkteco_attendance_logs
-        WHERE check_time >= $1 AND check_time <= ($2::date + interval '1 day')
-          AND employee_id IS NOT NULL
-        GROUP BY employee_id, check_time::date
-        UNION ALL
-        SELECT employee_id, date AS day,
-               (date + check_in)::timestamp::timestamptz AS time_in,
-               CASE WHEN check_out IS NOT NULL
-                    THEN (date + check_out)::timestamp::timestamptz
-                    ELSE NULL END AS time_out,
-               CASE WHEN check_out IS NOT NULL THEN 2 ELSE 1 END AS cnt
-        FROM attendance_manual_postings
-        WHERE date BETWEEN $1::date AND $2::date AND check_in IS NOT NULL
-      ) src
-      GROUP BY employee_id, day
-    `, [startDate, endDate]);
+    // â”€â”€ Fetch entire year's raw punches, shift-day bucketed per employee â”€â”€
+    // (widened range) — bucketPunchesByShiftDay aggregates below instead of
+    // GROUP BY check_time::date, which pairs the wrong punches together for
+    // a shift crossing midnight.
+    const rawLogsResYr = await pool.query(`
+      SELECT employee_id, check_time FROM zkteco_attendance_logs
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      UNION ALL
+      SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      UNION ALL
+      SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+    `, [rangeStartYr, rangeEndYr]);
 
+    const rawByEmpYr = new Map();
+    for (const r of rawLogsResYr.rows) {
+      if (!rawByEmpYr.has(r.employee_id)) rawByEmpYr.set(r.employee_id, []);
+      rawByEmpYr.get(r.employee_id).push(r.check_time);
+    }
     const logsMap = {};
-    for (const r of logsRes.rows) {
-      if (!logsMap[r.employee_id]) logsMap[r.employee_id] = {};
-      logsMap[r.employee_id][toDateStr(r.day)] = { timeIn: r.time_in, timeOut: r.time_out, punches: r.punches };
+    for (const emp of employees) {
+      const buckets = bucketPunchesByShiftDay(rawByEmpYr.get(emp.id) || [], emp.id, rosterMapYr, defShift);
+      logsMap[emp.id] = {};
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate) continue;
+        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount };
+      }
     }
 
     // Fetch all approved leaves for the year
@@ -2192,6 +2767,8 @@ router.get('/yearly-analytics', async (req, res) => {
     const shiftEnd   = defShift?.end_time?.toString().substring(0,5)   || '17:00';
     const graceSt    = defShift?.grace_period_start || 0;
     const graceEd    = defShift?.grace_period_end   || 0;
+    const defWinterEnabled = defShift?.winter_policy_enabled;
+    const defWinterPolicy  = defShift?.winter_policy;
 
     // Per-month breakdown for trend chart
     const monthlyTrend = Array.from({ length: 12 }, (_, mi) => ({
@@ -2210,8 +2787,16 @@ router.get('/yearly-analytics', async (req, res) => {
         : startDate;
       const empStartDate = rawJoin > startDate ? rawJoin : startDate;
 
-      // Only count working days on/after the employee's join date
-      const empWorkingDays   = workingDays.filter(d => d >= empStartDate);
+      // Only count working days on/after the employee's join date, with this
+      // employee's own roster (if any) overriding the company-wide weekend
+      // for each date — same override every other roster-aware report applies.
+      const empWorkingDays = allYearDates
+        .filter(d => d.ds >= empStartDate && !d.isHoliday)
+        .filter(d => {
+          const roster = getEffectiveRoster(rosterMapYr, emp.id, d.ds);
+          return !isRosterWeekend(roster, d.dow, getWeekends(d.ds), defShift?.id);
+        })
+        .map(d => d.ds);
       const empTotalWorkDays = empWorkingDays.length;
 
       let presentDays=0, absentDays=0, leaveDays=0;
@@ -2237,18 +2822,19 @@ router.get('/yearly-analytics', async (req, res) => {
 
         const inDt  = new Date(log.timeIn);
         const outDt = (log.timeOut && log.punches >= 2) ? new Date(log.timeOut) : null;
-        const [sh, sm] = shiftStart.split(':').map(Number);
-        const [eh, em] = shiftEnd.split(':').map(Number);
+        const fallbackShiftYr = resolveWinterShift(ds, shiftStart, shiftEnd, graceSt, graceEd, defWinterEnabled, defWinterPolicy);
+        const [sh, sm] = fallbackShiftYr.shiftStart.split(':').map(Number);
+        const [eh, em] = fallbackShiftYr.shiftEnd.split(':').map(Number);
         const [y2, mo2, dd2] = ds.split('-').map(Number);
         const sDt = shiftToUTC(y2, mo2, dd2, sh, sm);
         const eDt = shiftToUTC(y2, mo2, dd2, eh, em);
         if (eDt <= sDt) eDt.setUTCDate(eDt.getUTCDate()+1);
 
-        const lateMins = Math.round((inDt - sDt) / 60000) - graceSt;
+        const lateMins = Math.round((inDt - sDt) / 60000) - fallbackShiftYr.graceStart;
         if (lateMins > 0) { lateCount++; lateMinsTotal += lateMins; monthlyTrend[mi].late++; }
 
         if (outDt) {
-          const earlyMins = Math.round((eDt - outDt) / 60000) - graceEd;
+          const earlyMins = Math.round((eDt - outDt) / 60000) - fallbackShiftYr.graceEnd;
           if (earlyMins > 0) { earlyCount++; earlyMinsTotal += earlyMins; }
           const ot = Math.round((outDt - eDt) / 60000);
           if (ot > 0) {
@@ -2407,7 +2993,8 @@ router.get('/manual-postings', async (req, res) => {
     const { rows } = await pool.query(`
       SELECT
         mp.id, mp.date, mp.check_in, mp.check_out, mp.remark,
-        mp.created_at, mp.updated_at,
+        mp.created_at, mp.updated_at, mp.status, mp.comment,
+        mp.applied_date AS "appliedDate", mp.approved_date AS "approvedDate",
         mp.employee_id       AS "employeeId",
         mp.recommended_by    AS "recommendedById",
         mp.approved_by       AS "approvedById",
@@ -2436,25 +3023,80 @@ router.get('/manual-postings', async (req, res) => {
   }
 });
 
+const isManualPostingAdmin = (req) => ['admin', 'superAdmin'].includes(req.user?.role);
+
 router.post('/manual-postings', async (req, res) => {
-  const { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy } = req.body;
+  let { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy } = req.body;
+  const isAdmin = isManualPostingAdmin(req);
+
+  // Self-service "Inform Late In/Early Out" (FAB, staff role) always posts
+  // about the caller's own record, never anyone else's — a raw API call
+  // can't override this by sending a different employeeId. Admin's own
+  // manual-postings tool (ManualPostings.jsx grid) is unaffected — it can
+  // still target any employee and lands as an immediately-approved record,
+  // exactly as it always has.
+  if (!isAdmin) employeeId = req.user?.id;
   if (!employeeId || !date) return res.status(400).json({ error: 'Employee and date are required' });
+
+  // Mirrors leaves.js's POST: pending status leaves approved_by/approved_date
+  // null — those are only ever set by an actual /approve or /reject call,
+  // never at submission time. recommendedBy is passed straight through purely
+  // to know who to notify; it isn't otherwise validated or persisted as an
+  // "assignment" beyond that (same as the existing Leave/Office Visit flow).
+  const status = isAdmin ? 'approved' : 'pending';
+  const finalApprovedBy = status === 'approved' ? (approvedBy || null) : null;
+
   try {
     const { rows } = await pool.query(`
       INSERT INTO attendance_manual_postings
-        (employee_id, date, check_in, check_out, remark, recommended_by, approved_by, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        (employee_id, date, check_in, check_out, remark, recommended_by, approved_by, created_by, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING *
     `, [employeeId, date, checkIn || null, checkOut || null, remark || null,
-        recommendedBy || null, approvedBy || null, req.user?.id || null]);
+        recommendedBy || null, finalApprovedBy, req.user?.id || null, status]);
+
+    // Best-effort notification — never fail the request over email/message issues.
+    try {
+      const staffRow = (await pool.query('SELECT full_name FROM users WHERE id=$1', [employeeId])).rows[0];
+      const notifyIds = [recommendedBy, approvedBy].filter(Boolean).map(Number);
+      if (notifyIds.length) {
+        const { rows: recipients } = await pool.query(
+          `SELECT id, email, full_name FROM users WHERE id = ANY($1::int[])`, [notifyIds]
+        );
+        for (const r of recipients) {
+          if (r.email) {
+            await sendManualPostingApplication({
+              to: r.email, fullName: staffRow?.full_name || '',
+              date, checkIn, checkOut, remark: remark || '',
+            });
+          }
+        }
+        await notifyUsers({
+          senderId: req.user?.id || employeeId,
+          recipientIds: notifyIds,
+          subject: `Manual Attendance Entry: ${staffRow?.full_name || ''}`,
+          body: `A manual attendance entry was posted for ${staffRow?.full_name || 'a staff member'} on ${date}.`,
+        });
+      }
+    } catch (notifyErr) {
+      logError('[manual-postings POST notify]', notifyErr);
+    }
+
     res.status(201).json(rows[0]);
   } catch (e) {
+    if (e.code === '23505') {
+      return res.status(400).json({ error: 'A manual entry already exists for this staff member on this date — edit the existing one instead.' });
+    }
     logError('[manual-postings POST]', e);
     res.status(500).json({ error: e.message });
   }
 });
 
-router.put('/manual-postings/:id', async (req, res) => {
+// Editing an existing entry (as opposed to applying for a new one) is an
+// admin-only action today (ManualPostings.jsx's own grid already gates its
+// edit UI on canManageSystem) — enforced here too so a raw API call can't
+// bypass that and rewrite someone else's already-posted attendance.
+router.put('/manual-postings/:id', requireRole('admin', 'superAdmin'), async (req, res) => {
   const { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy } = req.body;
   try {
     const { rows } = await pool.query(`
@@ -2468,6 +3110,38 @@ router.put('/manual-postings/:id', async (req, res) => {
     res.json(rows[0]);
   } catch (e) {
     logError('[manual-postings PUT]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/manual-postings/:id/approve', async (req, res) => {
+  const { approvedBy, comment } = req.body;
+  try {
+    const { rows } = await pool.query(`
+      UPDATE attendance_manual_postings SET status='approved', approved_by=$1, approved_date=CURRENT_DATE, comment=$2, updated_at=NOW()
+      WHERE id=$3 RETURNING *
+    `, [approvedBy || null, comment || '', req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    logAudit({ actor: req.user, action: 'approve', entity: 'manual-posting', entityId: req.params.id, before: null, after: rows[0] });
+    res.json(rows[0]);
+  } catch (e) {
+    logError('[manual-postings approve]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/manual-postings/:id/reject', async (req, res) => {
+  const { approvedBy, comment } = req.body;
+  try {
+    const { rows } = await pool.query(`
+      UPDATE attendance_manual_postings SET status='rejected', approved_by=$1, approved_date=CURRENT_DATE, comment=$2, updated_at=NOW()
+      WHERE id=$3 RETURNING *
+    `, [approvedBy || null, comment || '', req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    logAudit({ actor: req.user, action: 'reject', entity: 'manual-posting', entityId: req.params.id, before: null, after: rows[0] });
+    res.json(rows[0]);
+  } catch (e) {
+    logError('[manual-postings reject]', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2509,7 +3183,12 @@ router.get('/missing-requests', async (req, res) => {
       WHERE  ($1::boolean IS FALSE) OR (mr.employee_id = $2 OR mr.recommended_by = $2 OR mr.approved_by = $2)
       ORDER  BY mr.created_at DESC
     `, [isScoped, scopeEmployeeId]);
-    res.json(rows.map(toMissingRequest));
+    let requests = rows.map(toMissingRequest);
+    if (!isScoped && req.query.orgScope === '1') {
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids) requests = requests.filter(r => ids.includes(r.employeeId));
+    }
+    res.json(requests);
   } catch (e) {
     logError('[missing-requests GET]', e);
     res.status(500).json({ error: e.message });
@@ -2615,7 +3294,7 @@ router.patch('/missing-requests/:id/approve', async (req, res) => {
       ON CONFLICT (employee_id, date) DO UPDATE SET
         check_in = EXCLUDED.check_in, check_out = EXCLUDED.check_out,
         remark = EXCLUDED.remark, recommended_by = EXCLUDED.recommended_by,
-        approved_by = EXCLUDED.approved_by, updated_at = NOW()
+        approved_by = EXCLUDED.approved_by, status = 'approved', updated_at = NOW()
     `, [existing.employee_id, existing.date, existing.check_in, existing.check_out,
         `Missing attendance request: ${existing.reason}`,
         existing.recommended_by, req.user.id, existing.employee_id]);
@@ -2667,6 +3346,38 @@ router.delete('/missing-requests/:id', async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     logError('[missing-requests DELETE]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Relink attendance logs to staff ─────────────────────────────────────────
+// A punch's employee_id is normally resolved once, at insert time, by
+// matching pin → users.device_id (see saveAttlogs() in zktecoService.js).
+// If a bulk import brings in historical logs before staff's Device ID is
+// set, or a device_id gets assigned/corrected after logs already streamed
+// in, those rows stay employee_id=NULL forever — computeDailyAttendance()
+// (and every other report) explicitly excludes NULL employee_id rows, so a
+// staff member with real punches on file can still show as Absent. This
+// re-runs that same match against CURRENT users.device_id values, so fixing
+// or backfilling a Device ID retroactively repairs every past report too.
+router.post('/relink-logs', requireRole('admin', 'superAdmin'), async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(`
+      UPDATE zkteco_attendance_logs l
+      SET employee_id = u.id
+      FROM users u
+      WHERE l.employee_id IS NULL AND u.device_id = l.pin
+    `);
+    const { rows: stillUnmatched } = await pool.query(`
+      SELECT pin, COUNT(*)::int AS count
+      FROM zkteco_attendance_logs
+      WHERE employee_id IS NULL
+      GROUP BY pin
+      ORDER BY count DESC
+    `);
+    res.json({ relinked: rowCount, stillUnmatched });
+  } catch (e) {
+    logError('[attendance/relink-logs]', e);
     res.status(500).json({ error: e.message });
   }
 });

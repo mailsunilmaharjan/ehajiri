@@ -3,11 +3,13 @@ import { createPortal } from 'react-dom';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import { useData }     from '../../context/DataContext.jsx';
 import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
 
 const pad2   = (n) => String(Math.round(Math.abs(n))).padStart(2, '0');
 const toHHMM = (m) => `${pad2(Math.floor(Math.abs(m) / 60))}:${pad2(Math.abs(m) % 60)}`;
@@ -37,11 +39,11 @@ const StatusBadge = ({ status }) => {
 /* Signed OT cell: green for +, red for – */
 const SignedOT = ({ value, formatted }) => {
   if (!formatted || formatted === '+00:00' || formatted === '-00:00') {
-    return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
+    return <span style={{ color:'#d1d5db' }}>—</span>;
   }
   const pos = value >= 0;
   return (
-    <span style={{ fontSize:13, color: pos ? '#059669' : '#dc2626' }}>
+    <span style={{ color: pos ? '#059669' : '#dc2626' }}>
       {formatted}
     </span>
   );
@@ -90,12 +92,26 @@ const OvertimePage = () => {
   const { currentUser, isManager, canApprove } = useAuth();
   const { language }  = useLanguage();
   const { settings, updateSettings } = useSettings();
+  const { getEmployeeName } = useData();
   const fd = useDateFormat();
+
+  /* Recommender/Approver configured per staff member (Staff → Reco/Approval
+     setup) — same source + same "0 configured / exactly 1 / pick from a
+     dropdown when there's more than 1" pattern LeaveApplyModal/LeaveVisitPage
+     already use for the normal Leave flow, reused here for consistency. */
+  const recoConfig = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
+  }, []);
+  const getRecoApprovalIds = (empId) => {
+    const cfg = recoConfig[String(empId)] || {};
+    const toIds = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map(String);
+    return { reco: toIds(cfg.reco), approval: toIds(cfg.approval) };
+  };
   const L  = (np, en) => language === 'np' ? np : en;
   const useNP = settings.defaultCalendar === 'np';
 
-  const now    = new Date();
-  const today  = now.toISOString().split('T')[0];
+  const now    = getNepalNow();
+  const today  = getNepalTodayISO();
   const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
 
   const [startDate,  setStartDate]  = useState(firstOfMonth);
@@ -111,6 +127,17 @@ const OvertimePage = () => {
 
   /* Manager-edited Approved OT values: key → minutes */
   const [editedOT, setEditedOT] = useState({});
+  /* Grant Leave modal — combines what used to be two separate dialogs
+     ("Select the Leave" then a generic "Approve Overtime" confirmation)
+     into one: pick the leave type + days right where all the OT context
+     (time in/out, calculated OT, recommender/approver) is already shown,
+     and submit directly — no separate staged/confirm step. */
+  const [leaveModal,  setLeaveModal]  = useState(null); // { rec } while the Grant Leave modal is open
+  const [leaveFormType, setLeaveFormType] = useState('');
+  const [leaveFormDays, setLeaveFormDays] = useState('1');
+  const [leaveComment,  setLeaveComment]  = useState('');
+  const [leaveReco,     setLeaveReco]     = useState(''); // selected Recommendator employee id
+  const [leaveApproval, setLeaveApproval] = useState(''); // selected Approval Authority employee id
 
   const [showAdvSearchModal, setShowAdvSearchModal] = useState(false);
   const [advFilters, setAdvFilters] = useState({ departments:[], branches:[], positions:[], grades:[], genders:[], modes:[], timingTypes:[] });
@@ -177,13 +204,6 @@ const OvertimePage = () => {
     return rs;
   }, [records, filterStatus, advFilters]);
 
-  const counts = useMemo(() => ({
-    all     : records.length,
-    pending : records.filter(r => r.status === 'pending').length,
-    approved: records.filter(r => r.status === 'approved').length,
-    rejected: records.filter(r => r.status === 'rejected').length,
-  }), [records]);
-
   const totalApprovedOT = useMemo(() =>
     records.filter(r => r.status === 'approved')
            .reduce((s, r) => s + (r.approvedOTMins || 0), 0),
@@ -203,8 +223,12 @@ const OvertimePage = () => {
 
   const [dayTypeFilter, setDayTypeFilter] = useState(''); // '' | 'weekend' | 'holiday'
 
-  /* ── Apply OT settings to filtered records for display ── */
-  const displayRecords = useMemo(() => {
+  /* ── Apply OT settings (weekend/holiday leave-vs-ot rule, weekday min/max
+     thresholds) to a list of raw records — shared by displayRecords (the
+     grid, scoped to the current status/advFilters) and otAdjustedRecords
+     above (tab-badge counts, scoped to nothing) so both agree on which
+     records actually qualify. ── */
+  const applyOtSettings = useCallback((list) => {
     const cfg      = otSettings;
     const wkDays   = settings.defaultWeekends || ['Sat'];
     /* Map of date → holiday name for tooltip */
@@ -214,90 +238,134 @@ const OvertimePage = () => {
         h.name || h.title || 'Public Holiday',
       ])
     );
-    const parseHM  = str => parseHHMM(str);
+    const parseHM = str => parseHHMM(str);
+    const maxOut  = parseHM(cfg.maxOTAfterOut);
+    const maxIn   = parseHM(cfg.maxOTBeforeIn);
+    const minOut  = parseHM(cfg.minOTAfterOut);
+    const minIn   = parseHM(cfg.minOTBeforeIn);
 
     const result = [];
-    for (const r of filtered) {
-      const isWeekend    = wkDays.includes(r.day);
+    for (const r of list) {
+      // A roster-assigned Day Off/Night Off (r.rosterOffType, from the Duty
+      // Roster — a personal rest day, distinct from the company-wide weekend
+      // pattern) counts as a weekend day too, same OT rules and all.
+      const isWeekend    = wkDays.includes(r.day) || !!r.rosterOffType;
       const holidayName  = holMap.get(r.date);
       const isHoliday    = !!holidayName;
+      const isSpecial    = isWeekend || isHoliday;
 
-      if (isWeekend || isHoliday) {
-        const rule = isHoliday ? cfg.holidayPresent : cfg.weekendPresent;
-        if (rule === 'leave') continue; // skip — next day leave
+      // "Provide Next Day Leave" rows used to be dropped here entirely
+      // (`continue`d out) — now they're kept and rendered with a
+      // "Select the Leave" action instead of a time-based Approved OT box
+      // (see the Approved OT column render + Grant Leave modal), so a
+      // manager can actually act on them instead of the record just
+      // vanishing from the grid.
+      const isLeaveMode = isSpecial && (isHoliday ? cfg.holidayPresent : cfg.weekendPresent) === 'leave';
+      // A weekend/holiday has no assigned shift at all, so "Don't calculate shift —
+      // show only Working Hours as OT" means the FULL punch-in-to-punch-out
+      // span counts as OT — not just the sliver outside the default shift's
+      // window, which is what the shift-relative net below computes and is
+      // often ~0 when someone simply works their usual hours on a day off.
+      const totalWorkedMins = Math.max(0, parseHHMM(r.timeOut) - parseHHMM(r.timeIn));
 
-        /* Total working hours = OT (no shift comparison for weekend/holiday) */
-        const inMins   = parseHM(r.timeIn);
-        const outMins  = parseHM(r.timeOut);
-        const workMins = outMins > inMins ? outMins - inMins : 0;
+      /* OT in IN and OT in OUT are independent credits — each reflects only
+         what happened at that specific punch (early arrival / late
+         departure), never reduced by the other side, so a big early
+         arrival still shows in full even if the same person also left
+         early that day. OT Duration / Approved OT (the payable total) is
+         simply both of these added together — not netted against
+         lateness/early-departure — so the total always matches what the
+         two columns show. */
+      const effOTOutIndep = Math.max(0, r.otInOUTMins);
+      const effOTInIndep  = Math.max(0, r.otInINMins);
+      const capOTOutIndep = effOTOutIndep >= minOut ? (maxOut > 0 ? Math.min(effOTOutIndep, maxOut) : effOTOutIndep) : 0;
+      const capOTInIndep  = effOTInIndep  >= minIn  ? (maxIn  > 0 ? Math.min(effOTInIndep,  maxIn)  : effOTInIndep)  : 0;
 
-        result.push({
-          ...r,
-          otInINMins: 0,      otInOUTMins: 0,
-          otInINFormatted: '+00:00', otInOUTFormatted: '+00:00',
-          otMinutes: workMins, otFormatted: toHHMM(workMins),
-          approvedOTMins: r.approvalId ? r.approvedOTMins : workMins,
-          _dayType:     isHoliday ? 'holiday' : 'weekend',
-          _holidayName: isHoliday ? holidayName : null,
-          _tooltipOTOut: null,
-          _tooltipOTIn:  null,
-        });
-        continue;
-      }
+      const net = isSpecial ? totalWorkedMins : (capOTInIndep + capOTOutIndep);
 
-      /* Regular weekday
-         Late arrival (otInINMins < 0) is deducted from OT OUT.
-         Early departure (otInOUTMins < 0) is deducted from OT IN.
-         Then minimum threshold and cap are applied. */
-      const lateMins    = Math.max(0, -r.otInINMins);    // mins staff was late to arrive
-      const earlyOutMin = Math.max(0, -r.otInOUTMins);   // mins staff left early
+      /* Skip pending records with no qualifying OT on EITHER side — but only
+         on a regular day, and checked against the independent figures, not
+         the netted total: a 3h early arrival must stay visible for review
+         even on a day the same person left early enough that the netted
+         total comes out to 0 — the record itself (and its raw numbers) is
+         what's being reviewed, not just whatever the total happens to be.
+         A weekend/holiday Present record stays visible regardless, since
+         presence itself is what's being reviewed there. */
+      if (!isSpecial && capOTInIndep === 0 && capOTOutIndep === 0 && r.status === 'pending') continue;
 
-      const effOTOut = Math.max(0, r.otInOUTMins - lateMins);
-      const effOTIn  = Math.max(0, r.otInINMins  - earlyOutMin);
-
-      const maxOut = parseHM(cfg.maxOTAfterOut);
-      const maxIn  = parseHM(cfg.maxOTBeforeIn);
-      const capOTOut = effOTOut >= parseHM(cfg.minOTAfterOut)
-        ? (maxOut > 0 ? Math.min(effOTOut, maxOut) : effOTOut) : 0;
-      const capOTIn  = effOTIn  >= parseHM(cfg.minOTBeforeIn)
-        ? (maxIn  > 0 ? Math.min(effOTIn,  maxIn)  : effOTIn)  : 0;
-
-      const net = capOTIn + capOTOut;
-
-      /* Skip pending records that have no qualifying OT */
-      if (net === 0 && r.status === 'pending') continue;
-
-      /* OT IN display: show capped OT IN if positive, show raw lateness if negative,
-         show — if early arrival didn't qualify */
+      /* OT IN display: show independent capped OT IN if positive, show raw
+         lateness if negative, show — if early arrival didn't qualify */
       let dispOTIn, dispOTInFmt;
-      if (capOTIn > 0) {
-        dispOTIn = capOTIn;
-        dispOTInFmt = `+${toHHMM(capOTIn)}`;
-      } else if (r.otInINMins < 0) {
-        dispOTIn = r.otInINMins;           // show late info in red
+      if (capOTInIndep > 0) {
+        dispOTIn = capOTInIndep;
+        dispOTInFmt = `+${toHHMM(capOTInIndep)}`;
+      } else if (!isSpecial && r.otInINMins < 0) {
+        dispOTIn = r.otInINMins;           // show late info in red (weekday only — no assigned shift to be "late" for on a day off)
         dispOTInFmt = r.otInINFormatted;
       } else {
         dispOTIn = 0;
         dispOTInFmt = '+00:00';            // → SignedOT renders as —
       }
 
+      /* OT OUT display: same pattern, mirrored — show independent capped OT
+         OUT if positive, show raw early-departure if negative, else 0. */
+      let dispOTOut, dispOTOutFmt;
+      if (capOTOutIndep > 0) {
+        dispOTOut = capOTOutIndep;
+        dispOTOutFmt = `+${toHHMM(capOTOutIndep)}`;
+      } else if (!isSpecial && r.otInOUTMins < 0) {
+        dispOTOut = r.otInOUTMins;         // show early-departure info in red (weekday only — same reasoning as OT IN above)
+        dispOTOutFmt = r.otInOUTFormatted;
+      } else {
+        dispOTOut = 0;
+        dispOTOutFmt = '+00:00';
+      }
+
       result.push({
         ...r,
-        otInINMins: dispOTIn, otInOUTMins: capOTOut,
+        otInINMins: dispOTIn, otInOUTMins: dispOTOut,
         otInINFormatted:  dispOTInFmt,
-        otInOUTFormatted: `+${toHHMM(capOTOut)}`,
+        otInOUTFormatted: dispOTOutFmt,
         otMinutes: net, otFormatted: toHHMM(net),
         approvedOTMins: r.approvalId ? r.approvedOTMins : net,
-        _tooltipOTIn: (maxIn > 0 && capOTIn > 0 && capOTIn < effOTIn)
-          ? `You worked ${toHHMM(effOTIn)} before shift start\nMaximum OT IN is ${cfg.maxOTBeforeIn} as per setting`
+        _leaveMode:   isLeaveMode,
+        _dayType:     isHoliday ? 'holiday' : (isWeekend ? 'weekend' : undefined),
+        _holidayName: isHoliday ? holidayName : null,
+        // Same 'weekend' bucket for settings/filtering/counting purposes —
+        // just a more accurate label so a Tuesday tagged "Weekend" because
+        // of a roster Day Off doesn't look like a mistake to the manager.
+        _weekendLabel: r.rosterOffType === 'nightOff' ? 'Night Off'
+          : r.rosterOffType === 'dayOff' ? 'Day Off'
+          : 'Weekend',
+        _tooltipOTIn: (maxIn > 0 && capOTInIndep > 0 && capOTInIndep < effOTInIndep)
+          ? `You worked ${toHHMM(effOTInIndep)} before shift start\nMaximum OT IN is ${cfg.maxOTBeforeIn} as per setting`
           : null,
-        _tooltipOTOut: (maxOut > 0 && capOTOut > 0 && capOTOut < effOTOut)
-          ? `You worked ${toHHMM(effOTOut)} after shift end\nMaximum OT OUT is ${cfg.maxOTAfterOut} as per setting`
+        _tooltipOTOut: (maxOut > 0 && capOTOutIndep > 0 && capOTOutIndep < effOTOutIndep)
+          ? `You worked ${toHHMM(effOTOutIndep)} after shift end\nMaximum OT OUT is ${cfg.maxOTAfterOut} as per setting`
           : null,
       });
     }
     return result;
-  }, [filtered, otSettings, settings.defaultWeekends, settings.publicHolidays]);
+  }, [otSettings, settings.defaultWeekends, settings.publicHolidays]);
+
+  const displayRecords = useMemo(() => applyOtSettings(filtered), [filtered, applyOtSettings]);
+
+  /* Tab badges / "Select all N pending" must count only records
+     applyOtSettings will actually keep — e.g. a weekend/holiday "Present"
+     record is dropped entirely when Weekend/Public Holiday is configured as
+     "leave" rather than "ot". Counting raw `records` here (as before) let a
+     tenant with weekendPresent/holidayPresent set to "leave" show
+     "Pending (1242)" with an actionable "Select all 1242 pending" bar while
+     the grid itself rendered empty — the count and the grid must agree on
+     what "pending" means. */
+  const otAdjustedRecords = useMemo(() => applyOtSettings(records), [records, applyOtSettings]);
+
+  const counts = useMemo(() => ({
+    all     : otAdjustedRecords.length,
+    pending : otAdjustedRecords.filter(r => r.status === 'pending').length,
+    approved: otAdjustedRecords.filter(r => r.status === 'approved').length,
+    rejected: otAdjustedRecords.filter(r => r.status === 'rejected').length,
+  }), [otAdjustedRecords]);
 
   const weekendCount = useMemo(() => displayRecords.filter(r => r._dayType === 'weekend').length, [displayRecords]);
   const holidayCount = useMemo(() => displayRecords.filter(r => r._dayType === 'holiday').length, [displayRecords]);
@@ -313,12 +381,70 @@ const OvertimePage = () => {
     return key in editedOT ? editedOT[key] : rec.approvedOTMins;
   };
 
-  /* ── Approve / Reject single record ── */
+  /* Opens the single Grant Leave form, seeded from whatever's already granted
+     (re-opening lets the manager change a prior grant — approve-leave
+     reverses the old one server-side before applying the new one) */
+  const openLeaveModal = (row) => {
+    setLeaveFormType(row.leaveTypeCode || '');
+    setLeaveFormDays(row.leaveDays != null ? String(row.leaveDays) : '1');
+    setLeaveComment('');
+    const { reco, approval } = getRecoApprovalIds(row.employeeId);
+    setLeaveReco(reco.length === 1 ? reco[0] : '');
+    setLeaveApproval(approval.length === 1 ? approval[0] : '');
+    setLeaveModal({ rec: row });
+  };
+
+  /* One click does everything the old two-modal flow needed two clicks for:
+     validate, submit to /approve-leave (which sets status='approved' and
+     credits the balance server-side), close, reload. */
+  const submitLeaveGrant = async () => {
+    const rec = leaveModal?.rec;
+    if (!rec) return;
+    const days = Math.round(parseFloat(leaveFormDays) * 10) / 10;
+    if (!leaveFormType) { showToast('Select a leave type', 'error'); return; }
+    if (!(days > 0) || days > 2 || !Number.isInteger(days * 2)) {
+      showToast('Days must be greater than 0, at most 2, in half-day steps', 'error');
+      return;
+    }
+    const { reco: recoIds, approval: approvalIds } = getRecoApprovalIds(rec.employeeId);
+    if (recoIds.length > 1 && !leaveReco)         { showToast('Select a Recommendator', 'error'); return; }
+    if (approvalIds.length > 1 && !leaveApproval) { showToast('Select an Approval Authority', 'error'); return; }
+
+    // No dedicated recommended_by/approval_by columns on overtime_approvals —
+    // fold the picked names into the comment so who-recommended/approved
+    // this specific grant still ends up in the audit trail.
+    const recoName     = leaveReco     ? getEmployeeName(leaveReco)     : (recoIds[0]     ? getEmployeeName(recoIds[0])     : null);
+    const approvalName = leaveApproval ? getEmployeeName(leaveApproval) : (approvalIds[0] ? getEmployeeName(approvalIds[0]) : null);
+    const recoNote = [recoName && `Recommended by ${recoName}`, approvalName && `Approval ${approvalName}`].filter(Boolean).join(' · ');
+    const finalComment = [recoNote, leaveComment.trim()].filter(Boolean).join(' — ');
+
+    try {
+      const res = await api.post('/overtime/approve-leave', {
+        employeeId: rec.employeeId, date: rec.date,
+        leaveTypeCode: leaveFormType, leaveDays: days,
+        approvedBy: currentUser.id, comment: finalComment,
+      });
+      showToast(`Leave granted — ${days} day(s)${res?.newBalance != null ? `, new balance ${res.newBalance}` : ''}`);
+      setLeaveModal(null);
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  /* Approve button click — a leave-mode row goes straight to the Grant Leave
+     form (there's no time-based OT to confirm there); everything else opens
+     the normal approve/reject confirmation modal as before. */
+  const handleApproveClick = (row) => {
+    if (row._leaveMode) { openLeaveModal(row); return; }
+    setActionModal({ rec: row, type: 'approve' });
+  };
+
+  /* ── Approve / Reject single record (non-leave-mode rows only — a
+     leave-mode row's Approve goes straight to openLeaveModal instead) ── */
   const handleAction = async (type) => {
     const rec = actionModal?.rec;
     if (!rec) return;
-    const approvedMins = getApprovedOT(rec);
     try {
+      const approvedMins = getApprovedOT(rec);
       if (rec.approvalId) {
         await api.patch(`/overtime/${rec.approvalId}/${type}`, {
           approvedBy: currentUser.id, comment, approvedOTMins: approvedMins,
@@ -380,7 +506,7 @@ const OvertimePage = () => {
       field: 'fullName', header: L('नाम','Staff'), width: 170,
       render: (v, row) => (
         <div>
-          <div style={{ fontWeight:700, fontSize:13, color:'#111827' }}>{v}</div>
+          <div style={{ color:'#111827' }}>{v}</div>
           <div style={{ fontSize:10, color:'#9ca3af', marginTop:2,
             display:'flex', gap:4, flexWrap:'nowrap',
             overflow:'hidden', maxWidth:'100%' }}>
@@ -415,7 +541,7 @@ const OvertimePage = () => {
     /* Date */
     {
       field: 'date', header: L('मिति','Date'), width: 110,
-      render: v => <span style={{ fontWeight:600, fontSize:14 }}>{fd(v)}</span>,
+      render: v => <span style={{ fontWeight:600 }}>{fd(v)}</span>,
     },
 
     /* Day */
@@ -423,12 +549,12 @@ const OvertimePage = () => {
       field: 'day', header: L('बार','Day'), width: 90,
       render: (v, row) => (
         <div style={{ lineHeight:1.3 }}>
-          <div style={{ fontSize:14, color:'#6b7280', fontWeight:700 }}>{v}</div>
+          <div style={{ color:'#6b7280', fontWeight:700 }}>{v}</div>
           {row._dayType === 'weekend' && (
             <span style={{ fontSize:10, fontWeight:700, color:'#92400e',
               background:'#fef3c7', border:'1px solid #fde68a',
               borderRadius:4, padding:'1px 6px', marginTop:3, display:'inline-block' }}>
-              Weekend
+              {row._weekendLabel || 'Weekend'}
             </span>
           )}
           {row._dayType === 'holiday' && (
@@ -447,8 +573,13 @@ const OvertimePage = () => {
 
     /* Time In */
     {
-      field: 'timeIn', header: L('आगमन','Time In'), width: 75,
-      render: v => <span style={{ fontSize:14, color:'#059669' }}>{v}</span>,
+      field: 'timeIn', header: L('आगमन','Time In'), width: 80,
+      render: v => (
+        <span style={{ background:'#f0fdf4', color:'#065f46', border:'1px solid #bbf7d0',
+          borderRadius:6, padding:'2px 8px', fontSize:12, fontWeight:600 }}>
+          {v}
+        </span>
+      ),
     },
 
     /* OT in IN: positive (early) = green, negative (late) = red */
@@ -463,8 +594,13 @@ const OvertimePage = () => {
 
     /* Time Out */
     {
-      field: 'timeOut', header: L('प्रस्थान','Time Out'), width: 75,
-      render: v => <span style={{ fontSize:14, color:'#0369a1' }}>{v}</span>,
+      field: 'timeOut', header: L('प्रस्थान','Time Out'), width: 80,
+      render: v => (
+        <span style={{ background:'#eff6ff', color:'#0369a1', border:'1px solid #bfdbfe',
+          borderRadius:6, padding:'2px 8px', fontSize:12, fontWeight:600 }}>
+          {v}
+        </span>
+      ),
     },
 
     /* OT in OUT: positive (late out) = green, negative (early) = red */
@@ -481,7 +617,7 @@ const OvertimePage = () => {
     {
       field: 'otFormatted', header: L('OT अवधि','OT Duration'), width: 90, align:'center',
       render: (v, row) => (
-        <span style={{ fontSize:13,
+        <span style={{
           color: row._dayType ? '#7c3aed' : '#0369a1',
           fontWeight: row._dayType ? 700 : 400 }}>
           {v}
@@ -489,11 +625,30 @@ const OvertimePage = () => {
       ),
     },
 
-    /* Approved OT — plain editable text box */
+    /* Approved OT — plain editable text box, or a "Select the Leave" action
+       for a weekend/holiday row under the "Provide Next Day Leave" rule */
     {
-      field: 'approvedOTMins', header: L('अनु. OT','Approved OT'), width: 110, align:'center',
+      field: 'approvedOTMins', header: L('अनु. OT','Approved OT'), width: 130, align:'center',
       filterable:false, sortable:false,
       render: (_, row) => {
+        if (row._leaveMode) {
+          const granted = row.leaveTypeCode && row.leaveDays != null;
+          const ltName = granted
+            ? ((settings.leaveTypeConfigs || []).find(lt => lt.shortName === row.leaveTypeCode)?.name || row.leaveTypeCode)
+            : null;
+          return (
+            <button onClick={() => openLeaveModal(row)}
+              style={granted ? {
+                background:'#f0fdf4', border:'1px solid #86efac', color:'#065f46',
+                borderRadius:6, padding:'3px 10px', fontSize:11.5, fontWeight:700, cursor:'pointer',
+              } : {
+                background:'none', border:'1px dashed #93c5fd', color:'#1a56db',
+                borderRadius:6, padding:'3px 10px', fontSize:11.5, fontWeight:600, cursor:'pointer',
+              }}>
+              {granted ? `🏖 ${ltName} · ${row.leaveDays} day${row.leaveDays !== 1 ? 's' : ''}` : 'Select the Leave →'}
+            </button>
+          );
+        }
         const key = `${row.employeeId}-${row.date}`;
         const currentMins = key in editedOT ? editedOT[key] : row.approvedOTMins;
         const displayVal  = toHHMM(currentMins);
@@ -509,7 +664,7 @@ const OvertimePage = () => {
               e.target.value = toHHMM(Math.max(0, mins));
             }}
             className="form-control"
-            style={{ width:75, textAlign:'center', fontSize:13, padding:'2px 6px' }}
+            style={{ width:75, textAlign:'center', fontSize:12.5, padding:'2px 6px' }}
           />
         );
       },
@@ -525,12 +680,19 @@ const OvertimePage = () => {
       ),
     },
 
-    /* Approved By */
+    /* Approved By — name plus the date the decision was made */
     {
       field: 'approvedByName', header: L('स्वीकृतकर्ता','Approved By'), width: 130,
       render: (v, row) => row.status === 'pending'
         ? <span style={{ color:'#d1d5db' }}>—</span>
-        : <span style={{ fontSize:12 }}>{v || '—'}</span>,
+        : (
+          <div style={{ fontSize:12, lineHeight:1.4 }}>
+            <div>{v || '—'}</div>
+            {row.approvedDate && (
+              <div style={{ fontSize:10, color:'#9ca3af' }}>{fd(row.approvedDate)}</div>
+            )}
+          </div>
+        ),
     },
 
     /* Actions */
@@ -545,7 +707,7 @@ const OvertimePage = () => {
           </button>
         );
         if (row.status === 'rejected') return (
-          <button onClick={() => setActionModal({ rec:row, type:'approve' })}
+          <button onClick={() => handleApproveClick(row)}
             style={{ background:'none', border:'1px solid #6ee7b7', color:'#059669',
               borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:600 }}>
             ✓ Approve
@@ -553,7 +715,7 @@ const OvertimePage = () => {
         );
         return (
           <div style={{ display:'flex', gap:6 }}>
-            <button onClick={() => setActionModal({ rec:row, type:'approve' })}
+            <button onClick={() => handleApproveClick(row)}
               style={{ background:'#d1fae5', border:'none', color:'#065f46',
                 borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
               ✓
@@ -677,8 +839,8 @@ const OvertimePage = () => {
       {/* ── Bulk action bar ── */}
       {canAct && selected.size > 0 && (
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12,
-          background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'8px 14px' }}>
-          <span style={{ fontSize:13, fontWeight:600, color:'#15803d' }}>
+          background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:8, padding:'8px 14px' }}>
+          <span style={{ fontSize:13, fontWeight:600, color:'#1d4ed8' }}>
             {selected.size} selected
           </span>
           <button onClick={() => handleBulk('approve')}
@@ -692,7 +854,7 @@ const OvertimePage = () => {
             ✗ Reject Selected
           </button>
           <button onClick={() => setSelected(new Set())}
-            style={{ background:'none', border:'1px solid #86efac', color:'#15803d',
+            style={{ background:'none', border:'1px solid #93c5fd', color:'#1d4ed8',
               borderRadius:6, padding:'5px 10px', fontSize:12, cursor:'pointer' }}>
             Clear
           </button>
@@ -703,7 +865,7 @@ const OvertimePage = () => {
       {canAct && counts.pending > 0 && (
         <div style={{ marginBottom:8 }}>
           <button onClick={toggleSelectAll}
-            style={{ background:'none', border:'none', color:'#52b02c', fontSize:12,
+            style={{ background:'none', border:'none', color:'#1a56db', fontSize:12,
               fontWeight:600, cursor:'pointer', padding:0 }}>
             {counts.pending === selected.size
               ? '☑ Deselect all pending'
@@ -742,16 +904,16 @@ const OvertimePage = () => {
               toolbar={
                 <button onClick={() => setShowAdvSearchModal(true)}
                   style={{ display:'flex', alignItems:'center', gap:6, height:34,
-                    padding:'0 14px', background: activeFilterCount>0 ? '#f0fdf4' : '#f9fafb',
-                    border:`1.5px solid ${activeFilterCount>0 ? '#52b02c' : '#d1d5db'}`,
+                    padding:'0 14px', background: activeFilterCount>0 ? '#eff6ff' : '#f9fafb',
+                    border:`1.5px solid ${activeFilterCount>0 ? '#1a56db' : '#d1d5db'}`,
                     borderRadius:7, fontSize:13, fontWeight:600,
-                    color: activeFilterCount>0 ? '#52b02c' : '#374151', cursor:'pointer' }}>
+                    color: activeFilterCount>0 ? '#1a56db' : '#374151', cursor:'pointer' }}>
                   <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   Advanced Search
                   {activeFilterCount > 0 && (
-                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10,
+                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10,
                       fontSize:10, fontWeight:700, padding:'1px 7px', marginLeft:2 }}>
                       {activeFilterCount}
                     </span>
@@ -765,8 +927,7 @@ const OvertimePage = () => {
       {actionModal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"
-              style={{ background: actionModal.type==='approve' ? '#f0fdf4' : '#fef2f2' }}>
+            <div className="modal-header">
               <h2>
                 {actionModal.type==='approve' ? '✅ Approve' : '❌ Reject'} Overtime
               </h2>
@@ -801,11 +962,13 @@ const OvertimePage = () => {
                   </div>
                 </div>
 
-                {/* Editable Approved OT */}
+                {/* Editable Approved OT — this modal is never opened for a
+                    leave-mode row's Approve (that goes straight to the Grant
+                    Leave form instead), so this is always the time-based flow. */}
                 {actionModal.type === 'approve' && (
-                  <div style={{ marginTop:10, padding:'8px 10px', background:'#f0fdf4',
-                    border:'1px solid #bbf7d0', borderRadius:8 }}>
-                    <div style={{ fontSize:11, fontWeight:600, color:'#15803d', marginBottom:4 }}>
+                  <div style={{ marginTop:10, padding:'8px 10px', background:'#eff6ff',
+                    border:'1px solid #bfdbfe', borderRadius:8 }}>
+                    <div style={{ fontSize:11, fontWeight:600, color:'#1d4ed8', marginBottom:4 }}>
                       Approved OT (editable — in HH:MM)
                     </div>
                     <input
@@ -819,8 +982,8 @@ const OvertimePage = () => {
                         setEditedOT(prev => ({ ...prev, [key]: Math.max(0, mins) }));
                       }}
                       style={{ width:'100%', fontFamily:'monospace', fontSize:15, fontWeight:800,
-                        textAlign:'center', border:'1px solid #86efac', borderRadius:6,
-                        padding:'4px 10px', color:'#15803d', outline:'none' }}
+                        textAlign:'center', border:'1px solid #93c5fd', borderRadius:6,
+                        padding:'4px 10px', color:'#1d4ed8', outline:'none' }}
                     />
                     <div style={{ fontSize:10, color:'#6b7280', marginTop:3 }}>
                       Enter HH:MM or minutes. This value will be recorded in reports.
@@ -854,6 +1017,139 @@ const OvertimePage = () => {
         </div>
       )}
 
+      {/* ── Grant Leave modal — one form covering everything that used to take
+           two (pick the leave, see the OT context, confirm) for a "Provide
+           Next Day Leave" weekend/holiday record. Submitting calls
+           /overtime/approve-leave directly, which sets status='approved'
+           and credits the balance in the same step. ── */}
+      {leaveModal && (() => {
+        const rec = leaveModal.rec;
+        const { reco: recoIds, approval: approvalIds } = getRecoApprovalIds(rec.employeeId);
+        /* Aligned "label : value" line — same look for every Time/OT row so
+           the two columns (IN-side, OUT-side) read as a clean little table. */
+        const InfoLine = ({ label, value, color }) => (
+          <div style={{ display:'flex', fontSize:13, marginBottom:4 }}>
+            <span style={{ color:'#9ca3af', width:78, flexShrink:0 }}>{label}</span>
+            <span style={{ color:'#9ca3af', marginRight:8 }}>:</span>
+            <strong style={{ color: color || '#111827' }}>{value}</strong>
+          </div>
+        );
+        /* Recommendator/Approval picker — identical 0/1/many pattern as the
+           normal Leave Apply form: nothing configured shows a placeholder,
+           exactly one shows a fixed badge, more than one is an actual
+           dropdown to pick which one applies to this specific grant. */
+        const RecoPicker = ({ label, ids, value, onChange, bg, border, chipBg, chipColor }) => (
+          <div style={{ flex:1, minWidth:160 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:'#9ca3af', textTransform:'uppercase', marginBottom:4 }}>{label}</div>
+            {ids.length === 0 && (
+              <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 10px' }}>
+                <span style={{ fontSize:12.5, color:'#9ca3af' }}>— Not configured —</span>
+              </div>
+            )}
+            {ids.length === 1 && (
+              <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:8, padding:'7px 10px' }}>
+                <span style={{ background:chipBg, color:chipColor, borderRadius:10, padding:'2px 10px', fontSize:12.5, fontWeight:600 }}>
+                  {getEmployeeName(ids[0])}
+                </span>
+              </div>
+            )}
+            {ids.length > 1 && (
+              <select className="form-control" value={value} onChange={e => onChange(e.target.value)} style={{ fontSize:12.5 }}>
+                <option value="">— Select {label} —</option>
+                {ids.map(id => <option key={id} value={id}>{getEmployeeName(id)}</option>)}
+              </select>
+            )}
+          </div>
+        );
+        return (
+          <div className="modal-overlay" onClick={() => setLeaveModal(null)}>
+            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth:560, width:'94vw' }}>
+              <div className="modal-header">
+                <h2>🏖 Select the Leave</h2>
+                <button className="modal-close" onClick={() => setLeaveModal(null)}>✕</button>
+              </div>
+              <div className="modal-body">
+                <div style={{ background:'#f9fafb', borderRadius:8, padding:12, marginBottom:14 }}>
+                  <div style={{ fontWeight:700, fontSize:14, color:'#111827', marginBottom:8 }}>
+                    {rec.fullName}
+                    <span style={{ fontSize:11, color:'#9ca3af', marginLeft:8 }}>
+                      {rec.postShort} · {rec.deptShort}
+                    </span>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, fontSize:13, marginBottom:10 }}>
+                    <div><span style={{ color:'#9ca3af' }}>Date:</span> <strong>{fd(rec.date)}</strong> ({rec.day})</div>
+                    <div><span style={{ color:'#9ca3af' }}>Shift:</span> {rec.shiftName}</div>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 20px' }}>
+                    <div>
+                      <InfoLine label="Time IN"  value={rec.timeIn}  color="#059669" />
+                      <InfoLine label="OT in IN" value={rec.otInINFormatted} color={rec.otInINMins>=0 ? '#059669':'#dc2626'} />
+                    </div>
+                    <div>
+                      <InfoLine label="Time OUT"  value={rec.timeOut} color="#0369a1" />
+                      <InfoLine label="OT in OUT" value={rec.otInOUTFormatted} color={rec.otInOUTMins>=0 ? '#059669':'#dc2626'} />
+                    </div>
+                  </div>
+                  <div style={{ marginTop:6 }}>
+                    <span style={{ color:'#9ca3af', fontSize:13 }}>Calculated (worked hours):</span>
+                    <strong style={{ color:'#0369a1', fontSize:16, marginLeft:6 }}>{rec.otFormatted}</strong>
+                  </div>
+                </div>
+
+                {/* Recommender/Approver on record for this staff member — pick
+                    one when Staff → Reco/Approval setup has more than one */}
+                <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+                  <RecoPicker label="Recommended By" ids={recoIds} value={leaveReco} onChange={setLeaveReco}
+                    bg="#f0f9ff" border="#bfdbfe" chipBg="#eff6ff" chipColor="#1a56db" />
+                  <RecoPicker label="Approval" ids={approvalIds} value={leaveApproval} onChange={setLeaveApproval}
+                    bg="#f0fdf4" border="#86efac" chipBg="#d1fae5" chipColor="#065f46" />
+                </div>
+
+                <div style={{ display:'flex', gap:12 }}>
+                  <div className="form-group" style={{ flex:2 }}>
+                    <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>
+                      Leave
+                    </label>
+                    <select className="form-control" value={leaveFormType}
+                      onChange={e => setLeaveFormType(e.target.value)} style={{ fontSize:13 }}>
+                      <option value="">— Select Leave Type —</option>
+                      {(settings.leaveTypeConfigs || []).map(lt => (
+                        <option key={lt.shortName} value={lt.shortName}>{lt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ flex:1 }}>
+                    <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>
+                      No. Of Days (max 2)
+                    </label>
+                    <input type="number" className="form-control" value={leaveFormDays}
+                      step={0.5} min={0.5} max={2}
+                      onChange={e => setLeaveFormDays(e.target.value)}
+                      style={{ fontSize:13 }} />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginTop:12 }}>
+                  <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>
+                    Comment (optional)
+                  </label>
+                  <textarea className="form-control" rows={2} value={leaveComment}
+                    onChange={e => setLeaveComment(e.target.value)}
+                    placeholder="Enter reason or note…" style={{ fontSize:13 }} />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-outline" onClick={() => setLeaveModal(null)}>Cancel</button>
+                <button className="btn btn-success" onClick={submitLeaveGrant}>
+                  ✅ Approve & Grant {leaveFormDays || 0} day(s) Leave
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── OT Settings Modal ── */}
       {showOTSettings && (
         <div className="modal-overlay">
@@ -861,7 +1157,7 @@ const OvertimePage = () => {
             style={{ maxWidth:640, width:'96vw' }}>
 
             {/* Header */}
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0f9ff,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2 style={{ display:'flex', alignItems:'center', gap:8 }}>
                 ⚙ OT Settings
               </h2>
@@ -875,15 +1171,19 @@ const OvertimePage = () => {
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:0,
                 border:'1px solid #e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:18 }}>
 
-                {/* Header row */}
+                {/* Header row — green for IN, blue for OUT, matching the Time In/Time Out
+                    pill colors elsewhere on this page so the two read as one color language */}
                 <div style={{ gridColumn:'1/-1', display:'grid', gridTemplateColumns:'1fr 1fr',
-                  background:'#f1f5f9', borderBottom:'1px solid #e5e7eb' }}>
-                  <div style={{ padding:'8px 16px', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:.5 }}>OT Before Time IN</div>
-                  <div style={{ padding:'8px 16px', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:.5, borderLeft:'1px solid #e5e7eb' }}>OT After Time OUT</div>
+                  borderBottom:'1px solid #e5e7eb' }}>
+                  <div style={{ padding:'8px 16px', fontSize:11, fontWeight:700, color:'#065f46',
+                    background:'#f0fdf4', textTransform:'uppercase', letterSpacing:.5 }}>OT Before Time IN</div>
+                  <div style={{ padding:'8px 16px', fontSize:11, fontWeight:700, color:'#0369a1',
+                    background:'#eff6ff', textTransform:'uppercase', letterSpacing:.5, borderLeft:'1px solid #e5e7eb' }}>OT After Time OUT</div>
                 </div>
 
                 {/* Must work toggle + Max */}
-                <div style={{ padding:'16px', borderRight:'1px solid #e5e7eb', display:'flex', flexDirection:'column', gap:12 }}>
+                <div style={{ padding:'16px', borderRight:'1px solid #e5e7eb', borderLeft:'3px solid #86efac',
+                  background:'#f7fdf9', display:'flex', flexDirection:'column', gap:12 }}>
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:'#374151', marginBottom:6 }}>Must Work to Get OT</div>
                     <input type="text" value={otSettings.minOTBeforeIn}
@@ -902,7 +1202,8 @@ const OvertimePage = () => {
                   </div>
                 </div>
 
-                <div style={{ padding:'16px', display:'flex', flexDirection:'column', gap:12 }}>
+                <div style={{ padding:'16px', borderLeft:'3px solid #93c5fd',
+                  background:'#f8fbff', display:'flex', flexDirection:'column', gap:12 }}>
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:'#374151', marginBottom:6 }}>Must Work to Get OT</div>
                     <input type="text" value={otSettings.minOTAfterOut}
@@ -944,7 +1245,7 @@ const OvertimePage = () => {
                         <input type="radio" name={key} value="ot"
                           checked={otSettings[key] === 'ot'}
                           onChange={() => setOtSettings(p => ({ ...p, [key]: 'ot' }))}
-                          style={{ accentColor:'#52b02c', width:15, height:15 }} />
+                          style={{ accentColor:'#1a56db', width:15, height:15 }} />
                         <span style={{ fontSize:13, color:'#374151' }}>
                           Don't calculate shift — show only Working Hours as OT
                         </span>
@@ -953,7 +1254,7 @@ const OvertimePage = () => {
                         <input type="radio" name={key} value="leave"
                           checked={otSettings[key] === 'leave'}
                           onChange={() => setOtSettings(p => ({ ...p, [key]: 'leave' }))}
-                          style={{ accentColor:'#52b02c', width:15, height:15 }} />
+                          style={{ accentColor:'#1a56db', width:15, height:15 }} />
                         <span style={{ fontSize:13, color:'#374151' }}>
                           Provide Next Day Leave
                         </span>
@@ -981,62 +1282,97 @@ const OvertimePage = () => {
         const MCS = ({ label, value, onChange, options }) => {
           const [open, setOpen] = React.useState(false);
           const [srch, setSrch] = React.useState('');
+          const [activeIndex, setActiveIndex] = React.useState(-1);
           const ref = React.useRef(null);
+          const itemRefs = React.useRef([]);
           React.useEffect(() => {
             const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
             document.addEventListener('mousedown', h);
             return () => document.removeEventListener('mousedown', h);
           }, []);
           const fo = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
+          // "All" is always row 0 in the navigable list, followed by the filtered options
+          const navItems = [null, ...fo];
+          itemRefs.current = [];
           const toggle = v => onChange(value.includes(v) ? value.filter(x=>x!==v) : [...value, v]);
+          const selectNav = v => v === null ? onChange([]) : toggle(v);
           const selLabel = value.length===0 ? 'All' : value.length===1 ? value[0] : `${value.length} selected`;
+          const openWithHighlight = () => {
+            const idx = value.length === 1 ? navItems.findIndex(v => v === value[0]) : 0;
+            setActiveIndex(idx >= 0 ? idx : 0);
+            setOpen(true);
+          };
+          const handleTriggerKeyDown = e => {
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              open ? setOpen(false) : openWithHighlight();
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          };
+          const handleSearchKeyDown = e => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setOpen(false);
+            }
+          };
+          React.useEffect(() => {
+            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+          }, [activeIndex, open]);
+          React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
           return (
             <div ref={ref} style={{ position:'relative' }}>
               <div style={{ fontSize:12, fontWeight:700, color:'#1f2937', marginBottom:5 }}>{label}</div>
               <div tabIndex={0}
-                onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setOpen(p=>!p); } if (e.key==='Escape') setOpen(false); }}
-                onClick={() => setOpen(p=>!p)}
+                onKeyDown={handleTriggerKeyDown}
+                onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 10px', border:`1.5px solid ${open?'#52b02c':'#d1d5db'}`,
+                  padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
                   borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
-                  color: value.length>0 ? '#166534' : '#9ca3af',
+                  color: value.length>0 ? '#1e40af' : '#9ca3af',
                   minHeight:42, fontWeight: value.length>0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', outline:'none', userSelect:'none' }}>
+                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none' }}>
                 <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
                 <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
-                  {value.length > 0 && <span style={{ background:'#52b02c', color:'white', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>{value.length}</span>}
+                  {value.length > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>{value.length}</span>}
                   {value.length > 0 && <span onMouseDown={e=>{e.preventDefault();e.stopPropagation();onChange([]);}} style={{ color:'#9ca3af', fontSize:16, lineHeight:1, cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.color='#ef4444'} onMouseLeave={e=>e.currentTarget.style.color='#9ca3af'}>×</span>}
                   <span style={{ fontSize:9, color:'#9ca3af' }}>{open?'▲':'▼'}</span>
                 </div>
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #52b02c', borderRadius:8,
+                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220, display:'flex', flexDirection:'column' }}>
                   <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
                     <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search..."
-                      onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}
+                      onClick={e=>e.stopPropagation()} onKeyDown={handleSearchKeyDown}
                       style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px', fontSize:12, outline:'none', boxSizing:'border-box' }} />
                   </div>
                   <div style={{ overflowY:'auto', flex:1 }}>
-                    <div onMouseDown={e=>{e.preventDefault();onChange([]);}}
-                      style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer', background:value.length===0?'#f0fdf4':'white', borderBottom:'1px solid #f1f5f9' }}>
-                      <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${value.length===0?'#52b02c':'#d1d5db'}`, background:value.length===0?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                        {value.length===0 && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
-                      </span>
-                      <span style={{ fontSize:13, fontWeight:600, color:value.length===0?'#166534':'#374151' }}>All</span>
-                    </div>
-                    {fo.map(opt => {
-                      const sel = value.includes(opt);
+                    {navItems.map((v, i) => {
+                      const isAll = v === null;
+                      const sel   = isAll ? value.length === 0 : value.includes(v);
+                      const highlighted = i === activeIndex;
                       return (
-                        <div key={opt} onMouseDown={e=>{e.preventDefault();toggle(opt);}}
-                          style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer', background:sel?'#f0fdf4':'white', borderBottom:'1px solid #f9fafb' }}
-                          onMouseEnter={e=>{if(!sel)e.currentTarget.style.background='#f8fafc';}}
-                          onMouseLeave={e=>{if(!sel)e.currentTarget.style.background='white';}}>
-                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#52b02c':'#d1d5db'}`, background:sel?'#52b02c':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                        <div key={v ?? '__all'} ref={el => itemRefs.current[i] = el}
+                          onMouseDown={e=>{e.preventDefault();selectNav(v);}}
+                          onMouseEnter={() => setActiveIndex(i)}
+                          style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                            background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
+                            borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
+                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`, background:sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                             {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
                           </span>
-                          <span style={{ fontSize:13, color:sel?'#166534':'#374151', fontWeight:sel?600:400 }}>{opt}</span>
+                          <span style={{ fontSize:13, color:sel?'#1e40af':'#374151', fontWeight:sel?600:400 }}>{isAll ? 'All' : v}</span>
                         </div>
                       );
                     })}
@@ -1068,14 +1404,14 @@ const OvertimePage = () => {
               {/* Header */}
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
                 padding:'16px 24px', borderBottom:'2px solid #e5e7eb',
-                background:'linear-gradient(135deg,#f0fdf4,#f0f9ff)', flexShrink:0 }}>
+                background:'#ffffff', flexShrink:0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#52b02c' }}>
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#1a56db' }}>
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
                   <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>Advanced Search</span>
                   {activeFilterCount > 0 && (
-                    <span style={{ background:'#52b02c', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
+                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount>1?'s':''} active
                     </span>
                   )}
@@ -1120,7 +1456,7 @@ const OvertimePage = () => {
                     Close
                   </button>
                   <button onClick={() => setShowAdvSearchModal(false)}
-                    style={{ padding:'8px 20px', background:'#52b02c', border:'none',
+                    style={{ padding:'8px 20px', background:'#1a56db', border:'none',
                       borderRadius:8, fontSize:13, fontWeight:700, color:'white', cursor:'pointer' }}>
                     ✔ Apply Filter
                   </button>

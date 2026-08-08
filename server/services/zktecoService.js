@@ -147,11 +147,11 @@ export function parseAttlog(body) {
     if (!line) continue;
     const data  = line.startsWith('ATTLOG\t') ? line.slice(7) : line;
     const parts = data.split('\t');
-    if (parts.length < 4) continue;
+    if (parts.length < 4) { console.warn(`[ZK] ATTLOG line skipped (only ${parts.length} field(s)): ${line.substring(0, 120)}`); continue; }
     const [pin, dateStr, verifyStatus, inOut] = parts;
-    if (!pin || !dateStr) continue;
+    if (!pin || !dateStr) { console.warn(`[ZK] ATTLOG line skipped (missing pin/date): ${line.substring(0, 120)}`); continue; }
     const checkTime = new Date(dateStr.replace(' ', 'T'));
-    if (isNaN(checkTime.getTime())) continue;
+    if (isNaN(checkTime.getTime())) { console.warn(`[ZK] ATTLOG line skipped (unparseable date "${dateStr}"): ${line.substring(0, 120)}`); continue; }
     records.push({
       pin       : pin.trim(),
       checkTime,
@@ -227,6 +227,44 @@ export async function checkTimezoneAccess(employeeId, department, now) {
   return false; // outside all allowed windows
 }
 
+// ── Validity / Expiry window (Edit Staff → Validity/Expiry panel) ──────────
+// Distinct from checkTimezoneAccess above: that's a RECURRING weekly time-of-
+// day schedule; this is a per-person bounded window (date range and/or a
+// use-count budget) set via /devices/:id/upload-user's expires/startDatetime/
+// endDatetime/validCount fields. Modes mirror the device's own Expires value:
+// 0 none | 1 date range | 2 use-count | 3 date range AND use-count.
+export async function checkValidityWindow(employeeId, checkTime) {
+  const { rows } = await pool.query(
+    `SELECT access_expires, access_expiry_mode, access_valid_from, access_valid_to, access_valid_count
+     FROM users WHERE id=$1`,
+    [employeeId]
+  );
+  const emp = rows[0];
+  if (!emp) return true;
+  const mode = emp.access_expiry_mode ?? (emp.access_expires ? 1 : 0);
+  if (mode === 0) return true;
+
+  let dateOk = true;
+  if (mode === 1 || mode === 3) {
+    // Nepal local date (UTC+5:45) — plain UTC would read as "yesterday" for
+    // ~6 hours every night, rejecting/admitting people a day early/late right
+    // at the edges of their validity window.
+    const nepalDate = new Date(checkTime.getTime() + 345 * 60000).toISOString().slice(0, 10);
+    const validFrom = emp.access_valid_from ? String(emp.access_valid_from).slice(0, 10) : null;
+    const validTo   = emp.access_valid_to   ? String(emp.access_valid_to).slice(0, 10)   : null;
+    dateOk = (!validFrom || nepalDate >= validFrom) && (!validTo || nepalDate <= validTo);
+  }
+  const countOk = (mode === 2 || mode === 3) ? (emp.access_valid_count ?? 0) > 0 : true;
+  return dateOk && countOk;
+}
+
+export async function consumeValidityUse(employeeId) {
+  await pool.query(
+    `UPDATE users SET access_valid_count = access_valid_count - 1 WHERE id=$1 AND access_valid_count > 0`,
+    [employeeId]
+  );
+}
+
 export async function saveAttlogs(deviceSn, records) {
   let inserted = 0;
   for (const r of records) {
@@ -242,6 +280,17 @@ export async function saveAttlogs(deviceSn, records) {
         console.warn(`[ZK] ATTLOG rejected — outside access window: PIN=${r.pin} time=${r.checkTime.toISOString()}`);
         continue;
       }
+      // Validity/Expiry (Date Range / Use Count) — this is the ONLY place
+      // this actually gets enforced for devices that verify locally and just
+      // push ATTLOG afterward (no PostVerifyData round-trip), which is most
+      // plain attendance terminals. The device's own local biometric match
+      // still succeeds either way — this is what stops it from counting as
+      // real attendance once forwarded to the server.
+      const withinValidity = await checkValidityWindow(employeeId, r.checkTime);
+      if (!withinValidity) {
+        console.warn(`[ZK] ATTLOG rejected — outside validity window: PIN=${r.pin} time=${r.checkTime.toISOString()}`);
+        continue;
+      }
     }
 
     try {
@@ -254,14 +303,23 @@ export async function saveAttlogs(deviceSn, records) {
       );
       if (result.rowCount > 0) {
         inserted++;
-        // Fire-and-forget: broadcast live notification
         if (employeeId) {
+          await consumeValidityUse(employeeId);
+          // Fire-and-forget: broadcast live notification
           buildPunchNotification(employeeId, r.checkTime)
             .then(n => { if (n) broadcastNotification(n); })
             .catch(() => {});
         }
       }
-    } catch { /* duplicate — skip */ }
+    } catch (err) {
+      // 23505 = unique_violation on (device_sn,pin,check_time) — a genuine
+      // resend/reconnect duplicate, safe to skip. Anything else (transient
+      // connection error, etc.) was previously swallowed identically, silently
+      // losing a real record with no trace — now it's at least logged.
+      if (err.code !== '23505') {
+        console.error(`[ZK] ATTLOG insert failed PIN=${r.pin} time=${r.checkTime.toISOString()}:`, err.message);
+      }
+    }
   }
   return inserted;
 }
@@ -359,12 +417,19 @@ export async function saveFingerprintRecord(deviceSn, kv) {
 
 export function parseDeviceInfo(rawBody) {
   const info = {};
-  for (const line of rawBody.replace(/\r/g,'').split('\n')) {
-    const t = line.trim();
-    if (!t.startsWith('~')) continue;
+  // Real device payloads vary in shape: some send one `~Key=Value` per line,
+  // but others (e.g. SpeedFace-V4L Pro's CHECK response) pack the whole thing
+  // into a single comma-separated line mixing tilde-prefixed and bare keys —
+  // splitting on newlines alone collapsed everything after the first `=` into
+  // one bogus field, leaving UserCount/FPCount/etc. permanently unparsed.
+  // Split on both so either shape parses correctly.
+  for (const raw of rawBody.replace(/\r/g,'').split(/[\n,]/)) {
+    const t = raw.trim().replace(/^~/, '');
     const eq = t.indexOf('=');
     if (eq < 0) continue;
-    info[t.slice(1, eq).trim()] = t.slice(eq + 1).trim();
+    const key = t.slice(0, eq).trim();
+    if (!key) continue;
+    info[key] = t.slice(eq + 1).trim();
   }
   return info;
 }
@@ -403,8 +468,11 @@ export async function saveDeviceInfo(deviceSn, info) {
       deviceSn,
       parseInt(info.UserCount) || 0,
       parseInt(info.FPCount)   || 0,
-      parseInt(info.MaxUser)   || 0,
-      parseInt(info.MaxFP)     || 0,
+      // Real field names are MaxUserCount/MaxFingerCount (confirmed from a
+      // live SpeedFace-V4L Pro payload) — MaxUser/MaxFP never matched
+      // anything, so these always stored as 0 regardless of actual capacity.
+      parseInt(info.MaxUserCount) || 0,
+      parseInt(info.MaxFingerCount) || 0,
       info.DeviceName          || null,
       info['Firmware Version'] || info.FirmwareVersion || null,
       info.Platform            || null,

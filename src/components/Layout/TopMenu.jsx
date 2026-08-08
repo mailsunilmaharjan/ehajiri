@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth }         from '../../context/AuthContext.jsx';
 import { useLanguage }     from '../../context/LanguageContext.jsx';
 import { useData }         from '../../context/DataContext.jsx';
-import { useSettings }     from '../../context/SettingsContext.jsx';
 import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import { useChat } from '../../context/ChatContext.jsx';
 import './TopMenu.css';
@@ -36,7 +35,6 @@ const TopMenu = () => {
   } = useAuth();
   const { t, language, changeLanguage } = useLanguage();
   const { stats } = useData();
-  const { settings, getCompanyName } = useSettings();
   const { msgCount } = useNotifications();
   const { totalUnread: chatUnread } = useChat();
   const navigate  = useNavigate();
@@ -117,8 +115,8 @@ const TopMenu = () => {
   };
 
   const roleLabel = { admin: t('Admin'), branchManager: 'Branch Manager', departmentHead: 'Dept. Head', employee: t('Staff') };
-  const roleColor = { admin: '#7e3af2', branchManager: '#52b02c', departmentHead: '#0e9f6e', employee: '#6b7280' };
-  const avatarBg  = { admin: '#ede9fe', branchManager: '#dcfce7', departmentHead: '#d1fae5', employee: '#f3f4f6' };
+  const roleColor = { admin: '#7e3af2', branchManager: '#1a56db', departmentHead: '#0e9f6e', employee: '#6b7280' };
+  const avatarBg  = { admin: '#ede9fe', branchManager: '#dbeafe', departmentHead: '#d1fae5', employee: '#f3f4f6' };
 
   const pendingCount     = stats.pendingLeaves + stats.pendingVisits;
   const leaveActive      = isActive('/leave') || isActive('/office-visit');
@@ -151,7 +149,7 @@ const TopMenu = () => {
 
   /* scope chip shown next to brand for non-admin roles */
   const scopeChip = isBranchManager
-    ? { label: `🏢 ${currentUser?.branch || 'Branch'}`, color: '#52b02c', bg: '#dcfce7' }
+    ? { label: `🏢 ${currentUser?.branch || 'Branch'}`, color: '#1a56db', bg: '#dbeafe' }
     : isDeptHead
     ? { label: `${currentUser?.department || 'Dept'}`, color: '#0e9f6e', bg: '#d1fae5' }
     : null;
@@ -167,10 +165,9 @@ const TopMenu = () => {
         <div className="tm-logo">EH</div>
         <div className="tm-brand-text">
           <span className="tm-brand-name">
-            <span style={{ color: '#fff' }}>eHajiri</span>{' '}
-            <span style={{ color: '#e9f7e0' }}>TMS</span>
+            <span style={{ color: '#111827' }}>eHajiri</span>{' '}
+            <span style={{ color: '#1a56db' }}>TMS</span>
           </span>
-          <span className="tm-brand-sub" style={{ color: 'rgba(255,255,255,.85)', fontWeight: 600 }}>{getCompanyName(language)}</span>
         </div>
         {scopeChip && (
           <span style={{
@@ -211,6 +208,11 @@ const TopMenu = () => {
             <div className="tm-dropdown-item" onClick={() => navTo('/staff/notes')}>
               <span>📝</span> {t('My Notes')}
             </div>
+            {canView('task') && (
+              <div className="tm-dropdown-item" onClick={() => navTo('/staff/task')}>
+                <span>✅</span> {t('Task')}
+              </div>
+            )}
             {canView('staffContact') && (
               <div className="tm-dropdown-item" onClick={() => navTo('/staff/contact')}>
                 <span>📞</span> {t('Contact')}
@@ -255,8 +257,15 @@ const TopMenu = () => {
             onClick={e => e.stopPropagation()}
           >
             {/* Leave & Office Visit list */}
-            <div className="tm-dropdown-item" onClick={() => navTo('/leave')}>
-              <span>📅</span> {t('Leave')} | 🏢 {t('Office Visit')}
+            <div className="tm-dropdown-item" onClick={() => navTo('/leave')}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span><span>📅</span> {t('Leave')} | 🏢 {t('Office Visit')}</span>
+              {isManager && pendingCount > 0 && (
+                <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
+                  fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
+                  {pendingCount}
+                </span>
+              )}
             </div>
 
             {/* Leave Calculation — anyone with leaveCalculation view permission */}
@@ -322,7 +331,7 @@ const TopMenu = () => {
             {/* OT Approval — managers/admins (approve), Dept Heads (their dept), OT-eligible employees (own records, read-only) */}
             {(isManager || isDeptHead || (isEmployee && currentUser?.eligibleForOt)) && (
               <div className="tm-dropdown-item" onClick={() => navTo('/attendance/overtime')}
-                style={{ color: location.pathname === '/attendance/overtime' ? '#52b02c' : undefined }}>
+                style={{ color: location.pathname === '/attendance/overtime' ? '#1a56db' : undefined }}>
                 <span>⏱️</span> {t('Overtime (OT) Approval')}
                 {stats?.pendingOT > 0 && (
                   <span style={{ marginLeft:'auto', background:'#dc2626', color:'#fff',
@@ -335,14 +344,17 @@ const TopMenu = () => {
 
             {/* Missing Attendance Requests — everyone (submit own / act on assigned) */}
             <div className="tm-dropdown-item" onClick={() => navTo('/attendance/missing-requests')}
-              style={{ color: location.pathname === '/attendance/missing-requests' ? '#52b02c' : undefined }}>
+              style={{ color: location.pathname === '/attendance/missing-requests' ? '#1a56db' : undefined }}>
               <span>📩</span> {t('Missing Attendance Requests')}
             </div>
 
-            {/* Duty Roster — anyone with dutyRoster view permission */}
+            {/* Duty Roster — anyone with dutyRoster view permission. A plain
+                Employee has no use for the Create/Manage hub (roster-dashboard)
+                — they go straight to their own read-only roster report. */}
             {canView('dutyRoster') && (
-              <div className="tm-dropdown-item" onClick={() => navTo('/attendance/roster-dashboard')}
-                style={{ color: location.pathname.startsWith('/attendance/roster-dashboard') || location.pathname.startsWith('/attendance/duty-roster') ? '#52b02c' : undefined }}>
+              <div className="tm-dropdown-item"
+                onClick={() => navTo(isEmployee ? '/attendance/roster-report' : '/attendance/roster-dashboard')}
+                style={{ color: location.pathname.startsWith('/attendance/roster-dashboard') || location.pathname.startsWith('/attendance/duty-roster') || (isEmployee && location.pathname.startsWith('/attendance/roster-report')) ? '#1a56db' : undefined }}>
                 <span>🗓️</span> {t('Duty Roster')}
               </div>
             )}
@@ -421,7 +433,7 @@ const TopMenu = () => {
               fontSize:11, color:'#6b7280', fontWeight:600, letterSpacing:'.3px', textTransform:'uppercase' }}>
               {roleLabel[currentUser?.role] || currentUser?.role}
               {(isBranchManager && currentUser?.branch) && (
-                <span style={{ display:'block', color:'#52b02c', fontSize:10, fontWeight:700, marginTop:2 }}>
+                <span style={{ display:'block', color:'#1a56db', fontSize:10, fontWeight:700, marginTop:2 }}>
                   {currentUser.branch}
                 </span>
               )}

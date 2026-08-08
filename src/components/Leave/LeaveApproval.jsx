@@ -100,7 +100,7 @@ const LeaveApproval = () => {
     )},
     { field:'fromDate',    header:t('From Date'),    width:110, render:v=>fd(v) },
     { field:'toDate',      header:t('To Date'),      width:110, render:v=>fd(v) },
-    { field:'days',        header:t('Days'),         width:60,  align:'center', render:v=><strong style={{ color:'#52b02c' }}>{v}</strong> },
+    { field:'days',        header:t('Days'),         width:60,  align:'center', render:v=><strong style={{ color:'#1a56db' }}>{v}</strong> },
     { field:'reason',      header:t('Reason'),       width:140 },
     { field:'appliedDate', header:t('Applied Date'), width:110, render:v=>fd(v) },
     { field:'status',      header:t('Status'),       width:120, render:(v, row)=>(
@@ -272,10 +272,7 @@ const LeaveApproval = () => {
       {actionModal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{
-              background: actionModal.type === 'approve' ? '#f0fdf4'
-                : actionModal.type === 'recommend' ? '#f0fdf4' : '#fef2f2'
-            }}>
+            <div className="modal-header">
               <h2>
                 {actionModal.type === 'recommend' ? `👍 Recommend`
                   : actionModal.type === 'approve' ? `✅ ${t('Approve')}`

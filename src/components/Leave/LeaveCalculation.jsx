@@ -1,13 +1,17 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
+import StaffDropdown   from '../Common/StaffDropdown.jsx';
+import MultiCheckSelect from '../Common/MultiCheckSelect.jsx';
 import SaveButton      from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
-import { branchAbbr }  from '../../utils/branchUtils.js';
+import { branchAbbr, staffRankCompare } from '../../utils/branchUtils.js';
+import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
 
 /* ─────────────────────────────────────────── */
 /* localStorage helpers                         */
@@ -19,13 +23,68 @@ const lsGet = (key, fallback) => {
 const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
 
 /* ─────────────────────────────────────────── */
+/* GridPager — pagination footer for the bespoke multi-column editable
+   tables in this file (dynamic per-leave-type columns, bulk-fill header
+   inputs, rowSpan merges) that can't be swapped for the <DataGrid>
+   component directly, but should still look and behave like one. Mirrors
+   DataGrid.jsx's own footer markup/classes/page-number logic exactly. */
+/* ─────────────────────────────────────────── */
+const GridPager = ({ page, setPage, pageSize, setPageSize, total, L, itemLabel }) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const startIdx = (page - 1) * pageSize;
+  const pageNumbers = useMemo(() => {
+    const arr = [];
+    if (totalPages <= 7) { for (let i = 1; i <= totalPages; i++) arr.push(i); }
+    else {
+      arr.push(1);
+      if (page > 3) arr.push('...');
+      for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) arr.push(i);
+      if (page < totalPages - 2) arr.push('...');
+      arr.push(totalPages);
+    }
+    return arr;
+  }, [totalPages, page]);
+
+  return (
+    <div className="dg-footer">
+      <div className="dg-info">
+        {total > 0
+          ? <span>{startIdx + 1}–{Math.min(startIdx + pageSize, total)} / {L('कुल','Total')} {total}{itemLabel ? ` ${itemLabel}` : ''}</span>
+          : <span>{L('कुनै रेकर्ड छैन','No records found')}</span>}
+      </div>
+      <div className="dg-paging">
+        <div className="dg-pagesize">
+          <label>{L('प्रति पृष्ठ:','Per page:')}</label>
+          <select value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
+            {[5, 10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <div className="dg-page-btns">
+          <button className="pg-btn" disabled={page === 1} onClick={() => setPage(1)} title={L('पहिलो','First')}>«</button>
+          <button className="pg-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)} title={L('अगाडि','Previous')}>‹</button>
+          {pageNumbers.map((pg, i) =>
+            pg === '...'
+              ? <span key={i} className="pg-ellipsis">…</span>
+              : <button key={i} className={`pg-btn ${pg === page ? 'active' : ''}`} onClick={() => setPage(pg)}>{pg}</button>
+          )}
+          <button className="pg-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)} title={L('पछाडि','Next')}>›</button>
+          <button className="pg-btn" disabled={page === totalPages} onClick={() => setPage(totalPages)} title={L('अन्तिम','Last')}>»</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────── */
 /* MultiSelectDropdown                          */
 /* ─────────────────────────────────────────── */
 const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', maxHeight = 220, tabIndex = 0 }) => {
   const [open,        setOpen]        = useState(false);
   const [openUp,      setOpenUp]      = useState(false);
   const [localSearch, setLocalSearch] = useState('');
+  const [activeIndex, setActiveIndex] = useState(-1);
   const ref  = useRef(null);
+  const itemRefs = useRef([]);
 
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -33,27 +92,52 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const handleToggle = () => {
-    if (!open) {
-      const rect = ref.current?.getBoundingClientRect();
-      if (rect) setOpenUp(window.innerHeight - rect.bottom < 280);
-      setLocalSearch('');
-    }
-    setOpen(p => !p);
-  };
-
-  const handleTriggerKey = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); }
-    else if (e.key === 'Escape')            { setOpen(false); }
-    else if (e.key === 'Tab')               { setOpen(false); }
-  };
-
   const isAll    = value.length === 0;
   const toggle   = (v) => onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v]);
   const filtered = localSearch ? options.filter(o => o.label.toLowerCase().includes(localSearch.toLowerCase())) : options;
   const display  = isAll ? null
     : value.length === 1 ? (options.find(o => o.value === value[0])?.label || value[0])
     : `${value.length} selected`;
+  // "All" is always row 0 in the navigable list, followed by the filtered options
+  const navItems = [null, ...filtered];
+  itemRefs.current = [];
+  const selectNav = (opt) => opt === null ? onChange([]) : toggle(opt.value);
+
+  const handleToggle = () => {
+    if (!open) {
+      const rect = ref.current?.getBoundingClientRect();
+      if (rect) setOpenUp(window.innerHeight - rect.bottom < 280);
+      setLocalSearch('');
+      const idx = value.length === 1 ? navItems.findIndex(o => o && o.value === value[0]) : 0;
+      setActiveIndex(idx >= 0 ? idx : 0);
+    }
+    setOpen(p => !p);
+  };
+
+  const handleTriggerKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); handleToggle(); }
+    else if (e.key === 'Escape')            { setOpen(false); }
+    else if (e.key === 'Tab')               { setOpen(false); }
+  };
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+  useEffect(() => {
+    if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+  useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [localSearch]);
 
   return (
     <div ref={ref} style={{ position:'relative', flex:1, minWidth:0 }}>
@@ -65,16 +149,16 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
         onKeyDown={handleTriggerKey}
         style={{
           display:'flex', alignItems:'center', justifyContent:'space-between',
-          padding:'6px 10px', border:`1.5px solid ${open ? '#52b02c' : '#d1d5db'}`,
+          padding:'6px 10px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
           borderRadius:6, background:'white', cursor:'pointer', fontSize:13, color:'#1f2937',
-          minHeight:34, boxShadow: open ? '0 0 0 2px #bbf7d0' : 'none', transition:'border-color .15s',
+          minHeight:34, boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', transition:'border-color .15s',
           outline:'none',
         }}
       >
         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
           {isAll
             ? <span style={{ color:'#9ca3af' }}>{placeholder}</span>
-            : <span style={{ color:'#166534', fontWeight:600 }}>{display}</span>}
+            : <span style={{ color:'#1e40af', fontWeight:600 }}>{display}</span>}
         </span>
         <span style={{ fontSize:9, color:'#9ca3af', marginLeft:4, flexShrink:0 }}>{open ? '▲' : '▼'}</span>
       </div>
@@ -97,7 +181,7 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
               value={localSearch}
               onChange={e => setLocalSearch(e.target.value)}
               onClick={e => e.stopPropagation()}
-              onKeyDown={e => e.stopPropagation()}
+              onKeyDown={handleSearchKeyDown}
               style={{
                 width:'100%', padding:'5px 8px', border:'1px solid #d1d5db', borderRadius:4,
                 fontSize:12, outline:'none', background:'#f9fafb',
@@ -106,32 +190,26 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
           </div>
           {/* options list */}
           <div style={{ maxHeight, overflowY:'auto' }}>
-            <label
-              onClick={() => { onChange([]); setLocalSearch(''); }}
-              style={{
-                display:'flex', alignItems:'center', gap:8, padding:'8px 12px', cursor:'pointer',
-                background: isAll ? '#f0fdf4' : 'transparent',
-                borderBottom:'2px solid #e5e7eb', userSelect:'none',
-              }}
-            >
-              <input type="checkbox" checked={isAll} readOnly style={{ accentColor:'#52b02c' }} onClick={e => e.stopPropagation()} />
-              <span style={{ fontSize:13, fontWeight:600, color: isAll ? '#166534' : '#374151' }}>All</span>
-            </label>
-            {filtered.map((opt, i) => {
-              const checked = value.includes(opt.value);
+            {navItems.map((opt, i) => {
+              const isAllRow = opt === null;
+              const checked  = isAllRow ? isAll : value.includes(opt.value);
+              const highlighted = i === activeIndex;
               return (
-                <label key={opt.value}
-                  onClick={() => toggle(opt.value)}
+                <label key={isAllRow ? '__all' : opt.value}
+                  ref={el => itemRefs.current[i] = el}
+                  onClick={() => selectNav(opt)}
+                  onMouseEnter={() => setActiveIndex(i)}
                   style={{
-                    display:'flex', alignItems:'center', gap:8, padding:'7px 12px', cursor:'pointer',
-                    background: checked ? '#f0fdf4' : 'transparent',
-                    borderBottom: i < filtered.length - 1 ? '1.5px solid #e5e7eb' : 'none',
+                    display:'flex', alignItems:'center', gap:8,
+                    padding: isAllRow ? '8px 12px' : '7px 12px', cursor:'pointer',
+                    background: checked ? '#eff6ff' : (highlighted ? '#f8fafc' : 'transparent'),
+                    borderBottom: isAllRow ? '2px solid #e5e7eb' : (i < navItems.length - 1 ? '1.5px solid #e5e7eb' : 'none'),
                     userSelect:'none',
                   }}
                 >
-                  <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#52b02c' }} onClick={e => e.stopPropagation()} />
-                  <span style={{ fontSize:13, color: checked ? '#166534' : '#374151', fontWeight: checked ? 600 : 400, whiteSpace:'nowrap' }}>
-                    {opt.label}
+                  <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#1a56db' }} onClick={e => e.stopPropagation()} />
+                  <span style={{ fontSize:13, color: checked ? '#1e40af' : '#374151', fontWeight: checked || isAllRow ? 600 : 400, whiteSpace:'nowrap' }}>
+                    {isAllRow ? 'All' : opt.label}
                   </span>
                 </label>
               );
@@ -164,7 +242,7 @@ const LeaveAdvancedFilter = ({
 }) => {
   if (!isOpen) return null;
   const funnelIcon = (
-    <svg viewBox="0 0 20 20" fill="currentColor" width={16} height={16} style={{ color:'#52b02c' }}>
+    <svg viewBox="0 0 20 20" fill="currentColor" width={16} height={16} style={{ color:'#1a56db' }}>
       <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
     </svg>
   );
@@ -258,8 +336,8 @@ const LeaveAdvancedFilter = ({
                   <label key={opt.val} style={{ display:'flex', alignItems:'center', gap:7, cursor:'pointer', userSelect:'none' }}>
                     <input type="radio" name="leaveAccumFilter" checked={tempF.leaveAccum === opt.val}
                       onChange={() => setTF('leaveAccum', opt.val)}
-                      style={{ accentColor:'#52b02c', width:15, height:15, cursor:'pointer' }} />
-                    <span style={{ fontSize:13, fontWeight: tempF.leaveAccum===opt.val ? 700 : 400, color: tempF.leaveAccum===opt.val ? '#166534' : '#374151' }}>
+                      style={{ accentColor:'#1a56db', width:15, height:15, cursor:'pointer' }} />
+                    <span style={{ fontSize:13, fontWeight: tempF.leaveAccum===opt.val ? 700 : 400, color: tempF.leaveAccum===opt.val ? '#1e40af' : '#374151' }}>
                       {L(opt.np, opt.en)}
                     </span>
                   </label>
@@ -303,7 +381,8 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
   const [filterOpen, setFilterOpen] = useState(false);
   const [advFilters, setAdvFilters] = useState({ ...DEFAULT_ADV_FILTERS });
   const [tempF,      setTempF]      = useState({ ...DEFAULT_ADV_FILTERS });
-
+  const [page,       setPage]       = useState(1);
+  const [pageSize,   setPageSize]   = useState(25);
 
   /* init editVals when FY selector changes */
   useEffect(() => {
@@ -416,7 +495,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
   /* rows for the table */
   const rows = useMemo(() =>
     [...(employees||[])].filter(e => e.active)
-      .sort((a, b) => (a.rankingOrder ?? 9999) - (b.rankingOrder ?? 9999))
+      .sort((a, b) => staffRankCompare(a, b, settings))
       .map(emp => ({
       id:          emp.id,
       fullName:    emp.fullName,
@@ -454,6 +533,11 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
     return r;
   }, [rows, search, advFilters]);
 
+  useEffect(() => { setPage(1); }, [search, advFilters, fyId]);
+  const pagedRows = useMemo(() =>
+    filteredRows.slice((page - 1) * pageSize, page * pageSize),
+  [filteredRows, page, pageSize]);
+
   /* active filter badge count */
   const activeFilterCount = useMemo(() =>
     [advFilters.branches, advFilters.departments, advFilters.posts,
@@ -476,8 +560,8 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
   };
 
   const numInput = {
-    width:56, textAlign:'center', borderRadius:4, padding:'3px 0',
-    fontSize:13, outline:'none', background:'white', fontWeight:600,
+    width:56, textAlign:'center', borderRadius:4, padding:'2px 0',
+    fontSize:12.5, outline:'none', background:'white', fontWeight:600,
   };
 
   return (
@@ -509,7 +593,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
           {activeFilterCount > 0 && (
             <span style={{
               position:'absolute', top:-7, right:-7,
-              background:'#52b02c', color:'white', fontSize:10, fontWeight:800,
+              background:'#1a56db', color:'white', fontSize:10, fontWeight:800,
               width:17, height:17, borderRadius:'50%',
               display:'flex', alignItems:'center', justifyContent:'center',
               lineHeight:1, boxShadow:'0 1px 3px rgba(0,0,0,.25)',
@@ -568,30 +652,30 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
                       onKeyDown={e => { if (e.key === 'Enter') { applyHeaderVal(lt); e.target.blur(); } }}
                       onClick={e => { e.stopPropagation(); e.target.select(); }}
                       title={`Fill ALL staff (max ${lt.daysPerYear} days)`}
-                      style={{ ...numInput, width:60, border:'1px solid #bbf7d0', background:'#f0fdf4', color:'#166534' }}
+                      style={{ ...numInput, width:60, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1e40af' }}
                     />
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row, ri) => {
+              {pagedRows.map((row, ri) => {
                 const total = filteredLtConfigs.reduce((s, lt) => s + Number(getVal(row.id, lt.shortName)||0), 0);
                 return (
                   <tr key={row.id} className="dg-row">
-                    <td className="dg-sn-col">{ri + 1}</td>
+                    <td className="dg-sn-col">{(page - 1) * pageSize + ri + 1}</td>
                     <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>{row.fullName}</td>
-                    <td className="dg-td" style={{ padding:'4px 8px' }}>
-                      <span style={{ background:'#f0fdf4', color:'#166534', padding:'2px 8px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.postShort}</span>
+                    <td className="dg-td" style={{ padding:'3px 8px' }}>
+                      <span style={{ color:'#1f2937' }}>{row.postShort}</span>
                     </td>
-                    <td className="dg-td" style={{ padding:'4px 8px' }}>
-                      <span style={{ background:'#f0fdf4', color:'#166534', padding:'2px 8px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.deptShort}</span>
+                    <td className="dg-td" style={{ padding:'3px 8px' }}>
+                      <span style={{ color:'#1f2937' }}>{row.deptShort}</span>
                     </td>
-                    <td className="dg-td" style={{ padding:'4px 8px' }}>
-                      <span style={{ background:'#fdf4ff', color:'#7e3af2', padding:'2px 8px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.branchShort}</span>
+                    <td className="dg-td" style={{ padding:'3px 8px' }}>
+                      <span style={{ color:'#1f2937' }}>{row.branchShort}</span>
                     </td>
                     {filteredLtConfigs.map(lt => (
-                      <td key={lt.shortName} className="dg-td" style={{ textAlign:'center', padding:'4px 6px' }}>
+                      <td key={lt.shortName} className="dg-td" style={{ textAlign:'center', padding:'3px 6px' }}>
                         <input
                           data-leave-cell
                           type="text" inputMode="numeric" pattern="[0-9.]*"
@@ -629,20 +713,15 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
         </div>
 
         {/* Footer */}
-        <div className="dg-footer">
-          <div className="dg-info">
-            {filteredRows.length === rows.length
-              ? `${rows.length} ${L('कर्मचारी','staff')}`
-              : `${filteredRows.length} / Total ${rows.length} ${L('कर्मचारी','staff')}`}
-          </div>
-        </div>
+        <GridPager page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+          total={filteredRows.length} L={L} itemLabel={L('कर्मचारी','staff')} />
       </div>
 
       {/* Validation alert popup */}
       {alertMsg && (
         <div className="modal-overlay">
           <div className="modal modal-sm" style={{ maxWidth:380 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fff7ed,#fef3c7)' }}>
+            <div className="modal-header">
               <h2 style={{ color:'#92400e' }}>{alertMsg.title}</h2>
               <button className="modal-close" onClick={() => setAlertMsg(null)}>✕</button>
             </div>
@@ -705,10 +784,11 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   const [editVals,    setEditVals]   = useState({});
   const [toast,       setToast]      = useState(null);
   const [prevAlert,   setPrevAlert]  = useState(null); // { ltName, maxDays }
-  const printTRef = useRef(null);
   const [tFilterOpen, setTFilterOpen] = useState(false);
   const [tAdvFilters, setTAdvFilters] = useState({ ...DEFAULT_TRANSFER_FILTERS });
   const [tTempF,      setTTempF]     = useState({ ...DEFAULT_TRANSFER_FILTERS });
+  const [page,        setPage]       = useState(1);
+  const [pageSize,    setPageSize]   = useState(25);
 
   const showToast = (msg, type='success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
@@ -755,7 +835,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   /* compute rows — Prev Year = prevFY opening, Curr Year = currentFY opening */
   const allRows = useMemo(() => {
     return [...(employees||[])].filter(e => e.active)
-      .sort((a, b) => (a.rankingOrder ?? 9999) - (b.rankingOrder ?? 9999))
+      .sort((a, b) => staffRankCompare(a, b, settings))
       .map(emp => {
       const row = {
         id:          emp.id,
@@ -842,7 +922,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
 
   /* company header for print/export */
   const companyHtml = `
-    <div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #52b02c;">
+    <div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #1a56db;">
       ${settings.logo ? `<img src="${settings.logo}" style="height:50px;margin-bottom:6px;display:block;margin-left:auto;margin-right:auto;" />` : ''}
       <div style="font-size:17px;font-weight:800;color:#1f2937;">${settings.companyName || settings.name || 'eHajiri TMS'}</div>
       ${settings.address ? `<div style="font-size:11px;color:#6b7280;">${settings.address}</div>` : ''}
@@ -850,8 +930,27 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     </div>`;
 
   const handlePrint = () => {
-    const content = printTRef.current?.innerHTML;
-    if (!content) return;
+    // Built from filteredRows directly (not the on-screen DOM) so Print
+    // always covers every filtered row, not just whatever page is visible.
+    const ltHeaderRow = visibleLtConfigs.map(lt =>
+      `<th colspan="2">${lt.name} <span style="font-weight:400">(${lt.shortName})</span></th>`).join('');
+    const ltSubRow = visibleLtConfigs.map(() =>
+      `<th>${L('अघिल्लो वर्ष','Prev Year')}</th><th>${L('चालु वर्ष','Curr Year')}</th>`).join('');
+    const bodyRows = filteredRows.map((r, i) => `<tr>
+      <td>${i + 1}</td>
+      <td class="left">${r.fullName}</td>
+      <td>${r.postShort}</td>
+      <td>${r.deptShort}</td>
+      <td>${r.branchShort}</td>
+      ${visibleLtConfigs.map(lt => `<td>${r[`${lt.shortName}_prev`] ?? 0}</td><td>${r[`${lt.shortName}_curr`] ?? 0}</td>`).join('')}
+    </tr>`).join('');
+    const content = `<table>
+      <thead>
+        <tr><th colspan="5">${prevFY ? prevFY.name : ''} ${currentFY ? `→ ${currentFY.name}` : ''}</th>${ltHeaderRow}</tr>
+        <tr><th>SN</th><th class="left">${L('कर्मचारी','Staff')}</th><th>${L('पद','Post')}</th><th>${L('विभाग','Dept')}</th><th>${L('शाखा','Branch')}</th>${ltSubRow}</tr>
+      </thead>
+      <tbody>${bodyRows}</tbody>
+    </table>`;
     const w = window.open('', '_blank');
     w.document.write(`<!DOCTYPE html><html><head><title>Leave Transfer</title>
       <style>body{font-family:Arial,sans-serif;font-size:11px;}table{width:100%;border-collapse:collapse;}
@@ -872,7 +971,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     const csv = [hdr,...csvRows].map(row => row.map(v=>`"${v}"`).join(',')).join('\n');
     const a   = document.createElement('a');
     a.href    = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download = `leave_transfer_${fyId}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `leave_transfer_${fyId}_${getNepalTodayISO()}.csv`;
     a.click();
   };
 
@@ -900,6 +999,11 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     return r;
   }, [allRows, search, tAdvFilters]);
 
+  useEffect(() => { setPage(1); }, [search, tAdvFilters, fyId]);
+  const pagedRows = useMemo(() =>
+    filteredRows.slice((page - 1) * pageSize, page * pageSize),
+  [filteredRows, page, pageSize]);
+
   /* which leave type columns to show — Previous Year Opening is carry-forward
      by definition, so only Accumulate (carryForward) leave types appear here;
      non-accumulate leaves have no previous-year balance to transfer. */
@@ -909,7 +1013,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     return configs;
   }, [ltConfigs, tAdvFilters.leaveTypes]);
 
-  const numCellStyle = { width:72, textAlign:'center', border:'1px solid #d1d5db', borderRadius:4, padding:'3px 2px', fontSize:13, outline:'none', fontWeight:600 };
+  const numCellStyle = { width:72, textAlign:'center', border:'1px solid #d1d5db', borderRadius:4, padding:'3px 2px', fontSize:12.5, outline:'none', fontWeight:600 };
   const thBase = { padding:'7px 10px', textAlign:'center', fontWeight:700, fontSize:12, background:'#f0f5fa', borderBottom:'2px solid #c8d6e5', borderRight:'1px solid #dce6f0', whiteSpace:'nowrap' };
   const tdBase = { padding:'5px 8px', textAlign:'center', fontSize:13, borderBottom:'1px solid #eef0f4', borderRight:'1px solid #e8f0f8' };
 
@@ -942,7 +1046,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
           style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/></svg>
           {L('फिल्टर','Filter')}
-          {tActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#52b02c', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>{tActiveCount}</span>}
+          {tActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#1a56db', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>{tActiveCount}</span>}
         </button>
 
         {/* edit/save/cancel */}
@@ -989,8 +1093,8 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
 
         {/* scrollable table */}
         <div className="dg-scroll-wrapper">
-          <div ref={printTRef}>
-            <table className="dg-table compact" style={{ fontSize:13 }}>
+          <div>
+            <table className="dg-table compact">
               <thead>
                 <tr className="dg-header-row">
                   <th className="dg-th dg-sn-col" style={{ width:40 }}>SN</th>
@@ -1000,36 +1104,36 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                   <th className="dg-th" style={{ width:80 }}>{L('शाखा','Branch')}</th>
                   {visibleLtConfigs.map(lt => (
                     <th key={lt.shortName} colSpan={2} className="dg-th"
-                      style={{ background:'#f0fdf4', color:'#52b02c', fontSize:13, textAlign:'center', borderBottom:'1px solid #dce6f0' }}>
+                      style={{ background:'#eff6ff', color:'#1a56db', textAlign:'center', borderBottom:'1px solid #dce6f0' }}>
                       {lt.name} <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>({lt.shortName})</span>
                     </th>
                   ))}
                 </tr>
                 <tr style={{ background:'#f8fafc' }}>
-                  <th colSpan={5} className="dg-th" style={{ fontSize:13, textAlign:'left', paddingLeft:12, letterSpacing:'.3px', background:'#f8fafc' }}>
+                  <th colSpan={5} className="dg-th" style={{ textAlign:'left', paddingLeft:12, letterSpacing:'.3px', background:'#f8fafc' }}>
                     {prevFY ? prevFY.name : ''} {currentFY ? `→ ${currentFY.name}` : ''}
                   </th>
                   {visibleLtConfigs.map(lt => (
                     <React.Fragment key={lt.shortName}>
-                      <th className="dg-th" style={{ background:'#fef3c7', color:'#92400e', fontSize:13, width:82 }}>{L('अघिल्लो वर्ष','Prev Year')}</th>
-                      <th className="dg-th" style={{ background:'#d1fae5', color:'#065f46', fontSize:13, width:82 }}>{L('चालु वर्ष','Curr Year')}</th>
+                      <th className="dg-th" style={{ background:'#fef3c7', color:'#92400e', width:82 }}>{L('अघिल्लो वर्ष','Prev Year')}</th>
+                      <th className="dg-th" style={{ background:'#d1fae5', color:'#065f46', width:82 }}>{L('चालु वर्ष','Curr Year')}</th>
                     </React.Fragment>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row, ri) => (
+                {pagedRows.map((row, ri) => (
                   <tr key={row.id} className="dg-row">
-                    <td className="dg-sn-col">{ri + 1}</td>
+                    <td className="dg-sn-col">{(page - 1) * pageSize + ri + 1}</td>
                     <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>{row.fullName}</td>
                     <td className="dg-td" style={{ textAlign:'center' }}>
-                      <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.postShort}</span>
+                      <span style={{ color:'#1f2937' }}>{row.postShort}</span>
                     </td>
                     <td className="dg-td" style={{ textAlign:'center' }}>
-                      <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.deptShort}</span>
+                      <span style={{ color:'#1f2937' }}>{row.deptShort}</span>
                     </td>
                     <td className="dg-td" style={{ textAlign:'center' }}>
-                      <span style={{ background:'#fdf4ff', color:'#7e3af2', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{row.branchShort}</span>
+                      <span style={{ color:'#1f2937' }}>{row.branchShort}</span>
                     </td>
                     {visibleLtConfigs.map(lt => {
                       const prevKey = `${row.id}_${lt.shortName}_prev`;
@@ -1076,16 +1180,15 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
           </div>
         </div>
 
-        <div className="dg-footer">
-          <div className="dg-info">{filteredRows.length} {L('कर्मचारी','staff')}</div>
-        </div>
+        <GridPager page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+          total={filteredRows.length} L={L} itemLabel={L('कर्मचारी','staff')} />
       </div>
 
       {/* validation alert popup */}
       {prevAlert && (
         <div className="modal-overlay">
           <div className="modal modal-sm" style={{ maxWidth:400 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fff7ed,#fef3c7)' }}>
+            <div className="modal-header">
               <h2 style={{ color:'#92400e' }}>⚠️ {L('बिदा सीमा उल्लङ्घन','Leave Limit Exceeded')}</h2>
               <button className="modal-close" onClick={() => setPrevAlert(null)}>✕</button>
             </div>
@@ -1155,7 +1258,7 @@ const buildPrintHeader = (settings, reportTitle, filters = []) => {
   const phone   = settings.phone   || '';
   const email   = settings.email   || '';
   const logo    = settings.logo    || '';
-  const today   = new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+  const today   = getNepalNow().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
 
   const filterRows = filters.length
     ? filters.map(([k, v]) => `<td style="padding:4px 12px;font-size:11px;"><strong>${k}:</strong> ${v || 'All'}</td>`).reduce((acc, td, i) =>
@@ -1164,13 +1267,13 @@ const buildPrintHeader = (settings, reportTitle, filters = []) => {
     : '';
 
   return `
-  <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:14px;padding-bottom:14px;border-bottom:3px solid #52b02c;">
+  <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:14px;padding-bottom:14px;border-bottom:3px solid #1a56db;">
     ${logo ? `<div style="flex-shrink:0"><img src="${logo}" style="height:60px;width:auto;object-fit:contain;" /></div>` : ''}
     <div style="flex:1;text-align:center;">
       <div style="font-size:20px;font-weight:900;color:#1f2937;letter-spacing:.5px;text-transform:uppercase;">${co}</div>
       ${addr  ? `<div style="font-size:11px;color:#6b7280;margin-top:3px;">${addr}</div>` : ''}
       ${(phone||email) ? `<div style="font-size:11px;color:#6b7280;">${[phone,email].filter(Boolean).join(' | ')}</div>` : ''}
-      <div style="display:inline-block;margin-top:8px;padding:4px 18px;background:#52b02c;color:white;font-size:13px;font-weight:700;border-radius:20px;letter-spacing:.5px;">${reportTitle}</div>
+      <div style="display:inline-block;margin-top:8px;padding:4px 18px;background:#1a56db;color:white;font-size:13px;font-weight:700;border-radius:20px;letter-spacing:.5px;">${reportTitle}</div>
     </div>
     <div style="flex-shrink:0;text-align:right;font-size:10px;color:#9ca3af;white-space:nowrap;">${today}</div>
   </div>
@@ -1180,13 +1283,18 @@ const buildPrintHeader = (settings, reportTitle, filters = []) => {
 
 const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, settings, L, fd, opening, setOpening }) => {
   const ltConfigs  = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
+  // Server-side credits (e.g. OT-to-leave grants from the Overtime Approval
+  // page) live in leave_balances, separate from the opening/used math below.
+  const getCredited = (empId, shortName) =>
+    Number(leaveBalances?.find(b => b.employeeId === empId)?.[shortName] || 0);
   const defaultFY  = (settings.fiscalYears||[]).find(f => f.isDefault) || (settings.fiscalYears||[])[0];
   const [fyId,        setFyId]       = useState(defaultFY?.id || '');
   const [search,      setSearch]      = useState('');
   const [bFilterOpen, setBFilterOpen] = useState(false);
   const [bAdvFilters, setBAdvFilters] = useState({ ...DEFAULT_BALANCE_FILTERS });
   const [bTempF,      setBTempF]      = useState({ ...DEFAULT_BALANCE_FILTERS });
-  const printRef = useRef(null);
+  const [page,        setPage]        = useState(1);
+  const [pageSize,    setPageSize]    = useState(25);
   const [transferDone, setTransferDone] = useState(false);
   const [usedPopup,   setUsedPopup]   = useState(null); // { empId, ltShortName, ltName, empName }
 
@@ -1232,7 +1340,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
 
   /* compute flat rows: one per employee × leave type */
   const allEmpRows = useMemo(() => [...(employees||[])].filter(e => e.active)
-    .sort((a, b) => (a.rankingOrder ?? 9999) - (b.rankingOrder ?? 9999))
+    .sort((a, b) => staffRankCompare(a, b, settings))
     .map(emp => ({
     id:          emp.id,
     fullName:    emp.fullName,
@@ -1267,7 +1375,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         const used     = (leaves||[])
           .filter(l => String(l.employeeId) === String(emp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved')
           .reduce((s, l) => s + Number(l.days), 0);
-        const balance  = prevYear + currYear - used;
+        const balance  = prevYear + currYear + getCredited(emp.id, lt.shortName) - used;
         /* cap at maxAccumulateDays; if not set, transfer the full balance */
         const maxAcc   = lt.maxAccumulateDays != null ? Number(lt.maxAccumulateDays) : balance;
         const transfer = Math.max(0, Math.min(balance, maxAcc));
@@ -1290,9 +1398,10 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         const used     = (leaves||[])
           .filter(l => String(l.employeeId) === String(emp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved')
           .reduce((s, l) => s + Number(l.days), 0);
-        const total   = prevYear + currYear;
+        const credited = getCredited(emp.id, lt.shortName);
+        const total   = prevYear + currYear + credited;
         const balance = total - used;
-        if (prevYear === 0 && currYear === 0 && used === 0 && balance === 0) return;
+        if (prevYear === 0 && currYear === 0 && credited === 0 && used === 0 && balance === 0) return;
         sn++;
         rows.push({
           sn,
@@ -1341,6 +1450,26 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
     return r;
   }, [flatRows, search, bAdvFilters]);
 
+  useEffect(() => { setPage(1); }, [search, bAdvFilters, fyId]);
+  const pagedRows = useMemo(() =>
+    balanceRows.slice((page - 1) * pageSize, page * pageSize),
+  [balanceRows, page, pageSize]);
+
+  /* mark rowSpan for the Leave Type cell — merges consecutive rows of the
+     same employee + same type (Accumulated/Non Accumulated) into one cell.
+     Computed from pagedRows (not the full balanceRows) so a merge never
+     visually spans across a page boundary. */
+  const balanceRowsSpanned = useMemo(() => pagedRows.map((r, i) => {
+    const prev = pagedRows[i - 1];
+    if (prev && prev.empId === r.empId && prev.ltType === r.ltType) return { ...r, _ltTypeSpan: 0 };
+    let span = 1;
+    for (let j = i + 1; j < pagedRows.length; j++) {
+      if (pagedRows[j].empId === r.empId && pagedRows[j].ltType === r.ltType) span++;
+      else break;
+    }
+    return { ...r, _ltTypeSpan: span };
+  }), [pagedRows]);
+
   /* unique employee count */
   const uniqueEmpCount = useMemo(() => new Set(balanceRows.map(r => r.empId)).size, [balanceRows]);
 
@@ -1356,10 +1485,44 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
     ['Mode',        bAdvFilters.modes.length       ? bAdvFilters.modes.join(', ')                 : 'All'],
   ], [bAdvFilters, currentFY]);
 
-  /* print */
+  /* print — built from balanceRows directly (not the on-screen DOM), so it
+     always covers every filtered row, not just whatever page is visible. */
   const handlePrint = () => {
-    const printContent = printRef.current?.innerHTML;
-    if (!printContent) return;
+    if (!balanceRows.length) return;
+    const spanned = balanceRows.map((r, i) => {
+      const prev = balanceRows[i - 1];
+      if (prev && prev.empId === r.empId && prev.ltType === r.ltType) return { ...r, _ltTypeSpan: 0 };
+      let span = 1;
+      for (let j = i + 1; j < balanceRows.length; j++) {
+        if (balanceRows[j].empId === r.empId && balanceRows[j].ltType === r.ltType) span++;
+        else break;
+      }
+      return { ...r, _ltTypeSpan: span };
+    });
+    const bodyRows = spanned.map((r, i) => `<tr>
+      <td>${i + 1}</td>
+      <td class="left">${r.fullName}</td>
+      <td>${r.postShort}</td>
+      <td>${r.deptShort}</td>
+      <td>${r.branchShort}</td>
+      ${r._ltTypeSpan > 0 ? `<td rowspan="${r._ltTypeSpan}">${r.ltType}</td>` : ''}
+      <td class="left">${r.ltName}</td>
+      <td>${r.prevYear}</td>
+      <td>${r.currYear}</td>
+      <td>${r.total}</td>
+      <td>${r.used}</td>
+      <td>${r.balance}</td>
+    </tr>`).join('');
+    const printContent = `<table>
+      <thead><tr>
+        <th>SN</th><th class="left">${L('कर्मचारी','Staff')}</th><th>${L('पद','Post')}</th>
+        <th>${L('विभाग','Dept')}</th><th>${L('शाखा','Branch')}</th><th>${L('बिदा प्रकार','Leave Type')}</th>
+        <th class="left">${L('बिदा','Leave')}</th><th>${L('अघिल्लो वर्ष','Prev. Year')}</th>
+        <th>${L('चालु वर्ष','Curr. Year')}</th><th>${L('जम्मा','Total')}</th>
+        <th>${L('लिएको','Used')}</th><th>${L('बाँकी','Balance')}</th>
+      </tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>`;
     const header = buildPrintHeader(settings, 'Leave Balance Report', filterSummary);
     const w = window.open('', '_blank');
     w.document.write(`<!DOCTYPE html><html><head><title>Leave Balance</title>
@@ -1388,13 +1551,13 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
     ].map(row => row.map(v=>`"${v}"`).join(',')).join('\n');
     const a = document.createElement('a');
     a.href  = URL.createObjectURL(new Blob([csv], { type:'text/csv' }));
-    a.download = `leave_balance_${fyId}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `leave_balance_${fyId}_${getNepalTodayISO()}.csv`;
     a.click();
   };
 
   /* cell styles */
-  const thS = { padding:'7px 10px', textAlign:'center', fontWeight:700, fontSize:12, background:'#f0f5fa', borderBottom:'2px solid #c8d6e5', borderRight:'1px solid #dce6f0', whiteSpace:'nowrap' };
-  const tdS = { padding:'6px 10px', textAlign:'center', fontSize:13, borderBottom:'1px solid #eef0f4', borderRight:'1px solid #e8f0f8' };
+  const thS = { padding:'4px 8px', textAlign:'center', fontWeight:700, fontSize:12.5, background:'#f0f5fa', borderBottom:'2px solid #c8d6e5', borderRight:'1px solid #dce6f0', whiteSpace:'nowrap' };
+  const tdS = { padding:'3px 8px', textAlign:'center', fontSize:12.5, borderBottom:'1px solid #eef0f4', borderRight:'1px solid #e8f0f8' };
 
   return (
     <div>
@@ -1412,7 +1575,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         <button className="btn btn-outline btn-filter" onClick={openBFilter} style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
           <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/></svg>
           {L('फिल्टर','Filter')}
-          {bActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#52b02c', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}>{bActiveCount}</span>}
+          {bActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#1a56db', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}>{bActiveCount}</span>}
         </button>
 
         {/* search */}
@@ -1447,8 +1610,8 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
       </div>
 
       {/* Table */}
-      <div ref={printRef} style={{ overflowX:'auto', border:'1px solid #d1d5db', borderRadius:8 }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+      <div style={{ overflowX:'auto', border:'1px solid #d1d5db', borderRadius:'8px 8px 0 0', borderBottom:'none' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5 }}>
           <thead>
             <tr>
               <th style={{ ...thS, width:40 }}>SN</th>
@@ -1457,7 +1620,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
               <th style={{ ...thS, width:75 }}>{L('विभाग','Dept')}</th>
               <th style={{ ...thS, width:75 }}>{L('शाखा','Branch')}</th>
               <th style={{ ...thS, width:110, background:'#f5f3ff', color:'#6d28d9' }}>{L('बिदा प्रकार','Leave Type')}</th>
-              <th style={{ ...thS, minWidth:130, background:'#f0fdf4', color:'#52b02c' }}>{L('बिदा','Leave')}</th>
+              <th style={{ ...thS, minWidth:130, background:'#eff6ff', color:'#1a56db' }}>{L('बिदा','Leave')}</th>
               <th style={{ ...thS, width:90, background:'#fef3c7', color:'#92400e' }}>{L('अघिल्लो वर्ष','Prev. Year')}</th>
               <th style={{ ...thS, width:90, background:'#d1fae5', color:'#065f46' }}>{L('चालु वर्ष','Curr. Year')}</th>
               <th style={{ ...thS, width:70, background:'#f1f5f9' }}>{L('जम्मा','Total')}</th>
@@ -1466,31 +1629,33 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
             </tr>
           </thead>
           <tbody>
-            {balanceRows.map((r, ri) => (
-              <tr key={`${r.empId}-${r.ltName}-${ri}`} style={{ background: ri % 2 === 0 ? 'white' : '#f9fafb' }}>
-                <td style={{ ...tdS, color:'#9ca3af', fontSize:13 }}>{ri + 1}</td>
+            {balanceRowsSpanned.map((r, ri) => (
+              <tr key={`${r.empId}-${r.ltName}-${ri}`} style={{ background: ri % 2 === 0 ? 'white' : '#f3f4f6' }}>
+                <td style={{ ...tdS, color:'#9ca3af' }}>{(page - 1) * pageSize + ri + 1}</td>
                 <td className="left" style={{ ...tdS, textAlign:'left', fontWeight:600, color:'#1f2937', paddingLeft:12 }}>{r.fullName}</td>
                 <td style={{ ...tdS }}>
-                  <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{r.postShort}</span>
+                  <span style={{ color:'#1f2937' }}>{r.postShort}</span>
                 </td>
                 <td style={{ ...tdS }}>
-                  <span style={{ background:'#f0fdf4', color:'#166534', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{r.deptShort}</span>
+                  <span style={{ color:'#1f2937' }}>{r.deptShort}</span>
                 </td>
                 <td style={{ ...tdS }}>
-                  <span style={{ background:'#fdf4ff', color:'#7e3af2', padding:'1px 7px', borderRadius:4, fontSize:13, fontWeight:600 }}>{r.branchShort}</span>
+                  <span style={{ color:'#1f2937' }}>{r.branchShort}</span>
                 </td>
-                <td style={{ ...tdS, textAlign:'center' }}>
-                  <span style={{
-                    fontSize:13, fontWeight:600, padding:'2px 8px', borderRadius:10,
-                    background: r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#f3f4f6' : '#f0fdf4',
-                    color:      r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#6b7280'  : '#065f46',
-                    border: `1px solid ${r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#e5e7eb' : '#86efac'}`,
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {r.ltType}
-                  </span>
-                </td>
-                <td className="left" style={{ ...tdS, textAlign:'left', paddingLeft:10, fontWeight:600, color:'#1f2937', fontSize:13 }}>
+                {r._ltTypeSpan > 0 && (
+                  <td rowSpan={r._ltTypeSpan} style={{ ...tdS, textAlign:'center' }}>
+                    <span style={{
+                      fontSize:12.5, fontWeight:600, padding:'2px 8px', borderRadius:10,
+                      background: r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#f3f4f6' : '#f0fdf4',
+                      color:      r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#6b7280'  : '#065f46',
+                      border: `1px solid ${r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#e5e7eb' : '#86efac'}`,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {r.ltType}
+                    </span>
+                  </td>
+                )}
+                <td className="left" style={{ ...tdS, textAlign:'left', paddingLeft:10, fontWeight:600, color:'#1f2937' }}>
                   {r.ltName}
                 </td>
                 <td style={{ ...tdS, background:'#fffbeb', color:'#92400e', fontWeight:600 }}>{r.prevYear}</td>
@@ -1500,7 +1665,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                   {r.used > 0
                     ? <button onClick={() => setUsedPopup({ empId:r.empId, ltShortName:r.ltShortName, ltName:r.ltName, empName:r.fullName })}
                         style={{ background:'none', border:'none', cursor:'pointer', color:'#be123c', fontWeight:700,
-                          fontSize:13, textDecoration:'underline', padding:0 }}
+                          fontSize:12.5, textDecoration:'underline', padding:0 }}
                         title="Click to view used leave details">
                         {r.used}
                       </button>
@@ -1520,6 +1685,10 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
           </tbody>
         </table>
       </div>
+      <div style={{ border:'1px solid #d1d5db', borderTop:'none', borderRadius:'0 0 8px 8px' }}>
+        <GridPager page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+          total={balanceRows.length} L={L} itemLabel={L('पङ्क्ति','rows')} />
+      </div>
 
       {/* ── Used Leave Details Popup ── */}
       {usedPopup && (() => {
@@ -1534,12 +1703,12 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
 
         /* ── shared cell styles (like Staff Detail grid) ── */
         const thS = {
-          padding:'10px 14px', fontWeight:700, fontSize:13, color:'#111827',
+          padding:'10px 14px', fontWeight:700, fontSize:12.5, color:'#111827',
           background:'#f0f5fa', borderBottom:'2px solid #c8d6e5',
           borderRight:'1px solid #dce6f0', whiteSpace:'nowrap', textAlign:'left',
         };
         const tdS = {
-          padding:'10px 14px', fontSize:13, color:'#374151',
+          padding:'10px 14px', fontSize:12.5, color:'#374151',
           borderBottom:'1px solid #eef0f4', borderRight:'1px solid #f3f4f6',
           verticalAlign:'middle',
         };
@@ -1562,8 +1731,8 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                   </div>
                   <div style={{ fontSize:13, color:'#6b7280', marginTop:5, display:'flex', gap:14, flexWrap:'wrap', alignItems:'center' }}>
                     <span style={{ fontWeight:600, color:'#1f2937' }}>👤 {usedPopup.empName}</span>
-                    <span style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8,
-                      padding:'2px 10px', color:'#166534', fontWeight:700, fontSize:12 }}>
+                    <span style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8,
+                      padding:'2px 10px', color:'#1e40af', fontWeight:700, fontSize:12 }}>
                       🌴 {usedPopup.ltName}
                     </span>
                     <span style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8,
@@ -1587,7 +1756,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                     {L('कुनै स्वीकृत बिदा फेला परेन','No approved leaves found')}
                   </div>
                 ) : (
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5 }}>
                     <thead>
                       <tr>
                         <th style={{ ...thS, width:50, textAlign:'center' }}>SN</th>
@@ -1606,12 +1775,12 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                         const recoName = empName(l.recommendedBy);
                         const apprName = empName(l.approvedBy);
                         return (
-                          <tr key={l.id} style={{ background: i%2===0 ? 'white' : '#f9fafb' }}>
+                          <tr key={l.id} style={{ background: i%2===0 ? 'white' : '#f3f4f6' }}>
                             <td style={{ ...tdS, textAlign:'center', color:'#9ca3af', width:50 }}>{i+1}</td>
                             <td style={{ ...tdS, fontWeight:600, color:'#111827' }}>{fd(l.fromDate)}</td>
                             <td style={{ ...tdS }}>{fd(l.toDate)}</td>
                             <td style={{ ...tdS, textAlign:'center' }}>
-                              <span style={{ display:'inline-block', background:'#dcfce7', color:'#166534',
+                              <span style={{ display:'inline-block', background:'#dbeafe', color:'#1e40af',
                                 borderRadius:8, padding:'2px 12px', fontWeight:800, fontSize:14 }}>
                                 {l.days}
                               </span>
@@ -1654,12 +1823,12 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                     {/* ── Summary footer row ── */}
                     <tfoot>
                       <tr style={{ background:'#f8fafc' }}>
-                        <td colSpan={3} style={{ padding:'10px 14px', fontWeight:700, fontSize:13, color:'#374151',
+                        <td colSpan={3} style={{ padding:'10px 14px', fontWeight:700, fontSize:12.5, color:'#374151',
                           borderTop:'2px solid #c8d6e5' }}>
                           {L('जम्मा','Total')}
                         </td>
                         <td style={{ padding:'10px 14px', textAlign:'center', borderTop:'2px solid #c8d6e5' }}>
-                          <span style={{ background:'#dcfce7', color:'#166534', borderRadius:8,
+                          <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:8,
                             padding:'2px 12px', fontWeight:800, fontSize:14 }}>
                             {totalDays}
                           </span>
@@ -1704,128 +1873,275 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
 };
 
 /* ═══════════════════════════════════════════ */
-/* TAB 4 — Leave Reports                       */
+/* TAB 4 — Leave Reports (personal ledger:      */
+/* defaults to the logged-in user's own leave;  */
+/* Admin/Branch Manager/Dept Head can switch)   */
 /* ═══════════════════════════════════════════ */
-const LeaveReportsTab = ({ employees, leaveTypes, leaves, L, fd }) => {
-  const totalLeaves   = leaves.length;
-  const approved      = leaves.filter(l => l.status === 'approved').length;
-  const pending       = leaves.filter(l => l.status === 'pending').length;
-  const rejected      = leaves.filter(l => l.status === 'rejected').length;
-  const totalDaysUsed = leaves.filter(l => l.status === 'approved').reduce((s, l) => s + Number(l.days), 0);
+const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBalances }) => {
+  const { currentUser, isAdmin, isBranchManager, isDeptHead } = useAuth();
+  const canChangeStaff = isAdmin || isBranchManager || isDeptHead;
 
-  const byType = useMemo(() => {
-    return (leaveTypes||[]).map(lt => {
-      const ltLeaves   = leaves.filter(l => l.leaveTypeCode === lt.code);
-      const ltApproved = ltLeaves.filter(l => l.status === 'approved');
-      return {
-        code:     lt.code,
-        name:     lt.nameEn || lt.name,
-        color:    lt.color || '#6b7280',
-        total:    ltLeaves.length,
-        approved: ltApproved.length,
-        days:     ltApproved.reduce((s, l) => s + Number(l.days), 0),
-        pending:  ltLeaves.filter(l => l.status === 'pending').length,
-      };
-    }).sort((a, b) => b.days - a.days);
-  }, [leaveTypes, leaves]);
+  const ltConfigs = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
+  const defaultFY = (settings.fiscalYears||[]).find(f => f.isDefault) || (settings.fiscalYears||[])[0];
+  const [fyId, setFyId] = useState(defaultFY?.id || '');
+  const currentFY  = useMemo(() => (settings.fiscalYears||[]).find(f => String(f.id) === String(fyId)), [settings.fiscalYears, fyId]);
+  const prevFYKey  = 'prev_' + fyId;
 
-  const byEmployee = useMemo(() => {
-    return (employees||[]).filter(e => e.active).map(emp => {
-      const empLeaves   = leaves.filter(l => String(l.employeeId) === String(emp.id));
-      const empApproved = empLeaves.filter(l => l.status === 'approved');
-      return {
-        id: emp.id, name: emp.fullName, dept: emp.department||'—', avatar: emp.avatar,
-        total: empLeaves.length,
-        approved: empApproved.length,
-        days: empApproved.reduce((s, l) => s + Number(l.days), 0),
-        pending: empLeaves.filter(l => l.status === 'pending').length,
-      };
-    }).sort((a, b) => b.days - a.days);
-  }, [employees, leaves]);
+  const activeEmployees = useMemo(() => (employees||[]).filter(e => e.active), [employees]);
 
-  const statCard = (icon, label, value, color, bg) => (
-    <div style={{ background:bg, border:`1px solid ${color}33`, borderRadius:10, padding:'16px 20px', display:'flex', alignItems:'center', gap:14 }}>
-      <div style={{ width:46,height:46,borderRadius:10,background:`${color}18`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,flexShrink:0 }}>{icon}</div>
-      <div>
-        <div style={{ fontSize:24, fontWeight:800, color, lineHeight:1.1 }}>{value}</div>
-        <div style={{ fontSize:12, color:'#6b7280', marginTop:2, fontWeight:500 }}>{label}</div>
-      </div>
-    </div>
-  );
+  const [selectedEmpId, setSelectedEmpId] = useState(null);
+
+  /* Default to the logged-in user's own record; elevated roles with no
+     linked record fall back to the first staff member instead of showing
+     nothing — same convention as RosterReport.jsx's Staff Wise. */
+  useEffect(() => {
+    if (!currentUser || !activeEmployees.length || selectedEmpId != null) return;
+    const me = activeEmployees.find(e => String(e.id) === String(currentUser.id));
+    if (me) { setSelectedEmpId(me.id); }
+    else if (canChangeStaff) {
+      const first = [...activeEmployees].sort((a, b) => (a.fullName||'').localeCompare(b.fullName||''))[0];
+      if (first) setSelectedEmpId(first.id);
+    }
+  }, [currentUser, activeEmployees, canChangeStaff, selectedEmpId]);
+
+  const selectedEmp = activeEmployees.find(e => String(e.id) === String(selectedEmpId)) || null;
+
+  const empName = (id) => id ? ((employees||[]).find(e => String(e.id) === String(id))?.fullName || `#${id}`) : null;
+
+  const [leaveTypeFilter, setLeaveTypeFilter] = useState([]);
+  const ltShortNameToName = (sn) => ltConfigs.find(c => c.shortName === sn)?.name || sn;
+
+  /* Same Transferred/Assigned/Total/Taken/Balance math as the Leave
+     Balance tab, scoped to one employee instead of every staff row. */
+  const summaryRowsAll = useMemo(() => {
+    if (!selectedEmp) return [];
+    return ltConfigs.map(lt => {
+      const prevYear = Number(opening[prevFYKey]?.[selectedEmp.id]?.[lt.shortName] ?? 0);
+      const currYear = Number(opening[fyId]?.[selectedEmp.id]?.[lt.shortName]      ?? 0);
+      const used     = (leaves||[])
+        .filter(l => String(l.employeeId) === String(selectedEmp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved')
+        .reduce((s, l) => s + Number(l.days), 0);
+      // Server-side credits (e.g. OT-to-leave grants from the Overtime
+      // Approval page) live in leave_balances, separate from this opening/used math.
+      const credited = Number(leaveBalances?.find(b => b.employeeId === selectedEmp.id)?.[lt.shortName] || 0);
+      const total   = prevYear + currYear + credited;
+      const balance = total - used;
+      return { ltName: lt.name, ltShortName: lt.shortName, prevYear, currYear, total, used, balance };
+    }).filter(r => !(r.prevYear === 0 && r.currYear === 0 && r.used === 0 && r.balance === 0));
+  }, [selectedEmp, ltConfigs, opening, fyId, prevFYKey, leaves]);
+
+  const summaryRows = useMemo(() => (
+    leaveTypeFilter.length === 0 ? summaryRowsAll : summaryRowsAll.filter(r => leaveTypeFilter.includes(r.ltShortName))
+  ), [summaryRowsAll, leaveTypeFilter]);
+
+  const detailRows = useMemo(() => {
+    if (!selectedEmp) return [];
+    const balanceByType = new Map(summaryRowsAll.map(r => [r.ltShortName, r.balance]));
+    return (leaves||[])
+      .filter(l => String(l.employeeId) === String(selectedEmp.id) && l.status === 'approved')
+      .filter(l => leaveTypeFilter.length === 0 || leaveTypeFilter.includes(l.leaveTypeCode))
+      .map(l => ({
+        id: l.id,
+        ltName: ltConfigs.find(c => c.shortName === l.leaveTypeCode)?.name || l.leaveTypeCode,
+        fromDate: l.fromDate, toDate: l.toDate, days: l.days,
+        balance: balanceByType.has(l.leaveTypeCode) ? balanceByType.get(l.leaveTypeCode) : '—',
+        reason: l.reason,
+        approvedByName: empName(l.approvedBy),
+        approvedDate: l.approvedDate,
+      }))
+      .sort((a, b) => new Date(a.fromDate) - new Date(b.fromDate));
+  }, [selectedEmp, leaves, ltConfigs, summaryRowsAll, leaveTypeFilter]);
+
+  const handlePrint = () => {
+    if (!selectedEmp) return;
+    const header = buildPrintHeader(settings, 'Leave Report', [
+      ['Staff', selectedEmp.fullName],
+      ['Fiscal Year', currentFY?.name || ''],
+    ]);
+    const summaryHtml = `
+      <h4>📊 ${L('सारांश','Summary')}</h4>
+      <table>
+        <thead><tr>
+          <th class="left">${L('बिदा','Leave')}</th><th>${L('हस्तान्तरण','Transferred')}</th>
+          <th>${L('विनियोजित','Assigned')}</th><th>${L('जम्मा','Total')}</th>
+          <th>${L('प्रयोग','Taken')}</th><th>${L('बाँकी','Balance')}</th>
+        </tr></thead>
+        <tbody>
+          ${summaryRows.length === 0
+            ? `<tr><td colspan="6">${L('डाटा छैन','No data')}</td></tr>`
+            : summaryRows.map(r => `<tr>
+                <td class="left">${r.ltName}</td><td>${r.prevYear}</td><td>${r.currYear}</td>
+                <td><b>${r.total}</b></td><td>${r.used}</td><td><b>${r.balance}</b></td>
+              </tr>`).join('')}
+        </tbody>
+      </table>`;
+    const detailHtml = `
+      <h4>📋 ${L('विवरण','Detail')}</h4>
+      <table>
+        <thead><tr>
+          <th class="left">${L('बिदा','Leave')}</th><th>${L('मिति देखि','From Date')}</th><th>${L('मिति सम्म','To Date')}</th>
+          <th>${L('प्रयोग','Taken')}</th><th>${L('बाँकी','Balance')}</th><th class="left">${L('कैफियत','Remarks')}</th>
+          <th>${L('स्वीकृतकर्ता','Approved By')}</th><th>${L('मिति','Approved Date')}</th>
+        </tr></thead>
+        <tbody>
+          ${detailRows.length === 0
+            ? `<tr><td colspan="8">${L('कुनै स्वीकृत बिदा छैन','No approved leaves')}</td></tr>`
+            : detailRows.map(r => `<tr>
+                <td class="left">${r.ltName}</td><td>${fd(r.fromDate)}</td><td>${fd(r.toDate)}</td>
+                <td><b>${r.days}</b></td><td>${r.balance}</td><td class="left">${r.reason||'—'}</td>
+                <td>${r.approvedByName||'—'}</td><td>${r.approvedDate?fd(r.approvedDate):'—'}</td>
+              </tr>`).join('')}
+        </tbody>
+      </table>`;
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html><html><head><title>Leave Report — ${selectedEmp.fullName}</title>
+      <style>
+        body{font-family:Arial,sans-serif;font-size:11px;margin:20px;}
+        table{width:100%;border-collapse:collapse;margin-bottom:18px;}
+        th,td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
+        th{background:#e8f0fb;font-weight:700;font-size:10px;}
+        td.left,th.left{text-align:left;}tr:nth-child(even){background:#f9fafb;}
+        h4{margin:0 0 6px;font-size:13px;}
+        @media print{body{margin:8px;}button{display:none;}}
+      </style></head><body>${header}${summaryHtml}${detailHtml}</body></html>`);
+    w.document.close(); w.focus(); w.print(); w.close();
+  };
+
+  const handleExport = () => {
+    if (!selectedEmp) return;
+    const co = settings.companyName || settings.name || 'eHajiri TMS';
+    const summarySheet = XLSX.utils.aoa_to_sheet([
+      [co], ['Leave Report — Summary'], [`Staff: ${selectedEmp.fullName}`], [`Fiscal Year: ${currentFY?.name||''}`], [],
+      ['Leave','Transferred','Assigned','Total','Taken','Balance'],
+      ...summaryRows.map(r => [r.ltName, r.prevYear, r.currYear, r.total, r.used, r.balance]),
+    ]);
+    const detailSheet = XLSX.utils.aoa_to_sheet([
+      [co], ['Leave Report — Detail'], [`Staff: ${selectedEmp.fullName}`], [`Fiscal Year: ${currentFY?.name||''}`], [],
+      ['Leave','From Date','To Date','Taken','Balance','Remarks','Approved By','Approved Date'],
+      ...detailRows.map(r => [r.ltName, fd(r.fromDate), fd(r.toDate), r.days, r.balance, r.reason||'', r.approvedByName||'', r.approvedDate?fd(r.approvedDate):'']),
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+    XLSX.utils.book_append_sheet(wb, detailSheet, 'Detail');
+    XLSX.writeFile(wb, `leave_report_${selectedEmp.fullName.replace(/\s+/g,'_')}_${getNepalTodayISO()}.xlsx`);
+  };
+
+  const dash = <span style={{ color:'#d1d5db' }}>—</span>;
+
+  const summaryColumns = useMemo(() => [
+    { field: 'ltName', header: L('बिदा','Leave'), width: 220, render: (v) => <span style={{ fontWeight:600, color:'#111827' }}>{v}</span> },
+    { field: 'prevYear', header: L('हस्तान्तरण','Transferred'), width: 130 },
+    { field: 'currYear', header: L('विनियोजित','Assigned'), width: 130 },
+    { field: 'total', header: L('जम्मा','Total'), width: 110, render: (v) => <b>{v}</b> },
+    { field: 'used', header: L('प्रयोग','Taken'), width: 110, render: (v) => <span style={{ color:'#dc2626' }}>{v}</span> },
+    { field: 'balance', header: L('बाँकी','Balance'), width: 120, render: (v) => <b style={{ color:'#059669' }}>{v}</b> },
+  ], [L]);
+
+  const detailColumns = useMemo(() => [
+    { field: 'ltName', header: L('बिदा','Leave'), width: 180, render: (v) => <span style={{ fontWeight:600, color:'#111827' }}>{v}</span> },
+    { field: 'fromDate', header: L('मिति देखि','From Date'), width: 130, render: (v) => fd(v) },
+    { field: 'toDate', header: L('मिति सम्म','To Date'), width: 130, render: (v) => fd(v) },
+    { field: 'days', header: L('प्रयोग','Taken'), width: 100, render: (v) => <b>{v}</b> },
+    { field: 'balance', header: L('बाँकी','Balance'), width: 100 },
+    { field: 'reason', header: L('कैफियत','Remarks'), width: 200, render: (v) => v || dash },
+    { field: 'approvedByName', header: L('स्वीकृतकर्ता','Approved By'), width: 160, render: (v) => v || dash },
+    { field: 'approvedDate', header: L('स्वीकृत मिति','Approved Date'), width: 140, render: (v) => v ? fd(v) : dash },
+  ], [L, fd]);
+
+  const printIcon = <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a1 1 0 001 1h8a1 1 0 001-1v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a1 1 0 00-1-1H6a1 1 0 00-1 1zm2 0h6v3H7V4zm-1 9a1 1 0 001 1h6a1 1 0 001-1v-2H6v2zm7-6H6a1 1 0 000 2h8a1 1 0 000-2z" clipRule="evenodd"/></svg>;
+  const downloadIcon = <svg viewBox="0 0 20 20" fill="currentColor" width={14} height={14}><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd"/></svg>;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12 }}>
-        {statCard('📋', L('जम्मा आवेदन','Total Applications'),    totalLeaves,            '#52b02c', '#f0fdf4')}
-        {statCard('✅', L('स्वीकृत','Approved'),                  approved,               '#0e9f6e', '#f0fdf4')}
-        {statCard('⏳', L('विचाराधीन','Pending'),                 pending,                '#e3a008', '#fffbeb')}
-        {statCard('❌', L('अस्वीकृत','Rejected'),                 rejected,               '#f05252', '#fff1f2')}
-        {statCard('📅', L('जम्मा दिन','Total Days Approved'),      totalDaysUsed.toFixed(1),'#7e3af2', '#f5f3ff')}
-      </div>
-
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-        <div className="card">
-          <div className="card-header"><h3>📊 {L('बिदा प्रकार अनुसार','By Leave Type')}</h3></div>
-          <div style={{ overflowX:'auto' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-              <thead>
-                <tr style={{ background:'#f0f5fa' }}>
-                  {[L('प्रकार','Type'), L('आवेदन','Applied'), L('स्वीकृत','Approved'), L('दिन','Days'), L('विचाराधीन','Pending')].map(h => (
-                    <th key={h} style={{ padding:'8px 12px', textAlign:h===L('प्रकार','Type')?'left':'center', fontSize:13, fontWeight:700, color:'#374151', borderBottom:'2px solid #c8d6e5' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {byType.map((lt, i) => (
-                  <tr key={lt.code} style={{ background:i%2===0?'white':'#f9fafb' }}>
-                    <td style={{ padding:'8px 12px', borderBottom:'1px solid #eef0f4' }}>
-                      <span style={{ display:'flex', alignItems:'center', gap:6 }}>
-                        <span style={{ width:8,height:8,borderRadius:'50%',background:lt.color,display:'inline-block',flexShrink:0 }}></span>
-                        <strong>{lt.code}</strong>
-                        <span style={{ color:'#6b7280', fontSize:13 }}>{lt.name}</span>
-                      </span>
-                    </td>
-                    <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4' }}>{lt.total}</td>
-                    <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4', color:'#0e9f6e', fontWeight:600 }}>{lt.approved}</td>
-                    <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4', color:'#52b02c', fontWeight:700 }}>{lt.days.toFixed(1)}</td>
-                    <td style={{ padding:'8px 12px', textAlign:'center', borderBottom:'1px solid #eef0f4', color:'#e3a008', fontWeight:600 }}>{lt.pending||'—'}</td>
-                  </tr>
-                ))}
-                {byType.length === 0 && <tr><td colSpan={5} style={{ padding:24, textAlign:'center', color:'#9ca3af' }}>No data</td></tr>}
-              </tbody>
-            </table>
-          </div>
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      {/* Filter toolbar */}
+      <div style={{ display:'flex', alignItems:'flex-end', gap:14, flexWrap:'wrap' }}>
+        <div>
+          <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
+            {L('आर्थिक वर्ष','Fiscal Year')}
+          </label>
+          <select className="form-control" style={{ width:160, fontSize:13, height:36 }} value={fyId} onChange={e => setFyId(e.target.value)}>
+            {(settings.fiscalYears||[]).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
+          </select>
         </div>
 
-        <div className="card">
-          <div className="card-header"><h3>👥 {L('कर्मचारी अनुसार','By Employee')}</h3></div>
-          <div style={{ maxHeight:360, overflowY:'auto' }}>
-            {byEmployee.map((emp, i) => (
-              <div key={emp.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 16px', borderBottom:'1px solid #f3f4f6', background:i%2===0?'white':'#f9fafb' }}>
-                <div style={{ width:32,height:32,borderRadius:'50%',background:'#dcfce7',color:'#52b02c',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,flexShrink:0 }}>
-                  {emp.avatar}
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontWeight:600, fontSize:13 }}>{emp.name}</div>
-                  <div style={{ fontSize:13, color:'#6b7280' }}>{emp.dept}</div>
-                </div>
-                <div style={{ textAlign:'right', flexShrink:0 }}>
-                  <div style={{ fontWeight:700, fontSize:14, color:'#52b02c' }}>{emp.days} {L('दिन','days')}</div>
-                  <div style={{ fontSize:13, color:'#6b7280' }}>{emp.approved} {L('स्वीकृत','approved')}</div>
-                </div>
-                {emp.pending > 0 && (
-                  <span style={{ background:'#fef3c7', color:'#92400e', padding:'2px 8px', borderRadius:20, fontSize:13, fontWeight:600 }}>
-                    {emp.pending} {L('विचाराधीन','pending')}
-                  </span>
-                )}
-              </div>
-            ))}
-            {byEmployee.length === 0 && (
-              <div style={{ padding:32, textAlign:'center', color:'#9ca3af' }}>{L('कुनै रेकर्ड छैन','No records')}</div>
-            )}
+        {canChangeStaff ? (
+          <div style={{ minWidth:280 }}>
+            <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
+              {L('कर्मचारी','Staff')}
+            </label>
+            <StaffDropdown employees={activeEmployees} value={selectedEmpId} onChange={setSelectedEmpId} />
           </div>
+        ) : selectedEmp ? (
+          <div>
+            <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
+              {L('कर्मचारी','Staff')}
+            </label>
+            <div style={{ height:36, display:'flex', alignItems:'center', padding:'0 12px', background:'#f3f4f6',
+              border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontWeight:600, color:'#374151' }}>
+              {selectedEmp.fullName}
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ minWidth:220 }}>
+          <MultiCheckSelect
+            label={L('बिदाको प्रकार','Leave Type')}
+            value={leaveTypeFilter}
+            onChange={setLeaveTypeFilter}
+            options={ltConfigs.map(c => c.shortName)}
+            displayFn={ltShortNameToName}
+            placeholder={L('सबै','All')}
+          />
+        </div>
+
+        <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+          <button className="btn btn-outline" onClick={handleExport} disabled={!selectedEmp}
+            style={{ display:'flex', alignItems:'center', gap:6 }}>
+            {downloadIcon} {L('एक्सेल निर्यात','Export Excel')}
+          </button>
+          <button className="btn btn-outline" onClick={handlePrint} disabled={!selectedEmp}
+            style={{ display:'flex', alignItems:'center', gap:6 }}>
+            {printIcon} {L('प्रिन्ट','Print')}
+          </button>
         </div>
       </div>
+
+      {!selectedEmp ? (
+        <div style={{ padding:40, textAlign:'center', color:'#9ca3af' }}>
+          {L('तपाईंको खातासँग सम्बन्धित कुनै स्टाफ रेकर्ड फेला परेन','No leave record found for your account')}
+        </div>
+      ) : (
+        <>
+          {/* Summary */}
+          <div className="card" style={{ marginBottom:16 }}>
+            <div className="card-header"><h3>📊 {L('सारांश','Summary')}</h3></div>
+            <DataGrid
+              columns={summaryColumns}
+              data={summaryRows}
+              rowKey="ltShortName"
+              showSearch={false}
+              showFilterButton={false}
+              showCheckbox={false}
+              showFooter={false}
+              defaultPageSize={50}
+            />
+          </div>
+
+          {/* Detail */}
+          <div className="card">
+            <div className="card-header"><h3>📋 {L('विवरण','Detail')}</h3></div>
+            <DataGrid
+              columns={detailColumns}
+              data={detailRows}
+              rowKey="id"
+              showSearch={false}
+              showFilterButton={false}
+              showCheckbox={false}
+              defaultPageSize={10}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1843,9 +2159,14 @@ const TABS = [
 const LeaveCalculation = () => {
   const { language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
-  const { filteredEmployees: employees, leaveTypes, leaveBalances, filteredLeaves: leaves } = useData();
+  const { filteredEmployees: employees, leaveTypes, leaveBalances, refreshLeaveBalances, filteredLeaves: leaves } = useData();
   const { settings } = useSettings();
   const fd = useDateFormat();
+
+  // leaveBalances is normally fetched once at login — refetch on mount so a
+  // credit granted elsewhere (e.g. Overtime Approval's "Provide Next Day
+  // Leave") shows up here without needing a full page reload/re-login.
+  useEffect(() => { refreshLeaveBalances(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [activeTab, setActiveTab] = useState('opening');
   const [opening,   setOpeningRaw] = useState(() => lsGet('ls_leaveOpening', {}));
@@ -1885,7 +2206,7 @@ const LeaveCalculation = () => {
         {activeTab === 'opening'  && <LeaveOpeningTab  {...sharedProps} />}
         {activeTab === 'transfer' && <LeaveTransferTab {...sharedProps} leaves={leaves} />}
         {activeTab === 'balance'  && <LeaveBalanceTab  {...sharedProps} leaveBalances={leaveBalances} leaves={leaves} settings={settings} />}
-        {activeTab === 'reports'  && <LeaveReportsTab  {...sharedProps} leaveBalances={leaveBalances} leaves={leaves} />}
+        {activeTab === 'reports'  && <LeaveReportsTab  {...sharedProps} leaves={leaves} leaveBalances={leaveBalances} />}
       </div>
     </div>
   );

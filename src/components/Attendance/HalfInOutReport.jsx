@@ -8,18 +8,11 @@ import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
-import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 const isoDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -79,9 +72,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         onClick={e=>e.stopPropagation()}>
 
         {/* Header */}
-        <div style={{ padding:'16px 22px 12px',background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'16px 22px 12px',background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex',justifyContent:'space-between',alignItems:'center' }}>
-          <span style={{ fontSize:16,fontWeight:700,color:'#166534' }}>{L('एडभान्स खोज','Advance Search')}</span>
+          <span style={{ fontSize:16,fontWeight:700,color:'#1e40af' }}>{L('एडभान्स खोज','Advance Search')}</span>
           <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1 }}>✕</button>
         </div>
 
@@ -94,7 +87,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
               {[['working',L('कार्यरत','Working')],['notworking',L('अवकाश','Not Working')]].map(([v,label])=>(
                 <button key={v} onClick={()=>{ set('_status',v); set('staffId',''); }}
                   style={{ flex:1,padding:'8px 12px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                    background:(local._status||'working')===v?'#52b02c':'white',
+                    background:(local._status||'working')===v?'#1a56db':'white',
                     color:(local._status||'working')===v?'white':'#374151',transition:'background .15s' }}>
                   {label}
                 </button>
@@ -147,7 +140,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
             {L('रिसेट','Reset')}
           </button>
           <button onClick={() => { onApply(local); onClose(); }}
-            style={{ padding:'8px 22px',border:'none',borderRadius:8,background:'#52b02c',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}>
+            style={{ padding:'8px 22px',border:'none',borderRadius:8,background:'#1a56db',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -157,7 +150,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
 };
 
 /* ── Day cell ──────────────────────────────────────────────── */
-const ROW_COLORS = { in:'#52b02c', out:'#059669', wh:'#374151', ot:'#7c3aed' };
+const ROW_COLORS = { in:'#1a56db', out:'#059669', wh:'#374151', ot:'#7c3aed' };
 
 const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast }) => {
   const isWH  = rowKey === 'wh';
@@ -171,7 +164,7 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast }) => 
     let badge = null;
     if (day?.leave)       badge = <span title={day.leave} style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 5px',fontSize:9,fontWeight:800,cursor:'help' }}>{leaveAbbrev(day.leave)}</span>;
     else if (isHoliday)   badge = <span title={holidayName||'Holiday'} style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 5px',fontSize:9,fontWeight:800,cursor:'help' }}>PH</span>;
-    else if (day?.visit)  badge = <span title="Office Visit" style={{ background:'#dcfce7',color:'#166534',borderRadius:4,padding:'1px 5px',fontSize:9,fontWeight:800 }}>OV</span>;
+    else if (day?.visit)  badge = <span title="Office Visit" style={{ background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 5px',fontSize:9,fontWeight:800 }}>OV</span>;
     else if (isWeekend)   badge = <span style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 6px',fontSize:9,fontWeight:800 }}>W</span>;
     return (
       <td style={{ background:bg,borderRight:'1px solid #f1f5f9',borderBottom:bdBot,padding:'3px 2px',minWidth:52,textAlign:'center',verticalAlign:'middle' }}>
@@ -211,9 +204,9 @@ const HalfInOutReport = () => {
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
-  const now     = new Date();
+  const now     = getNepalNow();
   const useNP   = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
   const urlHalf = parseInt(searchParams.get('half'));
 
   const { isEmployee, currentUser } = useAuth();
@@ -313,7 +306,7 @@ const HalfInOutReport = () => {
         <div>
           <h1 className="page-title">🔄 {L('IN & OUT रिपोर्ट','IN & OUT Report')}</h1>
           <p className="page-subtitle" style={{ margin:0 }}>
-            {currentFY&&<span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>{currentFY.name}</span>}
+            {currentFY&&<span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>{currentFY.name}</span>}
             {periodLabel()}
             {period&&<span style={{ marginLeft:8,fontSize:11,color:'#9ca3af' }}>{fd(period.startDate)} → {fd(period.endDate)}</span>}
           </p>
@@ -321,7 +314,7 @@ const HalfInOutReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8 }}>
           <button onClick={()=>window.print()}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
           <ViewHalfMonthlyBtn year={year} month={month} half={half} useNP={useNP} currentPath="/attendance/reports/half-monthly/in-out" />
@@ -347,7 +340,7 @@ const HalfInOutReport = () => {
           {[1,2].map(h=>(
             <button key={h} onClick={()=>setHalf(h)}
               style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
+                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
               {h===1?L('पहिलो अर्ध','1st Half'):L('दोस्रो अर्ध','2nd Half')}
             </button>
           ))}
@@ -372,7 +365,7 @@ const HalfInOutReport = () => {
             <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
           </svg>
           {L('एडभान्स खोज','Advance Search')}
-          {activeFilterCount>0&&<span style={{ background:'#52b02c',color:'white',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>}
+          {activeFilterCount>0&&<span style={{ background:'#1a56db',color:'white',borderRadius:'50%',width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>}
         </button>
 
         <button className="btn btn-outline btn-sm" style={{ height:36 }} onClick={load} disabled={loading}>🔃</button>
@@ -405,6 +398,9 @@ const HalfInOutReport = () => {
                   const dispNum = useNP ? (dateIdx+(half===1?1:16)) : dayNum;
                   return <th key={date} style={thDay(isWeekend,isHoliday)}>{settings.nepaliDigits?toNepaliDigits(dispNum):dispNum}</th>;
                 })}
+                <th rowSpan={2} style={{ ...TH, background:'#f0fdf4', color:'#059669', borderLeft:'2px solid #c9d1db', minWidth:64 }}>
+                  {L('कुल OT','Total OT')}
+                </th>
               </tr>
               {/* Row 2 — day abbreviations (always English) */}
               <tr>
@@ -421,7 +417,7 @@ const HalfInOutReport = () => {
 
             <tbody>
               {employees.length===0&&(
-                <tr><td colSpan={6+dates.length} style={{ textAlign:'center',padding:'40px',color:'#9ca3af',fontSize:13 }}>
+                <tr><td colSpan={7+dates.length} style={{ textAlign:'center',padding:'40px',color:'#9ca3af',fontSize:13 }}>
                   {L('कुनै कर्मचारी भेटिएन','No staff found')}
                 </td></tr>
               )}
@@ -445,11 +441,11 @@ const HalfInOutReport = () => {
                             borderBottom:'2px solid #cbd5e1',minWidth:120 }}>
                             {emp.fullName}
                           </td>
-                          <td rowSpan={4} style={{ ...TD_FIX,color:'#0369a1',textAlign:'center',borderBottom:'2px solid #cbd5e1' }}
+                          <td rowSpan={4} style={{ ...TD_FIX,color:'#1f2937',textAlign:'center',borderBottom:'2px solid #cbd5e1' }}
                             title={emp.position}>{emp.postShort||abbrevPost(emp.position)||'—'}</td>
-                          <td rowSpan={4} style={{ ...TD_FIX,color:'#059669',textAlign:'center',borderBottom:'2px solid #cbd5e1' }}
+                          <td rowSpan={4} style={{ ...TD_FIX,color:'#1f2937',textAlign:'center',borderBottom:'2px solid #cbd5e1' }}
                             title={emp.department}>{emp.deptShort||abbrevPost(emp.department)||'—'}</td>
-                          <td rowSpan={4} style={{ ...TD_FIX,color:'#7c3aed',textAlign:'center',borderBottom:'2px solid #cbd5e1' }}
+                          <td rowSpan={4} style={{ ...TD_FIX,color:'#1f2937',textAlign:'center',borderBottom:'2px solid #cbd5e1' }}
                             title={emp.branch}>{resolveShort(emp)}</td>
                         </>
                       )}
@@ -470,6 +466,25 @@ const HalfInOutReport = () => {
                           day={emp.days?.[date]} isWeekend={isWeekend}
                           isHoliday={isHoliday} holidayName={holidayName} isLast={isLast} />
                       ))}
+
+                      {/* Total OT — only shown in the OT row */}
+                      {rowKey === 'ot' ? (
+                        <td style={{ background:'#f0fdf4', borderLeft:'2px solid #c9d1db',
+                          borderRight:'1px solid #dedede', borderBottom:isLast?'2px solid #cbd5e1':'1px solid #f1f5f9',
+                          padding:'3px 8px', minWidth:64, textAlign:'center', verticalAlign:'middle' }}>
+                          {emp.eligibleForOt && emp.totalApprovedOTFormatted && emp.totalApprovedOTFormatted !== '—'
+                            ? <strong style={{ fontFamily:'monospace', fontSize:12, fontWeight:900, color:'#059669' }}>
+                                {emp.totalApprovedOTFormatted}
+                              </strong>
+                            : <span style={{ color:'#d1d5db' }}>—</span>}
+                        </td>
+                      ) : (
+                        <td style={{ background:'#f8fafc', borderLeft:'2px solid #c9d1db',
+                          borderRight:'1px solid #dedede', borderBottom:isLast?'2px solid #cbd5e1':'1px solid #f1f5f9',
+                          padding:'3px 4px', minWidth:54, textAlign:'center' }}>
+                          <span style={{ color:'#d1d5db', fontSize:11 }}>—</span>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -485,7 +500,7 @@ const HalfInOutReport = () => {
           color:'#6b7280',padding:'7px 12px',background:'#f8fafc',
           borderRadius:8,border:'1px solid #e2e8f0',alignItems:'center' }}>
           <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
-          {[['IN','#52b02c','Time In'],['OUT','#059669','Time Out'],['WH','#374151','Worked Hrs'],['OT','#7c3aed','Overtime']].map(([l,c,d])=>(
+          {[['IN','#1a56db','Time In'],['OUT','#059669','Time Out'],['WH','#374151','Worked Hrs'],['OT','#7c3aed','Overtime']].map(([l,c,d])=>(
             <span key={l} style={{ display:'inline-flex',alignItems:'center',gap:4 }}>
               <span style={{ background:c,color:'white',borderRadius:4,padding:'1px 7px',fontSize:10,fontWeight:800 }}>{l}</span>
               <span>= {d}</span>

@@ -27,6 +27,24 @@ export async function ensureLicenseTable() {
         is_active  BOOLEAN DEFAULT TRUE
       );
     `);
+    // Distributor contact info shown on the "Subscription Expired" screen.
+    // Deliberately NOT part of the signed `payload` — it's just-for-display
+    // (who to call to renew), not something that needs cryptographic
+    // integrity, so LicenseAdmin can update it independently of activation
+    // (e.g. a dealer's phone number changes) without re-signing/re-activating
+    // the license itself. ADD COLUMN IF NOT EXISTS so this backfills onto
+    // every already-provisioned tenant's table on its next restart, not just
+    // freshly-created ones.
+    // distributor_name = dealer's company/business name; distributor_contact_name
+    // = the actual person there (dealer_accounts has both `company` and
+    // `owner_name` for exactly this reason — they're often different).
+    await pool.query(`
+      ALTER TABLE license
+        ADD COLUMN IF NOT EXISTS distributor_name         VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS distributor_contact_name VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS distributor_phone        VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS distributor_email        VARCHAR(255);
+    `);
   } catch (e) { logError('[license] table init error:', e); }
 }
 
@@ -103,9 +121,35 @@ router.get('/status', async (_req, res) => {
       features    : payload.features || [],
       issuedAt    : payload.issuedAt,
       activatedAt : row.activated_at,
+      distributorName       : row.distributor_name         || payload.distributorName || '',
+      distributorContactName: row.distributor_contact_name || '',
+      distributorPhone      : row.distributor_phone        || '',
+      distributorEmail      : row.distributor_email        || '',
     });
   } catch (e) {
     logError('[license/status]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /distributor ─────────────────────────────────────────────────────────
+// Sets/updates the distributor contact info shown on the "Subscription
+// Expired" screen. Called by LicenseAdmin (pushLicenseToTenant) whenever a
+// license is pushed/activated, and independently whenever a dealer's own
+// phone/email changes — deliberately separate from /activate so updating
+// contact info never requires re-signing or re-activating the license
+// itself. No-ops (200, does nothing) if there's no active license row yet.
+router.post('/distributor', async (req, res) => {
+  const { name = '', contactName = '', phone = '', email = '' } = req.body;
+  try {
+    await pool.query(
+      `UPDATE license SET distributor_name=$1, distributor_contact_name=$2, distributor_phone=$3, distributor_email=$4
+       WHERE is_active = TRUE`,
+      [name, contactName, phone, email]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    logError('[license/distributor]', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -217,12 +261,12 @@ router.post('/dealer-activate', async (req, res) => {
 
     await pool.query(`UPDATE license SET is_active = FALSE WHERE is_active = TRUE`);
     await pool.query(`
-      INSERT INTO license (license_id, key_raw, payload, is_active)
-      VALUES ($1, $2, $3, TRUE)
+      INSERT INTO license (license_id, key_raw, payload, is_active, distributor_name)
+      VALUES ($1, $2, $3, TRUE, $4)
       ON CONFLICT (license_id) DO UPDATE
         SET key_raw = EXCLUDED.key_raw, payload = EXCLUDED.payload,
-            activated_at = NOW(), is_active = TRUE
-    `, [payload.id, key, JSON.stringify(payload)]);
+            activated_at = NOW(), is_active = TRUE, distributor_name = EXCLUDED.distributor_name
+    `, [payload.id, key, JSON.stringify(payload), dealer.name]);
 
     res.json({
       success : true,

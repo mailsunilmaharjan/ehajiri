@@ -3,7 +3,9 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import Layout from './components/Layout/Layout.jsx';
 import Login         from './components/Auth/Login.jsx';
+import SsoLogin      from './components/Auth/SsoLogin.jsx';
 import ResetPassword from './components/Auth/ResetPassword.jsx';
+import LicenseWarningModal from './components/Auth/LicenseWarningModal.jsx';
 import Dashboard from './components/Dashboard/Dashboard.jsx';
 import LeaveVisitPage from './components/Leave/LeaveVisitPage.jsx';
 import LeaveApplication from './components/Leave/LeaveApplication.jsx';
@@ -17,6 +19,8 @@ import ShiftManagement        from './components/Shift/ShiftManagement.jsx';
 import UserManagement         from './components/Users/UserManagement.jsx';
 import StaffNotes             from './components/Staff/StaffNotes.jsx';
 import StaffContact           from './components/Staff/StaffContact.jsx';
+import TaskList               from './components/Staff/TaskList.jsx';
+import TaskLookupPage         from './components/Staff/TaskLookupPage.jsx';
 import StaffMessage           from './components/Staff/StaffMessage.jsx';
 import ChatPage                from './components/Chat/ChatPage.jsx';
 import Settings               from './components/Settings/Settings.jsx';
@@ -79,10 +83,17 @@ const App = () => {
   const { currentUser } = useAuth();
 
   return (
+    <>
+    <LicenseWarningModal />
     <Routes>
       <Route path="/login" element={
         currentUser ? <Navigate to="/dashboard" replace /> : <Login />
       } />
+      {/* Not gated on currentUser like /login — "Open Software (Admin)" vs
+          "(Super Admin)" is an explicit choice of WHICH identity to become,
+          so it always runs (and overrides any existing session) rather than
+          bouncing straight to whoever's already logged in. */}
+      <Route path="/sso-login" element={<SsoLogin />} />
       <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route path="/dashboard" element={
@@ -230,6 +241,15 @@ const App = () => {
       <Route path="/staff/notes" element={
         <Protected pageKey="myNotes"><StaffNotes /></Protected>
       } />
+      <Route path="/staff/task" element={
+        <Protected pageKey="task"><TaskList /></Protected>
+      } />
+      <Route path="/staff/task/categories" element={
+        <Protected pageKey="task"><TaskLookupPage title="Task Category" endpoint="taskCategories" /></Protected>
+      } />
+      <Route path="/staff/task/priorities" element={
+        <Protected pageKey="task"><TaskLookupPage title="Task Priority" endpoint="taskPriorities" withColor /></Protected>
+      } />
       <Route path="/staff/contact" element={
         <Protected pageKey="staffContact"><StaffContact /></Protected>
       } />
@@ -252,6 +272,7 @@ const App = () => {
       <Route path="/" element={<Navigate to={currentUser ? "/dashboard" : "/login"} replace />} />
       <Route path="*" element={<Navigate to={currentUser ? "/dashboard" : "/login"} replace />} />
     </Routes>
+    </>
   );
 };
 

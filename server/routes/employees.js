@@ -5,6 +5,7 @@ import pool from '../db.js';
 import { requireRole } from '../middleware/roleGuard.js';
 import { logAudit } from '../services/auditLog.js';
 import { sendStaffCreated, sendPasswordReset } from '../services/emailService.js';
+import { syncEmailDirectory } from '../services/directorySync.js';
 
 // Postgres unique-violation (23505) on users_username_key means the email/username
 // is already taken by another account — including hidden system/superAdmin accounts
@@ -14,11 +15,28 @@ function friendlyDbError(e) {
   if (e.code === '23505' && e.constraint === 'users_username_key') {
     return 'Duplicate Email Address';
   }
+  if (e.code === '23505' && e.constraint === 'users_email_key') {
+    return 'This email address is already used by another staff member';
+  }
   if (e.code === '23503') {
     return `Cannot delete — this staff still has linked records in "${e.table}". ` +
            'Mark them Not Working via Officially Changes instead, or remove the linked records first.';
   }
   return e.message;
+}
+
+// The one true count of "staff that count toward the license's Max Staff
+// limit" — used both by the STAFF_LIMIT check below and by GET
+// /license-usage (which the frontend polls to disable "Add New Staff"
+// proactively). Keeping this in one place means the two can never drift —
+// they previously didn't, which is exactly why an active superAdmin account
+// could push the real count past the limit while the Staff page's own
+// (differently-scoped) list still looked like there was room.
+async function getActiveStaffCount() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) FROM users WHERE is_system IS NOT TRUE AND active = TRUE`
+  );
+  return parseInt(rows[0].count);
 }
 
 function getLocalIp() {
@@ -84,7 +102,9 @@ const SEL = `
 `;
 
 const sql = {
-  list: `SELECT ${SEL} FROM users WHERE is_system IS NOT TRUE AND role NOT IN ('superAdmin') ORDER BY ranking_order ASC NULLS LAST, id ASC`,
+  list: `SELECT ${SEL} FROM users WHERE is_system IS NOT TRUE AND role NOT IN ('superAdmin')
+    ORDER BY (SELECT b.ranking_order FROM branches b WHERE b.name = branch) ASC NULLS LAST,
+             ranking_order ASC NULLS LAST, id ASC`,
 
   insert: `
     INSERT INTO users
@@ -157,6 +177,31 @@ router.get('/', async (_req, res) => {
     res.json((await pool.query(sql.list)).rows);
   }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Current usage vs. license limits (Staff / Devices) — lets the Staff page
+// gate "Add New Staff" proactively instead of only reacting to the server's
+// STAFF_LIMIT error after a failed save. staffCount reuses getActiveStaffCount
+// so it's always identical to what the POST / handler below actually
+// enforces — the Staff grid (GET /, sql.list) excludes superAdmin accounts
+// from what's displayed, so counting off that list instead would silently
+// undercount whenever an active superAdmin account exists, and the button
+// would stay enabled right up until the real save gets rejected. Exposed to
+// canManageStaff (admin/branchManager/superAdmin), not just admin/superAdmin
+// like the full /api/zkteco and /api/standalone routers — this returns only
+// counts, never device credentials/IPs, so it's safe for the broader role
+// set that's already allowed to add staff.
+router.get('/license-usage', canManageStaff, async (_req, res) => {
+  try {
+    const [staffCount, zk, sa] = await Promise.all([
+      getActiveStaffCount(),
+      pool.query(`SELECT COUNT(*)::int AS n FROM zkteco_devices WHERE active = TRUE`),
+      pool.query(`SELECT COUNT(*)::int AS n FROM standalone_devices WHERE active = TRUE`),
+    ]);
+    res.json({ staffCount, deviceCount: zk.rows[0].n + sa.rows[0].n });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 const SOC_SEL = `
@@ -386,17 +431,12 @@ router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => 
     if (licRow.rows.length) {
       const lic      = licRow.rows[0].payload;
       const maxStaff = lic.maxStaff ?? 25;
-      if (maxStaff > 0) {
-        const cnt = await pool.query(
-          `SELECT COUNT(*) FROM users WHERE is_system IS NOT TRUE AND active = TRUE`
-        );
-        if (parseInt(cnt.rows[0].count) >= maxStaff) {
-          return res.status(403).json({
-            error: `License limit reached. Your license allows only ${maxStaff} staff members. To add more staff, please upgrade your license and contact your distributor.`,
-            code: 'STAFF_LIMIT',
-            maxStaff,
-          });
-        }
+      if (maxStaff > 0 && (await getActiveStaffCount()) >= maxStaff) {
+        return res.status(403).json({
+          error: `License limit reached. Your license allows only ${maxStaff} staff members. To add more staff, please upgrade your license and contact your distributor.`,
+          code: 'STAFF_LIMIT',
+          maxStaff,
+        });
       }
     }
 
@@ -431,6 +471,7 @@ router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => 
     ]);
     res.status(201).json(rows[0]);
     if (email) {
+      syncEmailDirectory({ action: 'upsert', newEmail: email });
       const loginUrl = `http://${getLocalIp()}:4000`;
       sendStaffCreated({
         to: email,
@@ -452,46 +493,82 @@ router.post('/import', async (req, res) => {
 
   const created = [], skipped = [], errors = [];
 
-  for (const emp of employees) {
-    const {
-      employeeId, fullName, email, phone, department, position, branch,
-      role, gender, joinDate, mode, deviceId, grade, dob, status, eligibleForOt, remarks,
-    } = emp;
-
-    if (!employeeId || !fullName) {
-      errors.push({ employeeId: employeeId || '?', error: 'Employee ID and Full Name are required' });
-      continue;
+  try {
+    // Pre-filter obviously-invalid rows and collect IDs for ONE batched
+    // duplicate check, instead of a separate SELECT per row — with a large
+    // file (100+ rows) that per-row round trip was slow enough to occasionally
+    // exceed the reverse-proxy's response timeout, which returns an HTML
+    // error page instead of JSON (surfaces client-side as "Backend server
+    // not running" / a JSON-parse error, not the actual cause).
+    const candidates = [];
+    for (const emp of employees) {
+      if (!emp.employeeId || !emp.fullName) {
+        errors.push({ employeeId: emp.employeeId || '?', error: 'Employee ID and Full Name are required' });
+        continue;
+      }
+      candidates.push(emp);
     }
-    try {
-      const dup = await pool.query(
-        'SELECT id FROM users WHERE employee_id=$1 AND is_system IS NOT TRUE', [String(employeeId)]
+
+    const existingIds = new Set();
+    if (candidates.length) {
+      const { rows } = await pool.query(
+        'SELECT employee_id FROM users WHERE employee_id = ANY($1::text[]) AND is_system IS NOT TRUE',
+        [candidates.map(e => String(e.employeeId))]
       );
-      if (dup.rows.length > 0) { skipped.push(String(employeeId)); continue; }
-
-      const otVal = String(eligibleForOt || '').toLowerCase();
-      const today = new Date().toISOString().split('T')[0];
-      await pool.query(sql.insert, [
-        String(employeeId),
-        email || String(employeeId),
-        deviceId || String(employeeId),
-        fullName,
-        role || 'employee',
-        department || null, position || null, null,
-        email || null, phone || null, joinDate || today,
-        gender || 'male',
-        fullName?.[0]?.toUpperCase() || 'E',
-        deviceId || null, null, false,
-        branch || null, mode || null, grade || null, null,
-        dob || null, null,
-        status || 'Active', null, remarks || null,
-        otVal === 'yes' || otVal === 'true' || otVal === '1',
-      ]);
-      created.push(String(employeeId));
-    } catch (e) {
-      errors.push({ employeeId: String(employeeId), error: friendlyDbError(e) });
+      rows.forEach(r => existingIds.add(r.employee_id));
     }
+
+    // One connection reused for all inserts, instead of checking a
+    // connection out of the pool per row — cuts per-row overhead way down.
+    // Deliberately NOT wrapped in a single BEGIN/COMMIT transaction: partial
+    // success (some rows created, some skipped, some errored) is the
+    // intended behavior here, and Postgres aborts an entire transaction on
+    // the first statement error — sharing one would turn one bad row into
+    // "current transaction is aborted" for every row after it.
+    const client = await pool.connect();
+    try {
+      for (const emp of candidates) {
+        const {
+          employeeId, fullName, email, phone, department, position, branch,
+          role, gender, joinDate, mode, deviceId, grade, dob, status, eligibleForOt, remarks,
+        } = emp;
+        const idStr = String(employeeId);
+        if (existingIds.has(idStr)) { skipped.push(idStr); continue; }
+
+        try {
+          const otVal = String(eligibleForOt || '').toLowerCase();
+          const today = new Date().toISOString().split('T')[0];
+          await client.query(sql.insert, [
+            idStr,
+            email || idStr,
+            deviceId || idStr,
+            fullName,
+            role || 'employee',
+            department || null, position || null, null,
+            email || null, phone || null, joinDate || today,
+            gender || 'male',
+            fullName?.[0]?.toUpperCase() || 'E',
+            deviceId || null, null, false,
+            branch || null, mode || null, grade || null, null,
+            dob || null, null,
+            status || 'Active', null, remarks || null,
+            otVal === 'yes' || otVal === 'true' || otVal === '1',
+          ]);
+          created.push(idStr);
+          existingIds.add(idStr); // guards against duplicate rows within the same file
+          if (email) syncEmailDirectory({ action: 'upsert', newEmail: email });
+        } catch (e) {
+          errors.push({ employeeId: idStr, error: friendlyDbError(e) });
+        }
+      }
+    } finally {
+      client.release();
+    }
+
+    res.json({ created: created.length, skipped: skipped.length, errors });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
-  res.json({ created: created.length, skipped: skipped.length, errors });
 });
 
 router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) => {
@@ -531,6 +608,7 @@ router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) =
     ]);
     logAudit({ actor: req.user, action: 'update', entity: 'employee', entityId: req.params.id, before, after: rows[0] });
     res.json(rows[0]);
+    if (before?.email !== email) syncEmailDirectory({ action: 'upsert', oldEmail: before?.email, newEmail: email });
   } catch (e) { res.status(500).json({ error: friendlyDbError(e) }); }
 });
 
@@ -558,6 +636,7 @@ router.delete('/:id', canDeleteStaff, guardAdminAccountMutation, async (req, res
     await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
     logAudit({ actor: req.user, action: 'delete', entity: 'employee', entityId: req.params.id, before, after: null });
     res.json({ success: true });
+    if (before?.email) syncEmailDirectory({ action: 'delete', newEmail: before.email });
   } catch (e) { res.status(500).json({ error: friendlyDbError(e) }); }
 });
 

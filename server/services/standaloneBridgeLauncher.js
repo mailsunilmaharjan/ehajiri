@@ -1,4 +1,11 @@
 /**
+ * ⚠ StandAlone SDK code — DISABLED BY DEFAULT. startStandaloneBridge() (below)
+ * is only ever called from server/index.js's boot sequence and
+ * routes/settings.js's module-flag toggle, both gated on
+ * FLAG_KEYS.standaloneDevice (default OFF, migration 47) — so on a fresh
+ * install this .exe is never spawned at all until an admin/superAdmin enables
+ * the StandAlone Device module from Role Management → Module Controls.
+ *
  * Spawns the standalone-bridge .exe (x86 .NET helper wrapping ZKTeco's legacy
  * Standalone SDK COM control) directly from the Node server, so it's
  * available in every run mode: `npm run dev`, `npm run dev:server`, the

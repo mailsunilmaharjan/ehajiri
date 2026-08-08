@@ -9,7 +9,7 @@ import DataGrid from '../DataGrid/DataGrid.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import ViewYearlyBtn from './ViewYearlyBtn.jsx';
-import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -19,13 +19,6 @@ const DOW_FULL = {
   Sun:'Sunday', Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday',
   Thu:'Thursday', Fri:'Friday', Sat:'Saturday',
 };
-
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
 
 const isoDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -62,8 +55,8 @@ const ActionMenu = ({ row, navigate, L, onReason }) => {
     {
       label: L('कार्यालय भ्रमण','Office Visit'),
       icon: '🚗',
-      color: '#166534',
-      bg: '#dcfce7',
+      color: '#1e40af',
+      bg: '#dbeafe',
       onClick: () => {
         navigate('/office-visit/apply', { state: { prefillDate: row.date, prefillStaffId: row.id } });
         setOpen(false);
@@ -84,7 +77,7 @@ const ActionMenu = ({ row, navigate, L, onReason }) => {
         style={{
           display:'inline-flex', alignItems:'center', gap:4,
           padding:'4px 10px', height:28,
-          background:open?'#166534':'#52b02c',
+          background:open?'#1e40af':'#1a56db',
           color:'white', border:'none', borderRadius:6,
           fontSize:12, fontWeight:600, cursor:'pointer', transition:'background .12s',
         }}>
@@ -149,7 +142,7 @@ const ReasonModal = ({ row, onClose, onSave, L, fd }) => {
             placeholder={L('अनुपस्थितको कारण लेख्नुस...','Write the reason for absence...')}
             style={{ width:'100%', border:'1.5px solid #d1d5db', borderRadius:8, padding:'10px 12px',
               fontSize:13, resize:'vertical', outline:'none', boxSizing:'border-box' }}
-            onFocus={e => e.target.style.borderColor='#52b02c'}
+            onFocus={e => e.target.style.borderColor='#1a56db'}
             onBlur={e => e.target.style.borderColor='#d1d5db'}
             autoFocus
           />
@@ -164,7 +157,7 @@ const ReasonModal = ({ row, onClose, onSave, L, fd }) => {
           <button onClick={() => { onSave(row, reason); onClose(); }}
             disabled={!reason.trim()}
             style={{ padding:'8px 20px', border:'none', borderRadius:8,
-              background:reason.trim()?'#52b02c':'#86efac',
+              background:reason.trim()?'#1a56db':'#93c5fd',
               color:'white', fontSize:13, fontWeight:700,
               cursor:reason.trim()?'pointer':'not-allowed' }}>
             {L('सेभ गर्नुस','Save')}
@@ -190,9 +183,9 @@ const YearlyAbsentReport = () => {
   const fd              = useDateFormat();
   const L = (np, en)    => language === 'np' ? np : en;
 
-  const now     = new Date();
+  const now     = getNepalNow();
   const useNP   = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
 
   const urlYear  = parseInt(searchParams.get('year'));
   const initYear = urlYear && !isNaN(urlYear)
@@ -289,32 +282,32 @@ const YearlyAbsentReport = () => {
   const columns = [
     {
       field:'fullName', header:L('नाम','Name'), sortable:true,
-      render: v => <span style={{ fontWeight:700, color:'#1f2937', fontSize:14 }}>{v}</span>,
+      render: v => <span style={{ color:'#1f2937' }}>{v}</span>,
     },
     {
       field:'postShort', header:L('पद','Post'),
-      render: (v, row) => <span style={{ fontSize:14, color:'#0369a1', fontWeight:700 }}>{row.position || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.position || v || '—'}</span>,
     },
     {
       field:'deptShort', header:L('विभाग','Dept.'),
-      render: (v, row) => <span style={{ fontSize:14, color:'#059669', fontWeight:700 }}>{row.department || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.department || v || '—'}</span>,
     },
     {
       field:'branchShort', header:L('शाखा','Branch'),
-      render: (v, row) => <span style={{ fontSize:14, color:'#7c3aed', fontWeight:700 }}>{branchAbbr(row.branch, settings) || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{branchAbbr(row.branch, settings) || v || '—'}</span>,
     },
     {
       field:'date', header:L('मिति','Date'), sortable:true,
-      render: v => <span style={{ fontWeight:600, color:'#374151', fontSize:14, whiteSpace:'nowrap' }}>{fd(v)}</span>,
+      render: v => <span style={{ color:'#374151', whiteSpace:'nowrap' }}>{fd(v)}</span>,
     },
     {
       field:'dayKey', header:L('दिन','Day'),
-      render: v => <span style={{ fontSize:14, color:'#6b7280', fontWeight:600 }}>{DOW_FULL[v] || v}</span>,
+      render: v => <span style={{ color:'#6b7280' }}>{DOW_FULL[v] || v}</span>,
     },
     {
       field:'phone', header:L('मोबाइल','Mobile'),
       render: v => v
-        ? <a href={`tel:${v}`} style={{ fontSize:12, color:'#0369a1', fontFamily:'monospace',
+        ? <a href={`tel:${v}`} style={{ color:'#0369a1', fontFamily:'monospace',
             textDecoration:'none', fontWeight:600 }}
             onMouseEnter={e => e.currentTarget.style.textDecoration='underline'}
             onMouseLeave={e => e.currentTarget.style.textDecoration='none'}>
@@ -325,7 +318,7 @@ const YearlyAbsentReport = () => {
     {
       field:'email', header:L('इमेल','Email'),
       render: v => v
-        ? <a href={`mailto:${v}`} style={{ fontSize:12, color:'#0369a1',
+        ? <a href={`mailto:${v}`} style={{ color:'#0369a1',
             textDecoration:'none', fontWeight:500 }}
             onMouseEnter={e => e.currentTarget.style.textDecoration='underline'}
             onMouseLeave={e => e.currentTarget.style.textDecoration='none'}>
@@ -408,7 +401,7 @@ const YearlyAbsentReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -424,7 +417,7 @@ const YearlyAbsentReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -460,7 +453,7 @@ const YearlyAbsentReport = () => {
               onClick={() => setStaffStatus(v)}
               style={{ padding:'5px 14px', border:'none', cursor:'pointer',
                 fontSize:13, fontWeight:600, transition:'background .15s',
-                background: staffStatus === v ? '#52b02c' : 'white',
+                background: staffStatus === v ? '#1a56db' : 'white',
                 color: staffStatus === v ? 'white' : '#374151' }}>
               {label}
             </button>

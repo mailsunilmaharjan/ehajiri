@@ -15,7 +15,7 @@ export default function ResetPassword() {
   const [error,    setError]      = useState(null);
 
   const handleSubmit = async () => {
-    if (password.length < 4) { setError('Password must be at least 4 characters'); return; }
+    if (!password) { setError('Password is required'); return; }
     if (password !== confirm)  { setError('Passwords do not match'); return; }
     setLoading(true);
     setError(null);
@@ -42,7 +42,7 @@ export default function ResetPassword() {
 
   const btn = (disabled) => ({
     width: '100%', padding: '11px', border: 'none', borderRadius: 8,
-    background: disabled ? '#86efac' : '#52b02c',
+    background: disabled ? '#93c5fd' : '#1a56db',
     color: '#fff', fontSize: 13, fontWeight: 700,
     cursor: disabled ? 'not-allowed' : 'pointer', marginTop: 8,
   });
@@ -124,10 +124,10 @@ export default function ResetPassword() {
               value={password}
               onChange={e => { setPassword(e.target.value); setError(null); }}
               onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-              placeholder="At least 4 characters"
+              placeholder="Enter new password"
               autoFocus
               style={{ ...input, paddingRight: 38 }}
-              onFocus={e => e.target.style.borderColor = '#52b02c'}
+              onFocus={e => e.target.style.borderColor = '#1a56db'}
               onBlur={e => e.target.style.borderColor = '#d1d5db'}
             />
             <button
@@ -154,7 +154,7 @@ export default function ResetPassword() {
               ...input,
               borderColor: confirm && confirm !== password ? '#ef4444' : '#d1d5db',
             }}
-            onFocus={e => e.target.style.borderColor = confirm && confirm !== password ? '#ef4444' : '#52b02c'}
+            onFocus={e => e.target.style.borderColor = confirm && confirm !== password ? '#ef4444' : '#1a56db'}
             onBlur={e => e.target.style.borderColor = confirm && confirm !== password ? '#ef4444' : '#d1d5db'}
           />
           {confirm && confirm !== password && (

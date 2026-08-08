@@ -3,8 +3,33 @@ import pool from '../db.js';
 import { logAudit } from '../services/auditLog.js';
 import { sendLeaveApplication, sendLeaveStatusUpdate } from '../services/emailService.js';
 import { logError } from '../utils/logError.js';
+import { isLeaveBackdateEnabled } from '../utils/appSettings.js';
 
 const router = Router();
+
+/* Rejects fromDate values before today when the Super Admin has disabled
+   backdating (Settings → Leave & Office Visit Backdate Apply). Frontend date
+   pickers already disable past dates in this case, but that's trivially
+   bypassed via a direct API call, so this is the real enforcement point.
+   allowPast overrides this regardless of the setting — reserved for an
+   admin's Manual Posting entry (backfilling/correcting records is the whole
+   point of that form), never the normal self-service Apply flow. */
+async function rejectIfBackdated(fromDate, res, allowPast) {
+  if (!fromDate || allowPast || await isLeaveBackdateEnabled()) return false;
+  const { rows } = await pool.query('SELECT CURRENT_DATE::text AS today');
+  if (fromDate < rows[0].today) {
+    res.status(400).json({ error: 'Backdated leave applications are currently disabled. Please select today or a later date.' });
+    return true;
+  }
+  return false;
+}
+
+/* Manual Posting + Admin (or Super Admin) login only — matches the frontend's
+   own allowPast gate on LeaveDateInput in LeaveVisitPage.jsx's Manual Posting
+   forms. Checked server-side too since a raw API call could otherwise set
+   isManual:true regardless of who's actually calling. */
+const isAdminManualBackdate = (req) =>
+  req.body?.isManual === true && ['admin', 'superAdmin'].includes(req.user?.role);
 
 /* Best-effort email lookup + send — never let a notification failure affect the request. */
 async function notifyLeaveApplication(leave) {
@@ -63,6 +88,7 @@ const toLeave = r => ({
   approvedDate   : r.approved_date,
   comment        : r.comment,
   recommendedBy  : r.recommended_by,
+  recommendedDate: r.recommended_date,
 });
 
 /* ── Leave Types ── */
@@ -81,7 +107,7 @@ router.get('/balances', async (_req, res) => {
     const map = {};
     rows.forEach(r => {
       if (!map[r.employee_id]) map[r.employee_id] = { employeeId: r.employee_id };
-      map[r.employee_id][r.leave_type_code] = parseFloat(r.balance_days);
+      map[r.employee_id][r.leave_type_code] = parseFloat(r.balance);
     });
     res.json(Object.values(map));
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -95,19 +121,20 @@ router.get('/', async (_req, res) => {
 
 router.post('/', async (req, res) => {
   const { employeeId, leaveTypeCode, fromDate, toDate, days, reason, halfDay,
-          status, approvedBy, approvedDate, reco, approval } = req.body;
+          status, recommendedBy, recommendedDate, approvedBy, approvedDate, reco, approval } = req.body;
 
   const finalStatus  = ['approved','rejected','pending'].includes(status) ? status : 'pending';
   const finalAppBy   = finalStatus !== 'pending' ? (approvedBy   || null) : null;
   const finalAppDate = finalStatus !== 'pending' ? (approvedDate || new Date().toISOString().split('T')[0]) : null;
 
   try {
+    if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
     const { rows } = await pool.query(
       `INSERT INTO leaves
-         (employee_id,leave_type_code,from_date,to_date,days,reason,half_day,status,approved_by,approved_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+         (employee_id,leave_type_code,from_date,to_date,days,reason,half_day,status,recommended_by,recommended_date,approved_by,approved_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [employeeId, leaveTypeCode, fromDate, toDate, days, reason, !!halfDay,
-       finalStatus, finalAppBy, finalAppDate]
+       finalStatus, recommendedBy || null, recommendedDate || null, finalAppBy, finalAppDate]
     );
     const leave = toLeave(rows[0]);
     if (finalStatus === 'pending') notifyLeaveApplication({ ...leave, reco, approval });
@@ -115,11 +142,36 @@ router.post('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.put('/:id', async (req, res) => {
+  const { employeeId, leaveTypeCode, fromDate, toDate, days, reason, halfDay,
+          status, recommendedBy, recommendedDate, approvedBy, approvedDate } = req.body;
+
+  const finalStatus  = ['approved','rejected','pending'].includes(status) ? status : 'pending';
+  const finalAppBy   = finalStatus !== 'pending' ? (approvedBy   || null) : null;
+  const finalAppDate = finalStatus !== 'pending' ? (approvedDate || null) : null;
+
+  try {
+    if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
+    const { rows } = await pool.query(
+      `UPDATE leaves
+       SET employee_id=$1, leave_type_code=$2, from_date=$3, to_date=$4, days=$5,
+           reason=$6, half_day=$7, status=$8, recommended_by=$9, recommended_date=$10, approved_by=$11, approved_date=$12
+       WHERE id=$13 RETURNING *`,
+      [employeeId, leaveTypeCode, fromDate, toDate, days, reason, !!halfDay,
+       finalStatus, recommendedBy || null, recommendedDate || null, finalAppBy, finalAppDate, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Leave not found' });
+    const leave = toLeave(rows[0]);
+    logAudit({ actor: req.user, action: 'edit', entity: 'leave', entityId: req.params.id, before: null, after: leave });
+    res.json(leave);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.patch('/:id/recommend', async (req, res) => {
   const { recommendedBy } = req.body;
   try {
     const { rows } = await pool.query(
-      `UPDATE leaves SET recommended_by=$1 WHERE id=$2 RETURNING *`,
+      `UPDATE leaves SET recommended_by=$1, recommended_date=CURRENT_DATE WHERE id=$2 RETURNING *`,
       [recommendedBy, req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Leave not found' });

@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { useSettings } from '../../context/SettingsContext.jsx';
 import { useBeepAlert } from '../../hooks/useBeepAlert.js';
+import { apiUrl } from '../../api/client.js';
 
 /* ── Notification Context ──────────────────────────────────── */
 const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {} });
@@ -17,12 +19,12 @@ const AttendanceToast = ({ noti, onClose }) => {
       borderRadius: 12, overflow: 'hidden',
       boxShadow: '0 8px 32px rgba(0,0,0,.20)',
       border: '1px solid #e5e7eb',
-      borderLeft: `4px solid ${isLate ? '#dc2626' : isEarly ? '#059669' : '#52b02c'}`,
+      borderLeft: `4px solid ${isLate ? '#dc2626' : isEarly ? '#059669' : '#1a56db'}`,
       animation: 'slideIn .25s ease-out',
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:8,
         padding:'8px 10px 6px', background:'#f9fafb', borderBottom:'1px solid #f3f4f6' }}>
-        <svg viewBox="0 0 20 20" fill="#52b02c" width="14" height="14">
+        <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd"/>
         </svg>
         <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', flex:1 }}>eHajiri · Live Attendance</span>
@@ -33,12 +35,12 @@ const AttendanceToast = ({ noti, onClose }) => {
       <div style={{ padding:'12px 14px 14px' }}>
         <div style={{ fontSize:17, fontWeight:800, color:'#111827', marginBottom:4 }}>{noti.staffName}</div>
         <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>
-          {noti.postShort   && <span style={{ fontSize:12, fontWeight:600, color:'#0369a1', background:'#f0fdf4', borderRadius:5, padding:'1px 7px' }}>{noti.postShort}</span>}
+          {noti.postShort   && <span style={{ fontSize:12, fontWeight:600, color:'#0369a1', background:'#eff6ff', borderRadius:5, padding:'1px 7px' }}>{noti.postShort}</span>}
           {noti.branchShort && <span style={{ fontSize:12, fontWeight:600, color:'#7c3aed', background:'#f5f3ff', borderRadius:5, padding:'1px 7px' }}>{noti.branchShort}</span>}
         </div>
         <div style={{ fontSize:13, color:'#374151', marginBottom: noti.remarks ? 6 : 0 }}>
           <span style={{ color:'#6b7280', fontWeight:500 }}>Time IN: </span>
-          <strong style={{ fontFamily:'monospace', fontSize:14, color:'#52b02c' }}>{noti.timeIn}</strong>
+          <strong style={{ fontFamily:'monospace', fontSize:14, color:'#1a56db' }}>{noti.timeIn}</strong>
         </div>
         {noti.remarks && (
           <div style={{ fontSize:12, fontWeight:700, color: isLate ? '#dc2626' : '#059669',
@@ -191,13 +193,32 @@ export function AttendanceNotificationProvider({ children }) {
     currentUser = auth?.currentUser;
   } catch (_) {}
 
-  const add = useCallback((data) => {
-    setNotifications(prev => [...prev, { ...data, id: Date.now() + Math.random() }]);
-  }, []);
+  // Settings → Company Information → "Enable Live Staff Attendance
+  // Notifications". Read via a ref so toggling it doesn't have to tear down
+  // and reopen the SSE connection — the onmessage handler below just checks
+  // the latest value each time an attendance ping arrives.
+  const { settings } = useSettings();
+  const liveAttendanceEnabledRef = useRef(settings.liveAttendanceNotifications !== false);
+  useEffect(() => {
+    liveAttendanceEnabledRef.current = settings.liveAttendanceNotifications !== false;
+  }, [settings.liveAttendanceNotifications]);
 
   const remove = useCallback((id) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
+
+  // Attendance pings are purely informational (someone just punched in) and
+  // fire constantly through the day — without an auto-dismiss they just pile
+  // up on screen forever until someone manually closes each one. Message/chat
+  // toasts stay put since those are actionable (View/Reply) and a user might
+  // genuinely need a moment before dealing with them.
+  const add = useCallback((data) => {
+    const id = Date.now() + Math.random();
+    setNotifications(prev => [...prev, { ...data, id }]);
+    if (data.type === 'attendance') {
+      setTimeout(() => remove(id), 5000);
+    }
+  }, [remove]);
 
   const clearMsgCount = useCallback(() => setMsgCount(0), []);
 
@@ -211,13 +232,13 @@ export function AttendanceNotificationProvider({ children }) {
       // as a query param — authGuard accepts either.
       const token = localStorage.getItem('auth_token');
       if (!token) return;
-      const es = new EventSource(`/api/attendance/live?token=${encodeURIComponent(token)}`);
+      const es = new EventSource(apiUrl(`/attendance/live?token=${encodeURIComponent(token)}`));
       esRef.current = es;
       es.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
           if (data.type === 'attendance') {
-            add(data);
+            if (liveAttendanceEnabledRef.current) add(data);
           } else if (data.type === 'new_message') {
             // Show popup only if current user is a recipient
             const uid = currentUser?.id;

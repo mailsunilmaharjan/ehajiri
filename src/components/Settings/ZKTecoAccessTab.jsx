@@ -15,6 +15,7 @@ import DataGrid from '../DataGrid/DataGrid.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import KeyboardMultiSelect from '../Common/KeyboardMultiSelect.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import { staffRankCompare } from '../../utils/branchUtils.js';
 
 /* ── Constants ──────────────────────────────────────────────── */
 const DAYS = [
@@ -49,7 +50,7 @@ const TimeInput = ({ value = '00:00', onChange }) => {
     transition:'border-color .15s, box-shadow .15s',
     boxSizing:'border-box',
   };
-  const focusStyle = { borderColor:'#52b02c', boxShadow:'0 0 0 2px rgba(82,176,44,.12)' };
+  const focusStyle = { borderColor:'#1a56db', boxShadow:'0 0 0 2px rgba(26,86,219,.12)' };
 
   const onlyDigits = (e) => {
     if (!/^[0-9]$/.test(e.key) &&
@@ -141,7 +142,7 @@ const TimeZoneModal = ({ tz, onSave, onClose }) => {
 
   /* ── Per-interval colour palette (3 distinct colours) ── */
   const INTERVAL_COLORS = [
-    { header:'#dcfce7', sub:'#f0fdf4', cell:'#f8fbff', border:'#bbf7d0', text:'#166534' }, // Interval 1 — Blue
+    { header:'#dbeafe', sub:'#eff6ff', cell:'#f8fbff', border:'#bfdbfe', text:'#1e40af' }, // Interval 1 — Blue
     { header:'#dcfce7', sub:'#f0fdf4', cell:'#f8fffe', border:'#86efac', text:'#166534' }, // Interval 2 — Green
     { header:'#fef3c7', sub:'#fffbeb', cell:'#fffef5', border:'#fcd34d', text:'#92400e' }, // Interval 3 — Amber
   ];
@@ -190,7 +191,7 @@ const TimeZoneModal = ({ tz, onSave, onClose }) => {
 
         {/* ── App-standard header ── */}
         <div className="modal-header"
-          style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)', position:'sticky', top:0, zIndex:10 }}>
+          style={{ position:'sticky', top:0, zIndex:10 }}>
           <h2>{tz ? '✏️ Edit — Time Zone' : '+ Add — Time Zone'}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
@@ -273,8 +274,8 @@ const TimeZoneModal = ({ tz, onSave, onClose }) => {
           {/* Copy Monday checkbox — app style, now includes Sunday */}
           <div style={{ marginTop:12, display:'flex', alignItems:'center', gap:8,
             padding:'8px 12px', background:'#f0fdf4', borderRadius:8, border:'1px solid #bbf7d0' }}>
-            <div style={{ width:20, height:20, borderRadius:5, border:`2px solid ${copyMon?'#52b02c':'#d1d5db'}`,
-              background:copyMon?'#52b02c':'white', cursor:'pointer', flexShrink:0,
+            <div style={{ width:20, height:20, borderRadius:5, border:`2px solid ${copyMon?'#1a56db':'#d1d5db'}`,
+              background:copyMon?'#1a56db':'white', cursor:'pointer', flexShrink:0,
               display:'flex', alignItems:'center', justifyContent:'center', transition:'all .15s' }}
               onClick={() => applyMonToAll(!copyMon)}>
               {copyMon && <svg viewBox="0 0 12 12" width="12" height="12" fill="none">
@@ -353,13 +354,8 @@ const PersonnelModal = ({ level, group, timezones, onClose, toast2 }) => {
           api.get('/zkteco/person-access'),
           ...levelIds.map(id => api.get(`/zkteco/access-levels/${id}/members`)),
         ]);
-        // Sort by ranking_order then full_name
-        setAllEmps((emps||[]).filter(e=>e.active!==false).sort((a,b)=>{
-          const ra = a.rankingOrder ?? 99999;
-          const rb = b.rankingOrder ?? 99999;
-          if (ra !== rb) return ra - rb;
-          return (a.fullName||'').localeCompare(b.fullName||'');
-        }));
+        // Sort by branch ranking order, then staff ranking_order, then full_name
+        setAllEmps((emps||[]).filter(e=>e.active!==false).sort((a,b)=>staffRankCompare(a,b,settings)));
         setPersonAccessAll(pa||[]);
         const merged = new Map();
         memberLists.flat().forEach(m => { if (m) merged.set(m.id, m); });
@@ -443,7 +439,7 @@ const PersonnelModal = ({ level, group, timezones, onClose, toast2 }) => {
   // so one column set covers both standard DataGrids.
   const personColumns = [
     { field:'emp_code', header:'P.ID', width:70,
-      render:v=><span style={{ fontFamily:'monospace', color:'#52b02c', fontWeight:700, fontSize:12 }}>{v}</span> },
+      render:v=><span style={{ fontFamily:'monospace', color:'#1a56db', fontWeight:700, fontSize:12 }}>{v}</span> },
     { field:'full_name', header:'Full Name' },
     { field:'branch', header:'Branch', width:70,
       render:v=><span style={{ fontSize:12 }}>{branchShort(v)}</span> },
@@ -469,7 +465,7 @@ const PersonnelModal = ({ level, group, timezones, onClose, toast2 }) => {
            onClick={e=>e.stopPropagation()}>
 
         {/* Header */}
-        <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)',position:'sticky',top:0,zIndex:10 }}>
+        <div className="modal-header" style={{ position:'sticky',top:0,zIndex:10 }}>
           <div>
             <h2>👥 Add Personnel — {group ? `📦 ${group.name}` : level.name}</h2>
             <div style={{ fontSize:12,color:'#6b7280',marginTop:2 }}>
@@ -514,9 +510,9 @@ const PersonnelModal = ({ level, group, timezones, onClose, toast2 }) => {
                     <button className={`btn btn-outline btn-sm ${activeFilterCount?'active':''}`}
                       onClick={()=>setFilterOpen(o=>!o)}
                       style={{ display:'flex', alignItems:'center', gap:5,
-                        ...(activeFilterCount ? { background:'#f0fdf4', color:'#52b02c', borderColor:'#bbf7d0' } : {}) }}>
+                        ...(activeFilterCount ? { background:'#eff6ff', color:'#1a56db', borderColor:'#bfdbfe' } : {}) }}>
                       🔽 Filter{activeFilterCount>0 && (
-                        <span style={{ background:'#52b02c', color:'white', borderRadius:10, padding:'0 6px', fontSize:10, fontWeight:700 }}>
+                        <span style={{ background:'#1a56db', color:'white', borderRadius:10, padding:'0 6px', fontSize:10, fontWeight:700 }}>
                           {activeFilterCount}
                         </span>
                       )}
@@ -571,7 +567,7 @@ const PersonnelModal = ({ level, group, timezones, onClose, toast2 }) => {
             <div>
               <div style={{ fontWeight:700,fontSize:12,color:'#374151',marginBottom:6 }}>
                 Selected
-                <span style={{ marginLeft:6,background:'#52b02c',color:'white',
+                <span style={{ marginLeft:6,background:'#1a56db',color:'white',
                   borderRadius:10,padding:'1px 8px',fontSize:11,fontWeight:700 }}>
                   {members.length}
                 </span>
@@ -622,18 +618,18 @@ const SetByLevelTab = ({ levels, employees, areas, timezones, toast2, L, onRefre
   /* DataGrid columns — Staff-detail style */
   const columns = [
     { field:'name', header:'Level Name',
-      render: v => <strong style={{ color:'#1f2937',fontSize:13 }}>{v}</strong> },
+      render: v => <strong style={{ color:'#1f2937' }}>{v}</strong> },
     { field:'area_name', header:'Area Name', width:140,
       render: v => v
         ? <span style={{ background:'#fef3c7',color:'#92400e',borderRadius:10,padding:'2px 9px',fontSize:11,fontWeight:700 }}>🗺️ {v}</span>
         : <span style={{ color:'#d1d5db' }}>—</span> },
     { field:'timezone_name', header:'Time Period', width:160,
       render: v => v
-        ? <span style={{ fontFamily:'monospace',fontSize:12,color:'#52b02c' }}>{v}</span>
+        ? <span style={{ fontFamily:'monospace',fontSize:12,color:'#1a56db' }}>{v}</span>
         : <span style={{ color:'#d1d5db' }}>—</span> },
     { field:'personnel_count', header:'Personnel', width:95, align:'center',
       render: v => (
-        <span style={{ fontWeight:700, color: v>0?'#059669':'#9ca3af', fontSize:13 }}>
+        <span style={{ fontWeight:700, color: v>0?'#059669':'#9ca3af' }}>
           {v || 0}
         </span>
       ),
@@ -645,7 +641,7 @@ const SetByLevelTab = ({ levels, employees, areas, timezones, toast2, L, onRefre
           title="Add / Manage Personnel"
           onClick={e=>{ e.stopPropagation(); setPersonnelLevel(row); }}
           style={{ display:'inline-flex',alignItems:'center',gap:5,
-            background:'#f0fdf4',color:'#52b02c',border:'1px solid #bbf7d0',
+            background:'#eff6ff',color:'#1a56db',border:'1px solid #bfdbfe',
             borderRadius:6,padding:'4px 10px',fontSize:12,fontWeight:700,cursor:'pointer' }}>
           👥+ Personnel
         </button>
@@ -814,7 +810,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
             {options.map(o => (
               <label key={o.value} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', fontSize:13, cursor:'pointer' }}
                 onMouseDown={e=>e.preventDefault()} onClick={()=>toggle(o.value)}>
-                <input type="checkbox" checked={values.includes(o.value)} readOnly style={{ accentColor:'#52b02c' }} />
+                <input type="checkbox" checked={values.includes(o.value)} readOnly style={{ accentColor:'#1a56db' }} />
                 {o.label}
               </label>
             ))}
@@ -948,7 +944,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
     <div>
       {/* Push access rules to device bar */}
       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10,
-        padding:'8px 12px', background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)',
+        padding:'8px 12px', background:'linear-gradient(135deg,#f0fdf4,#eff6ff)',
         borderRadius:8, border:'1px solid #bbf7d0' }}>
         <span style={{ fontSize:12, fontWeight:700, color:'#065f46', whiteSpace:'nowrap' }}>
           📡 Push Access Rules to Device:
@@ -974,11 +970,11 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
         {subTabs.map(t=>(
           <button key={t.key} onClick={()=>setSubTab(t.key)}
             style={{ padding:'7px 12px', background:'none', border:'none', marginBottom:-2,
-              borderBottom:subTab===t.key?'2px solid #52b02c':'2px solid transparent',
-              color:subTab===t.key?'#52b02c':'#6b7280', fontWeight:subTab===t.key?700:400,
+              borderBottom:subTab===t.key?'2px solid #1a56db':'2px solid transparent',
+              color:subTab===t.key?'#1a56db':'#6b7280', fontWeight:subTab===t.key?700:400,
               cursor:'pointer', fontSize:12, display:'flex', alignItems:'center', gap:5 }}>
             {t.label}
-            {t.count>0&&<span style={{ background:'#52b02c',color:'white',borderRadius:9,
+            {t.count>0&&<span style={{ background:'#1a56db',color:'white',borderRadius:9,
               padding:'0 5px',fontSize:10,fontWeight:700 }}>{t.count}</span>}
           </button>
         ))}
@@ -1049,7 +1045,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
           columns={[
             { field:'name',          header:'Access Level Name', render:(v,row)=><strong style={row?.active===false?{ color:'#9ca3af', textDecoration:'line-through' }:undefined}>{v}</strong> },
             { field:'effective_access_group_id', header:'AccGroup #', width:90, render:v=>v!=null
-              ?<span style={{ background:'#dcfce7',color:'#166534',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>#{v}</span>
+              ?<span style={{ background:'#dbeafe',color:'#1e40af',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>#{v}</span>
               :'—' },
             { field:'active',         header:'Status',     width:90, render:v=>v!==false
               ?<span style={{ background:'#dcfce7',color:'#166534',borderRadius:10,padding:'2px 8px',fontSize:11,fontWeight:700 }}>Active</span>
@@ -1140,7 +1136,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
         <DataGrid
           columns={[
             { field:'department',    header:'Department',  render:v=><strong>{v}</strong> },
-            { field:'member_count',  header:'Members',     width:80,  align:'center', render:v=><span style={{ fontWeight:700,color:'#52b02c' }}>{v||0}</span> },
+            { field:'member_count',  header:'Members',     width:80,  align:'center', render:v=><span style={{ fontWeight:700,color:'#1a56db' }}>{v||0}</span> },
             { field:'level_name',    header:'Access Level',width:150, render:v=>v||'—' },
             { field:'timezone_name', header:'Time Zone',   width:140, render:v=>v||'—' },
             { field:'area_name',     header:'Area',        width:120, render:v=>v
@@ -1226,7 +1222,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
       {lvModal&&(
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:480 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>{lvEdit?'✏️ Edit':'+'} Access Level</h2>
               <button className="modal-close" onClick={()=>setLvModal(false)}>✕</button>
             </div>
@@ -1272,7 +1268,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
       {pModal&&(
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:460 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>👤 Set Access By Person</h2>
               <button className="modal-close" onClick={()=>setPModal(false)}>✕</button>
             </div>
@@ -1299,7 +1295,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
       {dModal&&(
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:460 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#f0fdf4,#f0fdf4)' }}>
+            <div className="modal-header">
               <h2>🏗️ Set Access By Department</h2>
               <button className="modal-close" onClick={()=>setDModal(false)}>✕</button>
             </div>
@@ -1329,7 +1325,7 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
       {hlModal&&(
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth:480 }} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header" style={{ background:'linear-gradient(135deg,#fef3c7,#fffbeb)' }}>
+            <div className="modal-header">
               <h2>{hlEdit?'✏️ Edit':'+'} Holiday</h2>
               <button className="modal-close" onClick={()=>setHlModal(false)}>✕</button>
             </div>

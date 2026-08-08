@@ -18,6 +18,7 @@ import express from 'express';
 import pool    from '../db.js';
 import { requireRole } from '../middleware/roleGuard.js';
 import { logError } from '../utils/logError.js';
+import { syncEmailDirectory } from '../services/directorySync.js';
 
 const canManageDevices = requireRole('admin', 'branchManager', 'superAdmin');
 import {
@@ -303,6 +304,43 @@ async function syncAreaToDevice(areaId, targetSn) {
 }
 
 /**
+ * Copy one staff member's user record + fingerprint templates + face photo
+ * from one specific device to one specific target device — unlike
+ * syncAreaToDevice/pushUserToAreaDevices above, this isn't Area-scoped and
+ * only ever touches the one device requested, for a single manually-picked
+ * staff member (Settings → Attendance Device → Fingerprints tab → "Copy to
+ * device" per row).
+ */
+async function pushOneUserToDevice(sourceSn, targetSn, pin) {
+  const { rows: [u] } = await pool.query(
+    'SELECT * FROM zkteco_users WHERE device_sn=$1 AND pin=$2', [sourceSn, pin]
+  );
+  if (!u) throw Object.assign(new Error('Staff not found on source device'), { status: 404 });
+
+  const grp = await resolveGrpForEmployee(u.employee_id);
+  const uParams = buildUserInfoParams({ pin: u.pin, name: u.name || '', privilege: u.privilege || 0, card: u.card_no || '', grp });
+  await queueCommand(targetSn, 'DATA UPDATE USERINFO', uParams);
+
+  const { rows: fps } = await pool.query(
+    `SELECT * FROM zkteco_fingerprints WHERE device_sn=$1 AND pin=$2 AND template_data IS NOT NULL ORDER BY finger_id`,
+    [sourceSn, pin]
+  );
+  for (const fp of fps) {
+    const fpParams = `PIN=${fp.pin}\tFID=${fp.finger_id}\tSize=${fp.template_size}\tValid=${fp.valid||1}\tTMP=${fp.template_data}`;
+    await queueCommand(targetSn, 'DATA UPDATE FINGERTMP', fpParams);
+  }
+
+  let facePushed = false;
+  if (u.face_photo) {
+    await pushBioPhotoToDevice(targetSn, pin, u.face_photo);
+    facePushed = true;
+  }
+
+  console.log(`[ZK] pushOneUserToDevice: PIN=${pin} ${sourceSn} → ${targetSn} (${fps.length} fingerprint(s), face=${facePushed})`);
+  return { fingerprintCount: fps.length, facePushed };
+}
+
+/**
  * Push a single user (+ their FP templates) to all active devices in an area.
  * Called when: a user is uploaded to any device in the area.
  */
@@ -361,6 +399,20 @@ async function deleteUserFromAreaDevices(areaId, pin, excludeSn) {
 
 router.get('/devices', async (_req, res) => {
   try {
+    // total_logs/actual_user_count used to come from COUNT(DISTINCT ...) over
+    // two independent LEFT JOINs (attendance_logs, users) on the same device
+    // row — classic fan-out: with N logs and M device-users for one device,
+    // that's N*M intermediate rows before GROUP BY/DISTINCT can collapse them
+    // back down. Fine at small volume, but a device with 34k+ logs and ~200
+    // enrolled users produces ~7M intermediate rows and the query never
+    // returns (verified: >2min hang vs 65ms once each count is pre-aggregated
+    // in its own subquery before joining, so the join itself stays 1:1).
+    // face_samples/card_samples/pin_samples come from zkteco_users directly,
+    // but finger_samples deliberately does NOT read zkteco_users.fp_count —
+    // that field is write-only from the device handshake and drifts out of
+    // sync with reality. Real templates live in zkteco_fingerprints, so
+    // finger_samples counts distinct enrolled PINs from there instead
+    // (same fix as LicenseAdmin's tenantDeviceQuery.js — see its comment).
     const { rows } = await pool.query(`
       SELECT d.*,
              di.user_count,   di.fp_count,     di.max_user,    di.max_fp,
@@ -368,26 +420,44 @@ router.get('/devices', async (_req, res) => {
              di.firmware_ver AS info_firmware,
              di.platform     AS info_platform,
              di.updated_at   AS info_updated,
-             COUNT(DISTINCT l.id)::int  AS total_logs,
-             COUNT(DISTINCT zu.id)::int AS actual_user_count,
+             COALESCE(lc.total_logs, 0)        AS total_logs,
+             COALESCE(uc.actual_user_count, 0) AS actual_user_count,
+             COALESCE(sc.face_samples, 0)   AS face_samples,
+             COALESCE(sc.card_samples, 0)   AS card_samples,
+             COALESCE(sc.pin_samples, 0)    AS pin_samples,
+             COALESCE(fc.finger_samples, 0) AS finger_samples,
              za.id           AS area_id,
              za.name         AS area_name,
              za.code         AS area_code
       FROM   zkteco_devices d
-      LEFT   JOIN zkteco_device_info     di ON di.device_sn  = d.serial_number
-      LEFT   JOIN zkteco_attendance_logs l  ON l.device_sn   = d.serial_number
-      LEFT   JOIN zkteco_users           zu ON zu.device_sn  = d.serial_number
-      LEFT   JOIN zkteco_areas           za ON za.id         = d.area_id
-      GROUP  BY d.id, di.user_count, di.fp_count, di.max_user, di.max_fp,
-                di.device_name, di.firmware_ver, di.platform, di.updated_at,
-                za.id, za.name, za.code
+      LEFT   JOIN zkteco_device_info di ON di.device_sn = d.serial_number
+      LEFT   JOIN (SELECT device_sn, COUNT(*)::int AS total_logs
+                   FROM zkteco_attendance_logs GROUP BY device_sn) lc
+             ON lc.device_sn = d.serial_number
+      LEFT   JOIN (SELECT device_sn, COUNT(*)::int AS actual_user_count
+                   FROM zkteco_users GROUP BY device_sn) uc
+             ON uc.device_sn = d.serial_number
+      LEFT   JOIN (SELECT device_sn,
+                          SUM(CASE WHEN face_photo IS NOT NULL THEN 1 ELSE 0 END)::int AS face_samples,
+                          SUM(CASE WHEN card_no IS NOT NULL AND card_no NOT IN ('', '0') THEN 1 ELSE 0 END)::int AS card_samples,
+                          SUM(CASE WHEN passwd IS NOT NULL AND passwd <> '' THEN 1 ELSE 0 END)::int AS pin_samples
+                   FROM zkteco_users GROUP BY device_sn) sc
+             ON sc.device_sn = d.serial_number
+      LEFT   JOIN (SELECT device_sn, COUNT(DISTINCT pin)::int AS finger_samples
+                   FROM zkteco_fingerprints GROUP BY device_sn) fc
+             ON fc.device_sn = d.serial_number
+      LEFT   JOIN zkteco_areas za ON za.id = d.area_id
       ORDER  BY d.created_at DESC
     `);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/devices', async (req, res) => {
+// Manual "Add Device" — Super Admin only (mirrors the Add Device button's
+// visibility in ZKTecoDeviceSettings.jsx). Devices normally auto-register
+// themselves on first ADMS contact (see routes/zkteco.js's upsertDevice);
+// this route is only for hand-entering one ahead of time.
+router.post('/devices', requireRole('superAdmin'), async (req, res) => {
   const { name, serialNumber, ipAddress, port, model, deviceType, location, communicationKey } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   try {
@@ -506,7 +576,14 @@ router.post('/devices/:id/sync', async (req, res) => {
     // Also issue an explicit, deterministic full-range pull (DATA QUERY ATTLOG) so the
     // complete history is requested immediately instead of waiting on the passive
     // stamp/handshake path alone.
-    const params  = `StartTime=2000-01-01 00:00:00\tEndTime=${fmtDt(new Date().toISOString())}`;
+    // EndTime must be the device's own local wall-clock time (formatZkTime, same
+    // helper SETTIME uses) — new Date().toISOString() is UTC. The device has no
+    // idea an incoming EndTime is secretly UTC; it just compares it against its
+    // own local clock. On this server (Asia/Kathmandu, UTC+5:45) that silently
+    // undercut every "Get All Logs" pull's end of range by ~5h45m, so any
+    // attendance from roughly the last 6 hours never came back no matter how
+    // many times it was retried.
+    const params  = `StartTime=2000-01-01 00:00:00\tEndTime=${formatZkTime()}`;
     const queryCmd = await queueCommand(sn, 'DATA QUERY ATTLOG', params);
     console.log(`[ZK API] Get All Logs: stamp=None + RELOAD OPTIONS + DATA QUERY ATTLOG (full range) queued for ${sn}`);
     res.json({
@@ -569,12 +646,27 @@ router.post('/devices/:id/upload-user', canManageDevices, async (req, res) => {
        pin]
     );
 
-    // Mark this user as belonging to the area
+    // Record this user as belonging to this device (and area, if assigned) — an
+    // upsert rather than UPDATE, so the row exists immediately regardless of
+    // whether the device ever echoes back a USER row of its own. Devices that
+    // never echo OPERLOG data left this row permanently missing, which meant
+    // sync-names-to-devices (targets resolved via zkteco_users) and this same
+    // area cascade could never find the employee at all — "no reachable
+    // device" even though the device was online and had just accepted this
+    // very command.
+    await pool.query(
+      `INSERT INTO zkteco_users (device_sn, pin, name, privilege, card_no, area_id, employee_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (device_sn, pin) DO UPDATE SET
+         name        = EXCLUDED.name,
+         privilege   = EXCLUDED.privilege,
+         card_no     = EXCLUDED.card_no,
+         area_id     = COALESCE(EXCLUDED.area_id, zkteco_users.area_id),
+         employee_id = COALESCE(EXCLUDED.employee_id, zkteco_users.employee_id)`,
+      [sn, pin, name, privilege, card, areaId || null, emp?.id || null]
+    );
+
     if (areaId) {
-      await pool.query(
-        `UPDATE zkteco_users SET area_id=$1 WHERE device_sn=$2 AND pin=$3`,
-        [areaId, sn, pin]
-      );
       // Push to all other devices in the same area
       const cascaded = await pushUserToAreaDevices(areaId, pin, name, privilege, card, sn, grp, { expires, startDatetime, endDatetime, validCount });
       return res.json({ ok:true, sn, command:cmd.command_payload, areaCascaded:cascaded });
@@ -635,15 +727,75 @@ router.post('/devices/:id/sync-area', async (req, res) => {
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
+// Copy one staff member's fingerprint(s) + face photo from device :sourceId
+// onto device :targetId — see pushOneUserToDevice above.
+router.post('/devices/:targetId/copy-user/:sourceId', canManageDevices, async (req, res) => {
+  const { pin } = req.body;
+  if (!pin) return res.status(400).json({ error: 'pin is required' });
+  try {
+    const targetSn = await getSnById(req.params.targetId);
+    const sourceSn = await getSnById(req.params.sourceId);
+    if (targetSn === sourceSn) return res.status(400).json({ error: 'Source and target device are the same' });
+    const result = await pushOneUserToDevice(sourceSn, targetSn, pin);
+    res.json({ ok: true, sourceSn, targetSn, pin, ...result });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// Bulk version of copy-user above — one or more staff at once, with an
+// optional "delete from source after a successful copy" mode for moving
+// staff to a replacement device instead of just cloning them onto it.
+router.post('/devices/:targetId/copy-users/:sourceId', canManageDevices, async (req, res) => {
+  const { pins, deleteAfter } = req.body;
+  if (!Array.isArray(pins) || !pins.length) return res.status(400).json({ error: 'pins[] is required' });
+  try {
+    const targetSn = await getSnById(req.params.targetId);
+    const sourceSn = await getSnById(req.params.sourceId);
+    if (targetSn === sourceSn) return res.status(400).json({ error: 'Source and target device are the same' });
+
+    const results = [];
+    for (const pin of pins) {
+      try {
+        const r = await pushOneUserToDevice(sourceSn, targetSn, pin);
+        let deleted = false;
+        if (deleteAfter) {
+          // Deliberately NOT the /delete-user route (below) — that one also
+          // cascades to every other device sharing the source's Area, which
+          // is correct for its own "remove this person everywhere" use case
+          // but wrong here: this is a scoped device-A → device-B move, not
+          // an area-wide purge. deleteUserFromDevice only touches sourceSn.
+          await deleteUserFromDevice(sourceSn, pin);
+          await pool.query('DELETE FROM zkteco_users WHERE device_sn=$1 AND pin=$2', [sourceSn, pin]);
+          deleted = true;
+        }
+        results.push({ pin, ok: true, ...r, deleted });
+      } catch (err) {
+        // A copy failure for this one PIN must not delete them from source —
+        // each staff member's copy-then-delete is independent, not all-or-nothing.
+        results.push({ pin, ok: false, error: err.message });
+      }
+    }
+    res.json({ ok: true, sourceSn, targetSn, results });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
 // ── Enroll fingerprint — protocol format: ENROLL_FP PIN=X\tFID=Y\tRETRY=3\tOVERWRITE=1
 router.post('/devices/:id/enroll-fp', canManageDevices, async (req, res) => {
   const { pin, fingerId=0, retry=3, overwrite=1 } = req.body;
   if (!pin) return res.status(400).json({ error:'pin is required' });
   try {
     const sn     = await getSnById(req.params.id);
+    // A user clicking "Enroll FP" again before the device has actually polled
+    // and attempted the previous request just piles up duplicate commands
+    // (each 30-60s+ apart, one per device poll) — clear any of THIS user's
+    // still-unsent enroll-fp attempts on this device first, same pattern
+    // /get-users and /sync already use.
+    await pool.query(
+      `DELETE FROM zkteco_commands WHERE device_sn=$1 AND status='PENDING' AND command_payload LIKE $2`,
+      [sn, `%:ENROLL_FP PIN=${pin}%`]
+    );
     const params = `PIN=${pin}\tFID=${fingerId}\tRETRY=${retry}\tOVERWRITE=${overwrite}`;
     const cmd    = await queueCommand(sn, 'ENROLL_FP', params);
-    res.json({ ok:true, sn, command:cmd.command_payload });
+    res.json({ ok:true, sn, id:cmd.id, command:cmd.command_payload });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
@@ -659,9 +811,13 @@ router.post('/devices/:id/enroll-face', canManageDevices, async (req, res) => {
   if (!pin) return res.status(400).json({ error:'pin is required' });
   try {
     const sn     = await getSnById(req.params.id);
+    await pool.query(
+      `DELETE FROM zkteco_commands WHERE device_sn=$1 AND status='PENDING' AND command_payload LIKE $2`,
+      [sn, `%:ENROLL_BIO TYPE=9\tPIN=${pin}%`]
+    );
     const params = `TYPE=9\tPIN=${pin}\tCardNo=\tRETRY=${retry}\tOVERWRITE=${overwrite}`;
     const cmd    = await queueCommand(sn, 'ENROLL_BIO', params);
-    res.json({ ok:true, sn, command:cmd.command_payload });
+    res.json({ ok:true, sn, id:cmd.id, command:cmd.command_payload });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
@@ -1178,9 +1334,28 @@ router.post('/device-users/:id/unlink', async (req, res) => {
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
+// This tenant's own auto-generated staff-login domain — "<deviceId>@<this>"
+// — must be the SAME slug already deduped across every other tenant at
+// creation time (LicenseAdmin's generateSeedEmails/pushCompanyInfoToTenant,
+// stored here as app_settings.main.companyEmailDomain), not something this
+// process invents on its own. Falls back to slugifying the company name
+// locally only for a tenant whose company info was never filled in/pushed —
+// that fallback has no cross-tenant dedup guarantee, but is still far safer
+// than every tenant sharing one hardcoded domain.
+async function resolveTenantEmailDomain() {
+  const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key='main'`);
+  const settings = rows[0]?.value || {};
+  if (settings.companyEmailDomain) return settings.companyEmailDomain;
+  if (settings.companyNameEn) {
+    const slug = settings.companyNameEn.trim().toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40) || 'tenant';
+    return `${slug}.com.np`;
+  }
+  return 'planetinfosys.com.np';
+}
+
 // ── Import device users → create/update staff ─────────────────────────────
 router.post('/import-to-staff', async (req, res) => {
-  const emailDomain = ((req.body.emailDomain||'planetinfosys.com.np')).trim().replace(/^@/,'');
+  const emailDomain = await resolveTenantEmailDomain();
   const { rows: dus } = await pool.query(`
     SELECT zu.*, d.name AS device_name FROM zkteco_users zu
     LEFT JOIN zkteco_devices d ON d.serial_number=zu.device_sn
@@ -1226,6 +1401,7 @@ router.post('/import-to-staff', async (req, res) => {
           await pool.query(`UPDATE zkteco_attendance_logs SET employee_id=$1 WHERE pin=$2 AND device_sn=$3 AND employee_id IS NULL`,[empDbId,pin,du.device_sn]);
         }
       }
+      syncEmailDirectory({ action: 'upsert', newEmail: email });
     } catch (err) { skipped++; results.push({ pin,name,email,action:'error',error:err.message }); }
   }
   res.json({ ok:true, created, updated, skipped, total:dus.length, results });
@@ -1416,10 +1592,17 @@ router.post('/commands', async (req, res) => {
   const { deviceSn, commandPayload } = req.body;
   if (!deviceSn||!commandPayload) return res.status(400).json({ error:'deviceSn and commandPayload required' });
   try {
-    const { rows }=await pool.query(
-      'INSERT INTO zkteco_commands(device_sn,command_payload) VALUES($1,$2) RETURNING *',
-      [deviceSn,commandPayload]);
-    res.status(201).json(rows[0]);
+    // Route through queueCommand() so the C:<id>: wrapper always matches this
+    // row's real id. A hand-typed id here (the UI used to suggest "C:1001:...")
+    // made markCommandDoneByCmdId's fallback lookup match on that literal text
+    // instead — unscoped by device, so a different device reusing the same
+    // example id could get its ack applied to THIS device's command, or vice
+    // versa. Stripping it and letting queueCommand() re-generate it from the
+    // actual row id removes that ambiguity entirely.
+    const cmdText = commandPayload.replace(/^C:\d+:\s*/i, '').trim();
+    if (!cmdText) return res.status(400).json({ error:'Command text required' });
+    const cmd = await queueCommand(deviceSn, cmdText);
+    res.status(201).json(cmd);
   } catch (err) { res.status(500).json({ error:err.message }); }
 });
 
@@ -1878,7 +2061,8 @@ router.get('/access-levels/:id/members', async (req, res) => {
       JOIN   zkteco_access_levels al ON al.id = pa.access_level_id
       WHERE  pa.access_level_id = $1
          OR  al.group_id = (SELECT group_id FROM zkteco_access_levels WHERE id = $1)
-      ORDER  BY u.ranking_order ASC NULLS LAST, u.full_name ASC
+      ORDER  BY (SELECT b.ranking_order FROM branches b WHERE b.name = u.branch) ASC NULLS LAST,
+               u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [req.params.id]);
     res.json(rows);
   } catch (err) { res.status(500).json({ error:err.message }); }

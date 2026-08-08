@@ -1776,6 +1776,251 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 73,
+    description: 'users.email — normalize + enforce uniqueness within this tenant, needed for the shared-login directory to resolve one email to exactly one tenant. Warns instead of failing startup if this tenant still has real duplicates left to clean up by hand.',
+    up: async (client) => {
+      await client.query(`UPDATE users SET email = NULLIF(TRIM(LOWER(email)), '') WHERE email IS NOT NULL`);
+      const { rows: dupes } = await client.query(`
+        SELECT email, COUNT(*) AS n FROM users
+        WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1
+      `);
+      if (dupes.length) {
+        console.warn(`[migration v73] Skipping users.email UNIQUE constraint — ${dupes.length} duplicate email(s) still exist in this tenant's data: ${dupes.map(d => `${d.email} (x${d.n})`).join(', ')}. Fix these staff records, then this constraint will apply on the next restart.`);
+        return;
+      }
+      await client.query(`ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email)`);
+    },
+  },
+  {
+    version    : 74,
+    description: 'attendance_notifications_sent — per-employee/date/check-type dedup for the attendance notification scheduler, now that Late In / Absent / Early Out each fire relative to that employee\'s own shift start/end instead of one global daily time. Guarantees each employee is only ever emailed once per check per day regardless of poll timing.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS attendance_notifications_sent (
+          id          SERIAL PRIMARY KEY,
+          employee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          date        DATE NOT NULL,
+          notif_type  VARCHAR(20) NOT NULL,
+          sent_at     TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE(employee_id, date, notif_type)
+        );
+      `);
+    },
+  },
+  {
+    version    : 75,
+    description: 'Email Setup module toggle — same pattern as migration 47\'s Attendance Device/StandAlone Device flags, default OFF until the Super Admin enables it from User Rights.',
+    up: async (client) => {
+      await client.query(`
+        INSERT INTO app_settings (key, value) VALUES
+          ('module_email_setup_enabled', 'false')
+        ON CONFLICT (key) DO NOTHING;
+      `);
+    },
+  },
+  {
+    version    : 76,
+    description: 'Duty Roster — Day Off / Night Off as real shift rows (shifts.is_off), so they\'re selectable in the roster shift picker exactly like a real shift and every report that already understands "this employee\'s roster shift today" only needs one extra check (is_off) to treat that day as a weekend/non-working day, instead of a separate parallel concept.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS is_off BOOLEAN NOT NULL DEFAULT false;`);
+      await client.query(`
+        INSERT INTO shifts (name, name_en, code, start_time, end_time, work_hours, is_off, color)
+        SELECT 'Day Off', 'Day Off', 'DAY_OFF', '00:00:00', '00:00:00', 0, true, '#9ca3af'
+        WHERE NOT EXISTS (SELECT 1 FROM shifts WHERE code = 'DAY_OFF');
+      `);
+      await client.query(`
+        INSERT INTO shifts (name, name_en, code, start_time, end_time, work_hours, is_off, color)
+        SELECT 'Night Off', 'Night Off', 'NIGHT_OFF', '00:00:00', '00:00:00', 0, true, '#6b7280'
+        WHERE NOT EXISTS (SELECT 1 FROM shifts WHERE code = 'NIGHT_OFF');
+      `);
+    },
+  },
+  {
+    version    : 77,
+    description: 'Duty Roster — shift_ids JSONB array column for multi-shift rotation (Create/Edit Roster can now check more than one shift for a date range; the roster resolves which shift applies on a given day by cycling through shift_ids in the order selected, starting at date_from). shift_id is kept in sync as shift_ids[0] so any older code path still reading the single column keeps working.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE duty_roster ADD COLUMN IF NOT EXISTS shift_ids JSONB;`);
+      await client.query(`
+        UPDATE duty_roster SET shift_ids = jsonb_build_array(shift_id)
+        WHERE shift_ids IS NULL AND shift_id IS NOT NULL;
+      `);
+    },
+  },
+  {
+    version    : 78,
+    description: 'Standalone devices — sync_token + last_sync_ping_at for the remote sync agent (site-side .exe that pushes attendance logs over the network instead of the loopback bridge Electron spawns).',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE standalone_devices
+          ADD COLUMN IF NOT EXISTS sync_token        VARCHAR(64) UNIQUE,
+          ADD COLUMN IF NOT EXISTS last_sync_ping_at  TIMESTAMPTZ;
+      `);
+    },
+  },
+  {
+    version    : 79,
+    description: 'leaves — recommended_date column (mirrors approved_date; the Edit Leave form has always had a Recommended Date field but there was nowhere to persist it, so it silently reverted to blank every time the record was reloaded).',
+    up: async (client) => {
+      await client.query(`ALTER TABLE leaves ADD COLUMN IF NOT EXISTS recommended_date DATE;`);
+    },
+  },
+  {
+    version    : 80,
+    description: 'Backfill weekend_history from the legacy app_settings blob. Before weekend_history existed as its own table, Settings → Weekend Days only ever wrote to the generic app_settings "main" JSON blob via an optimistic-only save that silently succeeded locally even when nothing reached the server — every attendance report has always queried weekend_history directly (never the blob), so any tenant that configured a non-default weekend before the dedicated table + write-through save existed has had every report silently fall back to the hardcoded [\'Sat\'] default ever since, no matter what they actually set. This copies the blob\'s weekendHistory entries into the real table, once, whenever the table is still empty — a no-op if a tenant never customized weekends (their effective pattern was already [\'Sat\'] either way), a real fix if they did.',
+    up: async (client) => {
+      const { rows: existing } = await client.query('SELECT COUNT(*)::int AS n FROM weekend_history');
+      if (existing[0].n > 0) return; // already has real data — nothing to backfill
+
+      const { rows: mainRows } = await client.query(`SELECT value FROM app_settings WHERE key='main'`);
+      const history = mainRows[0]?.value?.weekendHistory;
+      if (!Array.isArray(history) || !history.length) return; // nothing in the blob either
+
+      for (const h of history) {
+        if (!Array.isArray(h.weekends) || !h.weekends.length || !h.effectiveDate) continue;
+        await client.query(
+          `INSERT INTO weekend_history (weekends, effective_date, changed_date, changed_by, reason)
+           VALUES ($1::jsonb, $2, $3, $4, $5)`,
+          [
+            JSON.stringify(h.weekends),
+            h.effectiveDate,
+            h.changedDate || h.effectiveDate,
+            h.changedBy || 'System',
+            h.reason || 'Migrated from legacy settings',
+          ],
+        );
+      }
+    },
+  },
+  {
+    version    : 81,
+    description: 'branches — add ranking_order, mirroring departments/posts (v2). Lets an admin order branches (e.g. Head Office=1, a branch=2); combined with the existing per-staff ranking_order (v5, now interpreted as rank WITHIN a branch), staff lists across the app sort by branch order first, then staff order inside that branch. NULL (every pre-existing row) ties with every other NULL, so nothing re-sorts until an admin actually sets it.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS ranking_order INTEGER;`);
+    },
+  },
+  {
+    version    : 82,
+    description: 'overtime_approvals — leave_type_code + leave_days, for the "Provide Next Day Leave" OT-to-leave conversion (Overtime Approval page). A weekend/holiday "present" row under that rule can be granted N days (max 2, half-day steps) of a chosen leave type instead of paid OT minutes; these columns record what was granted, on which record, for audit.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE overtime_approvals
+          ADD COLUMN IF NOT EXISTS leave_type_code VARCHAR(10),
+          ADD COLUMN IF NOT EXISTS leave_days      NUMERIC(4,1)
+            CHECK (leave_days IS NULL OR (leave_days > 0 AND leave_days <= 2 AND leave_days * 2 = FLOOR(leave_days * 2)));
+      `);
+    },
+  },
+  {
+    version    : 83,
+    description: 'attendance_manual_postings — status/applied_date/comment, so a staff self-service "Inform Late In/Early Out" request sits pending (like Leave/Office Visit) until recommended+approved, instead of landing straight in real attendance data. Existing rows (all admin-entered, pre-dating this workflow) default to approved so today\'s reports keep reading exactly what they already did.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE attendance_manual_postings
+          ADD COLUMN IF NOT EXISTS status       VARCHAR(20) NOT NULL DEFAULT 'approved',
+          ADD COLUMN IF NOT EXISTS applied_date DATE        NOT NULL DEFAULT CURRENT_DATE,
+          ADD COLUMN IF NOT EXISTS approved_date DATE,
+          ADD COLUMN IF NOT EXISTS comment      TEXT;
+        UPDATE attendance_manual_postings SET status = 'approved' WHERE status IS NULL;
+      `);
+    },
+  },
+  {
+    version    : 84,
+    description: 'tasks — new Staff > Task feature: a customer-linked task/to-do tracker (Enquiry/Quotation/Support style follow-ups). task_categories and task_priorities are plain admin-configurable lookup lists (managed via the gear icon on the Task page, through the existing generic /api/settings/:list CRUD — see SETUP_TABLES in settings.js), seeded with sensible defaults; tasks itself references them plus staff_contacts (for "Customer Name") and users (assignee/creator).',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS task_categories (
+          id            SERIAL       PRIMARY KEY,
+          name          VARCHAR(100) NOT NULL,
+          ranking_order INTEGER,
+          created_at    TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS task_priorities (
+          id            SERIAL       PRIMARY KEY,
+          name          VARCHAR(50)  NOT NULL,
+          color         VARCHAR(20),
+          ranking_order INTEGER,
+          created_at    TIMESTAMPTZ  DEFAULT NOW()
+        );
+        INSERT INTO task_categories (name, ranking_order)
+          SELECT * FROM (VALUES ('Enquiry',1), ('Quotation',2), ('Support',3)) AS v(name, ranking_order)
+          WHERE NOT EXISTS (SELECT 1 FROM task_categories);
+        INSERT INTO task_priorities (name, color, ranking_order)
+          SELECT * FROM (VALUES ('High','#dc2626',1), ('Medium','#f59e0b',2), ('Low','#22c55e',3)) AS v(name, color, ranking_order)
+          WHERE NOT EXISTS (SELECT 1 FROM task_priorities);
+
+        CREATE TABLE IF NOT EXISTS tasks (
+          id           SERIAL       PRIMARY KEY,
+          title        VARCHAR(255) NOT NULL,
+          description  TEXT,
+          contact_id   INTEGER      REFERENCES staff_contacts(id)  ON DELETE SET NULL,
+          category_id  INTEGER      REFERENCES task_categories(id) ON DELETE SET NULL,
+          priority_id  INTEGER      REFERENCES task_priorities(id) ON DELETE SET NULL,
+          assigned_to  INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          due_date     DATE,
+          status       VARCHAR(20)  NOT NULL DEFAULT 'pending',
+          created_by   INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          created_at   TIMESTAMPTZ  DEFAULT NOW(),
+          updated_at   TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status   ON tasks(status);
+      `);
+    },
+  },
+  {
+    version    : 85,
+    description: 'tasks — contact_person_id, so a task against a company contact (which has no phone/mobile of its own) can point at one specific person from that company\'s Contact Persons sub-list (staff_contact_persons) instead of only the parent contact record.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE tasks
+          ADD COLUMN IF NOT EXISTS contact_person_id INTEGER REFERENCES staff_contact_persons(id) ON DELETE SET NULL;
+      `);
+    },
+  },
+  {
+    version    : 86,
+    description: 'task_assignees — Task page "Assign Task" now supports assigning a task to several staff at once (checkbox grid) instead of one. Replaces the single tasks.assigned_to column with a join table; any existing single assignment is carried over before the old column is dropped.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS task_assignees (
+          task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          PRIMARY KEY (task_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_assignees_user ON task_assignees(user_id);
+
+        INSERT INTO task_assignees (task_id, user_id)
+          SELECT id, assigned_to FROM tasks WHERE assigned_to IS NOT NULL
+          ON CONFLICT DO NOTHING;
+
+        DROP INDEX IF EXISTS idx_tasks_assigned;
+        ALTER TABLE tasks DROP COLUMN IF EXISTS assigned_to;
+      `);
+    },
+  },
+  {
+    version    : 87,
+    description: 'task_followups — Task page right-side "Followup History" panel. Each row is one logged contact attempt (call/email/WhatsApp/SMS) against a task, who logged it (server-set from the session, not client-supplied), an optional next-followup date/time, and an optional hand-over to another staff member (which also adds that person to task_assignees, same as the checkbox grid would). Append-only log — no edit/delete route, matching how the UI only ever adds new entries.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS task_followups (
+          id               SERIAL       PRIMARY KEY,
+          task_id          INTEGER      NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          mode             VARCHAR(20)  NOT NULL CHECK (mode IN ('phone','email','whatsapp','sms')),
+          followup_date    DATE         NOT NULL DEFAULT CURRENT_DATE,
+          followed_by      INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          description      TEXT,
+          task_note        TEXT,
+          next_followup_at TIMESTAMPTZ,
+          handed_over_to   INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+          created_at       TIMESTAMPTZ  DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_followups_task ON task_followups(task_id);
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

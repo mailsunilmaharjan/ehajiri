@@ -11,13 +11,13 @@ const DAYS = [
   { key: 'Sun', label: 'आ' }, { key: 'Mon', label: 'सो' }, { key: 'Tue', label: 'मं' },
   { key: 'Wed', label: 'बु' }, { key: 'Thu', label: 'बि' }, { key: 'Fri', label: 'शु' }, { key: 'Sat', label: 'श' }
 ];
-const COLORS = ['#52b02c', '#0e9f6e', '#e3a008', '#f05252', '#7e3af2', '#e74694', '#111827'];
+const COLORS = ['#1a56db', '#0e9f6e', '#e3a008', '#f05252', '#7e3af2', '#e74694', '#111827'];
 
 const defaultForm = {
   name: '', nameEn: '', code: '',
   startTime: '09:00', endTime: '17:00', workHours: 8,
   days: ['Sun','Mon','Tue','Wed','Thu','Fri'],
-  color: '#52b02c', active: true,
+  color: '#1a56db', active: true,
 };
 
 const ShiftManagement = () => {
@@ -125,8 +125,8 @@ const ShiftManagement = () => {
             width: 22, height: 22, borderRadius: 4,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 10, fontWeight: 700,
-            background: v?.includes(d.key) ? '#dcfce7' : '#f3f4f6',
-            color:      v?.includes(d.key) ? '#52b02c' : '#9ca3af',
+            background: v?.includes(d.key) ? '#dbeafe' : '#f3f4f6',
+            color:      v?.includes(d.key) ? '#1a56db' : '#9ca3af',
           }}>{d.label}</span>
         ))}
       </div>
@@ -307,7 +307,7 @@ const ShiftManagement = () => {
                   <input type="checkbox" checked={form.active}
                     onChange={e => handleChange('active', e.target.checked)}
                     style={{ opacity: 0, width: 0, height: 0 }} />
-                  <div style={{ width: 44, height: 24, background: form.active ? '#52b02c' : '#d1d5db', borderRadius: 12, transition: 'background .2s', position: 'relative' }}>
+                  <div style={{ width: 44, height: 24, background: form.active ? '#1a56db' : '#d1d5db', borderRadius: 12, transition: 'background .2s', position: 'relative' }}>
                     <div style={{ position: 'absolute', top: 2, left: form.active ? 22 : 2, width: 20, height: 20, background: 'white', borderRadius: '50%', transition: 'left .2s' }}></div>
                   </div>
                 </label>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
@@ -6,6 +6,7 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useLeaveApply } from '../../context/LeaveApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import { getNepalTodayISO } from '../../utils/dateUtils.js';
 
 /* ── load saved reco/approval ── */
 const loadRecoApproval = () => {
@@ -13,13 +14,14 @@ const loadRecoApproval = () => {
 };
 
 /* ── Date input that respects calendar setting ── */
-const LeaveDateInput = ({ value, onChange, min, error, settings }) => {
+const LeaveDateInput = ({ value, onChange, error, settings }) => {
+  const blockPast = settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} />;
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
   }
   return (
     <input type="date" className={`form-control ${error ? 'error' : ''}`}
-      value={value} min={min}
+      value={value} min={blockPast ? getNepalTodayISO() : undefined}
       onChange={e => onChange(e.target.value)}
       style={{ fontSize: 13 }} />
   );
@@ -39,16 +41,29 @@ const Err = ({ msg }) => msg
    LeaveApplyModal — globally rendered modal
 ════════════════════════════════════════════════ */
 const LeaveApplyModal = () => {
-  const { isOpen, close, targetEmployeeId } = useLeaveApply();
+  const { isOpen, close, targetEmployeeId, prefillDates } = useLeaveApply();
   const { currentUser }   = useAuth();
   const navigate          = useNavigate();
   const { t }             = useLanguage();
-  const { settings }      = useSettings();
+  const { settings, refreshSettings } = useSettings();
+
+  // This modal stays mounted for the whole session (see Layout.jsx), so a
+  // long-open tab would otherwise keep enforcing whatever
+  // leaveBackdateEnabled was when it first logged in — refetch right as it
+  // opens so a Super Admin flipping the toggle takes effect immediately for
+  // everyone, not just after their next full page reload.
+  useEffect(() => { if (isOpen) refreshSettings(); }, [isOpen]);
   const {
     filteredLeaves: leaves, addLeave,
-    leaveTypes, getLeaveBalance,
+    leaveTypes, getLeaveBalance, refreshLeaveBalances,
     employees: allEmployees,
   } = useData();
+
+  // Same reasoning as the settings refetch above — leaveBalances is normally
+  // fetched once at login, so a credit granted elsewhere (e.g. an OT-to-leave
+  // grant on the Overtime Approval page) wouldn't show up in "days remaining"
+  // here without this.
+  useEffect(() => { if (isOpen) refreshLeaveBalances(); }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When opened from daily attendance context menu, use target employee; else current user
   const activeUser = useMemo(() => {
@@ -56,7 +71,7 @@ const LeaveApplyModal = () => {
     return allEmployees.find(e => String(e.id) === String(targetEmployeeId)) || currentUser;
   }, [targetEmployeeId, allEmployees, currentUser]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getNepalTodayISO();
   const emptyForm = {
     leaveTypeCode: '', fromDate: today, toDate: today,
     halfDay: false, reason: '', reco: [], approval: [], document: null,
@@ -111,7 +126,11 @@ const LeaveApplyModal = () => {
                     && l.leaveTypeCode === lt.shortName
                     && l.status === 'approved')
           .reduce((s, l) => s + Number(l.days || 0), 0);
-        result[lt.shortName] = Math.max(0, prevYear + currYear - used);
+        // Server-side credits (e.g. OT-to-leave grants from the Overtime
+        // Approval page) live in leave_balances, not the opening/used math
+        // above — add them in so a granted day actually shows up here.
+        const credited = Number(getLeaveBalance(empId)?.[lt.shortName] || 0);
+        result[lt.shortName] = Math.max(0, prevYear + currYear + credited - used);
       });
       return result;
     } catch {
@@ -250,7 +269,9 @@ const LeaveApplyModal = () => {
   /* ── Open: load fresh reco/approval ── */
   const initForm = () => {
     const { reco, approval } = getMyRecoApproval();
-    setForm({ ...emptyForm, reco, approval });
+    const fromDate = prefillDates?.fromDate || today;
+    const toDate   = prefillDates?.toDate   || fromDate;
+    setForm({ ...emptyForm, fromDate, toDate, reco, approval });
     setSelectedReco(reco.length === 1 ? String(reco[0]) : '');
     setSelectedApproval(approval.length === 1 ? String(approval[0]) : '');
     setErrors({}); setSuccess(false);
@@ -276,7 +297,7 @@ const LeaveApplyModal = () => {
 
         {/* Header */}
         <div className="modal-header"
-          style={{ background: 'linear-gradient(135deg,#f0fdf4,#e0e7ff)', position: 'sticky', top: 0, zIndex: 10 }}>
+          style={{ position: 'sticky', top: 0, zIndex: 10 }}>
           <h2>📝 {t('Apply for Leave')}</h2>
           <button className="modal-close" onClick={handleClose}>✕</button>
         </div>
@@ -306,11 +327,11 @@ const LeaveApplyModal = () => {
 
                 {/* Step 1: Recommendation */}
                 <div style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:12 }}>
-                  <div style={{ width:26, height:26, borderRadius:'50%', background:'#f0fdf4', border:'2px solid #52b02c',
-                    color:'#52b02c', display:'flex', alignItems:'center', justifyContent:'center',
+                  <div style={{ width:26, height:26, borderRadius:'50%', background:'#eff6ff', border:'2px solid #1a56db',
+                    color:'#1a56db', display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:12, fontWeight:800, flexShrink:0 }}>1</div>
                   <div>
-                    <div style={{ fontWeight:700, color:'#166534', fontSize:13 }}>
+                    <div style={{ fontWeight:700, color:'#1e40af', fontSize:13 }}>
                       🔖 Recommendation Required
                     </div>
                     {submittedInfo.recoNames.length > 0 ? (
@@ -320,7 +341,7 @@ const LeaveApplyModal = () => {
                         </div>
                         <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginTop:5 }}>
                           {submittedInfo.recoNames.map((n, i) => (
-                            <span key={i} style={{ background:'#dcfce7', color:'#166534',
+                            <span key={i} style={{ background:'#dbeafe', color:'#1e40af',
                               borderRadius:10, padding:'3px 12px', fontSize:13, fontWeight:700 }}>
                               👤 {n}
                             </span>
@@ -428,7 +449,7 @@ const LeaveApplyModal = () => {
                   </span>
                   {ltc.reduceWeekend      && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Weekends deducted</span>}
                   {ltc.reducePublicHoliday && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#fef3c7', color:'#92400e' }}>Holidays deducted</span>}
-                  {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#f0fdf4', color:'#52b02c' }}>Balance required</span>}
+                  {ltc.provideOnlyOnBalance && <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10, background:'#eff6ff', color:'#1a56db' }}>Balance required</span>}
                   {ltc.isServicePeriod && ltc.timesPerService && (
                     <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:10,
                       background: timesAlreadyTaken >= ltc.timesPerService ? '#fff1f2' : '#f5f3ff',
@@ -445,7 +466,7 @@ const LeaveApplyModal = () => {
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
                 <input type="checkbox" checked={form.halfDay}
                   onChange={e => handleChange('halfDay', e.target.checked)}
-                  style={{ width: 15, height: 15, accentColor: '#52b02c' }} />
+                  style={{ width: 15, height: 15, accentColor: '#1a56db' }} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Half Day</span>
                 {form.halfDay && <span style={{ fontSize: 11, color: '#6b7280' }}>(0.5 days will be deducted)</span>}
               </label>
@@ -479,10 +500,10 @@ const LeaveApplyModal = () => {
             {/* Days + Balance summary */}
             {(form.halfDay || (form.fromDate && form.toDate)) && (
               <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 120, background: '#f0fdf4', border: '1px solid #bbf7d0',
+                <div style={{ flex: 1, minWidth: 120, background: '#eff6ff', border: '1px solid #bfdbfe',
                   borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: '#166534', fontWeight: 600 }}>📅 No. of Days</span>
-                  <span style={{ fontSize: 20, fontWeight: 800, color: '#52b02c' }}>{days}</span>
+                  <span style={{ fontSize: 12, color: '#1e40af', fontWeight: 600 }}>📅 No. of Days</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: '#1a56db' }}>{days}</span>
                 </div>
                 {form.leaveTypeCode && (
                   <div style={{ flex: 1, minWidth: 120,
@@ -514,8 +535,8 @@ const LeaveApplyModal = () => {
                   </div>
                 )}
                 {form.reco.length === 1 && (
-                  <div style={{ background:'#f0f9ff', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                    <span style={{ background:'#f0fdf4', color:'#52b02c', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                  <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
+                    <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
                       {getEmpName(form.reco[0])}
                     </span>
                   </div>
@@ -583,7 +604,7 @@ const LeaveApplyModal = () => {
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
                 border: '1.5px dashed #d1d5db', borderRadius: 8, cursor: 'pointer',
                 background: form.document ? '#f0fdf4' : '#fafafa', transition: 'border .15s' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = '#52b02c'}
+                onMouseEnter={e => e.currentTarget.style.borderColor = '#1a56db'}
                 onMouseLeave={e => e.currentTarget.style.borderColor = '#d1d5db'}>
                 <input type="file" accept="image/*,.pdf,.doc,.docx" style={{ display: 'none' }}
                   onChange={e => handleChange('document', e.target.files[0] || null)} />

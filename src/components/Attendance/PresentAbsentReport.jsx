@@ -8,7 +8,7 @@ import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
-import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -22,13 +22,6 @@ const abbrev = (name) => {
   return name.slice(0, 5);
 };
 
-function getCurrentFiscalYear(fiscalYears = []) {
-  const today = new Date().toISOString().split('T')[0];
-  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
-      || fiscalYears.find(fy => fy.isDefault)
-      || fiscalYears[fiscalYears.length - 1] || null;
-}
-
 /* ── Status cell config ──────────────────────────────────────── */
 const STATUS = {
   P  : { color:'#059669', main:'P',   sup:null,  title:'Present'                   },
@@ -38,7 +31,7 @@ const STATUS = {
   H  : { color:'#111827', main:'W',   sup:null,  title:'Weekend'                   },
   L  : { color:'#7c3aed', main:'L',   sup:null,  title:'Leave'                     },
   LH : { color:'#a855f7', main:'L',   sup:'½',   title:'Half-day Leave'            },
-  OV : { color:'#16a34a', main:'OV',  sup:null,  title:'Office Visit'              },
+  OV : { color:'#2563eb', main:'OV',  sup:null,  title:'Office Visit'              },
   PH : { color:'#d97706', main:'H',   sup:null,  title:'Public Holiday'            },
 };
 
@@ -112,9 +105,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
       }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div style={{ padding:'18px 24px 14px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'18px 24px 14px', background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:17, fontWeight:700, color:'#166534' }}>
+          <span style={{ fontSize:17, fontWeight:700, color:'#1e40af' }}>
             {L('एडभान्स खोज','Advance Search')}
           </span>
           <button onClick={onClose}
@@ -210,10 +203,10 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           <button
             onClick={() => { onApply(local); onMonthChange(localMonth); onClose(); }}
             style={{ padding:'8px 24px', border:'none', borderRadius:8,
-              background:'#52b02c', color:'white', fontSize:14, fontWeight:700,
-              cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)' }}
-            onMouseEnter={e=>e.currentTarget.style.background='#166534'}
-            onMouseLeave={e=>e.currentTarget.style.background='#52b02c'}>
+              background:'#1a56db', color:'white', fontSize:14, fontWeight:700,
+              cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
+            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -229,13 +222,13 @@ const PresentAbsentReport = () => {
   const [searchParams] = useSearchParams();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
-  const { filteredEmployees: allEmployees, shifts, getApprovedLeaveForDate } = useData();
+  const { filteredEmployees: allEmployees, shifts, getApprovedLeaveForDate, rosterVersion } = useData();
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
-  const now    = new Date();
+  const now    = getNepalNow();
   const useNP  = settings.defaultCalendar === 'np';
-  const todayBS = adToBS(now);
+  const todayBS = adToBS(getNepalTodayISO());
 
   const urlYear  = parseInt(searchParams.get('year'));
   const urlMonth = parseInt(searchParams.get('month'));
@@ -287,7 +280,7 @@ const PresentAbsentReport = () => {
     finally { setLoading(false); }
   }, [year, month, half, activeParam, useNP]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, rosterVersion]);
 
   const period    = data?.period;
   const dates     = data?.dates     || [];
@@ -372,9 +365,9 @@ const PresentAbsentReport = () => {
   /* ── Standard DataGrid header style (matches .dg-th) ── */
   const thBase = {
     background:'#efefef', color:'#374151',
-    fontWeight:700, fontSize:12,
+    fontWeight:700, fontSize:12.5,
     borderRight:'1px solid #dedede', borderBottom:'2px solid #dedede',
-    padding:'6px 8px', textAlign:'center',
+    padding:'4px 8px', textAlign:'center',
     whiteSpace:'nowrap', position:'sticky', top:0, zIndex:3,
     userSelect:'none',
   };
@@ -388,9 +381,10 @@ const PresentAbsentReport = () => {
   const thSubHoliday = { ...thSub, background:'#fef3c7', color:'#92400e' };
   const thTotalP   = { ...thBase, background:'#d1fae5', color:'#065f46' };
   const thTotalAB  = { ...thBase, background:'#fee2e2', color:'#991b1b' };
+  const thTotalOT  = { ...thBase, background:'#d1fae5', color:'#059669' };
 
   const tdBase = {
-    padding:'4px 6px', fontSize:12,
+    padding:'3px 8px', fontSize:12.5,
     borderRight:'1px solid #e5e7eb', borderBottom:'1px solid #f3f4f6',
     verticalAlign:'middle', whiteSpace:'nowrap', textAlign:'center',
   };
@@ -415,6 +409,7 @@ const PresentAbsentReport = () => {
         ${dayCells}
         <td style="padding:3px 5px;border:1px solid #dedede;text-align:center;font-weight:700;color:#065f46">${e.totalP}</td>
         <td style="padding:3px 5px;border:1px solid #dedede;text-align:center;font-weight:700;color:#991b1b">${e.totalAB}</td>
+        <td style="padding:3px 5px;border:1px solid #dedede;text-align:center;font-weight:700;color:#059669">${e.eligibleForOt ? (e.otApprovedFormatted||'—') : '—'}</td>
       </tr>`;
     }).join('');
     const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:11px">
@@ -427,6 +422,7 @@ const PresentAbsentReport = () => {
         ${dayHeaders}
         <th style="padding:4px 5px;border:1px solid #dedede;background:#d1fae5;color:#065f46">P</th>
         <th style="padding:4px 5px;border:1px solid #dedede;background:#fee2e2;color:#991b1b">AB</th>
+        <th style="padding:4px 5px;border:1px solid #dedede;background:#d1fae5;color:#059669">OT</th>
       </tr></thead>
       <tbody>${dataRows}</tbody>
     </table>`;
@@ -436,11 +432,11 @@ const PresentAbsentReport = () => {
   const exportCSV = () => {
     if (!employees.length) return;
     const headers = ['SN','Staff','Post','Dept','Branch',
-      ...dates.map(d=>`${d.dayNum}(${d.dayKey})`), 'Total P','Total AB'];
+      ...dates.map(d=>`${d.dayNum}(${d.dayKey})`), 'Total P','Total AB','Total OT'];
     const dataRows = employees.map((e,i) => [
       i+1, e.fullName, e.postShort, e.deptShort, e.branchShort,
       ...dates.map(d => STATUS[e.days[d.date]]?.label || ''),
-      e.totalP, e.totalAB,
+      e.totalP, e.totalAB, e.eligibleForOt ? (e.otApprovedFormatted||'—') : '—',
     ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
     downloadCSV(getExcelHeaderRows(settings, language, reportTitle, reportSub()) + headers.join(',') + '\n' + dataRows,
       `HalfPresentAbsent_${period?.startDate||''}_${period?.endDate||''}.csv`);
@@ -457,7 +453,7 @@ const PresentAbsentReport = () => {
           </h1>
           <p className="page-subtitle" style={{ margin:0 }}>
             {currentFY && (
-              <span style={{ background:'#f0fdf4',color:'#52b02c',borderRadius:6,
+              <span style={{ background:'#eff6ff',color:'#1a56db',borderRadius:6,
                 padding:'1px 8px',fontSize:12,fontWeight:600,marginRight:8 }}>
                 {currentFY.name}
               </span>
@@ -477,7 +473,7 @@ const PresentAbsentReport = () => {
         <div style={{ display:'flex',alignItems:'center',gap:8,flexWrap:'wrap' }}>
           <button onClick={handlePrint}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
-              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
@@ -518,7 +514,7 @@ const PresentAbsentReport = () => {
           {[1,2].map(h=>(
             <button key={h} onClick={()=>setHalf(h)}
               style={{ padding:'5px 16px',border:'none',cursor:'pointer',fontSize:13,fontWeight:600,
-                background:half===h?'#52b02c':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
+                background:half===h?'#1a56db':'white',color:half===h?'white':'#374151',transition:'background .15s' }}>
               {h===1?L('पहिलो अर्ध','1st Half'):L('दोस्रो अर्ध','2nd Half')}
             </button>
           ))}
@@ -530,7 +526,7 @@ const PresentAbsentReport = () => {
             <button key={v}
               onClick={() => setFilters(p => ({ ...p, status:v, staffId:'' }))}
               style={{ padding:'5px 14px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,
-                background:filters.status===v?'#52b02c':'white',
+                background:filters.status===v?'#1a56db':'white',
                 color:filters.status===v?'white':'#374151',transition:'background .15s' }}>
               {label}
             </button>
@@ -562,7 +558,7 @@ const PresentAbsentReport = () => {
           </svg>
           {L('एडभान्स खोज','Advance Search')}
           {activeFilterCount > 0 && (
-            <span style={{ background:'#52b02c',color:'white',borderRadius:'50%',
+            <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
               fontSize:11,fontWeight:800 }}>{activeFilterCount}</span>
           )}
@@ -611,6 +607,7 @@ const PresentAbsentReport = () => {
                 ))}
                 <th style={{ ...thTotalP,  minWidth:38 }}>P</th>
                 <th style={{ ...thTotalAB, minWidth:38 }}>AB</th>
+                <th style={{ ...thTotalOT, minWidth:44 }}>OT</th>
               </tr>
 
               {/* Row 2 — day abbreviations */}
@@ -631,13 +628,14 @@ const PresentAbsentReport = () => {
                 ))}
                 <th style={{ ...thSub, background:'#d1fae5', color:'#065f46' }}>Total</th>
                 <th style={{ ...thSub, background:'#fee2e2', color:'#991b1b' }}>Total</th>
+                <th style={{ ...thSub, background:'#d1fae5', color:'#059669' }}>Total</th>
               </tr>
             </thead>
 
             <tbody>
               {employees.length === 0 && (
                 <tr>
-                  <td colSpan={5 + dates.length + 2}
+                  <td colSpan={5 + dates.length + 3}
                     style={{ textAlign:'center', padding:'40px', color:'#9ca3af', fontSize:13 }}>
                     {L('कुनै कर्मचारी भेटिएन','No staff found matching the filters')}
                   </td>
@@ -646,27 +644,27 @@ const PresentAbsentReport = () => {
 
               {employees.map((emp, idx) => (
                 <tr key={emp.id}
-                  style={{ background: idx%2===0 ? 'white' : '#f9fafb' }}
-                  onMouseEnter={e=>e.currentTarget.style.background='#f0fdf4'}
-                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f9fafb'}>
+                  style={{ background: idx%2===0 ? 'white' : '#f3f4f6' }}
+                  onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
+                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f3f4f6'}>
 
                   <td style={{ ...tdBase, fontWeight:600, color:'#6b7280',
                     position:'sticky', left:0, background:'#efefef', zIndex:1,
                     borderRight:'1px solid #dedede' }}>
                     {idx+1}
                   </td>
-                  <td style={{ ...tdBase, textAlign:'left', fontWeight:700, color:'#1f2937',
+                  <td style={{ ...tdBase, textAlign:'left', color:'#1f2937',
                     position:'sticky', left:34, background:'inherit', zIndex:1,
                     width:staffColWidth, minWidth:staffColWidth, whiteSpace:'nowrap' }}>
                     {emp.fullName}
                   </td>
-                  <td style={{ ...tdBase, color:'#0369a1', fontWeight:700, textAlign:'left' }} title={emp.position}>
+                  <td style={{ ...tdBase, color:'#1f2937', textAlign:'left' }} title={emp.position}>
                     {(settings.posts||[]).find(p=>p.name===emp.position)?.shortName || emp.postShort || emp.position || '—'}
                   </td>
-                  <td style={{ ...tdBase, color:'#059669', fontWeight:700, textAlign:'left' }} title={emp.department}>
+                  <td style={{ ...tdBase, color:'#1f2937', textAlign:'left' }} title={emp.department}>
                     {(settings.departments||[]).find(d=>d.name===emp.department)?.shortName || emp.deptShort || emp.department || '—'}
                   </td>
-                  <td style={{ ...tdBase, color:'#7c3aed', fontWeight:700, textAlign:'left' }} title={emp.branch}>{resolveShort(emp)}</td>
+                  <td style={{ ...tdBase, color:'#1f2937', textAlign:'left' }} title={emp.branch}>{resolveShort(emp)}</td>
 
                   {dates.map(({ date }) => (
                     <td key={date} style={{ ...tdBase, padding:'3px' }}>
@@ -675,10 +673,15 @@ const PresentAbsentReport = () => {
                   ))}
 
                   <td style={{ ...tdBase, fontWeight:800, color:'#065f46',
-                    background:'#f0fdf4', fontSize:13 }}>{emp.totalP}</td>
+                    background:'#f0fdf4' }}>{emp.totalP}</td>
                   <td style={{ ...tdBase, fontWeight:800,
                     color:emp.totalAB>0?'#991b1b':'#d1d5db',
-                    background:emp.totalAB>0?'#fff5f5':'white', fontSize:13 }}>{emp.totalAB}</td>
+                    background:emp.totalAB>0?'#fff5f5':'white' }}>{emp.totalAB}</td>
+                  <td style={{ ...tdBase, fontWeight:800,
+                    color: (emp.eligibleForOt && emp.otApprovedFormatted!=='—') ? '#059669' : '#d1d5db',
+                    background: (emp.eligibleForOt && emp.otApprovedFormatted!=='—') ? '#f0fdf4' : 'white' }}>
+                    {emp.eligibleForOt ? (emp.otApprovedFormatted||'—') : '—'}
+                  </td>
                 </tr>
               ))}
 
@@ -700,27 +703,29 @@ const PresentAbsentReport = () => {
                   ))}
                   <td style={{ ...tdBase, fontWeight:800, color:'#5b21b6', background:'#ede9fe', textAlign:'center' }}>{grandL}</td>
                   <td style={{ ...tdBase, color:'#d1d5db', textAlign:'center' }}>—</td>
+                  <td style={{ ...tdBase, color:'#d1d5db', textAlign:'center' }}>—</td>
                 </tr>
               )}
 
               {/* Office Visit summary row */}
               {employees.length > 0 && grandOV > 0 && (
-                <tr style={{ background:'#f0fdf4', borderTop:'1px solid #bbf7d0' }}>
-                  <td style={{ ...tdBase, background:'#dcfce7', color:'#6b7280', fontWeight:600,
+                <tr style={{ background:'#eff6ff', borderTop:'1px solid #bfdbfe' }}>
+                  <td style={{ ...tdBase, background:'#dbeafe', color:'#6b7280', fontWeight:600,
                     position:'sticky', left:0, zIndex:1, borderRight:'1px solid #dedede' }}></td>
-                  <td colSpan={4} style={{ ...tdBase, fontWeight:700, color:'#166534',
-                    textAlign:'left', background:'#dcfce7',
+                  <td colSpan={4} style={{ ...tdBase, fontWeight:700, color:'#1e40af',
+                    textAlign:'left', background:'#dbeafe',
                     position:'sticky', left:34, zIndex:1 }}>
                     🚗 {L('कार्यालय भ्रमण जम्मा','Office Visit Total')}
                   </td>
                   {dateTotals.map((dt, i) => (
                     <td key={i} style={{ ...tdBase, textAlign:'center', fontWeight:700,
-                      color: dt.ov > 0 ? '#16a34a' : '#d1d5db' }}>
+                      color: dt.ov > 0 ? '#2563eb' : '#d1d5db' }}>
                       {dt.ov > 0 ? dt.ov : '—'}
                     </td>
                   ))}
                   <td style={{ ...tdBase, color:'#d1d5db', textAlign:'center' }}>—</td>
-                  <td style={{ ...tdBase, fontWeight:800, color:'#166534', background:'#dcfce7', textAlign:'center' }}>{grandOV}</td>
+                  <td style={{ ...tdBase, fontWeight:800, color:'#1e40af', background:'#dbeafe', textAlign:'center' }}>{grandOV}</td>
+                  <td style={{ ...tdBase, color:'#d1d5db', textAlign:'center' }}>—</td>
                 </tr>
               )}
 

@@ -11,6 +11,7 @@ import { Router } from 'express';
 import pool       from '../db.js';
 import { logError } from '../utils/logError.js';
 import { resolveOrgScope } from './orgScope.js';
+import { loadRosterMap, getEffectiveRoster, isRosterWeekend, bucketPunchesByShiftDay } from './attendance.js';
 
 const router  = Router();
 const pad2    = (n) => String(Math.round(n)).padStart(2, '0');
@@ -22,6 +23,23 @@ const toDateS = (v) => {
 };
 
 const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+/* Reverses a previously-granted "Provide Next Day Leave" credit on a single
+   overtime_approvals row, if it has one — shared by reject and reset (DELETE)
+   so a mistaken grant never leaves a stuck credit in leave_balances. Caller
+   owns the transaction; this only reads/writes within it. */
+async function reverseLeaveGrant(client, approvalId) {
+  const { rows } = await client.query(
+    `SELECT employee_id, leave_type_code, leave_days FROM overtime_approvals WHERE id=$1`,
+    [approvalId]
+  );
+  const row = rows[0];
+  if (!row?.leave_type_code || !row?.leave_days) return;
+  await client.query(
+    `UPDATE leave_balances SET balance = balance - $1 WHERE employee_id=$2 AND leave_type_code=$3`,
+    [row.leave_days, row.employee_id, row.leave_type_code]
+  );
+}
 
 /* ── GET /api/overtime?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&status=pending ─ */
 router.get('/', async (req, res) => {
@@ -50,43 +68,99 @@ router.get('/', async (req, res) => {
     const shiftStartMins = sh * 60 + sm;
     const shiftEndMins   = eh * 60 + em;
 
-    // 2. All attendance logs in range with at least 2 punches
-    //    Join shifts for shift name; use department/position strings from users directly
-    const { rows: logRows } = await pool.query(`
+    // 1b. Weekend days + public holidays — needed below to stop the
+    // shift-relative "nothing to show" filter from silently dropping
+    // Present-on-Weekend/Holiday records (see comment at the filter itself).
+    // Same app_settings.main source the frontend's own weekend/holiday
+    // detection already uses (OvertimePage.jsx's settings.defaultWeekends /
+    // settings.publicHolidays), so both sides agree on what counts as one.
+    const { rows: mainRows } = await pool.query(`SELECT value FROM app_settings WHERE key='main'`);
+    const appMain       = mainRows[0]?.value || {};
+    const weekendDays   = appMain.defaultWeekends || ['Sat'];
+    const publicHolidays = appMain.publicHolidays || [];
+    const getHolidayName = (dateStr) => {
+      const h = publicHolidays.find(ph => ph.startDate && ph.endDate && dateStr >= ph.startDate && dateStr <= ph.endDate);
+      return h?.name || null;
+    };
+
+    // 1c. Duty roster — a staff member's roster-assigned Day Off/Night Off (or
+    // a non-default shift's own off-days) is a personal rest day just like the
+    // company-wide weekend, but was previously invisible to OT entirely since
+    // this route only ever checked the company-wide weekend list. Reuses the
+    // exact same rotation-resolution helpers every other attendance report
+    // already relies on (attendance.js), rather than re-deriving roster logic
+    // here. Widened a day each side so bucketPunchesByShiftDay (below) can
+    // resolve "yesterday"'s shift even at the range's start boundary.
+    const rangeStart = toDateS(new Date(new Date(startDate).getTime() - 86400000));
+    const rangeEnd   = toDateS(new Date(new Date(endDate).getTime()   + 86400000));
+    const rosterMap = await loadRosterMap(rangeStart, rangeEnd);
+
+    // 2. Employee info for everyone in scope — attendance is fetched and
+    //    shift-day bucketed separately below (see 2b), rather than joined
+    //    here, since a shift crossing midnight needs roster-aware bucketing
+    //    a plain `check_time::date` GROUP BY can't express.
+    const { rows: userRows } = await pool.query(`
       SELECT
-        z.employee_id,
-        z.check_time::date              AS date,
-        MIN(z.check_time)               AS time_in,
-        MAX(z.check_time)               AS time_out,
-        COUNT(*)::int                   AS punches,
+        u.id                             AS employee_id,
         u.full_name,
         u.department,
         u.position,
-        u.employee_id                   AS emp_code,
-        COALESCE(s.name_en, s.name, $3) AS emp_shift_name,
-        -- Try to get short names from lookup tables, fall back to raw strings
-        COALESCE(br.short_name, '')     AS branch_short,
+        u.employee_id                    AS emp_code,
+        COALESCE(s.name_en, s.name, $1)  AS emp_shift_name,
+        COALESCE(br.short_name, '')      AS branch_short,
         COALESCE(p.short_name,  u.position,   '') AS post_short,
         COALESCE(d.short_name,  u.department, '') AS dept_short,
         u.grade, u.gender, u.mode,
-        u.timing_type                   AS "timingType"
-      FROM zkteco_attendance_logs z
-      JOIN users u ON u.id = z.employee_id
+        u.timing_type                    AS "timingType",
+        u.ranking_order                  AS staff_rank,
+        br.ranking_order                 AS branch_rank,
+        u.eligible_for_ot                AS eligible_for_ot
+      FROM users u
       LEFT JOIN shifts      s  ON s.code = u.shift
       LEFT JOIN branches    br ON br.name = u.branch
       LEFT JOIN posts       p  ON p.name  = u.position
       LEFT JOIN departments d  ON d.name  = u.department
-      WHERE z.check_time::date BETWEEN $1 AND $2
-        AND z.employee_id IS NOT NULL
-        AND u.active = TRUE
-        AND u.eligible_for_ot = TRUE
+      WHERE u.active = TRUE
         ${scopeCond}
-      GROUP BY z.employee_id, z.check_time::date,
-               u.full_name, u.department, u.position, u.employee_id,
-               br.short_name, p.short_name, d.short_name, s.name_en, s.name,
-               u.grade, u.gender, u.mode, u.timing_type
-      HAVING COUNT(*) >= 2
-    `, [startDate, endDate, shiftName, ...scopeParams]);
+    `, [shiftName, ...scopeParams]);
+    const userMap = new Map(userRows.map(u => [u.employee_id, u]));
+
+    // 2b. Raw punches in the widened range — merges ZKTeco device logs with
+    //     manually-posted attendance (attendance_manual_postings), the same
+    //     UNION ALL pattern every other report in attendance.js already
+    //     uses, then bucketed into shift-days per employee (instead of a
+    //     plain GROUP BY check_time::date, which pairs the wrong punches
+    //     together for a shift crossing midnight — see bucketPunchesByShiftDay).
+    const { rows: rawRows } = await pool.query(`
+      SELECT employee_id, check_time FROM zkteco_attendance_logs
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      UNION ALL
+      SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      UNION ALL
+      SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
+      FROM   attendance_manual_postings
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
+    `, [rangeStart, rangeEnd]);
+
+    const rawByEmp = new Map();
+    for (const r of rawRows) {
+      if (!rawByEmp.has(r.employee_id)) rawByEmp.set(r.employee_id, []);
+      rawByEmp.get(r.employee_id).push(r.check_time);
+    }
+
+    const logRows = [];
+    for (const [empId, timestamps] of rawByEmp) {
+      const user = userMap.get(empId);
+      if (!user) continue; // inactive or out of the requester's org scope
+      const buckets = bucketPunchesByShiftDay(timestamps, empId, rosterMap, defShift);
+      for (const [dateStr, b] of buckets) {
+        if (dateStr < startDate || dateStr > endDate) continue;
+        if (b.punchCount < 2) continue; // same "at least 2 punches" gate as before
+        logRows.push({ ...user, date: dateStr, time_in: b.timeIn, time_out: b.timeOut, punches: b.punchCount });
+      }
+    }
 
     // 3. Existing approval records
     const { rows: approvals } = await pool.query(`
@@ -109,6 +183,22 @@ router.get('/', async (req, res) => {
       const outDt = new Date(r.time_out);
       const [dy, mo, dd] = ds.split('-').map(Number);
 
+      // Day of week + weekend/holiday check — a weekend/holiday Present day
+      // has no meaningful "shift-relative" OT (the shift-based filter right
+      // below doesn't apply to it), so it must never be skipped by that
+      // check even when it happens to land near-zero on it. "Weekend" here
+      // also includes a roster-assigned Day Off/Night Off (or a non-default
+      // shift's own off-days) for this specific employee on this specific
+      // date — a personal rest day, not just the company-wide pattern.
+      const dayOfWeek     = DOW_SHORT[new Date(dy, mo - 1, dd).getDay()];
+      const roster        = getEffectiveRoster(rosterMap, r.employee_id, ds);
+      const isWeekendDay  = isRosterWeekend(roster, dayOfWeek, weekendDays, defShift?.id);
+      const rosterOffType = roster?.isOff
+        ? (roster.shiftName === 'Night Off' ? 'nightOff' : (roster.shiftName === 'Day Off' ? 'dayOff' : 'weekend'))
+        : null;
+      const holidayName   = getHolidayName(ds);
+      const isSpecialDay  = isWeekendDay || !!holidayName;
+
       // Actual times in minutes (using local time components)
       const actualInMins  = inDt.getHours() * 60 + inDt.getMinutes();
       const actualOutMins = outDt.getHours() * 60 + outDt.getMinutes();
@@ -126,18 +216,37 @@ router.get('/', async (req, res) => {
         ? rawOTinOUT                                           // late departure
         : (Math.abs(rawOTinOUT) > graceEd ? rawOTinOUT : 0); // early beyond grace
 
-      // Net calculated OT
+      // Net calculated OT — OT IN and OT OUT are independent signals (an
+      // early arrival and a late departure are each their own overtime
+      // credit, not netted against each other), so summing them here is
+      // only ever used for the DB-approval default below, never for
+      // deciding whether the record has anything worth showing.
       const netOTMins = otInINMins + otInOUTMins;
-      if (netOTMins <= 0 && rawOTinOUT <= 0) continue; // nothing to show
+      // Regular working days stay gated by "Eligible for OT" (Employee
+      // Management) — that flag means "authorized for paid OT," which only
+      // makes sense relative to a shift's start/end. A weekend/holiday
+      // Present record is a different thing (tracking who showed up on a
+      // day off), so it's always kept regardless of both this flag and the
+      // shift-relative math below, so OvertimePage.jsx's own weekend/
+      // holiday-aware recalculation (and its "Present in Weekend"/"Present
+      // in Public Holiday" filters) actually has the record to work with
+      // instead of it being silently dropped here first.
+      //
+      // Skip only when NEITHER side has anything positive to show — e.g. a
+      // 3-hour early arrival must never be silently dropped just because
+      // the same person also left early that day (large negative
+      // otInOUTMins used to drag the summed netOTMins below zero and hide
+      // the whole record, along with its legitimate OT-in credit).
+      if (!isSpecialDay) {
+        if (!r.eligible_for_ot) continue;
+        if (otInINMins <= 0 && otInOUTMins <= 0) continue;
+      }
 
       const key  = `${r.employee_id}-${ds}`;
       const appr = approvalMap.get(key);
 
       // Manager-approved OT (from DB, editable) or default to calculated
       const approvedOTMins = appr?.ot_minutes ?? (netOTMins > 0 ? netOTMins : 0);
-
-      // Day of week
-      const dayOfWeek = DOW_SHORT[new Date(dy, mo - 1, dd).getDay()];
 
       const rec = {
         approvalId     : appr?.id || null,
@@ -149,6 +258,8 @@ router.get('/', async (req, res) => {
         position       : r.position       || '—',
         postShort      : r.post_short     || r.position   || '—',
         branchShort    : r.branch_short   || '—',
+        staffRank      : r.staff_rank,
+        branchRank     : r.branch_rank,
         shiftName      : r.emp_shift_name || shiftName,
         grade      : r.grade      || '—',
         gender     : r.gender     || '—',
@@ -158,6 +269,7 @@ router.get('/', async (req, res) => {
         shiftEnd,
         date           : ds,
         day            : dayOfWeek,
+        rosterOffType,
         timeIn         : `${String(inDt.getHours()).padStart(2,'0')}:${String(inDt.getMinutes()).padStart(2,'0')}`,
         timeOut        : `${String(outDt.getHours()).padStart(2,'0')}:${String(outDt.getMinutes()).padStart(2,'0')}`,
         // Signed OT components
@@ -176,16 +288,28 @@ router.get('/', async (req, res) => {
         approvedByName : appr?.approved_by_name || null,
         approvedDate   : toDateS(appr?.approved_date),
         comment        : appr?.comment || '',
+        // "Provide Next Day Leave" conversion (set only via /approve-leave)
+        leaveTypeCode  : appr?.leave_type_code || null,
+        leaveDays      : appr?.leave_days != null ? parseFloat(appr.leave_days) : null,
       };
 
       if (!status || status === 'all' || rec.status === status) records.push(rec);
     }
 
-    // Sort: pending first, then by date desc
+    // Sort: pending first, then by date desc, then by branch/staff ranking order
+    // (a tiebreak within the same status+date group — not a replacement of the
+    // workflow-priority ordering above).
     records.sort((a, b) => {
       if (a.status === 'pending' && b.status !== 'pending') return -1;
       if (a.status !== 'pending' && b.status === 'pending') return  1;
-      return b.date.localeCompare(a.date);
+      const dateCmp = b.date.localeCompare(a.date);
+      if (dateCmp !== 0) return dateCmp;
+      const brA = a.branchRank > 0 ? a.branchRank : Infinity;
+      const brB = b.branchRank > 0 ? b.branchRank : Infinity;
+      if (brA !== brB) return brA - brB;
+      const srA = a.staffRank > 0 ? a.staffRank : Infinity;
+      const srB = b.staffRank > 0 ? b.staffRank : Infinity;
+      return srA - srB;
     });
 
     res.json({ records, total: records.length });
@@ -260,16 +384,28 @@ router.patch('/:id/approve', async (req, res) => {
 /* ── PATCH /api/overtime/:id/reject ──────────────────────────────────────────── */
 router.patch('/:id/reject', async (req, res) => {
   const { approvedBy, comment } = req.body;
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(`
+    await client.query('BEGIN');
+    // Reversing a prior leave-in-lieu grant on reject — a mistaken grant
+    // must not leave a stuck credit sitting in the employee's balance.
+    await reverseLeaveGrant(client, req.params.id);
+    const { rows } = await client.query(`
       UPDATE overtime_approvals
-         SET status='rejected', approved_by=$1, approved_date=CURRENT_DATE, comment=$2
+         SET status='rejected', approved_by=$1, approved_date=CURRENT_DATE, comment=$2,
+             leave_type_code=NULL, leave_days=NULL
        WHERE id=$3
        RETURNING *
     `, [approvedBy || null, comment || '', req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: 'OT record not found' });
+    if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'OT record not found' }); }
+    await client.query('COMMIT');
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 /* ── POST /api/overtime/approve-inline — approve/reject by empId+date (no DB id yet) ─ */
@@ -288,6 +424,82 @@ router.post('/approve-inline', async (req, res) => {
     `, [employeeId, date, otMinutes || 0, status, approvedBy || null, comment || '']);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── POST /api/overtime/approve-leave — convert a "Present" weekend/holiday
+   record into a leave-balance credit instead of paid OT minutes ("Provide
+   Next Day Leave"). Positive, additive credit only (no negative `leaves`
+   row) — writes straight to leave_balances.balance. Reverses any prior
+   grant on the same record first, so re-picking a different type/day-count
+   for the same record never double-credits. ─────────────────────────────── */
+router.post('/approve-leave', async (req, res) => {
+  const { employeeId, date, leaveTypeCode, leaveDays, approvedBy, comment } = req.body;
+  if (!employeeId || !date || !leaveTypeCode) {
+    return res.status(400).json({ error: 'employeeId, date and leaveTypeCode are required' });
+  }
+  const days = Math.round(Number(leaveDays) * 10) / 10;
+  if (!(days > 0) || days > 2 || !Number.isInteger(days * 2)) {
+    return res.status(400).json({ error: 'Leave days must be greater than 0, at most 2, in half-day steps (e.g. 0.5, 1, 1.5, 2)' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Reverse any leave already granted for this exact record before applying
+    // the new one — otherwise editing a grant (different type or day count)
+    // would stack on top of the old credit instead of replacing it.
+    const { rows: existingRows } = await client.query(
+      `SELECT leave_type_code, leave_days FROM overtime_approvals WHERE employee_id=$1 AND date=$2`,
+      [employeeId, date]
+    );
+    const existing = existingRows[0];
+    if (existing?.leave_type_code && existing?.leave_days) {
+      await client.query(
+        `UPDATE leave_balances SET balance = balance - $1 WHERE employee_id=$2 AND leave_type_code=$3`,
+        [existing.leave_days, employeeId, existing.leave_type_code]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO leave_balances (employee_id, leave_type_code, balance)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (employee_id, leave_type_code)
+       DO UPDATE SET balance = leave_balances.balance + $3`,
+      [employeeId, leaveTypeCode, days]
+    );
+
+    const { rows: mainRows } = await client.query(`SELECT value FROM app_settings WHERE key='main'`);
+    const leaveTypeName = (mainRows[0]?.value?.leaveTypeConfigs || [])
+      .find(lt => lt.shortName === leaveTypeCode)?.name || leaveTypeCode;
+    const autoComment  = `Converted to ${days} day(s) ${leaveTypeName} (worked ${date})`;
+    const finalComment = comment ? `${autoComment} — ${comment}` : autoComment;
+
+    const { rows } = await client.query(
+      `INSERT INTO overtime_approvals
+         (employee_id, date, ot_minutes, status, approved_by, approved_date, comment, leave_type_code, leave_days)
+       VALUES ($1, $2, 0, 'approved', $3, CURRENT_DATE, $4, $5, $6)
+       ON CONFLICT (employee_id, date) DO UPDATE
+         SET ot_minutes=0, status='approved', approved_by=$3, approved_date=CURRENT_DATE,
+             comment=$4, leave_type_code=$5, leave_days=$6
+       RETURNING *`,
+      [employeeId, date, approvedBy || null, finalComment, leaveTypeCode, days]
+    );
+
+    const { rows: balRows } = await client.query(
+      `SELECT balance FROM leave_balances WHERE employee_id=$1 AND leave_type_code=$2`,
+      [employeeId, leaveTypeCode]
+    );
+
+    await client.query('COMMIT');
+    res.json({ ...rows[0], newBalance: balRows[0] ? parseFloat(balRows[0].balance) : null });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    logError('[overtime approve-leave]', e);
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 /* ── POST /api/overtime/bulk-approve ─────────────────────────────────────────── */
@@ -313,10 +525,24 @@ router.post('/bulk-approve', async (req, res) => {
 
 /* ── DELETE /api/overtime/:id — reset approval (back to pending) ─────────────── */
 router.delete('/:id', async (req, res) => {
+  const client = await pool.connect();
   try {
-    await pool.query(`UPDATE overtime_approvals SET status='pending', approved_by=NULL, approved_date=NULL, comment='' WHERE id=$1`, [req.params.id]);
+    await client.query('BEGIN');
+    await reverseLeaveGrant(client, req.params.id);
+    await client.query(`
+      UPDATE overtime_approvals
+         SET status='pending', approved_by=NULL, approved_date=NULL, comment='',
+             leave_type_code=NULL, leave_days=NULL
+       WHERE id=$1
+    `, [req.params.id]);
+    await client.query('COMMIT');
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 export default router;

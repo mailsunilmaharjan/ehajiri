@@ -19,7 +19,7 @@ const recipientLabel = (msg) =>
 
 const RecipientBadge = ({ type, department }) => {
   const map = {
-    all        : { bg: '#f0fdf4', color: '#166534', label: '📢 All Staff' },
+    all        : { bg: '#eff6ff', color: '#1e40af', label: '📢 All Staff' },
     department : { bg: '#f5f3ff', color: '#6d28d9', label: `🏢 ${department || 'Dept.'}` },
     individual : { bg: '#f0fdf4', color: '#065f46', label: '👤 Personal' },
   };
@@ -87,8 +87,8 @@ const ComposeModal = ({ onClose, onSent, employees, settings }) => {
   return (
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
-          <h2 style={{ color: '#166534' }}>✉ New Message</h2>
+        <div className="modal-header">
+          <h2 style={{ color: '#1e40af' }}>✉ New Message</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -106,16 +106,16 @@ const ComposeModal = ({ onClose, onSent, employees, settings }) => {
               ].map(opt => (
                 <label key={opt.v} style={{
                   flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
-                  gap: 2, padding: '8px 6px', border: `2px solid ${form.recipientType === opt.v ? '#52b02c' : '#e5e7eb'}`,
+                  gap: 2, padding: '8px 6px', border: `2px solid ${form.recipientType === opt.v ? '#1a56db' : '#e5e7eb'}`,
                   borderRadius: 8, cursor: 'pointer', userSelect: 'none',
-                  background: form.recipientType === opt.v ? '#f0fdf4' : 'white',
+                  background: form.recipientType === opt.v ? '#eff6ff' : 'white',
                   transition: 'all .12s',
                 }}>
                   <input type="radio" name="rtype" value={opt.v}
                     checked={form.recipientType === opt.v}
                     onChange={() => setForm(p => ({ ...p, recipientType: opt.v, recipientIds: [], department: '' }))}
                     style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: form.recipientType === opt.v ? '#52b02c' : '#374151' }}>{opt.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: form.recipientType === opt.v ? '#1a56db' : '#374151' }}>{opt.label}</span>
                   <span style={{ fontSize: 10, color: '#9ca3af' }}>{opt.desc}</span>
                 </label>
               ))}
@@ -261,7 +261,7 @@ const ReadingPane = ({ msg, folder, onDelete, onReply, customFolders = [], onMov
                     <div
                       onClick={() => { onMove(msg, null); setFolderMenu(false); }}
                       style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer',
-                        fontWeight: !msg.folder_id ? 700 : 400, color: !msg.folder_id ? '#52b02c' : '#374151' }}
+                        fontWeight: !msg.folder_id ? 700 : 400, color: !msg.folder_id ? '#1a56db' : '#374151' }}
                       onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
                       📥 Inbox (no folder)
@@ -277,7 +277,7 @@ const ReadingPane = ({ msg, folder, onDelete, onReply, customFolders = [], onMov
                         style={{ padding: f.sub ? '6px 10px 6px 26px' : '6px 10px', borderRadius: 6,
                           fontSize: 12.5, cursor: 'pointer',
                           fontWeight: msg.folder_id === f.id ? 700 : 400,
-                          color: msg.folder_id === f.id ? '#52b02c' : '#374151' }}
+                          color: msg.folder_id === f.id ? '#1a56db' : '#374151' }}
                         onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
                         {f.sub ? '📂' : '📁'} {f.name}
@@ -292,7 +292,7 @@ const ReadingPane = ({ msg, folder, onDelete, onReply, customFolders = [], onMov
             <button
               onClick={() => { replyRef.current?.focus(); replyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}
               title={`Reply to ${msg.sender_name}`}
-              style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#52b02c',
+              style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1a56db',
                 borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
               ↩ Reply
             </button>
@@ -313,13 +313,13 @@ const ReadingPane = ({ msg, folder, onDelete, onReply, customFolders = [], onMov
           {msg.subject}
         </h2>
         <div style={{ width: 38, height: 3, borderRadius: 2, margin: '10px 0 18px',
-          background: 'linear-gradient(90deg,#22c55e,#8b5cf6)' }} />
+          background: 'linear-gradient(90deg,#3b82f6,#8b5cf6)' }} />
 
         {/* Sender card */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
           background: '#f9fafb', border: '1px solid #f0f1f4', borderRadius: 10, padding: '12px 14px' }}>
           <Avatar photo={folder === 'inbox' ? msg.sender_photo : null} name={fromLabel} size={44}
-            style={{ boxShadow: '0 2px 6px rgba(82,176,44,.25)' }} />
+            style={{ boxShadow: '0 2px 6px rgba(26,86,219,.25)' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{fromLabel}</div>
             <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>🕐 {fmtFull(msg.created_at)}</div>
@@ -345,7 +345,7 @@ const ReadingPane = ({ msg, folder, onDelete, onReply, customFolders = [], onMov
         <div style={{ flexShrink: 0, borderTop: '1px solid #eef0f3', background: '#fafbfc',
           padding: '12px 20px 14px' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 7 }}>
-            ↩ Reply to <span style={{ color: '#52b02c' }}>{msg.sender_name}</span>
+            ↩ Reply to <span style={{ color: '#1a56db' }}>{msg.sender_name}</span>
           </div>
           <textarea
             ref={replyRef}
@@ -366,10 +366,10 @@ const ReadingPane = ({ msg, folder, onDelete, onReply, customFolders = [], onMov
             <button
               onClick={send}
               disabled={sending || !replyText.trim()}
-              style={{ background: (!replyText.trim() || sending) ? '#86efac' : '#52b02c', color: '#fff',
+              style={{ background: (!replyText.trim() || sending) ? '#93c5fd' : '#1a56db', color: '#fff',
                 border: 'none', borderRadius: 8, padding: '7px 18px', fontSize: 13, fontWeight: 700,
                 cursor: (!replyText.trim() || sending) ? 'not-allowed' : 'pointer',
-                boxShadow: '0 2px 6px rgba(82,176,44,.25)' }}>
+                boxShadow: '0 2px 6px rgba(26,86,219,.25)' }}>
               {sending ? '⏳ Sending…' : '↩ Send Reply'}
             </button>
           </div>
@@ -406,8 +406,8 @@ const BigMessageModal = ({ msg, onClose, onDelete, onReply }) => {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 760, width: '92%' }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header" style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
-          <h2 style={{ color: '#166534', fontSize: 16, wordBreak: 'break-word' }}>✉ {msg.subject}</h2>
+        <div className="modal-header">
+          <h2 style={{ color: '#1e40af', fontSize: 16, wordBreak: 'break-word' }}>✉ {msg.subject}</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
@@ -740,7 +740,7 @@ const StaffMessage = () => {
           field: 'is_read', header: 'Status', width: 100, align: 'center', sortable: false,
           render: v => v
             ? <span style={{ background: '#f3f4f6', color: '#6b7280', borderRadius: 10, padding: '1px 9px', fontSize: 11, fontWeight: 700 }}>Read</span>
-            : <span style={{ background: '#f0fdf4', color: '#52b02c', borderRadius: 10, padding: '1px 9px', fontSize: 11, fontWeight: 700 }}>● Unread</span>,
+            : <span style={{ background: '#eff6ff', color: '#1a56db', borderRadius: 10, padding: '1px 9px', fontSize: 11, fontWeight: 700 }}>● Unread</span>,
         },
         dateCol,
       ];
@@ -793,9 +793,9 @@ const StaffMessage = () => {
             <button
               onClick={() => setCompose(true)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                padding: '9px 0', background: '#52b02c', color: '#fff', border: 'none',
+                padding: '9px 0', background: '#1a56db', color: '#fff', border: 'none',
                 borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(82,176,44,.25)' }}>
+                boxShadow: '0 2px 8px rgba(26,86,219,.25)' }}>
               ✉ New Message
             </button>
           </div>
@@ -807,7 +807,7 @@ const StaffMessage = () => {
                   onClick={() => selectFolder(f.key)}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px',
                     borderRadius: 7, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                    color: isActive ? '#52b02c' : '#374151',
+                    color: isActive ? '#1a56db' : '#374151',
                     background: isActive ? '#e0e7f0' : 'transparent' }}
                   onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f0f0f0'; }}
                   onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}>
@@ -834,7 +834,7 @@ const StaffMessage = () => {
               <button onClick={() => { setNewFolder({ parentId: null, parentName: null }); setNewFolderName(''); }}
                 title="Create a new folder"
                 style={{ width: 20, height: 20, borderRadius: 6, border: '1px solid #d1d5db',
-                  background: '#fff', color: '#52b02c', fontSize: 13, fontWeight: 800, lineHeight: 1,
+                  background: '#fff', color: '#1a56db', fontSize: 13, fontWeight: 800, lineHeight: 1,
                   cursor: 'pointer', padding: 0 }}>
                 +
               </button>
@@ -855,7 +855,7 @@ const StaffMessage = () => {
                       padding: sub ? '6px 8px 6px 24px' : '7px 8px',
                       borderRadius: 7, cursor: 'pointer', fontSize: 12.5,
                       fontWeight: sub ? 500 : 600,
-                      color: isActive ? '#52b02c' : '#374151',
+                      color: isActive ? '#1a56db' : '#374151',
                       background: isActive ? '#e0e7f0' : 'transparent' }}
                     onMouseEnter={e => {
                       if (!isActive) e.currentTarget.style.background = '#f0f0f0';
@@ -880,7 +880,7 @@ const StaffMessage = () => {
                       <button data-fact onClick={e => { e.stopPropagation(); setNewFolder({ parentId: f.id, parentName: f.name }); setNewFolderName(''); }}
                         title={`New sub-folder under “${f.name}”`}
                         style={{ visibility: 'hidden', width: 17, height: 17, borderRadius: 5, border: 'none',
-                          background: '#dcfce7', color: '#52b02c', fontSize: 11, fontWeight: 800,
+                          background: '#dbeafe', color: '#1a56db', fontSize: 11, fontWeight: 800,
                           lineHeight: 1, cursor: 'pointer', padding: 0, flexShrink: 0 }}>
                         +
                       </button>
@@ -924,7 +924,7 @@ const StaffMessage = () => {
                   selectedIds.length === 1 && (
                     <button
                       onClick={() => openBig(currentList.find(m => m.id === selectedIds[0]))}
-                      style={{ background: '#dcfce7', color: '#166534', border: 'none', borderRadius: 6,
+                      style={{ background: '#dbeafe', color: '#1e40af', border: 'none', borderRadius: 6,
                         padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                       ✏️ Edit
                     </button>
@@ -940,7 +940,7 @@ const StaffMessage = () => {
           onMouseDown={startResize}
           title="Drag to resize"
           style={{ width: 6, flexShrink: 0, cursor: 'col-resize', position: 'relative', background: '#fff' }}
-          onMouseEnter={e => { e.currentTarget.firstChild.style.background = '#86efac'; }}
+          onMouseEnter={e => { e.currentTarget.firstChild.style.background = '#93c5fd'; }}
           onMouseLeave={e => { e.currentTarget.firstChild.style.background = '#e5e7eb'; }}>
           <div style={{ position: 'absolute', left: 2, top: 0, bottom: 0, width: 2, background: '#e5e7eb', transition: 'background .12s' }} />
         </div>
@@ -968,7 +968,7 @@ const StaffMessage = () => {
       {delConfirm && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background: 'linear-gradient(135deg,#fff5f5,#fef2f2)' }}>
+            <div className="modal-header">
               <h2>⚠️ Delete Message</h2>
               <button className="modal-close" onClick={() => setDelConfirm(null)}>✕</button>
             </div>
@@ -989,7 +989,7 @@ const StaffMessage = () => {
       {newFolder && (
         <div className="modal-overlay" onClick={() => setNewFolder(null)}>
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background: 'linear-gradient(135deg,#f5f3ff,#ede9fe)' }}>
+            <div className="modal-header">
               <h2 style={{ color: '#6d28d9' }}>
                 {newFolder.parentId ? `📂 New Sub-folder in “${newFolder.parentName}”` : '📁 New Folder'}
               </h2>
@@ -1022,7 +1022,7 @@ const StaffMessage = () => {
       {delFolder && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ background: 'linear-gradient(135deg,#fff5f5,#fef2f2)' }}>
+            <div className="modal-header">
               <h2>⚠️ Delete Folder</h2>
               <button className="modal-close" onClick={() => setDelFolder(null)}>✕</button>
             </div>

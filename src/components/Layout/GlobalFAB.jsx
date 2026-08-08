@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useLeaveApply } from '../../context/LeaveApplyContext.jsx';
 import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
+import { useManualPostingApply } from '../../context/ManualPostingApplyContext.jsx';
 
 const GlobalFAB = () => {
-  const navigate        = useNavigate();
   const location        = useLocation();
   const { open: openLeaveApply }       = useLeaveApply();
   const { open: openOfficeVisitApply } = useOfficeVisitApply();
-  const { canView, canManageSystem, currentUser } = useAuth();
+  const { open: openManualPostingApply } = useManualPostingApply();
+  const { canView, currentUser } = useAuth();
   const [open, setOpen] = useState(false);
   const fabRef = useRef(null);
 
@@ -42,12 +43,12 @@ const GlobalFAB = () => {
       bg:     '#ccfbf1',
       action: () => { setOpen(false); openOfficeVisitApply(); },
     },
-    canManageSystem && {
+    canView('manualPostingApply') && {
       label:  'Inform Late In/Early Out',
       icon:   '⏱️',
       color:  '#f59e0b',
       bg:     '#fef3c7',
-      action: () => { setOpen(false); navigate('/attendance/manual-postings'); },
+      action: () => { setOpen(false); openManualPostingApply(); },
     },
   ].filter(Boolean);
 
@@ -57,8 +58,8 @@ const GlobalFAB = () => {
     <div
       ref={fabRef}
       style={{
-        position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
-        display: 'flex', flexDirection: 'column-reverse', alignItems: 'flex-end', gap: 10,
+        position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+        display: 'flex', flexDirection: 'column-reverse', alignItems: 'center', gap: 10,
       }}
     >
       {/* Action items */}
@@ -71,12 +72,19 @@ const GlobalFAB = () => {
             animationDelay: `${i * 40}ms`,
           }}
         >
-          {/* Label pill */}
-          <span style={{
-            background: '#1e293b', color: '#fff', fontSize: 13, fontWeight: 600,
-            padding: '6px 14px', borderRadius: 8, whiteSpace: 'nowrap',
-            boxShadow: '0 2px 8px rgba(0,0,0,.18)',
-          }}>
+          {/* Label pill — also clickable, same action as the circle button */}
+          <span
+            onClick={a.action}
+            title={a.label}
+            style={{
+              background: '#f3f4f6', color: '#1f2937', fontSize: 13, fontWeight: 600,
+              padding: '6px 14px', borderRadius: 8, whiteSpace: 'nowrap',
+              boxShadow: '0 2px 8px rgba(0,0,0,.18)', border: '1px solid #e5e7eb',
+              cursor: 'pointer', transition: 'background .15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#e5e7eb'}
+            onMouseLeave={e => e.currentTarget.style.background = '#f3f4f6'}
+          >
             {a.label}
           </span>
           {/* Circle button */}
@@ -101,7 +109,7 @@ const GlobalFAB = () => {
       {/* Main toggle button */}
       <button
         onClick={() => setOpen(p => !p)}
-        title={open ? 'Close' : 'Quick Actions'}
+        title={open ? 'Close' : 'Apply Applications'}
         style={{
           width: 52, height: 52, borderRadius: '50%', border: 'none',
           background: open ? '#64748b' : '#7c3aed', color: '#fff',

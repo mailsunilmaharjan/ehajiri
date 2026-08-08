@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import baseTranslations from '../translations/translations.js';
 
 const LanguageContext = createContext(null);
@@ -7,6 +7,14 @@ export const LanguageProvider = ({ children }) => {
   const [language, setLanguage] = useState(
     () => localStorage.getItem('app_language') || 'en'
   );
+
+  // Devanagari glyphs render visually smaller than Latin ones at the same
+  // font-size — this class drives a size-adjust'd font swap (see index.css)
+  // that boosts only Devanagari-script text while Nepali/English mode is active,
+  // without touching Latin text size even when the two are mixed in the same label.
+  useEffect(() => {
+    document.documentElement.classList.toggle('lang-np', language === 'np');
+  }, [language]);
   const [autoTranslate, setAutoTranslate] = useState(
     () => localStorage.getItem('auto_translate') !== 'false'
   );

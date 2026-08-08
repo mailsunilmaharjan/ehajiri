@@ -7,7 +7,7 @@ import api from '../../api/client.js';
 import './Login.css';
 
 /* ── Subscription Expired / Activation screen ─────────────────────────────── */
-const SubscriptionExpiredScreen = ({ settings }) => {
+export const SubscriptionExpiredScreen = ({ settings, distributor }) => {
   // mode: null (steps view) | 'dealer' (Dealer Name/Username/Password form) | 'key' (paste-license-key form)
   const [mode, setMode] = useState(null);
 
@@ -93,12 +93,30 @@ const SubscriptionExpiredScreen = ({ settings }) => {
         <h2 style={{ fontSize:20, fontWeight:800, color:'#991b1b', marginBottom:8 }}>
           Subscription Expired
         </h2>
-        <p style={{ fontSize:14, fontWeight:700, color:'#374151', marginBottom:6, lineHeight:1.5 }}>
-          Subscription has been Expired,<br/>Contact to your Distributor
+        <p style={{ fontSize:14, fontWeight:700, color:'#374151', marginBottom:16, lineHeight:1.5 }}>
+          Your Subscription of this Software is Expired,<br/>Kindly contact to your Distributor for renew the Subscription
         </p>
-        <p style={{ fontSize:12, color:'#9ca3af', marginBottom:20 }}>
-          Your eHajiri TMS license is not active or has expired.
-        </p>
+        {(distributor?.name || distributor?.contactName || distributor?.phone || distributor?.email) && (
+          <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:10,
+            padding:'12px 18px', marginBottom:20, textAlign:'left', fontSize:13, color:'#374151' }}>
+            <div style={{ display:'flex', marginBottom:4 }}>
+              <span style={{ fontWeight:700, width:100 }}>Distributor</span>
+              <span>: {distributor.name || '—'}</span>
+            </div>
+            <div style={{ display:'flex', marginBottom:4 }}>
+              <span style={{ fontWeight:700, width:100 }}>Phone no</span>
+              <span>: {distributor.phone || '—'}</span>
+            </div>
+            <div style={{ display:'flex', marginBottom:4 }}>
+              <span style={{ fontWeight:700, width:100 }}>Name</span>
+              <span>: {distributor.contactName || '—'}</span>
+            </div>
+            <div style={{ display:'flex' }}>
+              <span style={{ fontWeight:700, width:100 }}>Email</span>
+              <span>: {distributor.email || '—'}</span>
+            </div>
+          </div>
+        )}
 
         {mode === null ? (
           <>
@@ -118,9 +136,9 @@ const SubscriptionExpiredScreen = ({ settings }) => {
             {/* Activation button */}
             <button
               onClick={() => { setMode('dealer'); setMsg(null); }}
-              style={{ width:'100%', padding:'13px', background:'#52b02c', color:'white',
+              style={{ width:'100%', padding:'13px', background:'#1a56db', color:'white',
                 border:'none', borderRadius:10, fontSize:14, fontWeight:700, cursor:'pointer',
-                boxShadow:'0 2px 8px rgba(82,176,44,.3)', display:'flex', alignItems:'center',
+                boxShadow:'0 2px 8px rgba(26,86,219,.3)', display:'flex', alignItems:'center',
                 justifyContent:'center', gap:8 }}>
               🔑 Activation
             </button>
@@ -154,7 +172,7 @@ const SubscriptionExpiredScreen = ({ settings }) => {
                 onChange={e => { setDealerName(e.target.value); setDealerErrors(p => ({ ...p, dealerName:null })); }}
                 placeholder="e.g. Planet Infosys"
                 style={fieldStyle(dealerErrors.dealerName)}
-                onFocus={e => e.target.style.borderColor='#52b02c'}
+                onFocus={e => e.target.style.borderColor='#1a56db'}
                 onBlur={e  => e.target.style.borderColor = dealerErrors.dealerName ? '#fca5a5' : '#d1d5db'}
               />
               {dealerErrors.dealerName && (
@@ -172,7 +190,7 @@ const SubscriptionExpiredScreen = ({ settings }) => {
                 onChange={e => { setDealerUser(e.target.value); setDealerErrors(p => ({ ...p, dealerUser:null })); }}
                 placeholder="Dealer username"
                 style={fieldStyle(dealerErrors.dealerUser)}
-                onFocus={e => e.target.style.borderColor='#52b02c'}
+                onFocus={e => e.target.style.borderColor='#1a56db'}
                 onBlur={e  => e.target.style.borderColor = dealerErrors.dealerUser ? '#fca5a5' : '#d1d5db'}
               />
               {dealerErrors.dealerUser && (
@@ -190,7 +208,7 @@ const SubscriptionExpiredScreen = ({ settings }) => {
                 onChange={e => { setDealerPass(e.target.value); setDealerErrors(p => ({ ...p, dealerPass:null })); }}
                 placeholder="Dealer password"
                 style={fieldStyle(dealerErrors.dealerPass)}
-                onFocus={e => e.target.style.borderColor='#52b02c'}
+                onFocus={e => e.target.style.borderColor='#1a56db'}
                 onBlur={e  => e.target.style.borderColor = dealerErrors.dealerPass ? '#fca5a5' : '#d1d5db'}
                 onKeyDown={e => { if (e.key === 'Enter') handleDealerActivate(); }}
               />
@@ -213,10 +231,10 @@ const SubscriptionExpiredScreen = ({ settings }) => {
               onClick={handleDealerActivate}
               disabled={activating}
               style={{ width:'100%', padding:'13px', border:'none', borderRadius:10,
-                background: activating ? '#86efac' : '#52b02c',
+                background: activating ? '#93c5fd' : '#1a56db',
                 color:'white', fontSize:14, fontWeight:700,
                 cursor: activating ? 'not-allowed' : 'pointer',
-                boxShadow:'0 2px 8px rgba(82,176,44,.3)', transition:'all .15s', marginBottom:12 }}>
+                boxShadow:'0 2px 8px rgba(26,86,219,.3)', transition:'all .15s', marginBottom:12 }}>
               {activating ? '⏳ Activating...' : '✅ Activate via Dealer'}
             </button>
 
@@ -254,9 +272,9 @@ const SubscriptionExpiredScreen = ({ settings }) => {
               placeholder="EHAJ-eyJ... paste your license key here"
               style={{ width:'100%', border:'1.5px solid #d1d5db', borderRadius:8,
                 padding:'10px 12px', fontSize:11, fontFamily:'monospace', resize:'vertical',
-                outline:'none', boxSizing:'border-box', color:'#166534', letterSpacing:'.3px',
+                outline:'none', boxSizing:'border-box', color:'#1e40af', letterSpacing:'.3px',
                 marginBottom:10 }}
-              onFocus={e => e.target.style.borderColor='#52b02c'}
+              onFocus={e => e.target.style.borderColor='#1a56db'}
               onBlur={e  => e.target.style.borderColor='#d1d5db'}
             />
             {msg && (
@@ -272,10 +290,10 @@ const SubscriptionExpiredScreen = ({ settings }) => {
               onClick={handleActivate}
               disabled={activating || !keyInput.trim()}
               style={{ width:'100%', padding:'13px', border:'none', borderRadius:10,
-                background: activating||!keyInput.trim() ? '#86efac' : '#52b02c',
+                background: activating||!keyInput.trim() ? '#93c5fd' : '#1a56db',
                 color:'white', fontSize:14, fontWeight:700,
                 cursor: activating||!keyInput.trim() ? 'not-allowed' : 'pointer',
-                boxShadow:'0 2px 8px rgba(82,176,44,.3)', transition:'all .15s' }}>
+                boxShadow:'0 2px 8px rgba(26,86,219,.3)', transition:'all .15s' }}>
               {activating ? '⏳ Activating...' : '✅ Activate License'}
             </button>
           </>
@@ -285,58 +303,6 @@ const SubscriptionExpiredScreen = ({ settings }) => {
   );
 };
 
-/* ── License footer bar ────────────────────────────────────────────────────── */
-const LicenseFooter = ({ info }) => {
-  if (!info) return null;
-
-  const daysLeft = info.expires
-    ? Math.max(0, Math.ceil((new Date(info.expires) - new Date()) / 86400000))
-    : null;
-
-  const isExpired = daysLeft === 0;
-  const isWarning = daysLeft !== null && daysLeft <= 30 && !isExpired;
-  const dotColor  = isExpired ? '#f87171' : isWarning ? '#fbbf24' : '#4ade80';
-
-  const fmtDate = (iso) => {
-    if (!iso) return '—';
-    const d = new Date(iso);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
-             .replace(/ /g, '-');
-  };
-
-  const dim  = { fontSize: 11, color: 'rgba(255,255,255,.45)', fontWeight: 500 };
-  const bold = { fontSize: 11, color: 'rgba(255,255,255,.80)', fontWeight: 700 };
-  const sep  = <span style={{ color: 'rgba(255,255,255,.2)', margin: '0 12px' }}>|</span>;
-
-  return (
-    <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexWrap: 'wrap', gap: '2px 0',
-      padding: '10px 20px',
-      zIndex: 50,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: dotColor,
-        display: 'inline-block', marginRight: 8, flexShrink: 0,
-        boxShadow: `0 0 6px ${dotColor}` }} />
-
-      <span style={dim}>Remaining Days :&nbsp;</span>
-      <span style={bold}>
-        {isExpired ? 'Expired' : daysLeft !== null ? daysLeft : '—'}
-      </span>
-
-      {sep}
-
-      <span style={dim}>Valid Date :&nbsp;</span>
-      <span style={bold}>{fmtDate(info.expires)}</span>
-
-      {sep}
-
-      <span style={dim}>Distributed by :&nbsp;</span>
-      <span style={bold}>{info.client || '—'}</span>
-    </div>
-  );
-};
 
 const ForgotPasswordModal = ({ onClose }) => {
   const [usernameInput, setUsernameInput] = useState('');
@@ -395,7 +361,7 @@ const ForgotPasswordModal = ({ onClose }) => {
                   border: '1.5px solid #d1d5db', borderRadius: 8, fontSize: 13,
                   outline: 'none', transition: 'border .15s',
                 }}
-                onFocus={e => e.target.style.borderColor = '#52b02c'}
+                onFocus={e => e.target.style.borderColor = '#1a56db'}
                 onBlur={e => e.target.style.borderColor = '#d1d5db'}
               />
             </div>
@@ -404,7 +370,7 @@ const ForgotPasswordModal = ({ onClose }) => {
               disabled={loading || !usernameInput.trim()}
               style={{
                 width: '100%', padding: '11px', border: 'none', borderRadius: 8,
-                background: loading || !usernameInput.trim() ? '#86efac' : '#52b02c',
+                background: loading || !usernameInput.trim() ? '#93c5fd' : '#1a56db',
                 color: '#fff', fontSize: 13, fontWeight: 700,
                 cursor: loading || !usernameInput.trim() ? 'not-allowed' : 'pointer',
               }}>
@@ -458,10 +424,9 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
-  const [licenseInfo, setLicenseInfo] = useState(null);
   const [adContent, setAdContent] = useState(null);
   const [adSlide, setAdSlide] = useState(0);
-  const { login, error, licenseError, licenseChecked, currentUser } = useAuth();
+  const { login, error, licenseError, licenseChecked, licenseDistributor, currentUser } = useAuth();
   const { t, language, changeLanguage } = useLanguage();
   const { settings } = useSettings();
   const navigate = useNavigate();
@@ -485,16 +450,27 @@ const Login = () => {
     }
   }, []);
 
+  // Landed here via the shared login hub's cross-tenant redirect
+  // (attend.zkattendance.com resolved this email to THIS company) — prefill
+  // it so the user only has to type their password. The email itself never
+  // appears in the URL: ?et= carries a short-lived opaque token instead,
+  // stripped from the URL immediately (before the exchange call even
+  // resolves) so it can't linger in browser history from a bookmark/share,
+  // then exchanged server-side for the real email.
   useEffect(() => {
-    api.get('/license/status')
-      .then(d => setLicenseInfo(d))
+    const params = new URLSearchParams(window.location.search);
+    const redirectToken = params.get('et');
+    if (!redirectToken) return;
+    params.delete('et');
+    const rest = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    api.get(`/auth/resolve-redirect-token?t=${encodeURIComponent(redirectToken)}`)
+      .then(r => { if (r.email) setUsername(r.email); })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
-    const base = import.meta.env.VITE_LICENSE_ADMIN_URL || 'http://localhost:3000';
-    fetch(`${base}/api/settings/advertisement`)
-      .then(r => r.ok ? r.json() : null)
+    api.get('/auth/advertisement')
       .then(data => { if (data) setAdContent(data); })
       .catch(() => {});
   }, []);
@@ -527,7 +503,7 @@ const Login = () => {
   if (!licenseChecked) {
     return (
       <div style={{ position: 'fixed', inset: 0,
-        background: 'linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#52b02c 100%)',
+        background: 'linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1a56db 100%)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
         <div style={{ width: 44, height: 44, border: '4px solid rgba(255,255,255,.2)',
           borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -541,7 +517,7 @@ const Login = () => {
 
   /* ── Subscription Expired / No License Screen ── */
   if (licenseError) {
-    return <SubscriptionExpiredScreen settings={settings} />;
+    return <SubscriptionExpiredScreen settings={settings} distributor={licenseDistributor} />;
   }
 
   const companyName    = language === 'np' ? settings.companyNameNp    : settings.companyNameEn;
@@ -569,8 +545,12 @@ const Login = () => {
                   transition: 'opacity 0.6s ease',
                 }} />
             ))}
+            {/* No title overlay here — a configured ad image already carries
+                its own branding, and stacking LicenseAdmin's title text on
+                top of it (defaulting to a generic placeholder whenever that
+                field is empty) just duplicated/clashed with it. */}
             {adContent.adImages.length > 1 && (
-              <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 6, zIndex: 1 }}>
+              <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 6, zIndex: 2 }}>
                 {adContent.adImages.map((_, i) => (
                   <span key={i} onClick={() => setAdSlide(i)} style={{
                     width: i === adSlide ? 18 : 7, height: 7, borderRadius: 4, cursor: 'pointer',
@@ -690,7 +670,7 @@ const Login = () => {
                   type="checkbox"
                   checked={rememberMe}
                   onChange={e => setRememberMe(e.target.checked)}
-                  style={{ width: 15, height: 15, accentColor: '#52b02c', cursor: 'pointer' }}
+                  style={{ width: 15, height: 15, accentColor: '#1a56db', cursor: 'pointer' }}
                 />
                 <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>Remember Password</span>
               </label>
@@ -699,7 +679,7 @@ const Login = () => {
                 onClick={() => setShowForgot(true)}
                 style={{
                   background: 'none', border: 'none', padding: 0,
-                  fontSize: 12, color: '#52b02c', fontWeight: 600, cursor: 'pointer',
+                  fontSize: 12, color: '#1a56db', fontWeight: 600, cursor: 'pointer',
                   textDecoration: 'underline', textUnderlineOffset: 2,
                 }}>
                 Forgot Password?
@@ -719,7 +699,6 @@ const Login = () => {
       </div>
 
       {showForgot && <ForgotPasswordModal onClose={() => setShowForgot(false)} />}
-      <LicenseFooter info={licenseInfo} />
     </div>
   );
 };

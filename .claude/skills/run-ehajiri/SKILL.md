@@ -138,6 +138,21 @@ thing to one — use it to verify changes.
   with `Get-NetTCPConnection -LocalPort 4000,5001 -State Listen` (or
   `lsof -i :4000,:5001` outside Windows) before assuming you need to start
   a fresh one.
+- **WARNING — verify it's actually a dev process before trusting it.** On at
+  least one deployment of this box, :5001 was found to be the NSSM-managed
+  **production** "eHajiriWeb" hub service, not a dev leftover — its parent
+  process was `nssm.exe`, not a shell. A session that skipped this check
+  logged into it, reset a real user's password, and wrote test roster rows
+  to a live database before catching the mistake. Before running ANY
+  write-capable test (login, POST, etc.) against whatever answers on
+  :4000/:5001/:5000, confirm the owning PID's parent isn't `nssm.exe`:
+  `Get-NetTCPConnection -LocalPort 5001 -State Listen |
+  Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)"` (or
+  chain through `Get-CimInstance` on `OwningProcess` directly) and inspect
+  `ParentProcessId`'s process name. If it's `nssm.exe`, treat it as
+  production: read-only at most, never write, and start your own isolated
+  instance instead (separate `DB_NAME`, separate port) rather than reusing
+  it.
 
 ## Troubleshooting
 

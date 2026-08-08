@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Start-Sleep -Seconds 2; try { $r = Invoke-WebRequest -Uri \"http://localhost:4000\" -TimeoutSec 5 -UseBasicParsing; \"Vite: $\\($r.StatusCode\\)\" } catch { \"Error: $_\" })"
+      "PowerShell(Start-Sleep -Seconds 2; try { $r = Invoke-WebRequest -Uri \"http://localhost:4000\" -TimeoutSec 5 -UseBasicParsing; \"Vite: $\\($r.StatusCode\\)\" } catch { \"Error: $_\" })",
+      "Read(//c/Attendance/LicenseAdmin/**)",
+      "Bash(awk -F: '$1 >= 4339 && $1 <= 5370')",
+      "Bash(node -e ' *)",
+      "PowerShell(Restart-Service LicenseAdminWeb -Confirm:$false)",
+      "PowerShell(Get-Service LicenseAdminWeb)",
+      "Bash(npm run *)"
     ]
   }
 }

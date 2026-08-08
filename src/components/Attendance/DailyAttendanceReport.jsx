@@ -13,6 +13,7 @@ import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
+import { getNepalTodayISO } from '../../utils/dateUtils.js';
 
 /* ── abbreviate a post name: "General Manager"→"GM", "Accountant"→"Accou" ── */
 const abbrev = (name) => {
@@ -27,12 +28,12 @@ const DAY_EN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Sat
 const DAY_NP = ['आइत','सोम','मंगल','बुध','बिही','शुक्र','शनि'];
 
 const STATUS_STYLE = {
-  Present          : { bg:'#d1fae5', color:'#065f46', border:'#6ee7b7' },
-  Absent           : { bg:'#fee2e2', color:'#991b1b', border:'#fca5a5' },
+  Present          : { bg:'#f0fdf4', color:'#065f46', border:'#bbf7d0' },
+  Absent           : { bg:'#fff5f5', color:'#991b1b', border:'#fecaca' },
   Weekend          : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
   Leave            : { bg:'#ede9fe', color:'#5b21b6', border:'#c4b5fd' },
   'Public Holiday' : { bg:'#fef3c7', color:'#92400e', border:'#fcd34d' },
-  'Office Visit'   : { bg:'#dcfce7', color:'#166534', border:'#86efac' },
+  'Office Visit'   : { bg:'#dbeafe', color:'#1e40af', border:'#93c5fd' },
 };
 const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
 
@@ -49,10 +50,7 @@ const fmtTime = (iso) => {
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 };
 
-const todayISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-};
+const todayISO = () => getNepalTodayISO();
 
 /* ── Advance Search Modal ───────────────────────────────────── */
 const EMPTY_FILTERS = {
@@ -113,9 +111,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
       }} onClick={e => e.stopPropagation()}>
 
         {/* ── Header ── */}
-        <div style={{ padding:'20px 24px 16px', background:'linear-gradient(135deg,#f0f4ff,#e8f4ff,#e6fffe,#edfff5,#fdf4ff,#fff0f8,#f0f4ff)',backgroundSize:'300% 300%',animation:'headerShift 8s ease infinite',borderBottom:'1px solid #f3f4f6',
+        <div style={{ padding:'20px 24px 16px', background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span style={{ fontSize:18, fontWeight:700, color:'#166534', letterSpacing:'-.2px' }}>
+          <span style={{ fontSize:18, fontWeight:700, color:'#1e40af', letterSpacing:'-.2px' }}>
             {L('एडभान्स खोज','Advance Search')}
           </span>
           <button onClick={onClose}
@@ -191,10 +189,10 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
           <button
             onClick={() => { onApply(local); onClose(); }}
             style={{ padding:'9px 26px', border:'none', borderRadius:8,
-              background:'#52b02c', color:'white', fontSize:14, fontWeight:700,
-              cursor:'pointer', boxShadow:'0 2px 8px rgba(82,176,44,.3)', transition:'all .15s' }}
-            onMouseEnter={e=>e.currentTarget.style.background='#166534'}
-            onMouseLeave={e=>e.currentTarget.style.background='#52b02c'}>
+              background:'#1a56db', color:'white', fontSize:14, fontWeight:700,
+              cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)', transition:'all .15s' }}
+            onMouseEnter={e=>e.currentTarget.style.background='#1e40af'}
+            onMouseLeave={e=>e.currentTarget.style.background='#1a56db'}>
             {L('खोज्नुस','Search')}
           </button>
         </div>
@@ -330,7 +328,7 @@ const DailyAttendanceReport = () => {
   const columns = [
     {
       field:'fullName', header:L('कर्मचारी','Staff'), sortable:true,
-      render: v => <span style={{ fontWeight:700, color:'#1f2937', fontSize:14 }}>{v}</span>,
+      render: v => <span style={{ color:'#1f2937' }}>{v}</span>,
     },
     {
       field:'postShort', header:L('पद','Post'),
@@ -338,7 +336,7 @@ const DailyAttendanceReport = () => {
         const fromSettings = (settings.posts || []).find(p => p.name === row.postFull)?.shortName;
         const display = fromSettings || v || '—';
         return (
-          <span title={row.postFull || ''} style={{ fontSize:14, color:'#0369a1', fontWeight:700, cursor:'default' }}>
+          <span title={row.postFull || ''} style={{ color:'#1f2937', cursor:'default' }}>
             {display}
           </span>
         );
@@ -350,7 +348,7 @@ const DailyAttendanceReport = () => {
         const fromSettings = (settings.departments || []).find(d => d.name === row.deptFull)?.shortName;
         const display = fromSettings || v || '—';
         return (
-          <span title={row.deptFull || ''} style={{ fontSize:14, color:'#059669', fontWeight:700, cursor:'default' }}>
+          <span title={row.deptFull || ''} style={{ color:'#1f2937', cursor:'default' }}>
             {display}
           </span>
         );
@@ -362,7 +360,7 @@ const DailyAttendanceReport = () => {
         const fromSettings = (settings.branches || []).find(b => b.name === row.branchName)?.shortName;
         const display = fromSettings || v || '—';
         return (
-          <span title={row.branchName || ''} style={{ fontSize:14, color:'#7c3aed', fontWeight:700, cursor:'default' }}>
+          <span title={row.branchName || ''} style={{ color:'#1f2937', cursor:'default' }}>
             {display}
           </span>
         );
@@ -370,29 +368,30 @@ const DailyAttendanceReport = () => {
     },
     {
       field:'_date', header:L('मिति','Date'), sortable:false,
-      render: () => <span style={{ fontSize:14, fontWeight:600, whiteSpace:'nowrap' }}>{displayDate}</span>,
+      render: () => <span style={{ whiteSpace:'nowrap' }}>{displayDate}</span>,
     },
     {
       field:'_day', header:L('दिन','Day'), sortable:false,
       render: () => (
-        <span style={{ fontSize:14, color: data?.isWeekend?'#9ca3af':'#374151', fontWeight:500 }}>
+        <span style={{ color: data?.isWeekend?'#9ca3af':'#374151', fontWeight:500 }}>
           {dayLabel}
         </span>
       ),
     },
     {
       field:'shiftName', header:L('सिफ्ट','Shift'),
-      render: v => <span style={{ fontSize:14, color:'#7c3aed', whiteSpace:'nowrap' }}>{v||'—'}</span>,
+      render: v => <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v||'—'}</span>,
     },
     {
       field:'timeIn', header:L('आउने','Time In'), align:'center',
       render: (v, row) => {
-        if (!v) return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>;
+        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         const warn = row.punchCount === 1;
+        const onTime = row.lateIn === 'On Time';
         return (
-          <span style={{ color:warn?'#d97706':'#52b02c', fontSize:14, fontWeight:700, whiteSpace:'nowrap' }}
+          <span style={{ color: onTime ? '#1f2937' : (warn?'#f59e0b':'#3b82f6'), fontWeight: onTime?400:700, whiteSpace:'nowrap' }}
             title={warn?'Single punch only':''}>
-            {fmtTime(v)}{warn&&' ⚠'}
+            {fmtTime(v)}
           </span>
         );
       },
@@ -400,12 +399,13 @@ const DailyAttendanceReport = () => {
     {
       field:'timeOut', header:L('जाने','Time Out'), align:'center',
       render: (v, row) => {
-        if (!v) return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>;
+        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         const warn = row.punchCount === 1;
+        const onTime = row.earlyOut === 'On Time';
         return (
-          <span style={{ color:warn?'#d97706':'#374151', fontSize:14, fontWeight:700, whiteSpace:'nowrap' }}
+          <span style={{ color: onTime ? '#1f2937' : (warn?'#f59e0b':'#6b7280'), fontWeight: onTime?400:700, whiteSpace:'nowrap' }}
             title={warn?'Single punch only':''}>
-            {fmtTime(v)}{warn&&' ⚠'}
+            {fmtTime(v)}
           </span>
         );
       },
@@ -413,23 +413,31 @@ const DailyAttendanceReport = () => {
     {
       field:'totalHrs', header:L('घण्टा','Total Hrs'), align:'center',
       render: v => v
-        ? <span style={{ color:'#0369a1', fontSize:14, fontWeight:700 }}>{v}</span>
-        : <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>,
+        ? <span style={{ color:'#0369a1', fontWeight:700 }}>{v}</span>
+        : <span style={{ color:'#d1d5db' }}>—</span>,
+    },
+    {
+      field:'otApprovedFormatted', header:L('ओटी','OT'), align:'center',
+      render: (v, row) => row.eligibleForOt && v
+        ? <span style={{ color:'#059669', fontWeight:700 }}>{v}</span>
+        : <span style={{ color:'#d1d5db' }}>—</span>,
     },
     {
       field:'lateIn', header:L('IN स्थिति','IN Status'),
       render: v => {
-        if (!v) return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>;
+        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
+        if (v === 'On Time') return <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v}</span>;
         const isEarly = v.startsWith('Early In');
-        return <span style={{ color: isEarly ? '#059669' : '#dc2626', fontWeight:700, fontSize:14, whiteSpace:'nowrap' }}>{v}</span>;
+        return <span style={{ color: isEarly ? '#10b981' : '#ef4444', fontWeight:700, whiteSpace:'nowrap' }}>{v}</span>;
       },
     },
     {
       field:'earlyOut', header:L('OUT स्थिति','OUT Status'),
       render: v => {
-        if (!v) return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>;
+        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
+        if (v === 'On Time') return <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v}</span>;
         const isLateOut = v.startsWith('Late Out');
-        return <span style={{ color: isLateOut ? '#16a34a' : '#d97706', fontWeight:700, fontSize:14, whiteSpace:'nowrap' }}>{v}</span>;
+        return <span style={{ color: isLateOut ? '#3b82f6' : '#f59e0b', fontWeight:700, whiteSpace:'nowrap' }}>{v}</span>;
       },
     },
     {
@@ -437,7 +445,7 @@ const DailyAttendanceReport = () => {
       render: (v, row) => {
         if (v === 'On Leave') {
           /* Badge only — no leave name below */
-          return <Pill bg="#f0fdf4" color="#166534" border="#bbf7d0">🏖️ {L('बिदामा','On Leave')}</Pill>;
+          return <Pill bg="#eff6ff" color="#1e40af" border="#bfdbfe">🏖️ {L('बिदामा','On Leave')}</Pill>;
         }
         const s = statusStyle(v);
         return <Pill bg={s.bg} color={s.color} border={s.border}>{v}</Pill>;
@@ -448,7 +456,7 @@ const DailyAttendanceReport = () => {
       render: (v, row) => {
         if (row.status === 'On Leave') {
           const parts = [];
-          if (row.leaveType)  parts.push(<span key="type" style={{ fontWeight:700, color:'#166534' }}>{row.leaveType}</span>);
+          if (row.leaveType)  parts.push(<span key="type" style={{ fontWeight:700, color:'#1e40af' }}>{row.leaveType}</span>);
           if (row.leaveReason) parts.push(<span key="reason" style={{ color:'#374151' }}>{row.leaveReason}</span>);
           if (row.recommendedBy) parts.push(
             <span key="reco" style={{ color:'#059669' }}>
@@ -461,7 +469,7 @@ const DailyAttendanceReport = () => {
             </span>
           );
           return (
-            <div style={{ fontSize:14, display:'flex', flexWrap:'wrap', gap:'0 8px', alignItems:'center' }}>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'0 8px', alignItems:'center' }}>
               {parts.map((p, i) => (
                 <React.Fragment key={i}>
                   {i > 0 && <span style={{ color:'#d1d5db', fontSize:10 }}>|</span>}
@@ -471,15 +479,15 @@ const DailyAttendanceReport = () => {
             </div>
           );
         }
-        if (!v) return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>;
+        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         const segs = v.split(' | ').map(s => s.trim()).filter(Boolean);
         const isMeta = (s) => s.includes('Recom. by') || s.includes('App. by');
-        if (!segs.some(isMeta)) return <span style={{ fontSize:14, color:'#374151', lineHeight:1.4 }}>{v}</span>;
+        if (!segs.some(isMeta)) return <span style={{ color:'#374151', lineHeight:1.4 }}>{v}</span>;
         return (
           <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
             {segs.map((seg, i) => isMeta(seg)
               ? <span key={i} style={{ fontSize:11, color:'#9ca3af', lineHeight:1.3 }}>{seg}</span>
-              : <span key={i} style={{ fontSize:13, color:'#374151', lineHeight:1.3 }}>{seg}</span>
+              : <span key={i} style={{ color:'#374151', lineHeight:1.3 }}>{seg}</span>
             )}
           </div>
         );
@@ -525,7 +533,7 @@ const DailyAttendanceReport = () => {
                 [`"Date: ${displayDate}  |  Day: ${dayLabel}${data?.isWeekend?' (Weekend)':''}"`],
                 [`"Total: ${se.total}  |  Present: ${se.present}  |  Absent: ${se.absent}  |  Leave: ${se.leave}  |  Office Visit: ${se.visit||0}  |  Weekend: ${se.weekend}  |  Late In: ${se.late}  |  Early Out: ${se.early}"`],
                 [''],
-                ['"SN","Staff","Post","Dept.","Branch","Date","Day","Shift","Time In","Time Out","Total Hrs","IN Status","OUT Status","Status","Remarks"'],
+                ['"SN","Staff","Post","Dept.","Branch","Date","Day","Shift","Time In","Time Out","Total Hrs","OT","IN Status","OUT Status","Status","Remarks"'],
               ].map(r => Array.isArray(r) ? r.join(',') : r);
 
               quickRows.forEach((r, i) => {
@@ -534,7 +542,7 @@ const DailyAttendanceReport = () => {
                   displayDate, dayLabel, r.shiftName||'',
                   r.timeIn  ? fmtTime(r.timeIn)  : '',
                   r.timeOut ? fmtTime(r.timeOut) : '',
-                  r.totalHrs||'', r.lateIn||'', r.earlyOut||'',
+                  r.totalHrs||'', (r.eligibleForOt && r.otApprovedFormatted) || '', r.lateIn||'', r.earlyOut||'',
                   r.status||'', (r.remarks||'').replace(/"/g,'""'),
                 ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
               });
@@ -567,7 +575,7 @@ const DailyAttendanceReport = () => {
                 ['Present',      s.present, '#065f46'],
                 ['Absent',       s.absent,  '#991b1b'],
                 ['Leave',        s.leave,   '#5b21b6'],
-                ['Office Visit', s.visit,   '#166534'],
+                ['Office Visit', s.visit,   '#1e40af'],
                 ['Weekend',      s.weekend, '#6b7280'],
                 ['Late In',      s.late,    '#dc2626'],
                 ['Early Out',    s.early,   '#d97706'],
@@ -577,7 +585,7 @@ const DailyAttendanceReport = () => {
               const rowsHtml = quickRows.map((r,i) => {
                 const stColor = {Present:'#065f46,#d1fae5',Absent:'#991b1b,#fee2e2',
                   Weekend:'#6b7280,#f3f4f6',Leave:'#5b21b6,#ede9fe','Public Holiday':'#92400e,#fef3c7',
-                  'Office Visit':'#166534,#dcfce7'}[r.status]||'#374151,#f9fafb';
+                  'Office Visit':'#1e40af,#dbeafe'}[r.status]||'#374151,#f9fafb';
                 const [sc,sb] = stColor.split(',');
                 const bg = i%2===0?'white':'#f9fafb';
                 const td = (v,c='#374151',fw=400) =>
@@ -589,11 +597,12 @@ const DailyAttendanceReport = () => {
                   ${td(r.deptShort,'#059669',700)}
                   ${td(r.branchShort,'#7c3aed',700)}
                   ${td(r.shiftName||'—','#7c3aed')}
-                  ${td(r.timeIn?fmtTime(r.timeIn):'—','#52b02c',700)}
+                  ${td(r.timeIn?fmtTime(r.timeIn):'—','#1a56db',700)}
                   ${td(r.timeOut?fmtTime(r.timeOut):'—','#374151',700)}
                   ${td(r.totalHrs||'—','#0369a1',700)}
+                  ${td((r.eligibleForOt && r.otApprovedFormatted)||'—','#059669',700)}
                   ${td(r.lateIn||'—',r.lateIn?.startsWith('Late')?'#dc2626':'#059669')}
-                  ${td(r.earlyOut||'—',r.earlyOut?.startsWith('Early Out')?'#d97706':'#16a34a')}
+                  ${td(r.earlyOut||'—',r.earlyOut?.startsWith('Early Out')?'#d97706':'#2563eb')}
                   <td style="padding:4px 5px;border:1px solid #e5e7eb;background:${bg};text-align:center;">
                     <span style="background:${sb};color:${sc};border-radius:4px;padding:1px 5px;font-size:8px;font-weight:700;">${r.status}</span>
                   </td>
@@ -615,7 +624,7 @@ const DailyAttendanceReport = () => {
   .header-spacer{ grid-column:3; }
   .company-name { font-size:15px; font-weight:800; color:#1f2937; margin-bottom:2px; }
   .company-sub  { font-size:10px; color:#6b7280; margin-bottom:4px; }
-  .report-title { font-size:13px; font-weight:800; color:#166534; }
+  .report-title { font-size:13px; font-weight:800; color:#1e40af; }
   .report-date  { font-size:11px; color:#374151; font-weight:600; margin:2px 0; }
   /* Footer */
   .footer { margin-top:40px; display:flex; justify-content:space-between; gap:24px; }
@@ -648,7 +657,7 @@ const DailyAttendanceReport = () => {
       <th style="width:22px;">SN</th>
       <th style="text-align:left;">Staff</th>
       <th>Post</th><th>Dept</th><th>Branch</th>
-      <th>Shift</th><th>In</th><th>Out</th><th>Hrs</th>
+      <th>Shift</th><th>In</th><th>Out</th><th>Hrs</th><th>OT</th>
       <th>IN Status</th><th>OUT Status</th><th>Status</th>
       <th style="text-align:left;">Remarks</th>
     </tr>
@@ -676,7 +685,7 @@ const DailyAttendanceReport = () => {
               if (w) { w.document.write(html); w.document.close(); }
             }}
             style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 14px', height:34,
-              background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d',
+              background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8',
               borderRadius:6, fontSize:13, fontWeight:600, cursor:'pointer' }}>
             🖨️ {L('प्रिन्ट','Print')}
           </button>
@@ -715,8 +724,8 @@ const DailyAttendanceReport = () => {
               alignItems:'center', justifyContent:'center', flexShrink:0 }}>→</button>
 
           <button onClick={() => setDate(todayISO())}
-            style={{ height:34, padding:'0 14px', border:'1px solid #bbf7d0', borderRadius:6,
-              background:'#f0fdf4', color:'#52b02c', cursor:'pointer', fontSize:13, fontWeight:700 }}>
+            style={{ height:34, padding:'0 14px', border:'1px solid #bfdbfe', borderRadius:6,
+              background:'#eff6ff', color:'#1a56db', cursor:'pointer', fontSize:13, fontWeight:700 }}>
             {L('आज','Today')}
           </button>
         </div>
@@ -825,7 +834,7 @@ const DailyAttendanceReport = () => {
               </svg>
               {L('एडभान्स खोज','Advance Search')}
               {activeCount > 0 && (
-                <span style={{ background:'#52b02c', color:'white', borderRadius:'50%',
+                <span style={{ background:'#1a56db', color:'white', borderRadius:'50%',
                   width:17, height:17, fontSize:10, fontWeight:700,
                   display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
                   {activeCount}
@@ -882,7 +891,6 @@ const DailyAttendanceReport = () => {
         <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
         <span><strong style={{ color:'#dc2626' }}>Late: HH:mm</strong> — {L('ढिलो (ग्रेस पछि)','Late (after grace)')}</span>
         <span><strong style={{ color:'#d97706' }}>Early: HH:mm</strong> — {L('चाँडो गएको','Left early')}</span>
-        <span><strong style={{ color:'#d97706' }}>⚠</strong> — {L('एकै पञ्च','Single punch')}</span>
         <span style={{ marginLeft:'auto', color:'#9ca3af' }}>
           {L('पद/विभाग/शाखामा Short Name देखाइन्छ — hover गर्नुस पूरा नाम हेर्न',
             'Post/Dept/Branch show short names — hover for full name')}

@@ -23,6 +23,44 @@ export const BS_DATA = {
 const REF_BS  = { year: 2081, month: 1, day: 1 };
 const REF_AD  = new Date(2024, 3, 13); // month is 0-indexed; April 13, 2024
 
+// ── Nepal-anchored "now" ──────────────────────────────────────────────────
+// eHajiri is a Nepal-only attendance system, so "today" must always mean
+// Nepal wall-clock time (UTC+5:45, no DST) — never the viewer's own OS/
+// browser timezone and never raw UTC. Neither `new Date()` + local getters
+// nor `new Date().toISOString()` give that: the former drifts a day
+// whenever the viewer's own clock isn't set to Nepal time, the latter
+// drifts for every viewer during Nepal's 00:00-05:45 window since it's
+// always UTC. These two are the only correct ways to get "today" in Nepal.
+const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
+
+/**
+ * Drop-in replacement for `new Date()` wherever the result is read via
+ * LOCAL getters (getFullYear/getMonth/getDate/getHours/...). Shifts the
+ * epoch by (Nepal's offset − the viewer's own offset), so those same local
+ * getters — unchanged at the call site — report Nepal wall-clock time
+ * instead of the viewer's own OS time.
+ */
+export function getNepalNow() {
+  const now = new Date();
+  const localOffsetMs = -now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() + NEPAL_OFFSET_MS - localOffsetMs);
+}
+
+/** Drop-in replacement for `new Date().toISOString().split('T')[0]` — today's Nepal calendar date as YYYY-MM-DD. */
+export function getNepalTodayISO() {
+  const d = new Date(Date.now() + NEPAL_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** Shared fiscal-year lookup — consolidates the identical copy previously duplicated across report files. */
+export function getCurrentFiscalYear(fiscalYears = []) {
+  const today = getNepalTodayISO();
+  return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
+      || fiscalYears.find(fy => fy.isDefault)
+      || fiscalYears[fiscalYears.length - 1]
+      || null;
+}
+
 export function getBSDays(year, month) {
   const row = BS_DATA[year];
   if (!row) return 30; // fallback

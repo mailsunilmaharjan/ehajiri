@@ -1,4 +1,14 @@
 /**
+ * ⚠ StandAlone SDK code (legacy zkemkeeper.dll COM control) — DISABLED BY
+ * DEFAULT. This entire router is mounted behind requireModuleEnabled(FLAG_KEYS
+ * .standaloneDevice) in server/index.js, itself default OFF (migration 47) and
+ * only re-enableable from Settings → Role Management → Module Controls. The UI
+ * tab that calls these routes is likewise hidden from every role, including
+ * Admin/Super Admin, until that flag is turned on. Nothing below executes on a
+ * fresh install unless someone explicitly opts in — see CLAUDE.md's "StandAlone
+ * ZKTeco devices" section for the COM-registration prerequisite that makes it
+ * fragile enough to keep gated.
+ *
  * Standalone ZKTeco device REST API — consumed by the Settings → "StandAlone
  * Device" tab. Unlike /api/zkteco (ADMS push), these devices are PULLED from
  * via the standalone-bridge process (legacy SDK / zkemkeeper.dll COM control),
@@ -7,6 +17,7 @@
  */
 
 import express from 'express';
+import crypto  from 'crypto';
 import pool    from '../db.js';
 import { requireRole } from '../middleware/roleGuard.js';
 import {
@@ -62,15 +73,17 @@ async function getDeviceById(id) {
 
 router.get('/devices', async (_req, res) => {
   try {
+    // user_count/fingerprint_count used to come from COUNT(DISTINCT ...) over
+    // two independent LEFT JOINs on the same device — fan-out (see the
+    // identical fix + explanation in zktecoApi.js's GET /devices). Scoped as
+    // scalar subqueries instead, same as log_count already was, so the join
+    // itself stays 1:1 regardless of how many users/fingerprints pile up.
     const { rows } = await pool.query(`
       SELECT d.*,
-             COUNT(DISTINCT u.id)::int AS user_count,
-             COUNT(DISTINCT f.id)::int AS fingerprint_count,
+             (SELECT COUNT(*)::int FROM standalone_users        u WHERE u.device_id = d.id) AS user_count,
+             (SELECT COUNT(*)::int FROM standalone_fingerprints f WHERE f.device_id = d.id) AS fingerprint_count,
              (SELECT COUNT(*)::int FROM zkteco_attendance_logs zl WHERE zl.device_sn = d.serial_number) AS log_count
       FROM   standalone_devices d
-      LEFT JOIN standalone_users        u ON u.device_id = d.id
-      LEFT JOIN standalone_fingerprints f ON f.device_id = d.id
-      GROUP BY d.id
       ORDER BY d.created_at DESC
     `);
     res.json(rows);
@@ -156,6 +169,41 @@ router.post('/devices/:id/sync-info', canManageDevices, async (req, res) => {
     );
     res.json(result);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════
+//  REMOTE SYNC AGENT — a device-scoped bearer token that lets
+//  standalone-bridge.exe run in "remote sync" mode (RemoteSyncAgent.cs) at a
+//  site whose device this server can't reach directly, POSTing fetched logs
+//  to POST /api/standalone-sync/logs instead of this server pulling them over
+//  the loopback bridge. See middleware/standaloneSyncTokenGuard.js.
+// ═══════════════════════════════════════════════════════
+
+router.post('/devices/:id/sync-token', canManageDevices, async (req, res) => {
+  try {
+    const device = await getDeviceById(req.params.id);
+    const token = crypto.randomBytes(32).toString('hex');
+    await pool.query('UPDATE standalone_devices SET sync_token=$1 WHERE id=$2', [token, device.id]);
+    const config = {
+      deviceIp       : device.ip_address,
+      devicePort     : device.port,
+      commPassword   : device.comm_password || '',
+      serverUrl      : req.body.serverUrl || `${req.protocol}://${req.get('host')}`,
+      syncToken      : token,
+      pollIntervalSec: 60,
+    };
+    res.json({ ok: true, token, config });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// Revoke — a leaked config.json (or a decommissioned site) should stop being
+// able to push logs immediately, not just until someone remembers to delete
+// the device row.
+router.delete('/devices/:id/sync-token', canManageDevices, async (req, res) => {
+  try {
+    await pool.query('UPDATE standalone_devices SET sync_token=NULL WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ═══════════════════════════════════════════════════════
