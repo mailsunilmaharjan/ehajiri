@@ -80,4 +80,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Followup History: double-click a row to edit it, delete (admin/superAdmin only), wider panel with a Task/Followup description footer. Email and WhatsApp followup buttons now open Gmail compose / a WhatsApp chat pre-filled with the linked customer\'s own contact info.',
   },
+  {
+    appVersion : '1.0.23',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : 'Followup History panel restyled with colored section-header cards (Followup History / Description), matching the Company detail panel look.',
+  },
 ];

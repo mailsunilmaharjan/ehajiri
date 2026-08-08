@@ -533,11 +533,13 @@ const TaskList = () => {
         {/* Right — Followup History panel (click a task row to open) */}
         {followupTask && (
           <div style={{ width: 560, flexShrink: 0, background: '#fff', border: '1px solid #dedede', borderRadius: 10,
-            display: 'flex', flexDirection: 'column', minHeight: 0, boxShadow: '0 1px 3px rgba(0,0,0,.07)' }}>
+            display: 'flex', flexDirection: 'column', minHeight: 0, boxShadow: '0 1px 3px rgba(0,0,0,.07)', overflow: 'hidden' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{followupTask.title}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    📄 {followupTask.title}
+                  </div>
                   <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 2 }}>
                     {followupTask.customerName || 'No client linked'}
                     {followupTask.personName ? ` — ${followupTask.personName}` : ''}
@@ -557,43 +559,60 @@ const TaskList = () => {
                 + New Followup
               </button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, padding: 8 }}>
-              {followupsLoading ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Loading…</div>
-              ) : (
-                <div className="dg-fixed-height" style={{ height: '100%' }}>
-                  <DataGrid
-                    columns={followupColumns}
-                    data={followups}
-                    rowKey="id"
-                    showCheckbox={false}
-                    showFilterButton={false}
-                    compact
-                    searchPlaceholder="Search followups…"
-                    onRowClick={setSelectedFollowup}
-                    onRowDoubleClick={openEditFollowup}
-                  />
-                </div>
-              )}
-            </div>
 
-            {/* Footer — left: the task's own description, right: the selected followup's */}
-            <div style={{ borderTop: '1px solid #e5e7eb', padding: '10px 14px', flexShrink: 0,
-              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
-                  Task Description
+            <div style={{ flex: 1, minHeight: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+              {/* Followup History — blue card, matches the section-header convention on the Company detail panel */}
+              <div style={{ flex: 1, minHeight: 160, display: 'flex', flexDirection: 'column',
+                border: '1px solid #dbeafe', borderRadius: 10, overflow: 'hidden' }}>
+                <div style={{ background: '#eff6ff', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7,
+                  borderBottom: '1px solid #dbeafe', flexShrink: 0 }}>
+                  <span style={{ fontSize: 13 }}>📋</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px' }}>FOLLOWUP HISTORY</span>
                 </div>
-                <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
-                  {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
+                <div style={{ flex: 1, minHeight: 0, padding: 8, background: '#fff' }}>
+                  {followupsLoading ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Loading…</div>
+                  ) : (
+                    <div className="dg-fixed-height" style={{ height: '100%' }}>
+                      <DataGrid
+                        columns={followupColumns}
+                        data={followups}
+                        rowKey="id"
+                        showCheckbox={false}
+                        showFilterButton={false}
+                        compact
+                        searchPlaceholder="Search followups…"
+                        onRowClick={setSelectedFollowup}
+                        onRowDoubleClick={openEditFollowup}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
-              <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
-                  Followup Description
+
+              {/* Description — amber card, left: the task's own description, right: the selected followup's */}
+              <div style={{ flexShrink: 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
+                <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
+                  <span style={{ fontSize: 13 }}>📝</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                 </div>
-                <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
-                  {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                <div style={{ padding: '10px 14px', background: '#fff', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
+                      Task Description
+                    </div>
+                    <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                      {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
+                    </div>
+                  </div>
+                  <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
+                      Followup Description
+                    </div>
+                    <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                      {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
