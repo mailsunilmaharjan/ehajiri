@@ -140,9 +140,17 @@ const TaskList = () => {
   const [editingFollowupId, setEditingFollowupId] = useState(null); // null = "+ New Followup"; set = editing that row
   const [selectedFollowup,  setSelectedFollowup]  = useState(null); // single-click row -> panel footer preview
   const [deleteFollowupConfirm, setDeleteFollowupConfirm] = useState(null);
+  const [followupSearch, setFollowupSearch] = useState(''); // search box lives in the FOLLOWUP HISTORY card header, not the grid's own toolbar
 
   // Footer preview defaults to the most recent followup whenever the list (re)loads
   useEffect(() => { setSelectedFollowup(followups[0] || null); }, [followups]);
+
+  const filteredFollowups = useMemo(() => {
+    const q = followupSearch.trim().toLowerCase();
+    if (!q) return followups;
+    return followups.filter(f =>
+      [f.mode, f.description, f.taskNote, f.followedByName, f.handedOverToName].some(v => v && v.toLowerCase().includes(q)));
+  }, [followups, followupSearch]);
 
   const loadTasks = () => {
     setLoading(true);
@@ -284,8 +292,8 @@ const TaskList = () => {
       .catch(e => showToast(e.message || 'Failed to load followups', 'error'))
       .finally(() => setFollowupsLoading(false));
   };
-  const openFollowupPanel = (row) => { setFollowupTask(row); loadFollowups(row.id); };
-  const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); };
+  const openFollowupPanel = (row) => { setFollowupTask(row); setFollowupSearch(''); loadFollowups(row.id); };
+  const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); setFollowupSearch(''); };
   const openNewFollowup = () => { setEditingFollowupId(null); setFollowupForm(emptyFollowup); setFollowupErrors({}); setFollowupModal(true); };
   const openEditFollowup = (row) => {
     setEditingFollowupId(row.id);
@@ -502,7 +510,7 @@ const TaskList = () => {
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 14 }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {loading ? (
             <div style={{ padding: 48, textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>Loading...</div>
@@ -532,7 +540,7 @@ const TaskList = () => {
 
         {/* Right — Followup History panel (click a task row to open) */}
         {followupTask && (
-          <div style={{ width: 560, flexShrink: 0, background: '#fff', border: '1px solid #dedede', borderRadius: 10,
+          <div style={{ width: 560, height: '100%', flexShrink: 0, background: '#fff', border: '1px solid #dedede', borderRadius: 10,
             display: 'flex', flexDirection: 'column', minHeight: 0, boxShadow: '0 1px 3px rgba(0,0,0,.07)', overflow: 'hidden' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
@@ -567,7 +575,11 @@ const TaskList = () => {
                 <div style={{ background: '#eff6ff', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7,
                   borderBottom: '1px solid #dbeafe', flexShrink: 0 }}>
                   <span style={{ fontSize: 13 }}>📋</span>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px' }}>FOLLOWUP HISTORY</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px', whiteSpace: 'nowrap' }}>FOLLOWUP HISTORY</span>
+                  <input type="text" value={followupSearch} onChange={e => setFollowupSearch(e.target.value)}
+                    placeholder="Search followups…"
+                    style={{ marginLeft: 'auto', height: 26, width: 160, border: '1px solid #bfdbfe', borderRadius: 6,
+                      padding: '0 9px', fontSize: 11.5, color: '#1e3a8a', background: '#fff', outline: 'none', boxSizing: 'border-box' }} />
                 </div>
                 <div style={{ flex: 1, minHeight: 0, padding: 8, background: '#fff' }}>
                   {followupsLoading ? (
@@ -576,12 +588,12 @@ const TaskList = () => {
                     <div className="dg-fixed-height" style={{ height: '100%' }}>
                       <DataGrid
                         columns={followupColumns}
-                        data={followups}
+                        data={filteredFollowups}
                         rowKey="id"
                         showCheckbox={false}
                         showFilterButton={false}
+                        showSearch={false}
                         compact
-                        searchPlaceholder="Search followups…"
                         onRowClick={setSelectedFollowup}
                         onRowDoubleClick={openEditFollowup}
                       />
@@ -597,21 +609,11 @@ const TaskList = () => {
                   <span style={{ fontSize: 11.5, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                 </div>
                 <div style={{ padding: '10px 14px', background: '#fff', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
-                      Task Description
-                    </div>
-                    <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
-                      {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
-                    </div>
+                  <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                    {stripHtml(followupTask.description) || <span style={{ color: '#d1d5db' }}>—</span>}
                   </div>
-                  <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 3 }}>
-                      Followup Description
-                    </div>
-                    <div style={{ fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
-                      {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
-                    </div>
+                  <div style={{ borderLeft: '1px solid #f1f5f9', paddingLeft: 12, fontSize: 12, color: '#374151', maxHeight: 70, overflowY: 'auto' }}>
+                    {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
                   </div>
                 </div>
               </div>

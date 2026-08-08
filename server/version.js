@@ -86,4 +86,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Followup History panel restyled with colored section-header cards (Followup History / Description), matching the Company detail panel look.',
   },
+  {
+    appVersion : '1.0.24',
+    dbVersion  : 87,
+    releaseDate: '2026-08-08',
+    notes      : 'Followup History panel: removed the gap to the task grid, panel now stretches full height, search box moved into the Followup History card header, Description card shows values only (no redundant labels).',
+  },
 ];
