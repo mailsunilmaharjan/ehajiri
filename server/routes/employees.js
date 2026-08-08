@@ -122,8 +122,8 @@ const sql = {
       email=$6, phone=$7, join_date=$8, gender=$9, active=$10,
       device_id=$11, religion=$12, handicapped=$13, branch=$14, mode=$15,
       grade=$16, timing_type=$17, dob=$18, attendance_date=$19, emp_status=$20,
-      ranking_order=$21, remarks=$22, eligible_for_ot=$23
-    WHERE id=$24
+      ranking_order=$21, remarks=$22, eligible_for_ot=$23, employee_id=$24
+    WHERE id=$25
     RETURNING ${SEL}`,
 };
 
@@ -573,7 +573,7 @@ router.post('/import', async (req, res) => {
 
 router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) => {
   const {
-    fullName, role, department, position, shift,
+    employeeId, fullName, role, department, position, shift,
     email, phone, joinDate, gender, active,
     deviceId, religion, handicapped, branch, mode, grade,
     timingType, dob, attendanceDate, status, rankingOrder, remarks, eligibleForOt,
@@ -604,6 +604,7 @@ router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) =
       rankingOrder ? Number(rankingOrder) : null,
       remarks      || null,
       eligibleForOt ?? false,
+      employeeId,
       req.params.id,
     ]);
     logAudit({ actor: req.user, action: 'update', entity: 'employee', entityId: req.params.id, before, after: rows[0] });

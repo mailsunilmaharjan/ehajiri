@@ -122,4 +122,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-08',
     notes      : 'Followup form: the free-text "Task" field is now "Transfer for Next Task", a Task Category dropdown (defaults to the task\'s current category) moved to after Next Followup & Time — saving it reclassifies the task itself, same as Hand Over adds an assignee. Description textarea is taller.',
   },
+  {
+    appVersion : '1.0.30',
+    dbVersion  : 88,
+    releaseDate: '2026-08-08',
+    notes      : 'Fixed a bug where editing a staff member\'s Staff ID on the Staff Detail page appeared to save (no error, other fields updated fine) but the new value never actually persisted or showed up in the grid — the PUT /api/employees/:id route was missing employee_id from its UPDATE statement entirely.',
+  },
 ];
