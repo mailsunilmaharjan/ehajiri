@@ -1427,6 +1427,7 @@ const OfficeVisitTypeSection = () => {
         defaultPageSize={10}
         showSearch={true}
         compact={true}
+        autoWidth={true}
         onRowDoubleClick={openEdit}
         onDeleteKey={row=>setDelId(row.id)}
         onDeleteSelected={ids=>updateSetupList('officeVisitTypes',data.filter(d=>!ids.includes(d.id)))}

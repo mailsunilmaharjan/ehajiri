@@ -125,8 +125,14 @@
   color: #111827;
   min-width: 600px;
 }
-/* auto-width: columns shrink/grow to content */
-.dg-table.auto-width { table-layout: auto; min-width: unset; }
+/* auto-width: columns shrink/grow to content. width:auto (not the base
+   rule's 100%) matters specifically for grids with few/narrow columns —
+   a width:100% table with room to spare redistributes that leftover space
+   proportionally across every column regardless of their own width/
+   max-width (even !important ones can't stop it), which is what puffs up
+   a column like SN on a short table. Tables with enough columns to already
+   fill/exceed the container are unaffected either way. */
+.dg-table.auto-width { table-layout: auto; min-width: unset; width: auto; }
 .dg-table.auto-width .dg-th,
 .dg-table.auto-width .dg-td { white-space: nowrap; }
 

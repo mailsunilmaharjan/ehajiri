@@ -248,4 +248,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Fixed the hover-card tooltip (Note Details, Assigned To, Description) rendering clipped/cut off inside a grid — it now floats above the page instead of being trapped inside the scrollable grid area, so the full text is always fully visible.',
   },
+  {
+    appVersion : '1.0.51',
+    dbVersion  : 91,
+    releaseDate: '2026-08-09',
+    notes      : 'Office Visit Type Settings grid: the SN column was being stretched way past its needed width on grids with only a few narrow columns (a table stretched to fill its container redistributes the extra space across every column, even ones with a fixed max-width). Columns now auto-fit their content on this grid instead.',
+  },
 ];
