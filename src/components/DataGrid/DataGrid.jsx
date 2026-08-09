@@ -377,7 +377,7 @@ const DataGrid = ({
               let flatIdx = -1; // keeps incrementing across sections — matches pageData's flattened order (keyboard nav)
               return groupSections.map(({ key, rows }) => (
                 <React.Fragment key={`dg-grp-${key}`}>
-                  <tr className="dg-group-row">
+                  <tr className={`dg-group-row dg-group-row-${String(key).replace(/[^a-zA-Z0-9_-]/g, '')}`}>
                     <td colSpan={totalCols} className="dg-group-cell">
                       {groupLabel ? groupLabel(key, rows.length) : key}
                     </td>

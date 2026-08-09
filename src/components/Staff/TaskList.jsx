@@ -32,17 +32,7 @@ const todayISO = () => {
 
 const emptyTask = { title: '', description: '', contactId: '', contactPersonId: '', categoryId: '', priorityId: '', dueDate: todayISO(), assignedTo: [], status: 'pending' };
 
-// Task grid date-bucket sections ("Today's Task", "Tomorrow's Task", ...) —
-// weekday is a property of the underlying calendar day, the same regardless
-// of whether it's displayed in AD or BS, so it's derived straight from the
-// Y/M/D parts (never through `new Date(isoString)`, which reads a bare
-// "YYYY-MM-DD" as UTC midnight and can shift a day under a non-UTC viewer).
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const weekdayName = (isoDate) => {
-  if (!isoDate) return '';
-  const [y, m, d] = isoDate.split('-').map(Number);
-  return WEEKDAYS[new Date(y, m - 1, d).getDay()];
-};
+// Task grid date-bucket sections ("Today", "Tomorrow", ...).
 const addDaysISO = (isoDate, n) => {
   const [y, m, d] = isoDate.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
@@ -800,25 +790,73 @@ const TaskList = () => {
     if (due === after5thNepal) return 'after5th';
     return 'pending';
   };
-  // A blank/overdue-but-completed task still counts as "Today" above (so it's
-  // never lost), but the header itself should only claim tasks actually dated
-  // today — it always shows today's own date/weekday regardless.
-  const taskGroupLabel = (key, count) => {
-    const dated = (title, iso) => `${title} : ${fd(iso)} - ${weekdayName(iso)} (${count})`;
+  // Short labels — Today/Tomorrow/Day After Tomorrow are self-explanatory on
+  // their own, so no date is spelled out; the two sections beyond that show
+  // just the plain date since "after 4th/5th day" alone isn't as meaningful.
+  const taskGroupLabel = (key) => {
     switch (key) {
-      case 'today':            return dated("Today's Task", todayNepal);
-      case 'tomorrow':         return dated("Tomorrow's Task", tomorrowNepal);
-      case 'dayAfterTomorrow': return dated("Day After Tomorrow's Task Plan", dayAfterTomorrowNepal);
-      case 'after4th':         return dated('After 4th Day Task Plan', after4thNepal);
-      case 'after5th':         return dated('After 5th Day Task Plan', after5thNepal);
-      case 'pending':          return `Task Pending Plan in coming Days (${count})`;
+      case 'today':            return 'Today';
+      case 'tomorrow':         return 'Tomorrow';
+      case 'dayAfterTomorrow': return 'Day After Tomorrow';
+      case 'after4th':         return fd(after4thNepal);
+      case 'after5th':         return fd(after5thNepal);
+      case 'pending':          return 'Task Pending Plan in coming Days';
       default:                 return key;
     }
   };
 
+  // Filter by Staff, quick filters, Advance Search — rendered inside the grid's
+  // own toolbar (left of its Search box) via DataGrid's toolbarLeft prop.
+  const taskFilterToolbar = (
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter by Staff</label>
+        <div style={{ width: 190 }}>
+          <SearchableSelect
+            value={staffFilter}
+            onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
+            options={staffFilterOptions}
+            placeholder="— Select staff —"
+          />
+        </div>
+      </div>
+
+      <button onClick={() => setYesterdayOnly(p => !p)}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
+          border: `1px solid ${yesterdayOnly ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
+          background: yesterdayOnly ? '#eff6ff' : '#fff', color: yesterdayOnly ? '#1a56db' : '#374151',
+          fontSize: 12.5, fontWeight: 600 }}>
+        📅 My Yesterday Task
+      </button>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Priority</label>
+        <select value={quickPriorityId} onChange={e => setQuickPriorityId(e.target.value)}
+          style={{ height: 32, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 12.5, background: '#fff' }}>
+          <option value="">All</option>
+          {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
+      <button onClick={() => { setAdvSearchDraft(advSearch); setAdvSearchOpen(true); }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
+          border: `1px solid ${advSearchActive ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
+          background: advSearchActive ? '#eff6ff' : '#fff', color: advSearchActive ? '#1a56db' : '#374151',
+          fontSize: 12.5, fontWeight: 600 }}>
+        🔍 Advance Search{advSearchActive ? ' (active)' : ''}
+      </button>
+      {advSearchActive && (
+        <button onClick={() => { setAdvSearch(emptyAdvSearch); setAdvSearchDraft(emptyAdvSearch); }}
+          style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+          ✕ Clear
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0 }}>✅ Task</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {canManageSystem && (
@@ -856,52 +894,6 @@ const TaskList = () => {
         </div>
       </div>
 
-      {/* Filter row — Filter by Staff, quick filters, Advance Search */}
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginBottom: 12, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter by Staff</label>
-          <div style={{ width: 190 }}>
-            <SearchableSelect
-              value={staffFilter}
-              onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
-              options={staffFilterOptions}
-              placeholder="— Select staff —"
-            />
-          </div>
-        </div>
-
-        <button onClick={() => setYesterdayOnly(p => !p)}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
-            border: `1px solid ${yesterdayOnly ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
-            background: yesterdayOnly ? '#eff6ff' : '#fff', color: yesterdayOnly ? '#1a56db' : '#374151',
-            fontSize: 12.5, fontWeight: 600 }}>
-          📅 My Yesterday Task
-        </button>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Priority</label>
-          <select value={quickPriorityId} onChange={e => setQuickPriorityId(e.target.value)}
-            style={{ height: 32, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 12.5, background: '#fff' }}>
-            <option value="">All</option>
-            {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </div>
-
-        <button onClick={() => { setAdvSearchDraft(advSearch); setAdvSearchOpen(true); }}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
-            border: `1px solid ${advSearchActive ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
-            background: advSearchActive ? '#eff6ff' : '#fff', color: advSearchActive ? '#1a56db' : '#374151',
-            fontSize: 12.5, fontWeight: 600 }}>
-          🔍 Advance Search{advSearchActive ? ' (active)' : ''}
-        </button>
-        {advSearchActive && (
-          <button onClick={() => { setAdvSearch(emptyAdvSearch); setAdvSearchDraft(emptyAdvSearch); }}
-            style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-            ✕ Clear
-          </button>
-        )}
-      </div>
-
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {loading ? (
@@ -916,6 +908,7 @@ const TaskList = () => {
                 compact={true}
                 className="task-list-grid"
                 showFilterButton={false}
+                toolbarLeft={taskFilterToolbar}
                 extraSearchFields={['customerPhone']}
                 groupBy={taskGroupKey}
                 groupOrder={TASK_GROUP_ORDER}

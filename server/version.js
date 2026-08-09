@@ -182,4 +182,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Task grid section headers (Today\'s Task, Tomorrow\'s Task, ...) no longer have a background fill — smaller italic text instead, just the top/bottom border lines separating sections.',
   },
+  {
+    appVersion : '1.0.40',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Filter by Staff, quick filters, and Advance Search moved into the Task grid\'s own header row next to Search. Section labels shortened to Today / Tomorrow / Day After Tomorrow, followed by a plain date for the two sections beyond that; Today\'s section keeps a light highlight so it still stands out.',
+  },
 ];
