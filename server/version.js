@@ -218,4 +218,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Task grid\'s Task Date column shows "Day Af.To" instead of the longer "Day After Tomorrow" for a task due the day after tomorrow.',
   },
+  {
+    appVersion : '1.0.46',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'A task still open once its own due date has passed now shows as "Today" in the Task Date column (carried forward) instead of its stale past date — a completed one still shows its real date as a record. Today/Tomorrow/Day Af.To now render as colored badges (red/amber/blue) instead of plain text.',
+  },
 ];

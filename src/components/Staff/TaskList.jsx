@@ -704,19 +704,24 @@ const TaskList = () => {
     },
     {
       field: 'dueDate', header: 'Task Date', width: 130,
-      render: (v) => {
+      render: (v, row) => {
         const due = v ? String(v).split('T')[0] : null;
+        if (!due) return <span style={{ color: '#d1d5db' }}>—</span>;
         // Computed live off getNepalTodayISO() each render (not a captured
         // outer const) — same reason as the Days column below: keeps "Today"/
         // "Tomorrow" correct day to day without the memoized columns array
-        // needing to recompute.
-        let label = '—';
-        if (due) {
-          const today = getNepalTodayISO();
-          if (due === today) label = 'Today';
-          else if (due === addDaysISO(today, 1)) label = 'Tomorrow';
-          else if (due === addDaysISO(today, 2)) label = 'Day Af.To';
-          else label = fd(due);
+        // needing to recompute. A task still open once its own due date has
+        // passed shows as "Today" (carried forward) rather than a stale past
+        // date; a completed one keeps showing its real date as a record.
+        const today = getNepalTodayISO();
+        const overdueOpen = due < today && row.status !== 'completed';
+        let label, badge = null;
+        if (overdueOpen || due === today) { label = 'Today';      badge = { bg: '#fef2f2', color: '#dc2626' }; }
+        else if (due === addDaysISO(today, 1)) { label = 'Tomorrow';  badge = { bg: '#fffbeb', color: '#b45309' }; }
+        else if (due === addDaysISO(today, 2)) { label = 'Day Af.To'; badge = { bg: '#eff6ff', color: '#1d4ed8' }; }
+        else label = fd(due);
+        if (badge) {
+          return <span style={{ fontSize: 10.5, fontWeight: 700, background: badge.bg, color: badge.color, borderRadius: 20, padding: '3px 10px' }}>{label}</span>;
         }
         return <span style={{ fontSize: 11.5, color: '#374151' }}>{label}</span>;
       },
