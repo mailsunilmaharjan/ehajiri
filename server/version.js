@@ -170,4 +170,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Task grid now groups tasks into date-bucket sections (Today\'s Task, Tomorrow\'s Task, Day After Tomorrow\'s Task Plan, After 4th/5th Day Task Plan, Task Pending Plan in coming Days) with a merged section header per bucket, smaller/denser text matching Staff Detail, and a "Filter by Staff" picker that defaults to your own tasks with a "Show All Task" option — scoped by role (Admin/Super Admin see everyone, Branch Manager/Department Head see their own branch/department, employees stay own-only).',
   },
+  {
+    appVersion : '1.0.38',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Task grid section headers are lighter; a task still pending once its due date passes now auto-moves into the Tomorrow section instead of piling up under Today. New "Days" column shows how long each task has been open. Assigned To shows the first 2 names with a hover card for the rest. New quick filters ("My Yesterday Task", Priority) plus a full Advance Search (branch, department, post, staff, category, task name, priority, customer, date range).',
+  },
 ];

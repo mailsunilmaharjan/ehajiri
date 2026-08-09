@@ -49,7 +49,38 @@ const addDaysISO = (isoDate, n) => {
   dt.setDate(dt.getDate() + n);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 };
+const daysBetweenISO = (fromISO, toISO) => {
+  const [y1, m1, d1] = fromISO.split('-').map(Number);
+  const [y2, m2, d2] = toISO.split('-').map(Number);
+  return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+};
 const TASK_GROUP_ORDER = ['today', 'tomorrow', 'dayAfterTomorrow', 'after4th', 'after5th', 'pending'];
+
+// "Assigned To" cell — shows only the first 2 names inline (the column isn't
+// wide enough for a whole checkbox-grid's worth of assignees) with a larger,
+// custom-styled hover card for the rest — a native `title` tooltip renders in
+// tiny OS chrome, not big enough to read a long staff list comfortably.
+const AssigneeCell = ({ assignees }) => {
+  const [show, setShow] = useState(false);
+  if (!Array.isArray(assignees) || !assignees.length) return <span style={{ color: '#d1d5db' }}>—</span>;
+  const shown = assignees.slice(0, 2).map(a => a.name).join(', ');
+  const extra = assignees.length - 2;
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => extra > 0 && setShow(true)} onMouseLeave={() => setShow(false)}>
+      <span style={{ fontSize: 12.5, color: '#374151' }}>
+        {shown}{extra > 0 && <span style={{ color: '#1a56db', fontWeight: 700, cursor: 'default' }}> +{extra}</span>}
+      </span>
+      {show && (
+        <div style={{ position: 'absolute', zIndex: 200, top: '130%', left: 0, minWidth: 200, maxWidth: 320,
+          background: '#111827', color: '#f9fafb', fontSize: 14, lineHeight: 1.8, padding: '10px 14px',
+          borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.3)', whiteSpace: 'normal' }}>
+          {assignees.map(a => a.name).join(', ')}
+        </div>
+      )}
+    </span>
+  );
+};
 
 // "General Manager" -> "GM", "Administration" -> "Admin" — same short-name
 // fallback convention used by the attendance reports (abbrev() there),
@@ -155,7 +186,7 @@ const stripHtml = (html) => {
 const TaskList = () => {
   const navigate = useNavigate();
   const { canManageSystem, currentUser } = useAuth();
-  const { filteredEmployees } = useData();
+  const { employees, filteredEmployees } = useData();
   const fd = useDateFormat();
 
   const [tasks,      setTasks]      = useState([]);
@@ -176,6 +207,21 @@ const TaskList = () => {
   // Head -> their own branch/department, employee -> stays own-only). See
   // GET /api/tasks's ?staffId= handling in server/routes/tasks.js.
   const [staffFilter, setStaffFilter] = useState(() => currentUser ? String(currentUser.id) : '');
+
+  // Quick filters, next to Filter by Staff — "My Yesterday Task" is always
+  // scoped to the logged-in user specifically (creator or assignee),
+  // independent of whatever Filter by Staff is currently set to.
+  const [yesterdayOnly, setYesterdayOnly] = useState(false);
+  const [quickPriorityId, setQuickPriorityId] = useState('');
+
+  // Advance Search — a fuller filter form (branch/department/post/assignee/
+  // category/title/priority/customer/date range), applied on top of
+  // whatever Filter by Staff + quick filters already narrowed down.
+  const emptyAdvSearch = { branch: '', department: '', post: '', staffId: '', categoryId: '', title: '', priorityId: '', customerName: '', dateFrom: '', dateTo: '' };
+  const [advSearchOpen, setAdvSearchOpen] = useState(false);
+  const [advSearchDraft, setAdvSearchDraft] = useState(emptyAdvSearch);
+  const [advSearch, setAdvSearch] = useState(emptyAdvSearch);
+  const advSearchActive = Object.values(advSearch).some(Boolean);
 
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [gearOpen, setGearOpen] = useState(false);
@@ -347,6 +393,53 @@ const TaskList = () => {
       label: currentUser && String(e.id) === String(currentUser.id) ? `${e.fullName} (Me)` : e.fullName,
     })),
   ], [filteredEmployees, currentUser]);
+
+  // employees (not filteredEmployees) — Advance Search needs to resolve branch/
+  // department/post for ANY assignee on an already-authorized task, even one
+  // outside the current viewer's own role scope (e.g. a Branch Manager viewing
+  // "Show All Task" sees a task whose other assignee is from a different branch).
+  const employeeById = useMemo(() => new Map(employees.map(e => [String(e.id), e])), [employees]);
+  const branchOptions     = useMemo(() => [...new Set(employees.map(e => e.branch).filter(Boolean))].sort(), [employees]);
+  const departmentOptions = useMemo(() => [...new Set(employees.map(e => e.department).filter(Boolean))].sort(), [employees]);
+  const postOptions       = useMemo(() => [...new Set(employees.map(e => e.position).filter(Boolean))].sort(), [employees]);
+
+  // Quick filters + Advance Search apply client-side, on top of whatever
+  // Filter by Staff already scoped server-side.
+  const visibleTasks = useMemo(() => {
+    let result = tasks;
+
+    if (yesterdayOnly) {
+      const yesterdayNepal = addDaysISO(getNepalTodayISO(), -1);
+      result = result.filter(t => {
+        const due = t.dueDate ? String(t.dueDate).split('T')[0] : null;
+        if (due !== yesterdayNepal) return false;
+        return String(t.createdBy) === String(currentUser?.id)
+          || (Array.isArray(t.assignees) && t.assignees.some(a => String(a.id) === String(currentUser?.id)));
+      });
+    }
+
+    if (quickPriorityId) result = result.filter(t => String(t.priorityId) === quickPriorityId);
+
+    if (advSearchActive) {
+      result = result.filter(t => {
+        const assigneeEmps = (t.assignees || []).map(a => employeeById.get(String(a.id))).filter(Boolean);
+        if (advSearch.branch && !assigneeEmps.some(e => e.branch === advSearch.branch)) return false;
+        if (advSearch.department && !assigneeEmps.some(e => e.department === advSearch.department)) return false;
+        if (advSearch.post && !assigneeEmps.some(e => e.position === advSearch.post)) return false;
+        if (advSearch.staffId && !(t.assignees || []).some(a => String(a.id) === advSearch.staffId)) return false;
+        if (advSearch.categoryId && String(t.categoryId) !== advSearch.categoryId) return false;
+        if (advSearch.title && !(t.title || '').toLowerCase().includes(advSearch.title.toLowerCase())) return false;
+        if (advSearch.priorityId && String(t.priorityId) !== advSearch.priorityId) return false;
+        if (advSearch.customerName && !(t.customerName || '').toLowerCase().includes(advSearch.customerName.toLowerCase())) return false;
+        const due = t.dueDate ? String(t.dueDate).split('T')[0] : null;
+        if (advSearch.dateFrom && (!due || due < advSearch.dateFrom)) return false;
+        if (advSearch.dateTo && (!due || due > advSearch.dateTo)) return false;
+        return true;
+      });
+    }
+
+    return result;
+  }, [tasks, yesterdayOnly, quickPriorityId, advSearch, advSearchActive, employeeById, currentUser]);
 
   // Close the gear dropdown on outside click
   useEffect(() => {
@@ -640,14 +733,24 @@ const TaskList = () => {
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
-      field: 'assignees', header: 'Assigned To', width: 160, sortable: false, filterable: false,
-      render: (v) => Array.isArray(v) && v.length
-        ? <span style={{ fontSize: 12.5, color: '#374151' }}>{v.map(a => a.name).join(', ')}</span>
-        : <span style={{ color: '#d1d5db' }}>—</span>,
+      field: 'assignees', header: 'Assigned To', width: 150, sortable: false, filterable: false,
+      render: (v) => <AssigneeCell assignees={v} />,
     },
     {
       field: 'dueDate', header: 'Task Date', width: 110,
       render: (v) => v ? fd(String(v).split('T')[0]) : '—',
+    },
+    {
+      field: 'createdAt', header: 'Days', width: 80, align: 'center',
+      render: (v) => {
+        if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
+        // Computed live off getNepalTodayISO() each render (not a captured outer
+        // const) so the count keeps advancing day to day without needing the
+        // whole memoized columns array to recompute.
+        const startedNepal = isoToNepalLocalInput(v).split('T')[0];
+        const n = daysBetweenISO(startedNepal, getNepalTodayISO());
+        return <span style={{ fontSize: 11.5, color: '#6b7280' }}>{n <= 0 ? 'Today' : `${n}d`}</span>;
+      },
     },
     {
       field: 'status', header: 'Status', width: 100, align: 'center',
@@ -674,9 +777,12 @@ const TaskList = () => {
     },
   ], [fd]);
 
-  // Date-bucket sections for the grid — Today's overdue-and-due tasks fold into
-  // "Today" rather than vanishing, everything past the 5-day window (or with no
-  // Task Date at all) lands in the trailing "Pending" catch-all.
+  // Date-bucket sections for the grid — a task due today that's still not
+  // completed once today is over auto-transfers into "Tomorrow" (and keeps
+  // landing there, however many days overdue, until it's completed) rather
+  // than piling up under "Today" forever. A completed task keeps showing
+  // under "Today" as a record rather than rolling forward. Undated tasks (or
+  // ones past the 5-day window) land in the trailing "Pending" catch-all.
   const todayNepal            = getNepalTodayISO();
   const tomorrowNepal         = addDaysISO(todayNepal, 1);
   const dayAfterTomorrowNepal = addDaysISO(todayNepal, 2);
@@ -685,16 +791,18 @@ const TaskList = () => {
 
   const taskGroupKey = (row) => {
     const due = row.dueDate ? String(row.dueDate).split('T')[0] : null;
-    if (!due || due <= todayNepal) return 'today';
+    if (!due) return 'pending';
+    if (due < todayNepal) return row.status === 'completed' ? 'today' : 'tomorrow';
+    if (due === todayNepal) return 'today';
     if (due === tomorrowNepal) return 'tomorrow';
     if (due === dayAfterTomorrowNepal) return 'dayAfterTomorrow';
     if (due === after4thNepal) return 'after4th';
     if (due === after5thNepal) return 'after5th';
     return 'pending';
   };
-  // A blank/overdue task still counts as "Today" above (so it's never lost),
-  // but the header itself should only claim tasks actually dated today —
-  // it always shows today's own date/weekday regardless.
+  // A blank/overdue-but-completed task still counts as "Today" above (so it's
+  // never lost), but the header itself should only claim tasks actually dated
+  // today — it always shows today's own date/weekday regardless.
   const taskGroupLabel = (key, count) => {
     const dated = (title, iso) => `${title} : ${fd(iso)} - ${weekdayName(iso)} (${count})`;
     switch (key) {
@@ -710,20 +818,9 @@ const TaskList = () => {
 
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0 }}>✅ Task</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter by Staff</label>
-            <div style={{ width: 200 }}>
-              <SearchableSelect
-                value={staffFilter}
-                onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
-                options={staffFilterOptions}
-                placeholder="— Select staff —"
-              />
-            </div>
-          </div>
           {canManageSystem && (
             <div ref={gearRef} style={{ position: 'relative' }}>
               <button onClick={() => setGearOpen(p => !p)} title="Task settings"
@@ -759,6 +856,52 @@ const TaskList = () => {
         </div>
       </div>
 
+      {/* Filter row — Filter by Staff, quick filters, Advance Search */}
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginBottom: 12, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter by Staff</label>
+          <div style={{ width: 190 }}>
+            <SearchableSelect
+              value={staffFilter}
+              onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
+              options={staffFilterOptions}
+              placeholder="— Select staff —"
+            />
+          </div>
+        </div>
+
+        <button onClick={() => setYesterdayOnly(p => !p)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
+            border: `1px solid ${yesterdayOnly ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
+            background: yesterdayOnly ? '#eff6ff' : '#fff', color: yesterdayOnly ? '#1a56db' : '#374151',
+            fontSize: 12.5, fontWeight: 600 }}>
+          📅 My Yesterday Task
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Priority</label>
+          <select value={quickPriorityId} onChange={e => setQuickPriorityId(e.target.value)}
+            style={{ height: 32, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 12.5, background: '#fff' }}>
+            <option value="">All</option>
+            {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+
+        <button onClick={() => { setAdvSearchDraft(advSearch); setAdvSearchOpen(true); }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
+            border: `1px solid ${advSearchActive ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
+            background: advSearchActive ? '#eff6ff' : '#fff', color: advSearchActive ? '#1a56db' : '#374151',
+            fontSize: 12.5, fontWeight: 600 }}>
+          🔍 Advance Search{advSearchActive ? ' (active)' : ''}
+        </button>
+        {advSearchActive && (
+          <button onClick={() => { setAdvSearch(emptyAdvSearch); setAdvSearchDraft(emptyAdvSearch); }}
+            style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            ✕ Clear
+          </button>
+        )}
+      </div>
+
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {loading ? (
@@ -767,7 +910,7 @@ const TaskList = () => {
             <div className="dg-fixed-height" style={{ height: '100%' }}>
               <DataGrid
                 columns={columns}
-                data={tasks}
+                data={visibleTasks}
                 rowKey="id"
                 defaultPageSize={20}
                 compact={true}
@@ -934,6 +1077,84 @@ const TaskList = () => {
                 </div>
                 {renderReplyInput()}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Advance Search */}
+      {advSearchOpen && (
+        <div className="modal-overlay" onClick={() => setAdvSearchOpen(false)}>
+          <div className="modal" style={{ maxWidth: 620 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🔍 Advance Search</h2>
+              <button className="modal-close" onClick={() => setAdvSearchOpen(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              {field('Branch', false, null,
+                <select value={advSearchDraft.branch} onChange={e => setAdvSearchDraft(p => ({ ...p, branch: e.target.value }))}
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  <option value="">— Any —</option>
+                  {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              )}
+              {field('Department', false, null,
+                <select value={advSearchDraft.department} onChange={e => setAdvSearchDraft(p => ({ ...p, department: e.target.value }))}
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  <option value="">— Any —</option>
+                  {departmentOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              )}
+              {field('Post', false, null,
+                <select value={advSearchDraft.post} onChange={e => setAdvSearchDraft(p => ({ ...p, post: e.target.value }))}
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  <option value="">— Any —</option>
+                  {postOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              )}
+              {field('Assign to Staff Name', false, null,
+                <SearchableSelect
+                  value={advSearchDraft.staffId}
+                  onChange={v => setAdvSearchDraft(p => ({ ...p, staffId: v }))}
+                  options={staffOptions}
+                  placeholder="— Any —"
+                />
+              )}
+              {field('Task Category', false, null,
+                <select value={advSearchDraft.categoryId} onChange={e => setAdvSearchDraft(p => ({ ...p, categoryId: e.target.value }))}
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  <option value="">— Any —</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
+              {field('Task Priority', false, null,
+                <select value={advSearchDraft.priorityId} onChange={e => setAdvSearchDraft(p => ({ ...p, priorityId: e.target.value }))}
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  <option value="">— Any —</option>
+                  {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              )}
+              {field('Task Name', false, null,
+                <input value={advSearchDraft.title} onChange={e => setAdvSearchDraft(p => ({ ...p, title: e.target.value }))}
+                  placeholder="Search title…"
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
+              )}
+              {field('Customer Name', false, null,
+                <input value={advSearchDraft.customerName} onChange={e => setAdvSearchDraft(p => ({ ...p, customerName: e.target.value }))}
+                  placeholder="Search customer…"
+                  style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
+              )}
+              {field('Task Date From', false, null,
+                <DateInput value={advSearchDraft.dateFrom} onChange={v => setAdvSearchDraft(p => ({ ...p, dateFrom: v }))} />
+              )}
+              {field('Task Date To', false, null,
+                <DateInput value={advSearchDraft.dateTo} onChange={v => setAdvSearchDraft(p => ({ ...p, dateTo: v }))} />
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => { setAdvSearchDraft(emptyAdvSearch); setAdvSearch(emptyAdvSearch); }}>Clear</button>
+              <button className="btn btn-outline" onClick={() => setAdvSearchOpen(false)}>Cancel</button>
+              <SaveButton onClick={() => { setAdvSearch(advSearchDraft); setAdvSearchOpen(false); }} icon="🔍" label="Search" />
             </div>
           </div>
         </div>

@@ -244,9 +244,9 @@ th.dg-sn-col {
 /* ── Grouped sections (groupBy prop) — merged full-width header bar per
    section, same bg/border convention as a summary row elsewhere in the app ── */
 .dg-group-row td.dg-group-cell {
-  background: #f1f5f9;
-  border-top: 2px solid #d1d5db;
-  border-bottom: 1px solid #d1d5db;
+  background: #f8fafc;
+  border-top: 2px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
   padding: 6px 10px;
   font-size: 12.5px;
   font-weight: 700;
