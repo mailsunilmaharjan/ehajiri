@@ -242,4 +242,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'My Notes: "Remarks" column replaced with "Note Details" (truncated with a hover card for the full text — no more horizontal scrolling). Notes can now be marked Private (only you, the default — unchanged from before) or Public (every staff member can see it, but only you can still edit or delete it).',
   },
+  {
+    appVersion : '1.0.50',
+    dbVersion  : 91,
+    releaseDate: '2026-08-09',
+    notes      : 'Fixed the hover-card tooltip (Note Details, Assigned To, Description) rendering clipped/cut off inside a grid — it now floats above the page instead of being trapped inside the scrollable grid area, so the full text is always fully visible.',
+  },
 ];
