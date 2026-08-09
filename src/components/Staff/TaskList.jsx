@@ -45,6 +45,25 @@ const daysBetweenISO = (fromISO, toISO) => {
   return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
 };
 
+// Same "today/tomorrow/day-after-tomorrow" bucketing the Task Date column
+// renders, pulled out so the WhatsApp "Send Today's Task" digest can select
+// exactly the rows that column is showing as "Today" (including a still-open
+// overdue task carried forward) without re-deriving the rule twice.
+const TASK_DATE_BADGES = {
+  today:    { label: 'Today',      bg: '#fef2f2', color: '#dc2626' },
+  tomorrow: { label: 'Tomorrow',   bg: '#fffbeb', color: '#b45309' },
+  dayAfter: { label: 'Day Af.To',  bg: '#eff6ff', color: '#1d4ed8' },
+};
+const taskDateBucket = (row) => {
+  const due = row.dueDate ? String(row.dueDate).split('T')[0] : null;
+  if (!due) return null;
+  const today = getNepalTodayISO();
+  if ((due < today && row.status !== 'completed') || due === today) return 'today';
+  if (due === addDaysISO(today, 1)) return 'tomorrow';
+  if (due === addDaysISO(today, 2)) return 'dayAfter';
+  return null;
+};
+
 // "Assigned To" cell — shows only the first 2 names inline (the column isn't
 // wide enough for a whole checkbox-grid's worth of assignees) with a larger,
 // custom-styled hover card for the rest — a native `title` tooltip renders in
@@ -232,7 +251,19 @@ const TaskList = () => {
   const [gearOpen, setGearOpen] = useState(false);
   const gearRef = useRef(null);
   const [toast, setToast] = useState(null);
-  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
+  // action: optional { label, onClick } — rendered as a button inside the
+  // toast (e.g. "Notify WhatsApp" right after saving a task). Stays up
+  // longer than a plain toast so there's time to actually click it.
+  const showToast = (msg, type = 'success', action = null) => {
+    setToast({ msg, type, action });
+    setTimeout(() => setToast(null), action ? 6000 : 3000);
+  };
+
+  // WhatsApp notify — click-to-chat only (no Business API on file for this
+  // tenant), so "sending" means opening a pre-filled wa.me chat the user
+  // still has to press Send in themselves. Numbers come from the assignee's
+  // own Staff Detail mobile (employees[].phone), never a customer's.
+  const [whatsappPicker, setWhatsappPicker] = useState(null); // { task, assignees } when a task has 2+ assignees to choose from
 
   // "+ Add New" next to Customer Name — the real Contact form, in a popup
   const [contactModal, setContactModal] = useState(false);
@@ -446,6 +477,62 @@ const TaskList = () => {
     return result;
   }, [tasks, yesterdayOnly, quickPriorityId, advSearch, advSearchActive, employeeById, currentUser]);
 
+  // WhatsApp notify — click-to-chat only (no Business API on file for this
+  // tenant), so "sending" opens a pre-filled wa.me chat the user still has
+  // to press Send in themselves. Numbers always come from the assignee's own
+  // Staff Detail mobile (employees[].phone), never a customer's.
+  const sendWhatsAppTo = (phone, message, missingLabel) => {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (!digits) { showToast(`No mobile number on file for ${missingLabel}`, 'error'); return; }
+    const target = digits.length === 10 ? `977${digits}` : digits;
+    window.open(`https://wa.me/${target}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
+  };
+
+  const composeTaskMessage = (row) => {
+    const desc = stripHtml(row.description);
+    const lines = [
+      `Task: ${row.title}`,
+      row.customerName ? `Customer: ${row.customerName}` : null,
+      row.categoryName ? `Category: ${row.categoryName}` : null,
+      row.priorityName ? `Priority: ${row.priorityName}` : null,
+      row.dueDate ? `Due: ${fd(String(row.dueDate).split('T')[0])}` : null,
+      `Status: ${(row.status || '').replace('_', ' ')}`,
+      desc ? `Note: ${desc}` : null,
+    ].filter(Boolean);
+    return lines.join('\n');
+  };
+
+  const notifyAssigneeWhatsApp = (row, assignee) => {
+    const emp = employeeById.get(String(assignee.id));
+    sendWhatsAppTo(emp?.phone, composeTaskMessage(row), assignee.name);
+  };
+
+  // Actions column's WhatsApp button — sends straight to the one assignee, or
+  // opens a small picker when there's more than one to choose from.
+  const handleWhatsAppClick = (row) => {
+    const assignees = Array.isArray(row.assignees) ? row.assignees : [];
+    if (!assignees.length) { showToast('This task has no assignee to notify', 'error'); return; }
+    if (assignees.length === 1) { notifyAssigneeWhatsApp(row, assignees[0]); return; }
+    setWhatsappPicker({ task: row, assignees });
+  };
+
+  // Toolbar "Send Today's Task" — only meaningful once Filter by Staff is
+  // narrowed to one specific person (not "Show All Task"), same rows the
+  // Task Date column is already showing as "Today" for that person.
+  const sendTodaysTaskDigest = () => {
+    if (!staffFilter || staffFilter === 'all') {
+      showToast('Select one specific staff member in "Filter by Staff" first', 'error');
+      return;
+    }
+    const emp = employeeById.get(String(staffFilter));
+    if (!emp) return;
+    const todays = visibleTasks.filter(t => taskDateBucket(t) === 'today');
+    if (!todays.length) { showToast(`No tasks due today for ${emp.fullName}`, 'error'); return; }
+    const lines = todays.map((t, i) => `${i + 1}. ${t.title}${t.customerName ? ' - ' + t.customerName : ''}${t.priorityName ? ` [${t.priorityName}]` : ''}`);
+    const message = [`Good morning ${emp.fullName}! Here are your tasks for today:`, '', ...lines].join('\n');
+    sendWhatsAppTo(emp.phone, message, emp.fullName);
+  };
+
   // Close the gear dropdown on outside click
   useEffect(() => {
     const handler = (e) => { if (gearRef.current && !gearRef.current.contains(e.target)) setGearOpen(false); };
@@ -517,9 +604,12 @@ const TaskList = () => {
       status: form.status,
     };
     try {
-      if (editId) await api.put(`/tasks/${editId}`, payload);
-      else        await api.post('/tasks', payload);
-      showToast(editId ? 'Task updated' : 'Task added');
+      const saved = editId ? await api.put(`/tasks/${editId}`, payload) : await api.post('/tasks', payload);
+      showToast(
+        editId ? 'Task updated' : 'Task added',
+        'success',
+        Array.isArray(saved?.assignees) && saved.assignees.length ? { label: '📱 Notify WhatsApp', onClick: () => handleWhatsAppClick(saved) } : null
+      );
       setModal(false);
       loadTasks();
     } catch (err) {
@@ -705,25 +795,16 @@ const TaskList = () => {
     {
       field: 'dueDate', header: 'Task Date', width: 130,
       render: (v, row) => {
-        const due = v ? String(v).split('T')[0] : null;
-        if (!due) return <span style={{ color: '#d1d5db' }}>—</span>;
-        // Computed live off getNepalTodayISO() each render (not a captured
-        // outer const) — same reason as the Days column below: keeps "Today"/
-        // "Tomorrow" correct day to day without the memoized columns array
-        // needing to recompute. A task still open once its own due date has
-        // passed shows as "Today" (carried forward) rather than a stale past
-        // date; a completed one keeps showing its real date as a record.
-        const today = getNepalTodayISO();
-        const overdueOpen = due < today && row.status !== 'completed';
-        let label, badge = null;
-        if (overdueOpen || due === today) { label = 'Today';      badge = { bg: '#fef2f2', color: '#dc2626' }; }
-        else if (due === addDaysISO(today, 1)) { label = 'Tomorrow';  badge = { bg: '#fffbeb', color: '#b45309' }; }
-        else if (due === addDaysISO(today, 2)) { label = 'Day Af.To'; badge = { bg: '#eff6ff', color: '#1d4ed8' }; }
-        else label = fd(due);
-        if (badge) {
-          return <span style={{ fontSize: 10.5, fontWeight: 700, background: badge.bg, color: badge.color, borderRadius: 20, padding: '3px 10px' }}>{label}</span>;
+        if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
+        // taskDateBucket computes fresh off getNepalTodayISO() on every call
+        // (not a captured outer const), so "Today"/"Tomorrow" stay correct
+        // day to day without the memoized columns array needing to recompute.
+        const bucket = taskDateBucket(row);
+        if (bucket) {
+          const b = TASK_DATE_BADGES[bucket];
+          return <span style={{ fontSize: 10.5, fontWeight: 700, background: b.bg, color: b.color, borderRadius: 20, padding: '3px 10px' }}>{b.label}</span>;
         }
-        return <span style={{ fontSize: 11.5, color: '#374151' }}>{label}</span>;
+        return <span style={{ fontSize: 11.5, color: '#374151' }}>{fd(String(v).split('T')[0])}</span>;
       },
     },
     {
@@ -800,10 +881,13 @@ const TaskList = () => {
       },
     },
     {
-      field: 'actions', header: 'Actions', width: 90, align: 'center', sortable: false, filterable: false,
+      field: 'actions', header: 'Actions', width: 120, align: 'center', sortable: false, filterable: false,
       render: (_, row) => (
         <div className="dg-actions">
-          <button className="dg-action-btn edit"   title="Edit"   onClick={e => { e.stopPropagation(); openEdit(row); }}>✏️</button>
+          <button className="dg-action-btn edit" title="Edit" onClick={e => { e.stopPropagation(); openEdit(row); }}>✏️</button>
+          <button className="dg-action-btn" title="Notify via WhatsApp"
+            style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}
+            onClick={e => { e.stopPropagation(); handleWhatsAppClick(row); }}>💬</button>
           <button className="dg-action-btn delete" title="Delete" onClick={e => { e.stopPropagation(); setDeleteConfirm(row.id); }}>🗑</button>
         </div>
       ),
@@ -832,6 +916,17 @@ const TaskList = () => {
           background: yesterdayOnly ? '#eff6ff' : '#fff', color: yesterdayOnly ? '#1a56db' : '#374151',
           fontSize: 12.5, fontWeight: 600 }}>
         📅 My Yesterday Task
+      </button>
+
+      <button onClick={sendTodaysTaskDigest}
+        disabled={!staffFilter || staffFilter === 'all'}
+        title={!staffFilter || staffFilter === 'all' ? 'Select one specific staff member in Filter by Staff first' : "Send this staff member's today's tasks via WhatsApp"}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
+          border: '1px solid #bbf7d0', borderRadius: 7,
+          cursor: (!staffFilter || staffFilter === 'all') ? 'not-allowed' : 'pointer',
+          opacity: (!staffFilter || staffFilter === 'all') ? 0.5 : 1,
+          background: '#f0fdf4', color: '#16a34a', fontSize: 12.5, fontWeight: 600 }}>
+        💬 Send Today's Task
       </button>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1476,6 +1571,30 @@ const TaskList = () => {
         />
       )}
 
+      {/* WhatsApp assignee picker — shown when a task has 2+ assignees */}
+      {whatsappPicker && (
+        <div className="modal-overlay" onClick={() => setWhatsappPicker(null)}>
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>💬 Notify via WhatsApp</h2>
+              <button className="modal-close" onClick={() => setWhatsappPicker(null)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <p style={{ fontSize: 12.5, color: '#6b7280', margin: '0 0 4px' }}>Who should get this on WhatsApp?</p>
+              {whatsappPicker.assignees.map(a => (
+                <button key={a.id}
+                  onClick={() => { notifyAssigneeWhatsApp(whatsappPicker.task, a); setWhatsappPicker(null); }}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px',
+                    border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 13 }}>
+                  <span>{a.name}{a.post ? ` | ${a.post}` : ''}</span>
+                  <span>💬</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirm */}
       {deleteConfirm && (
         <div className="modal-overlay">
@@ -1498,12 +1617,19 @@ const TaskList = () => {
       {/* Toast */}
       {toast && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, padding: '12px 20px', borderRadius: 10,
-          fontSize: 13, fontWeight: 600,
+          fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10,
           background: toast.type === 'error' ? '#fef2f2' : '#f0fdf4',
           color:      toast.type === 'error' ? '#dc2626'  : '#065f46',
           border:     `1px solid ${toast.type === 'error' ? '#fecaca' : '#bbf7d0'}`,
           boxShadow: '0 4px 16px rgba(0,0,0,.12)' }}>
-          {toast.type === 'error' ? '❌' : '✅'} {toast.msg}
+          <span>{toast.type === 'error' ? '❌' : '✅'} {toast.msg}</span>
+          {toast.action && (
+            <button onClick={() => { toast.action.onClick(); setToast(null); }}
+              style={{ background: '#fff', border: '1px solid currentColor', borderRadius: 6, padding: '4px 10px',
+                fontSize: 12, fontWeight: 700, cursor: 'pointer', color: 'inherit', whiteSpace: 'nowrap' }}>
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -224,4 +224,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'A task still open once its own due date has passed now shows as "Today" in the Task Date column (carried forward) instead of its stale past date — a completed one still shows its real date as a record. Today/Tomorrow/Day Af.To now render as colored badges (red/amber/blue) instead of plain text.',
   },
+  {
+    appVersion : '1.0.47',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'WhatsApp notify on the Task grid (click-to-chat, no Business API required): a 💬 button per task opens a pre-filled WhatsApp message to the assignee\'s own Staff Detail mobile number (or lets you pick which assignee, if there\'s more than one); "Send Today\'s Task" in the toolbar sends a staff member their full list of today\'s tasks once you pick them in Filter by Staff; saving a new or edited task offers a one-click "Notify WhatsApp" action right in the confirmation toast.',
+  },
 ];
