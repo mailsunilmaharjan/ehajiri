@@ -42,7 +42,7 @@ const SEL = `
   tp.color      AS "priorityColor",
   cu.full_name  AS "createdByName",
   COALESCE((
-    SELECT json_agg(json_build_object('id', u.id, 'name', u.full_name) ORDER BY u.full_name)
+    SELECT json_agg(json_build_object('id', u.id, 'name', u.full_name, 'post', u.position) ORDER BY u.full_name)
     FROM task_assignees ta JOIN users u ON u.id = ta.user_id
     WHERE ta.task_id = t.id
   ), '[]') AS "assignees"

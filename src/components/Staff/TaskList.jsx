@@ -80,7 +80,12 @@ const AssigneeCell = ({ assignees }) => {
     </span>
   );
   if (extra <= 0) return trigger;
-  return <HoverCard trigger={trigger} content={assignees.map(a => a.name).join(', ')} />;
+  const fullList = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {assignees.map((a, i) => <div key={a.id}>{i + 1}. {a.name} | {a.post || '—'}</div>)}
+    </div>
+  );
+  return <HoverCard trigger={trigger} content={fullList} minWidth={220} />;
 };
 
 // "General Manager" -> "GM", "Administration" -> "Admin" — same short-name
@@ -776,10 +781,18 @@ const TaskList = () => {
       },
     },
     {
-      field: 'description', header: 'Description', minWidth: 160,
+      field: 'description', header: 'Description', width: 180, minWidth: 160,
       render: (v) => {
         const text = stripHtml(v);
-        return text ? <span style={{ fontSize: 12, color: '#6b7280' }}>{text}</span> : <span style={{ color: '#d1d5db' }}>—</span>;
+        if (!text) return <span style={{ color: '#d1d5db' }}>—</span>;
+        if (text.length <= 40) return <span style={{ fontSize: 12, color: '#6b7280' }}>{text}</span>;
+        return (
+          <HoverCard
+            trigger={<span style={{ fontSize: 12, color: '#6b7280', cursor: 'default' }}>{text.slice(0, 40)}…</span>}
+            content={text}
+            maxWidth={420}
+          />
+        );
       },
     },
     {

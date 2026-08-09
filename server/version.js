@@ -200,4 +200,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'The per-row Task Date column moved to right after SN, before Task, and now shows Today/Tomorrow/Day After Tomorrow for those exact dates (matching the section headers) or the actual date otherwise — replacing the old plain-date column that used to sit between Assigned To and Days.',
   },
+  {
+    appVersion : '1.0.43',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Task grid Description column now truncates cleanly with a hover card for the full text instead of stretching the row. Assigned To\'s hover card now lists everyone as a numbered "Name | Post" list (e.g. "1. Sunil Maharjan | CEO") instead of a plain comma-separated line.',
+  },
 ];
