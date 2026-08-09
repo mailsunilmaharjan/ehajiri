@@ -676,8 +676,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 /* ========== Main Task grid (Staff/TaskList.jsx) ==========
    Smaller/denser text, matching the Staff Detail (User Management) list. */
 .task-list-grid .dg-td,
-.task-list-grid .dg-th,
-.task-list-grid .dg-group-cell { font-size: 11.5px; }
+.task-list-grid .dg-th { font-size: 11.5px; }
 
 @media (max-width: 480px) {
   /* 2-col inline grids → single column */

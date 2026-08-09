@@ -176,4 +176,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Task grid section headers are lighter; a task still pending once its due date passes now auto-moves into the Tomorrow section instead of piling up under Today. New "Days" column shows how long each task has been open. Assigned To shows the first 2 names with a hover card for the rest. New quick filters ("My Yesterday Task", Priority) plus a full Advance Search (branch, department, post, staff, category, task name, priority, customer, date range).',
   },
+  {
+    appVersion : '1.0.39',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Task grid section headers (Today\'s Task, Tomorrow\'s Task, ...) no longer have a background fill — smaller italic text instead, just the top/bottom border lines separating sections.',
+  },
 ];
