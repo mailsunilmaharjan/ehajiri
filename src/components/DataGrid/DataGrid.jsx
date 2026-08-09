@@ -34,6 +34,7 @@ const DataGrid = ({
   groupBy = null,             // (row) => groupKey — when set, rows render under merged full-width section headers instead of flat/paginated (e.g. Task's date-bucket sections)
   groupOrder = null,          // [groupKey, ...] display order for sections; a key with no matching rows still renders its header. Defaults to first-seen order when omitted
   groupLabel = null,          // (groupKey, rowCount) => ReactNode — section header content; defaults to the raw key
+  footerLeft = null,          // extra content on the footer's left side (e.g. a selected-row preview strip) — pushes the Total/pagination info to the right instead of leaving it alone on the left
 }) => {
   const { language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
@@ -459,43 +460,59 @@ const DataGrid = ({
         </div>
       )}
 
-      {/* Footer / Pagination */}
-      {showFooter && (
-      <div className="dg-footer">
-        <div className="dg-info">
-          {processedData.length > 0 ? (
-            <span>
-              {isGrouped
-                ? <>{L('कुल', 'Total')} {processedData.length}</>
-                : <>{startIdx + 1}–{Math.min(startIdx + pageSize, processedData.length)} / {L('कुल', 'Total')} {processedData.length}</>
-              }
-              {data.length !== processedData.length && ` (${L('फिल्टर', 'Filter')}: ${data.length} ${L('मध्ये', 'of')})`}
-            </span>
-          ) : <span>{L('कुनै रेकर्ड छैन', 'No records found')}</span>}
-        </div>
-        {!isGrouped && (
-        <div className="dg-paging">
-          <div className="dg-pagesize">
-            <label>{L('प्रति पृष्ठ:', 'Per page:')}</label>
-            <select value={pageSize} onChange={e => { setPageSize(+e.target.value); setCurrentPage(1); }}>
-              {[5, 10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
+      {/* Footer / Pagination — footerLeft (e.g. a selected-row preview strip)
+          pushes Total/pagination together to the right instead of leaving
+          them alone on the left; without it, the layout is unchanged from
+          before (info left, pagination right, as direct flex siblings) for
+          every other DataGrid caller. */}
+      {showFooter && (() => {
+        const infoBlock = (
+          <div className="dg-info">
+            {processedData.length > 0 ? (
+              <span>
+                {isGrouped
+                  ? <>{L('कुल', 'Total')} {processedData.length}</>
+                  : <>{startIdx + 1}–{Math.min(startIdx + pageSize, processedData.length)} / {L('कुल', 'Total')} {processedData.length}</>
+                }
+                {data.length !== processedData.length && ` (${L('फिल्टर', 'Filter')}: ${data.length} ${L('मध्ये', 'of')})`}
+              </span>
+            ) : <span>{L('कुनै रेकर्ड छैन', 'No records found')}</span>}
           </div>
-          <div className="dg-page-btns">
-            <button className="pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(1)} title={L('पहिलो', 'First')}>«</button>
-            <button className="pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} title={L('अगाडि', 'Previous')}>‹</button>
-            {pageNumbers.map((pg, i) =>
-              pg === '...'
-                ? <span key={i} className="pg-ellipsis">…</span>
-                : <button key={i} className={`pg-btn ${pg === currentPage ? 'active' : ''}`} onClick={() => setCurrentPage(pg)}>{pg}</button>
+        );
+        const pagingBlock = !isGrouped && (
+          <div className="dg-paging">
+            <div className="dg-pagesize">
+              <label>{L('प्रति पृष्ठ:', 'Per page:')}</label>
+              <select value={pageSize} onChange={e => { setPageSize(+e.target.value); setCurrentPage(1); }}>
+                {[5, 10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="dg-page-btns">
+              <button className="pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(1)} title={L('पहिलो', 'First')}>«</button>
+              <button className="pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} title={L('अगाडि', 'Previous')}>‹</button>
+              {pageNumbers.map((pg, i) =>
+                pg === '...'
+                  ? <span key={i} className="pg-ellipsis">…</span>
+                  : <button key={i} className={`pg-btn ${pg === currentPage ? 'active' : ''}`} onClick={() => setCurrentPage(pg)}>{pg}</button>
+              )}
+              <button className="pg-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} title={L('पछाडि', 'Next')}>›</button>
+              <button className="pg-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)} title={L('अन्तिम', 'Last')}>»</button>
+            </div>
+          </div>
+        );
+        return (
+          <div className="dg-footer">
+            {footerLeft ? (
+              <>
+                <div className="dg-footer-left">{footerLeft}</div>
+                <div className="dg-footer-right">{infoBlock}{pagingBlock}</div>
+              </>
+            ) : (
+              <>{infoBlock}{pagingBlock}</>
             )}
-            <button className="pg-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} title={L('पछाडि', 'Next')}>›</button>
-            <button className="pg-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)} title={L('अन्तिम', 'Last')}>»</button>
           </div>
-        </div>
-        )}
-      </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

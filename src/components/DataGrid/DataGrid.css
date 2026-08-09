@@ -281,6 +281,11 @@ th.dg-sn-col {
   gap: 8px;
 }
 .dg-info { font-size: 14px; color: #6b7280; white-space: nowrap; }
+/* footerLeft opt-in layout (e.g. Task's selected-row preview strip) — Total/
+   pagination info bundles together on the right instead of sitting alone
+   on the left. */
+.dg-footer-left { flex: 1; min-width: 0; }
+.dg-footer-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-left: auto; }
 .dg-paging { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dg-pagesize { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #6b7280; }
 .dg-pagesize select {

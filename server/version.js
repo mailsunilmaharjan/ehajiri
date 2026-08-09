@@ -188,4 +188,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Filter by Staff, quick filters, and Advance Search moved into the Task grid\'s own header row next to Search. Section labels shortened to Today / Tomorrow / Day After Tomorrow, followed by a plain date for the two sections beyond that; Today\'s section keeps a light highlight so it still stands out.',
   },
+  {
+    appVersion : '1.0.41',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Task grid footer now shows a Company Name / Task / Description preview of whichever row is selected, with the Total/pagination info moved to the right side. A long description shows truncated with a hover card for the full text. Hover tooltips (this new one and the Assigned To one) are now a light white card instead of a dark/black background.',
+  },
 ];

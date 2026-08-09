@@ -50,26 +50,37 @@ const TASK_GROUP_ORDER = ['today', 'tomorrow', 'dayAfterTomorrow', 'after4th', '
 // wide enough for a whole checkbox-grid's worth of assignees) with a larger,
 // custom-styled hover card for the rest — a native `title` tooltip renders in
 // tiny OS chrome, not big enough to read a long staff list comfortably.
-const AssigneeCell = ({ assignees }) => {
+// Shared hover-tooltip card — light background (never black/dark) with a
+// border and soft shadow, used for anything too long to show inline
+// (Assigned To's full staff list, a long Description in the footer strip).
+const HoverCard = ({ trigger, content, minWidth = 200, maxWidth = 340 }) => {
   const [show, setShow] = useState(false);
-  if (!Array.isArray(assignees) || !assignees.length) return <span style={{ color: '#d1d5db' }}>—</span>;
-  const shown = assignees.slice(0, 2).map(a => a.name).join(', ');
-  const extra = assignees.length - 2;
   return (
     <span style={{ position: 'relative', display: 'inline-block' }}
-      onMouseEnter={() => extra > 0 && setShow(true)} onMouseLeave={() => setShow(false)}>
-      <span style={{ fontSize: 12.5, color: '#374151' }}>
-        {shown}{extra > 0 && <span style={{ color: '#1a56db', fontWeight: 700, cursor: 'default' }}> +{extra}</span>}
-      </span>
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      {trigger}
       {show && (
-        <div style={{ position: 'absolute', zIndex: 200, top: '130%', left: 0, minWidth: 200, maxWidth: 320,
-          background: '#111827', color: '#f9fafb', fontSize: 14, lineHeight: 1.8, padding: '10px 14px',
-          borderRadius: 8, boxShadow: '0 10px 28px rgba(0,0,0,.3)', whiteSpace: 'normal' }}>
-          {assignees.map(a => a.name).join(', ')}
+        <div className="task-hover-card" style={{ position: 'absolute', zIndex: 300, top: '130%', left: 0, minWidth, maxWidth,
+          background: '#ffffff', color: '#1f2937', fontSize: 14, lineHeight: 1.8, padding: '10px 14px',
+          borderRadius: 8, border: '1px solid #e5e7eb', boxShadow: '0 10px 28px rgba(0,0,0,.18)', whiteSpace: 'normal' }}>
+          {content}
         </div>
       )}
     </span>
   );
+};
+
+const AssigneeCell = ({ assignees }) => {
+  if (!Array.isArray(assignees) || !assignees.length) return <span style={{ color: '#d1d5db' }}>—</span>;
+  const shown = assignees.slice(0, 2).map(a => a.name).join(', ');
+  const extra = assignees.length - 2;
+  const trigger = (
+    <span style={{ fontSize: 12.5, color: '#374151' }}>
+      {shown}{extra > 0 && <span style={{ color: '#1a56db', fontWeight: 700, cursor: 'default' }}> +{extra}</span>}
+    </span>
+  );
+  if (extra <= 0) return trigger;
+  return <HoverCard trigger={trigger} content={assignees.map(a => a.name).join(', ')} />;
 };
 
 // "General Manager" -> "GM", "Administration" -> "Admin" — same short-name
@@ -854,6 +865,24 @@ const TaskList = () => {
     </div>
   );
 
+  // Footer preview strip — Company Name / Task / Description of whichever
+  // task row is currently selected/focused (same row the Followup History
+  // drawer is open for). A long description shows truncated with a hover
+  // card for the full text instead of stretching the footer.
+  const taskFooterLeft = (() => {
+    const descText = stripHtml(followupTask?.description);
+    const descNode = !descText ? '—' : descText.length <= 50
+      ? descText
+      : <HoverCard trigger={<span style={{ cursor: 'default', borderBottom: '1px dotted #9ca3af' }}>{descText.slice(0, 50)}…</span>} content={descText} />;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, fontSize: 12.5, color: '#374151', flexWrap: 'wrap' }}>
+        <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Company Name :</span> {followupTask?.customerName || '—'}</span>
+        <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Task :</span> {followupTask?.title || '—'}</span>
+        <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Description :</span> {descNode}</span>
+      </div>
+    );
+  })();
+
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexShrink: 0 }}>
@@ -909,6 +938,7 @@ const TaskList = () => {
                 className="task-list-grid"
                 showFilterButton={false}
                 toolbarLeft={taskFilterToolbar}
+                footerLeft={taskFooterLeft}
                 extraSearchFields={['customerPhone']}
                 groupBy={taskGroupKey}
                 groupOrder={TASK_GROUP_ORDER}
