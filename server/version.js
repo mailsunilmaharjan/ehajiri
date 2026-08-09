@@ -194,4 +194,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Task grid footer now shows a Company Name / Task / Description preview of whichever row is selected, with the Total/pagination info moved to the right side. A long description shows truncated with a hover card for the full text. Hover tooltips (this new one and the Assigned To one) are now a light white card instead of a dark/black background.',
   },
+  {
+    appVersion : '1.0.42',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'The per-row Task Date column moved to right after SN, before Task, and now shows Today/Tomorrow/Day After Tomorrow for those exact dates (matching the section headers) or the actual date otherwise — replacing the old plain-date column that used to sit between Assigned To and Days.',
+  },
 ];

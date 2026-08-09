@@ -699,6 +699,25 @@ const TaskList = () => {
       ),
     },
     {
+      field: 'dueDate', header: 'Task Date', width: 130,
+      render: (v) => {
+        const due = v ? String(v).split('T')[0] : null;
+        // Computed live off getNepalTodayISO() each render (not a captured
+        // outer const) — same reason as the Days column below: keeps "Today"/
+        // "Tomorrow" correct day to day without the memoized columns array
+        // needing to recompute.
+        let label = '—';
+        if (due) {
+          const today = getNepalTodayISO();
+          if (due === today) label = 'Today';
+          else if (due === addDaysISO(today, 1)) label = 'Tomorrow';
+          else if (due === addDaysISO(today, 2)) label = 'Day After Tomorrow';
+          else label = fd(due);
+        }
+        return <span style={{ fontSize: 11.5, color: '#374151' }}>{label}</span>;
+      },
+    },
+    {
       field: 'title', header: 'Task', minWidth: 170,
       render: (v, row) => (
         <span style={{ fontWeight: 600, color: row.status === 'completed' ? '#9ca3af' : '#1e293b',
@@ -736,10 +755,6 @@ const TaskList = () => {
     {
       field: 'assignees', header: 'Assigned To', width: 150, sortable: false, filterable: false,
       render: (v) => <AssigneeCell assignees={v} />,
-    },
-    {
-      field: 'dueDate', header: 'Task Date', width: 110,
-      render: (v) => v ? fd(String(v).split('T')[0]) : '—',
     },
     {
       field: 'createdAt', header: 'Days', width: 80, align: 'center',
