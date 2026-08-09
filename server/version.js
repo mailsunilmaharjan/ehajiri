@@ -164,4 +164,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Task grid stays clickable and arrow-key navigable while the Followup History drawer is open, live-switching it to whichever row you land on. Esc closes the drawer. Description card is now two columns (Description → Replies) with a connector arrow, applied to both the compact card and its popup; each reply is a single line: avatar, Name (Post), then the message inline.',
   },
+  {
+    appVersion : '1.0.37',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Task grid now groups tasks into date-bucket sections (Today\'s Task, Tomorrow\'s Task, Day After Tomorrow\'s Task Plan, After 4th/5th Day Task Plan, Task Pending Plan in coming Days) with a merged section header per bucket, smaller/denser text matching Staff Detail, and a "Filter by Staff" picker that defaults to your own tasks with a "Show All Task" option — scoped by role (Admin/Super Admin see everyone, Branch Manager/Department Head see their own branch/department, employees stay own-only).',
+  },
 ];

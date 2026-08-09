@@ -13,6 +13,7 @@ import Avatar from '../Common/Avatar.jsx';
 import ContactFormModal, { CONTACT_EMPTY } from './ContactFormModal.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
+import { getNepalTodayISO } from '../../utils/dateUtils.js';
 
 /* Task tracker (Staff > Task) — standard DataGrid layout, matching every
    other list page in the app (Staff Detail, Manual Postings, etc.). Visible
@@ -30,6 +31,25 @@ const todayISO = () => {
 };
 
 const emptyTask = { title: '', description: '', contactId: '', contactPersonId: '', categoryId: '', priorityId: '', dueDate: todayISO(), assignedTo: [], status: 'pending' };
+
+// Task grid date-bucket sections ("Today's Task", "Tomorrow's Task", ...) —
+// weekday is a property of the underlying calendar day, the same regardless
+// of whether it's displayed in AD or BS, so it's derived straight from the
+// Y/M/D parts (never through `new Date(isoString)`, which reads a bare
+// "YYYY-MM-DD" as UTC midnight and can shift a day under a non-UTC viewer).
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const weekdayName = (isoDate) => {
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-').map(Number);
+  return WEEKDAYS[new Date(y, m - 1, d).getDay()];
+};
+const addDaysISO = (isoDate, n) => {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+};
+const TASK_GROUP_ORDER = ['today', 'tomorrow', 'dayAfterTomorrow', 'after4th', 'after5th', 'pending'];
 
 // "General Manager" -> "GM", "Administration" -> "Admin" — same short-name
 // fallback convention used by the attendance reports (abbrev() there),
@@ -149,6 +169,13 @@ const TaskList = () => {
   const [form,    setForm]    = useState(emptyTask);
   const [errors,  setErrors]  = useState({});
   const [saving,  setSaving]  = useState(false);
+
+  // Filter by Staff — every role defaults to seeing only their own tasks
+  // (creator or assignee); the dropdown also offers "Show All Task", scoped
+  // by role server-side (admin/superAdmin -> everyone, Branch Manager/Dept
+  // Head -> their own branch/department, employee -> stays own-only). See
+  // GET /api/tasks's ?staffId= handling in server/routes/tasks.js.
+  const [staffFilter, setStaffFilter] = useState(() => currentUser ? String(currentUser.id) : '');
 
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [gearOpen, setGearOpen] = useState(false);
@@ -301,7 +328,8 @@ const TaskList = () => {
 
   const loadTasks = () => {
     setLoading(true);
-    api.get('/tasks').then(rows => setTasks(Array.isArray(rows) ? rows : []))
+    const qs = staffFilter ? `?staffId=${encodeURIComponent(staffFilter)}` : '';
+    api.get(`/tasks${qs}`).then(rows => setTasks(Array.isArray(rows) ? rows : []))
       .catch(e => showToast(e.message || 'Failed to load tasks', 'error'))
       .finally(() => setLoading(false));
   };
@@ -309,7 +337,16 @@ const TaskList = () => {
   const loadPriorities = () => api.get('/settings/taskPriorities').then(rows => setPriorities(Array.isArray(rows) ? rows : [])).catch(() => setPriorities([]));
   const loadContacts   = () => api.get('/contacts').then(rows => setContacts(Array.isArray(rows) ? rows : [])).catch(() => setContacts([]));
 
-  useEffect(() => { loadTasks(); loadCategories(); loadPriorities(); loadContacts(); }, []);
+  useEffect(() => { loadCategories(); loadPriorities(); loadContacts(); }, []);
+  useEffect(() => { loadTasks(); }, [staffFilter]);
+
+  const staffFilterOptions = useMemo(() => [
+    { value: 'all', label: '🗂 Show All Task' },
+    ...filteredEmployees.map(e => ({
+      value: String(e.id),
+      label: currentUser && String(e.id) === String(currentUser.id) ? `${e.fullName} (Me)` : e.fullName,
+    })),
+  ], [filteredEmployees, currentUser]);
 
   // Close the gear dropdown on outside click
   useEffect(() => {
@@ -637,11 +674,56 @@ const TaskList = () => {
     },
   ], [fd]);
 
+  // Date-bucket sections for the grid — Today's overdue-and-due tasks fold into
+  // "Today" rather than vanishing, everything past the 5-day window (or with no
+  // Task Date at all) lands in the trailing "Pending" catch-all.
+  const todayNepal            = getNepalTodayISO();
+  const tomorrowNepal         = addDaysISO(todayNepal, 1);
+  const dayAfterTomorrowNepal = addDaysISO(todayNepal, 2);
+  const after4thNepal         = addDaysISO(todayNepal, 3);
+  const after5thNepal         = addDaysISO(todayNepal, 4);
+
+  const taskGroupKey = (row) => {
+    const due = row.dueDate ? String(row.dueDate).split('T')[0] : null;
+    if (!due || due <= todayNepal) return 'today';
+    if (due === tomorrowNepal) return 'tomorrow';
+    if (due === dayAfterTomorrowNepal) return 'dayAfterTomorrow';
+    if (due === after4thNepal) return 'after4th';
+    if (due === after5thNepal) return 'after5th';
+    return 'pending';
+  };
+  // A blank/overdue task still counts as "Today" above (so it's never lost),
+  // but the header itself should only claim tasks actually dated today —
+  // it always shows today's own date/weekday regardless.
+  const taskGroupLabel = (key, count) => {
+    const dated = (title, iso) => `${title} : ${fd(iso)} - ${weekdayName(iso)} (${count})`;
+    switch (key) {
+      case 'today':            return dated("Today's Task", todayNepal);
+      case 'tomorrow':         return dated("Tomorrow's Task", tomorrowNepal);
+      case 'dayAfterTomorrow': return dated("Day After Tomorrow's Task Plan", dayAfterTomorrowNepal);
+      case 'after4th':         return dated('After 4th Day Task Plan', after4thNepal);
+      case 'after5th':         return dated('After 5th Day Task Plan', after5thNepal);
+      case 'pending':          return `Task Pending Plan in coming Days (${count})`;
+      default:                 return key;
+    }
+  };
+
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0 }}>✅ Task</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter by Staff</label>
+            <div style={{ width: 200 }}>
+              <SearchableSelect
+                value={staffFilter}
+                onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
+                options={staffFilterOptions}
+                placeholder="— Select staff —"
+              />
+            </div>
+          </div>
           {canManageSystem && (
             <div ref={gearRef} style={{ position: 'relative' }}>
               <button onClick={() => setGearOpen(p => !p)} title="Task settings"
@@ -689,8 +771,12 @@ const TaskList = () => {
                 rowKey="id"
                 defaultPageSize={20}
                 compact={true}
+                className="task-list-grid"
                 showFilterButton={false}
                 extraSearchFields={['customerPhone']}
+                groupBy={taskGroupKey}
+                groupOrder={TASK_GROUP_ORDER}
+                groupLabel={taskGroupLabel}
                 onRowClick={openFollowupPanel}
                 onFocusChange={openFollowupPanel}
                 onRowDoubleClick={openEdit}

@@ -31,6 +31,9 @@ const DataGrid = ({
   className = '',             // extra class on the outer container, for scoping one-off style overrides
   showFooter = true,          // set false to hide the pagination/info footer (e.g. small fixed-size reports)
   initialSelected = [],       // seeds the checkbox selection once on mount (e.g. a caller pre-checking rows before this grid ever renders) — uncontrolled after that, same as selectedRows always has been
+  groupBy = null,             // (row) => groupKey — when set, rows render under merged full-width section headers instead of flat/paginated (e.g. Task's date-bucket sections)
+  groupOrder = null,          // [groupKey, ...] display order for sections; a key with no matching rows still renders its header. Defaults to first-seen order when omitted
+  groupLabel = null,          // (groupKey, rowCount) => ReactNode — section header content; defaults to the raw key
 }) => {
   const { language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
@@ -75,9 +78,9 @@ const DataGrid = ({
   };
 
   const handleSelectAll = (checked) => {
-    const next = checked
-      ? processedData.slice((currentPage-1)*pageSize, (currentPage-1)*pageSize+pageSize).map(r => r[rowKey])
-      : [];
+    // pageData already IS "everything currently on screen" — the current page's
+    // slice normally, or every grouped row when groupBy is set (see below).
+    const next = checked ? pageData.map(r => r[rowKey]) : [];
     setSelectedRows(next);
     if (onSelectionChange) onSelectionChange(next);
   };
@@ -125,9 +128,28 @@ const DataGrid = ({
   }, [data, globalSearch, filters, sortField, sortDir, extraSearchFields]);
 
   const processedData = processed;
-  const totalPages = Math.max(1, Math.ceil(processedData.length / pageSize));
-  const startIdx = (currentPage - 1) * pageSize;
-  const pageData = processedData.slice(startIdx, startIdx + pageSize);
+  const isGrouped = typeof groupBy === 'function';
+
+  // Bucket processedData into ordered sections (Today / Tomorrow / ... for the
+  // Task grid). Sections appear in groupOrder even with zero matching rows, so
+  // e.g. "nothing due tomorrow" is still visible rather than silently absent.
+  let groupSections = null;
+  if (isGrouped) {
+    const byGroup = new Map();
+    processedData.forEach(row => {
+      const key = groupBy(row);
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key).push(row);
+    });
+    const orderedKeys = (groupOrder && groupOrder.length) ? groupOrder : Array.from(byGroup.keys());
+    groupSections = orderedKeys.map(key => ({ key, rows: byGroup.get(key) || [] }));
+  }
+
+  // Grouped view shows every matching row across all sections at once — paging
+  // a date-bucketed planner sheet mid-section would split a section across pages.
+  const totalPages = isGrouped ? 1 : Math.max(1, Math.ceil(processedData.length / pageSize));
+  const startIdx = isGrouped ? 0 : (currentPage - 1) * pageSize;
+  const pageData = isGrouped ? groupSections.flatMap(s => s.rows) : processedData.slice(startIdx, startIdx + pageSize);
 
   useEffect(() => { setFocusedRowIdx(-1); }, [currentPage, pageSize, globalSearch, sortField, sortDir]);
   useEffect(() => { if (showSearch) searchRef.current?.focus(); }, []);
@@ -183,6 +205,48 @@ const DataGrid = ({
   const snWidth = Math.max(32, snDigits * 10 + 22);
 
   const hasToolbar = title || toolbarLeft || showSearch || showFilterButton || toolbar;
+  const totalCols = (showCheckbox ? 1 : 0) + 1 /* SN */ + columns.length;
+
+  const renderRow = (row, ri, sn) => (
+    <tr
+      key={row[rowKey] ?? ri}
+      className={`dg-row ${(onRowClick || onRowDoubleClick) ? 'clickable' : ''} ${selectedRows.includes(row[rowKey]) ? 'selected' : ''} ${focusedRowIdx === ri ? 'kb-focus' : ''}`}
+      ref={el => { if (focusedRowIdx === ri && el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }}
+      onClick={() => { setFocusedRowIdx(ri); scrollRef.current?.focus(); if (onRowClick) onRowClick(row); }}
+      onDoubleClick={() => {
+        if (onRowDoubleClick) onRowDoubleClick(row);
+        else if (onRowClick)  onRowClick(row);
+      }}
+      onContextMenu={contextMenu ? (e) => {
+        e.preventDefault();
+        setFocusedRowIdx(ri);
+        setCtxMenu({ x: e.clientX, y: e.clientY, row });
+      } : undefined}
+    >
+      {showCheckbox && (
+        <td className="dg-td dg-checkbox-col" onClick={e => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selectedRows.includes(row[rowKey])}
+            onChange={e => handleSelectRow(row[rowKey], e.target.checked)}
+            className="dg-checkbox"
+          />
+        </td>
+      )}
+      <td className="dg-td dg-sn-col" style={{ width: snWidth, minWidth: snWidth }}>{sn}</td>
+      {columns.map((col, ci) => (
+        <td
+          key={ci}
+          className={`dg-td${ci === 0 && col.field !== 'actions' ? ' dg-first-col' : ''}`}
+          style={{ textAlign: col.align || 'left', whiteSpace: (autoWidth && !col.wrap) ? 'nowrap' : undefined }}
+        >
+          {col.render
+            ? col.render(row[col.field], row)
+            : (row[col.field] != null && row[col.field] !== '' ? row[col.field] : <span className="dg-null">—</span>)}
+        </td>
+      ))}
+    </tr>
+  );
 
   return (
     <div className={`dg-container${className ? ' ' + className : ''}`}>
@@ -309,9 +373,25 @@ const DataGrid = ({
             )}
           </thead>
           <tbody>
-            {pageData.length === 0 ? (
+            {isGrouped ? (() => {
+              let flatIdx = -1; // keeps incrementing across sections — matches pageData's flattened order (keyboard nav)
+              return groupSections.map(({ key, rows }) => (
+                <React.Fragment key={`dg-grp-${key}`}>
+                  <tr className="dg-group-row">
+                    <td colSpan={totalCols} className="dg-group-cell">
+                      {groupLabel ? groupLabel(key, rows.length) : key}
+                    </td>
+                  </tr>
+                  {rows.length === 0 ? (
+                    <tr className="dg-group-row-empty">
+                      <td colSpan={totalCols} className="dg-group-empty-cell">{L('कुनै कार्य छैन', 'No tasks')}</td>
+                    </tr>
+                  ) : rows.map((row, gi) => { flatIdx++; return renderRow(row, flatIdx, gi + 1); })}
+                </React.Fragment>
+              ));
+            })() : pageData.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + 2} className="dg-empty">
+                <td colSpan={totalCols} className="dg-empty">
                   <div className="dg-empty-content">
                     <div className="dg-empty-icon">📋</div>
                     <div className="dg-empty-text">{L('कुनै डाटा फेला परेन', 'No data found')}</div>
@@ -319,46 +399,7 @@ const DataGrid = ({
                 </td>
               </tr>
             ) : (
-              pageData.map((row, ri) => (
-                <tr
-                  key={row[rowKey] ?? ri}
-                  className={`dg-row ${(onRowClick || onRowDoubleClick) ? 'clickable' : ''} ${selectedRows.includes(row[rowKey]) ? 'selected' : ''} ${focusedRowIdx === ri ? 'kb-focus' : ''}`}
-                  ref={el => { if (focusedRowIdx === ri && el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }}
-                  onClick={() => { setFocusedRowIdx(ri); scrollRef.current?.focus(); if (onRowClick) onRowClick(row); }}
-                  onDoubleClick={() => {
-                    if (onRowDoubleClick) onRowDoubleClick(row);
-                    else if (onRowClick)  onRowClick(row);
-                  }}
-                  onContextMenu={contextMenu ? (e) => {
-                    e.preventDefault();
-                    setFocusedRowIdx(ri);
-                    setCtxMenu({ x: e.clientX, y: e.clientY, row });
-                  } : undefined}
-                >
-                  {showCheckbox && (
-                    <td className="dg-td dg-checkbox-col" onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedRows.includes(row[rowKey])}
-                        onChange={e => handleSelectRow(row[rowKey], e.target.checked)}
-                        className="dg-checkbox"
-                      />
-                    </td>
-                  )}
-                  <td className="dg-td dg-sn-col" style={{ width: snWidth, minWidth: snWidth }}>{startIdx + ri + 1}</td>
-                  {columns.map((col, ci) => (
-                    <td
-                      key={ci}
-                      className={`dg-td${ci === 0 && col.field !== 'actions' ? ' dg-first-col' : ''}`}
-                      style={{ textAlign: col.align || 'left', whiteSpace: (autoWidth && !col.wrap) ? 'nowrap' : undefined }}
-                    >
-                      {col.render
-                        ? col.render(row[col.field], row)
-                        : (row[col.field] != null && row[col.field] !== '' ? row[col.field] : <span className="dg-null">—</span>)}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              pageData.map((row, ri) => renderRow(row, ri, startIdx + ri + 1))
             )}
           </tbody>
         </table>
@@ -424,11 +465,15 @@ const DataGrid = ({
         <div className="dg-info">
           {processedData.length > 0 ? (
             <span>
-              {startIdx + 1}–{Math.min(startIdx + pageSize, processedData.length)} / {L('कुल', 'Total')} {processedData.length}
+              {isGrouped
+                ? <>{L('कुल', 'Total')} {processedData.length}</>
+                : <>{startIdx + 1}–{Math.min(startIdx + pageSize, processedData.length)} / {L('कुल', 'Total')} {processedData.length}</>
+              }
               {data.length !== processedData.length && ` (${L('फिल्टर', 'Filter')}: ${data.length} ${L('मध्ये', 'of')})`}
             </span>
           ) : <span>{L('कुनै रेकर्ड छैन', 'No records found')}</span>}
         </div>
+        {!isGrouped && (
         <div className="dg-paging">
           <div className="dg-pagesize">
             <label>{L('प्रति पृष्ठ:', 'Per page:')}</label>
@@ -448,6 +493,7 @@ const DataGrid = ({
             <button className="pg-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)} title={L('अन्तिम', 'Last')}>»</button>
           </div>
         </div>
+        )}
       </div>
       )}
     </div>

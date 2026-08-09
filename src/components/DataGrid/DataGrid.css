@@ -241,6 +241,27 @@ th.dg-sn-col {
 /* left accent bar on focused row */
 .dg-row.kb-focus .dg-td:first-child { box-shadow: inset 3px 0 0 #fbbf24; }
 
+/* ── Grouped sections (groupBy prop) — merged full-width header bar per
+   section, same bg/border convention as a summary row elsewhere in the app ── */
+.dg-group-row td.dg-group-cell {
+  background: #f1f5f9;
+  border-top: 2px solid #d1d5db;
+  border-bottom: 1px solid #d1d5db;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #334155;
+}
+.dg-group-row:first-child td.dg-group-cell { border-top: none; }
+.dg-group-row-empty td.dg-group-empty-cell {
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: #9ca3af;
+  background: #fff;
+  border-bottom: 1px solid #f1f5f9;
+}
+
 /* Empty */
 .dg-empty { padding: 48px 20px; }
 .dg-empty-content { display: flex; flex-direction: column; align-items: center; gap: 10px; }

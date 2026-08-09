@@ -91,13 +91,75 @@ async function notifyCreatorOfCompletion(taskId, title, creatorId, actorId) {
   });
 }
 
+// "Filter by Staff" on the Task page — defaults to the caller's own tasks
+// (creator or assignee, same as always) but every role can also request a
+// wider view via ?staffId=:
+//   staffId=all        -> admin/superAdmin: every task company-wide.
+//                          branchManager/departmentHead: every task whose
+//                          creator or any assignee shares that person's own
+//                          branch/department (mirrors AuthContext.filterByRole's
+//                          scoping, just re-derived server-side since the JWT
+//                          already carries role/branch/department — see
+//                          authGuard.js's signToken).
+//                          employee: no wider scope to grant, silently no-ops.
+//   staffId=<other id> -> that person's tasks specifically, gated by the same
+//                          scope check (branch/department match, or admin).
+// A denied/unrecognized value never errors — it just falls back to "my own
+// tasks", the same safe default as if staffId were omitted entirely.
 router.get('/', async (req, res) => {
   try {
+    const me = req.user;
+    const role = me.role || 'employee';
+    const isAdmin = role === 'admin' || role === 'superAdmin';
+    const isBM    = role === 'branchManager';
+    const isDH    = role === 'departmentHead';
+
+    const requested = req.query.staffId ? String(req.query.staffId) : '';
+    let where  = `(t.created_by = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = $1))`;
+    let params = [me.id];
+
+    if (requested === 'all' && (isAdmin || isBM || isDH)) {
+      if (isAdmin) {
+        where = '1=1';
+        params = [];
+      } else {
+        const scopeCol = isBM ? 'branch' : 'department';
+        const scopeVal = (isBM ? me.branch : me.department) || '';
+        if (scopeVal.trim()) {
+          where = `(
+            EXISTS (SELECT 1 FROM users ou WHERE ou.id = t.created_by AND LOWER(TRIM(ou.${scopeCol})) = LOWER(TRIM($1)))
+            OR EXISTS (SELECT 1 FROM task_assignees ta JOIN users au ON au.id = ta.user_id WHERE ta.task_id = t.id AND LOWER(TRIM(au.${scopeCol})) = LOWER(TRIM($1)))
+          )`;
+          params = [scopeVal];
+        }
+      }
+    } else if (requested && requested !== 'all' && requested !== String(me.id)) {
+      const staffId = parseInt(requested, 10);
+      if (Number.isInteger(staffId)) {
+        let allowed = isAdmin;
+        if (!allowed && (isBM || isDH)) {
+          const scopeCol = isBM ? 'branch' : 'department';
+          const scopeVal = (isBM ? me.branch : me.department) || '';
+          if (scopeVal.trim()) {
+            const { rows: chk } = await pool.query(
+              `SELECT 1 FROM users WHERE id=$1 AND LOWER(TRIM(${scopeCol})) = LOWER(TRIM($2))`,
+              [staffId, scopeVal]
+            );
+            allowed = chk.length > 0;
+          }
+        }
+        if (allowed) {
+          where  = `(t.created_by = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = $1))`;
+          params = [staffId];
+        }
+      }
+    }
+
     const { rows } = await pool.query(
       `SELECT ${SEL} ${JOINS}
-       WHERE t.created_by = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = $1)
+       WHERE ${where}
        ORDER BY t.status = 'completed', t.due_date NULLS LAST, t.id DESC`,
-      [req.user.id]
+      params
     );
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
