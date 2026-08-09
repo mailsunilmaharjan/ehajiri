@@ -6,10 +6,11 @@ import ContactFormModal, { CONTACT_EMPTY as EMPTY } from './ContactFormModal.jsx
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-const displayName  = (row) => row.contactInfo === 'company' ? (row.companyName  || '—') : (row.personName  || '—');
-const displayPost  = (row) => row.contactInfo === 'company' ? '—'                       : (row.office       || '—');
-const displayMob1  = (row) => row.contactInfo === 'company' ? (row.companyPhone || '—') : (row.mobile1      || '—');
-const displayEmail = (row) => row.contactInfo === 'company' ? (row.companyEmail || '—') : (row.email        || '—');
+const displayName    = (row) => row.contactInfo === 'company' ? (row.companyName    || '—') : (row.personName || '—');
+const displayPost    = (row) => row.contactInfo === 'company' ? '—'                         : (row.office     || '—');
+const displayMob1    = (row) => row.contactInfo === 'company' ? (row.companyPhone   || '—') : (row.mobile1    || '—');
+const displayEmail   = (row) => row.contactInfo === 'company' ? (row.companyEmail   || '—') : (row.email      || '—');
+const displayAddress = (row) => row.contactInfo === 'company' ? (row.companyAddress || '—') : (row.address    || '—');
 
 // ── Share to WhatsApp ─────────────────────────────────────────────────────────
 // Builds a WhatsApp-formatted (*bold*) text card of the contact and opens the
@@ -57,7 +58,7 @@ const shareContactOnWhatsApp = async (contact) => {
 
 const TypeBadge = ({ type }) => (
   <span style={{
-    display:'inline-block', padding:'1px 9px', borderRadius:10, fontSize:11, fontWeight:700,
+    display:'inline-block', padding:'1px 7px', borderRadius:10, fontSize:9.5, fontWeight:700, whiteSpace:'nowrap',
     background: type==='private' ? '#fde8ef' : '#d1fae5',
     color:      type==='private' ? '#be185d'  : '#065f46',
   }}>
@@ -67,7 +68,7 @@ const TypeBadge = ({ type }) => (
 
 const InfoBadge = ({ info }) => (
   <span style={{
-    display:'inline-block', padding:'1px 9px', borderRadius:10, fontSize:11, fontWeight:700,
+    display:'inline-block', padding:'1px 7px', borderRadius:10, fontSize:9.5, fontWeight:700, whiteSpace:'nowrap',
     background: info==='company' ? '#dbeafe' : '#ede9fe',
     color:      info==='company' ? '#1e40af'  : '#5b21b6',
   }}>
@@ -80,8 +81,8 @@ const CategoryBadge = ({ category, type }) => {
   const isSupplier = category === 'supplier';
   return (
     <span style={{
-      display:'inline-flex', alignItems:'center', gap:4,
-      padding:'1px 9px', borderRadius:10, fontSize:11, fontWeight:700,
+      display:'inline-flex', alignItems:'center', gap:4, whiteSpace:'nowrap',
+      padding:'1px 7px', borderRadius:10, fontSize:9.5, fontWeight:700,
       background: isSupplier ? '#fef3c7' : '#d1fae5',
       color:      isSupplier ? '#92400e'  : '#065f46',
     }}>
@@ -122,17 +123,18 @@ const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
     api.get(`/contacts/${contact.id}/persons`).then(setPersons).catch(() => {});
   }, [contact.id, isPersonal]);
 
+  // Full-viewport-height overlay drawer (fixed, not a flex sibling) — same
+  // convention as the Task page's Followup History panel, so the grid stays
+  // full width and never has to shrink/scroll to make room for it.
   return (
     <div style={{
-      width:300, minWidth:300, flexShrink:0, background:'#fff',
-      border:'1px solid #e5e7eb', borderRadius:12,
+      position:'fixed', top:60, right:0, bottom:0, width:380, zIndex:51,
+      background:'#fff', boxShadow:'-6px 0 24px rgba(0,0,0,.15)', borderLeft:'1px solid #dedede',
       display:'flex', flexDirection:'column', overflow:'hidden',
-      boxShadow:'0 2px 12px rgba(0,0,0,.07)',
-      animation:'slideInRight .18s ease',
     }}>
       {/* Panel header */}
       <div style={{
-        background:'#ffffff',
+        background:'#ffffff', flexShrink:0,
         padding:'16px 16px 14px', borderBottom:'1px solid #e5e7eb', position:'relative',
       }}>
         <button onClick={onClose}
@@ -240,7 +242,7 @@ const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
       </div>
 
       {/* Actions */}
-      <div style={{ padding:'10px 16px', borderTop:'1px solid #f3f4f6', display:'flex', gap:8 }}>
+      <div style={{ padding:'10px 16px', borderTop:'1px solid #f3f4f6', display:'flex', gap:8, flexShrink:0 }}>
         <button onClick={() => onEdit(contact)}
           style={{ flex:1, padding:'7px 0', borderRadius:8, border:'1px solid #d1d5db',
             background:'#fff', color:'#374151', fontSize:12, fontWeight:600, cursor:'pointer',
@@ -314,9 +316,9 @@ const StaffContact = () => {
       render:(_,row) => <span style={{ fontWeight:600, color:'#1f2937' }}>{displayName(row)}</span>,
     },
     {
-      field:'contactInfo', header:'Type', width:220,
+      field:'contactInfo', header:'Type', width:190,
       render:(_,row) => (
-        <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
           <InfoBadge info={row.contactInfo} />
           <TypeBadge type={row.contactType} />
           {row.customerCategory && (
@@ -326,8 +328,8 @@ const StaffContact = () => {
       ),
     },
     {
-      field:'post', header:'Post / Office', width:150,
-      render:(_,row) => <span style={{ color:'#4b5563' }}>{displayPost(row)}</span>,
+      field:'address', header:'Address', width:180,
+      render:(_,row) => <span style={{ color:'#4b5563' }}>{displayAddress(row)}</span>,
     },
     {
       field:'mobile1', header:'Mobile 1', width:130,
@@ -369,33 +371,32 @@ const StaffContact = () => {
         </div>
       </div>
 
-      <div style={{ display:'flex', gap:16, alignItems:'flex-start', paddingBottom:24 }}>
-        <div style={{ flex:1, minWidth:0 }}>
-          {loading ? (
-            <div style={{ padding:40, textAlign:'center', color:'#9ca3af', fontSize:14 }}>
-              Loading contacts…
-            </div>
-          ) : (
-            <DataGrid
-              columns={columns} data={rows} rowKey="id" title="Contacts"
-              toolbar={toolbar} contextMenu={contextMenu}
-              onRowClick={(row) => setSelected(s => s?.id===row.id ? null : row)}
-              onRowDoubleClick={(row) => setModal({ initial:row })}
-              defaultPageSize={15} striped
-              extraSearchFields={['workScope']}
-            />
-          )}
-        </div>
-
-        {selected && (
-          <DetailPanel
-            contact={selected}
-            onEdit={(row) => setModal({ initial:row })}
-            onDelete={handleDelete}
-            onClose={() => setSelected(null)}
+      <div style={{ paddingBottom:24 }}>
+        {loading ? (
+          <div style={{ padding:40, textAlign:'center', color:'#9ca3af', fontSize:14 }}>
+            Loading contacts…
+          </div>
+        ) : (
+          <DataGrid
+            columns={columns} data={rows} rowKey="id" title="Contacts"
+            toolbar={toolbar} contextMenu={contextMenu}
+            onRowClick={(row) => setSelected(s => s?.id===row.id ? null : row)}
+            onRowDoubleClick={(row) => setModal({ initial:row })}
+            defaultPageSize={15} striped
+            extraSearchFields={['workScope', 'address', 'companyAddress']}
           />
         )}
       </div>
+
+      {/* Full-height overlay drawer — see DetailPanel, doesn't shrink the grid above */}
+      {selected && (
+        <DetailPanel
+          contact={selected}
+          onEdit={(row) => setModal({ initial:row })}
+          onDelete={handleDelete}
+          onClose={() => setSelected(null)}
+        />
+      )}
 
       {modal && (
         <ContactFormModal

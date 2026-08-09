@@ -230,4 +230,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'WhatsApp notify on the Task grid (click-to-chat, no Business API required): a 💬 button per task opens a pre-filled WhatsApp message to the assignee\'s own Staff Detail mobile number (or lets you pick which assignee, if there\'s more than one); "Send Today\'s Task" in the toolbar sends a staff member their full list of today\'s tasks once you pick them in Filter by Staff; saving a new or edited task offers a one-click "Notify WhatsApp" action right in the confirmation toast.',
   },
+  {
+    appVersion : '1.0.48',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Contact page: Type badges are smaller so they stay tidy with the right-side panel open; the "Post / Office" column is now "Address" (shows the real company/personal address); the detail panel is now a full-height overlay drawer like the Task page\'s, so the grid stays full width instead of shrinking when it opens.',
+  },
 ];
