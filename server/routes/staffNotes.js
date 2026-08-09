@@ -4,20 +4,29 @@ import pool from '../db.js';
 
 const router = Router();
 
+// visibility: 'private' (default — only the owner ever sees it, same as
+// before this existed) or 'public' (every staff member sees it, but only the
+// owner can still edit/delete it — enforced by the WHERE user_id=$N guard on
+// PUT/DELETE below, unchanged). ownerName/userId let the frontend show whose
+// public note it is and hide Edit/Delete for notes the viewer doesn't own.
 const SEL = `
-  id,
-  note_name      AS "noteName",
-  note_type      AS "noteType",
-  note_details   AS "noteDetails",
-  username_title AS "usernameTitle",
-  username,
-  password,
-  security_type  AS "securityType",
-  totp_secret    AS "totpSecret",
-  gmail_account  AS "gmailAccount",
-  remarks,
-  created_at     AS "createdAt"
+  sn.id,
+  sn.note_name      AS "noteName",
+  sn.note_type      AS "noteType",
+  sn.note_details   AS "noteDetails",
+  sn.username_title AS "usernameTitle",
+  sn.username,
+  sn.password,
+  sn.security_type  AS "securityType",
+  sn.totp_secret    AS "totpSecret",
+  sn.gmail_account  AS "gmailAccount",
+  sn.remarks,
+  sn.visibility,
+  sn.user_id        AS "userId",
+  u.full_name       AS "ownerName",
+  sn.created_at     AS "createdAt"
 `;
+const JOINS = `FROM staff_notes sn LEFT JOIN users u ON u.id = sn.user_id`;
 
 // ── IMPORTANT: /totp-config routes MUST come before /:id to avoid collision ──
 
@@ -68,7 +77,7 @@ router.put('/totp-config', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT ${SEL} FROM staff_notes WHERE user_id = $1 ORDER BY id DESC`,
+      `SELECT ${SEL} ${JOINS} WHERE sn.user_id = $1 OR sn.visibility = 'public' ORDER BY sn.id DESC`,
       [req.user.id]
     );
     res.json(rows);
@@ -76,36 +85,38 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { noteName, noteType, noteDetails, usernameTitle, username, password, securityType, totpSecret, gmailAccount, remarks } = req.body;
+  const { noteName, noteType, noteDetails, usernameTitle, username, password, securityType, totpSecret, gmailAccount, remarks, visibility } = req.body;
   try {
     const { rows } = await pool.query(
       `INSERT INTO staff_notes
-         (user_id, note_name, note_type, note_details, username_title, username, password, security_type, totp_secret, gmail_account, remarks)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING ${SEL}`,
+         (user_id, note_name, note_type, note_details, username_title, username, password, security_type, totp_secret, gmail_account, remarks, visibility)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING id`,
       [req.user.id, noteName, noteType || 'normal', noteDetails || null, usernameTitle || null,
        username || null, password || null, securityType || 'normal', totpSecret || null,
-       gmailAccount || null, remarks || null]
+       gmailAccount || null, remarks || null, visibility === 'public' ? 'public' : 'private']
     );
-    res.json(rows[0]);
+    const { rows: full } = await pool.query(`SELECT ${SEL} ${JOINS} WHERE sn.id = $1`, [rows[0].id]);
+    res.json(full[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.put('/:id', async (req, res) => {
-  const { noteName, noteType, noteDetails, usernameTitle, username, password, securityType, totpSecret, gmailAccount, remarks } = req.body;
+  const { noteName, noteType, noteDetails, usernameTitle, username, password, securityType, totpSecret, gmailAccount, remarks, visibility } = req.body;
   try {
     const { rows } = await pool.query(
       `UPDATE staff_notes SET
          note_name=$1, note_type=$2, note_details=$3, username_title=$4, username=$5,
-         password=$6, security_type=$7, totp_secret=$8, gmail_account=$9, remarks=$10, updated_at=NOW()
-       WHERE id=$11 AND user_id=$12
-       RETURNING ${SEL}`,
+         password=$6, security_type=$7, totp_secret=$8, gmail_account=$9, remarks=$10, visibility=$11, updated_at=NOW()
+       WHERE id=$12 AND user_id=$13
+       RETURNING id`,
       [noteName, noteType || 'normal', noteDetails || null, usernameTitle || null, username || null,
        password || null, securityType || 'normal', totpSecret || null, gmailAccount || null,
-       remarks || null, req.params.id, req.user.id]
+       remarks || null, visibility === 'public' ? 'public' : 'private', req.params.id, req.user.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Note not found' });
-    res.json(rows[0]);
+    const { rows: full } = await pool.query(`SELECT ${SEL} ${JOINS} WHERE sn.id = $1`, [rows[0].id]);
+    res.json(full[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

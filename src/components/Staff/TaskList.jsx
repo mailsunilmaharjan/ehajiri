@@ -10,6 +10,7 @@ import SearchableSelect from '../Common/SearchableSelect.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import RichTextEditor from '../Common/RichTextEditor.jsx';
 import Avatar from '../Common/Avatar.jsx';
+import HoverCard from '../Common/HoverCard.jsx';
 import ContactFormModal, { CONTACT_EMPTY } from './ContactFormModal.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
@@ -71,23 +72,6 @@ const taskDateBucket = (row) => {
 // Shared hover-tooltip card — light background (never black/dark) with a
 // border and soft shadow, used for anything too long to show inline
 // (Assigned To's full staff list, a long Description in the footer strip).
-const HoverCard = ({ trigger, content, minWidth = 200, maxWidth = 340 }) => {
-  const [show, setShow] = useState(false);
-  return (
-    <span style={{ position: 'relative', display: 'inline-block' }}
-      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
-      {trigger}
-      {show && (
-        <div className="task-hover-card" style={{ position: 'absolute', zIndex: 300, top: '130%', left: 0, minWidth, maxWidth,
-          background: '#ffffff', color: '#1f2937', fontSize: 14, lineHeight: 1.8, padding: '10px 14px',
-          borderRadius: 8, border: '1px solid #e5e7eb', boxShadow: '0 10px 28px rgba(0,0,0,.18)', whiteSpace: 'normal' }}>
-          {content}
-        </div>
-      )}
-    </span>
-  );
-};
-
 const AssigneeCell = ({ assignees }) => {
   if (!Array.isArray(assignees) || !assignees.length) return <span style={{ color: '#d1d5db' }}>—</span>;
   const shown = assignees.slice(0, 2).map(a => a.name).join(', ');

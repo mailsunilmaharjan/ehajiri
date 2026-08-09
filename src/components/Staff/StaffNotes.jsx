@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import QRCode from 'qrcode';
 import { useLanguage } from '../../context/LanguageContext.jsx';
+import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import HoverCard from '../Common/HoverCard.jsx';
 import { useModalDrag } from '../../hooks/useModalDrag.js';
 
 // ── TOTP helpers ──────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ function maskEmail(email) {
   return `${head}xxxxxxxx${tail}${domain}`;
 }
 
-const EMPTY = { noteName: '', noteType: 'normal', noteDetails: '', usernameTitle: '', username: '', password: '', securityType: 'normal', totpSecret: '', remarks: '' };
+const EMPTY = { noteName: '', noteType: 'normal', noteDetails: '', usernameTitle: '', username: '', password: '', securityType: 'normal', totpSecret: '', remarks: '', visibility: 'private' };
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  Gmail Setup Popup — separate modal on top of the note form
@@ -206,6 +208,7 @@ const GmailSetupModal = ({ onClose, onSaved }) => {
 // ══════════════════════════════════════════════════════════════════════════════
 const StaffNotes = () => {
   const { t } = useLanguage();
+  const { currentUser } = useAuth();
 
   const [notes,       setNotes]       = useState([]);
   const [loading,     setLoading]     = useState(true);
@@ -310,6 +313,7 @@ const StaffNotes = () => {
       securityType:  row.securityType  || 'normal',
       totpSecret:    row.totpSecret    || '',
       remarks:       row.remarks       || '',
+      visibility:    row.visibility    || 'private',
     });
     setShowPwd(false); resetOtp();
     // For edit, assume QR was already set up (user has it in their app)
@@ -354,6 +358,7 @@ const StaffNotes = () => {
         totpSecret:    (form.noteType === 'credential' && form.securityType === 'encrypt') ? form.totpSecret : null,
         gmailAccount:  (form.noteType === 'credential' && form.securityType === 'encrypt') ? gmailAccount    : null,
         remarks:       form.remarks,
+        visibility:    form.visibility === 'public' ? 'public' : 'private',
       };
       if (editRow) {
         const u = await api.put(`/staff-notes/${editRow.id}`, payload);
@@ -367,18 +372,28 @@ const StaffNotes = () => {
     finally { setSaving(false); }
   };
 
+  // A "public" note is visible to everyone but only its own owner can edit/
+  // delete it (enforced server-side too — this just keeps the UI from
+  // offering a button that would just 404).
+  const isOwner = (row) => !row.userId || String(row.userId) === String(currentUser?.id);
+
   const del = async (id) => {
     if (!confirm('Delete this note?')) return;
     try { await api.delete(`/staff-notes/${id}`); setNotes(p => p.filter(n => n.id !== id)); }
     catch (e) { alert(e.message); }
   };
 
-  // Bulk delete — called by DataGrid's built-in confirm dialog
+  // Bulk delete — called by DataGrid's built-in confirm dialog. Silently
+  // skips any selected note that isn't the current user's (a public note of
+  // someone else's could otherwise be checked alongside their own).
   const bulkDelete = async (ids) => {
+    const byId = new Map(notes.map(n => [n.id, n]));
+    const ownedIds = ids.filter(id => isOwner(byId.get(id) || {}));
     try {
-      await Promise.all(ids.map(id => api.delete(`/staff-notes/${id}`)));
-      setNotes(p => p.filter(n => !ids.includes(n.id)));
+      await Promise.all(ownedIds.map(id => api.delete(`/staff-notes/${id}`)));
+      setNotes(p => p.filter(n => !ownedIds.includes(n.id)));
       setSelectedIds([]);
+      if (ownedIds.length < ids.length) alert(`${ids.length - ownedIds.length} note(s) skipped — you can only delete your own notes.`);
     } catch (e) { alert(e.message); }
   };
 
@@ -394,16 +409,21 @@ const StaffNotes = () => {
   // ── Grid columns ──────────────────────────────────────────────────────────
   const columns = [
     {
-      field: 'noteName', header: 'Note', width: 220,
+      field: 'noteName', header: 'Note', width: 200,
       render: (v, row) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 16 }}>{row.noteType === 'credential' ? '🔑' : '📝'}</span>
-          <span style={{ fontWeight: 600 }}>{v}</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 600 }}>{v}</div>
+            {!isOwner(row) && row.ownerName && (
+              <div style={{ fontSize: 10.5, color: '#9ca3af' }}>by {row.ownerName}</div>
+            )}
+          </div>
         </div>
       ),
     },
     {
-      field: 'noteType', header: 'Note Type', width: 180, align: 'center',
+      field: 'noteType', header: 'Note Type', width: 170, align: 'center',
       render: v => (
         <span style={{
           padding: '2px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700,
@@ -414,17 +434,42 @@ const StaffNotes = () => {
         </span>
       ),
     },
-    { field: 'remarks', header: 'Remarks', render: v => v || <span style={{ color: '#d1d5db' }}>—</span> },
+    {
+      field: 'visibility', header: 'Visibility', width: 110, align: 'center', sortable: false,
+      render: v => (
+        <span style={{
+          padding: '2px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700,
+          background: v === 'public' ? '#d1fae5' : '#fde8ef',
+          color:      v === 'public' ? '#065f46' : '#be185d',
+        }}>
+          {v === 'public' ? '🌐 Public' : '🔒 Private'}
+        </span>
+      ),
+    },
+    {
+      field: 'noteDetails', header: 'Note Details', width: 240,
+      render: v => {
+        if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
+        if (v.length <= 42) return <span>{v}</span>;
+        return (
+          <HoverCard
+            trigger={<span style={{ cursor: 'default' }}>{v.slice(0, 42)}…</span>}
+            content={<div style={{ whiteSpace: 'pre-wrap' }}>{v}</div>}
+            maxWidth={380}
+          />
+        );
+      },
+    },
     {
       field: 'id', header: '', width: 90, sortable: false, filterable: false,
-      render: (_, row) => (
+      render: (_, row) => isOwner(row) ? (
         <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={e => { e.stopPropagation(); openEdit(row); }}
             style={{ background: '#dbeafe', color: '#1e40af', border: 'none', borderRadius: 5, padding: '3px 8px', fontSize: 12, cursor: 'pointer' }}>✏️</button>
           <button onClick={e => { e.stopPropagation(); del(row.id); }}
             style={{ background: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: 5, padding: '3px 8px', fontSize: 12, cursor: 'pointer' }}>🗑️</button>
         </div>
-      ),
+      ) : null,
     },
   ];
 
@@ -439,11 +484,11 @@ const StaffNotes = () => {
         columns={columns} data={notes} rowKey="id"
         showCheckbox={true}
         searchPlaceholder="Search notes…"
-        onRowDoubleClick={openEdit}
+        onRowDoubleClick={(row) => { if (isOwner(row)) openEdit(row); }}
         onSelectionChange={setSelectedIds}
         onDeleteSelected={bulkDelete}
         selectionActions={
-          selectedIds.length === 1 && (
+          selectedIds.length === 1 && isOwner(notes.find(n => n.id === selectedIds[0]) || {}) && (
             <button
               onClick={() => openEdit(notes.find(n => n.id === selectedIds[0]))}
               style={{ background: '#dbeafe', color: '#1e40af', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
@@ -455,10 +500,10 @@ const StaffNotes = () => {
         contextMenu={[
           { label: '＋ Add New Note',   icon: '➕', onClick: ()    => openAdd() },
           'divider',
-          { label: 'Edit Note',          icon: '✏️', onClick: (row) => openEdit(row) },
-          { label: 'Delete Note',        icon: '🗑️', onClick: (row) => del(row.id), className: 'danger' },
+          { label: 'Edit Note',          icon: '✏️', onClick: (row) => { if (isOwner(row)) openEdit(row); else alert('You can only edit your own notes.'); } },
+          { label: 'Delete Note',        icon: '🗑️', onClick: (row) => { if (isOwner(row)) del(row.id); else alert('You can only delete your own notes.'); }, className: 'danger' },
           'divider',
-          { label: '🔐 Encrypt Note',   icon: '🔐', onClick: (row) => encryptNote(row) },
+          { label: '🔐 Encrypt Note',   icon: '🔐', onClick: (row) => { if (isOwner(row)) encryptNote(row); else alert('You can only edit your own notes.'); } },
         ]}
         toolbar={
           <button onClick={openAdd} style={{ background: '#1a56db', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -503,6 +548,28 @@ const StaffNotes = () => {
                       <input type="radio" name="noteType" value={val} checked={form.noteType === val} onChange={() => set('noteType', val)} />
                       {lbl}
                     </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Visibility — private (only you) vs public (every staff member can see
+                  it, but only you can still edit/delete it). Defaults to private. */}
+              <div className="form-group">
+                <label className="form-label">Visibility</label>
+                <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
+                  {[
+                    ['private', '🔒 Private', 'Only visible to you', '#be185d', '#fde8ef'],
+                    ['public',  '🌐 Public',  'Visible to every staff member', '#065f46', '#d1fae5'],
+                  ].map(([val, lbl, hint, color, bg]) => (
+                    <button key={val} type="button" onClick={() => set('visibility', val)}
+                      style={{
+                        flex: 1, textAlign: 'left', padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                        border: `2px solid ${form.visibility === val ? color : '#e5e7eb'}`,
+                        background: form.visibility === val ? bg : '#fff',
+                      }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: form.visibility === val ? color : '#374151' }}>{lbl}</div>
+                      <div style={{ fontSize: 11, color: '#6b7280', marginTop: 1 }}>{hint}</div>
+                    </button>
                   ))}
                 </div>
               </div>

@@ -2058,6 +2058,18 @@ const MIGRATIONS = [
       `);
     },
   },
+
+  {
+    version    : 91,
+    description: 'staff_notes.visibility — a note defaults to private (only its own owner ever saw notes before this) but can now be marked Public, visible to every staff member; still only the owner can edit/delete it either way.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE staff_notes
+          ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private';
+        CREATE INDEX IF NOT EXISTS idx_staff_notes_visibility ON staff_notes(visibility);
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

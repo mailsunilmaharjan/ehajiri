@@ -236,4 +236,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Contact page: Type badges are smaller so they stay tidy with the right-side panel open; the "Post / Office" column is now "Address" (shows the real company/personal address); the detail panel is now a full-height overlay drawer like the Task page\'s, so the grid stays full width instead of shrinking when it opens.',
   },
+  {
+    appVersion : '1.0.49',
+    dbVersion  : 91,
+    releaseDate: '2026-08-09',
+    notes      : 'My Notes: "Remarks" column replaced with "Note Details" (truncated with a hover card for the full text — no more horizontal scrolling). Notes can now be marked Private (only you, the default — unchanged from before) or Public (every staff member can see it, but only you can still edit or delete it).',
+  },
 ];
