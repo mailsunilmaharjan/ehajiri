@@ -212,4 +212,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Removed the Today/Tomorrow/Day After Tomorrow/... merged section header rows from the Task grid — that info now lives entirely in the Task Date column added in 1.0.42, so the grid is back to a plain flat, paginated list.',
   },
+  {
+    appVersion : '1.0.45',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Task grid\'s Task Date column shows "Day Af.To" instead of the longer "Day After Tomorrow" for a task due the day after tomorrow.',
+  },
 ];

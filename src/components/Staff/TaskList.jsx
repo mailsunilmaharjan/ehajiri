@@ -715,7 +715,7 @@ const TaskList = () => {
           const today = getNepalTodayISO();
           if (due === today) label = 'Today';
           else if (due === addDaysISO(today, 1)) label = 'Tomorrow';
-          else if (due === addDaysISO(today, 2)) label = 'Day After Tomorrow';
+          else if (due === addDaysISO(today, 2)) label = 'Day Af.To';
           else label = fd(due);
         }
         return <span style={{ fontSize: 11.5, color: '#374151' }}>{label}</span>;
