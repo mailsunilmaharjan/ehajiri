@@ -254,4 +254,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Office Visit Type Settings grid: the SN column was being stretched way past its needed width on grids with only a few narrow columns (a table stretched to fill its container redistributes the extra space across every column, even ones with a fixed max-width). Columns now auto-fit their content on this grid instead.',
   },
+  {
+    appVersion : '1.0.52',
+    dbVersion  : 91,
+    releaseDate: '2026-08-09',
+    notes      : 'Task Notifications (live popup when a task is assigned to you) are now on by default instead of an opt-in toggle. The Staff and Task menu items in the top nav now show a red count badge for unread task notifications — clears automatically the moment you open the Task page.',
+  },
 ];

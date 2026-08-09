@@ -12,6 +12,7 @@ import RichTextEditor from '../Common/RichTextEditor.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import HoverCard from '../Common/HoverCard.jsx';
 import ContactFormModal, { CONTACT_EMPTY } from './ContactFormModal.jsx';
+import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
@@ -195,7 +196,12 @@ const TaskList = () => {
   const navigate = useNavigate();
   const { canManageSystem, currentUser } = useAuth();
   const { employees, filteredEmployees } = useData();
+  const { clearTaskCount } = useNotifications();
   const fd = useDateFormat();
+
+  // Clears the Staff/Task nav badge the moment this page is actually opened
+  // — same convention as StaffMessage.jsx clearing the message badge on mount.
+  useEffect(() => { clearTaskCount(); }, [clearTaskCount]);
 
   const [tasks,      setTasks]      = useState([]);
   const [categories, setCategories] = useState([]);

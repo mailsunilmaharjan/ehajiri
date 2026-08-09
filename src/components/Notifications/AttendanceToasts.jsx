@@ -6,7 +6,7 @@ import { useBeepAlert } from '../../hooks/useBeepAlert.js';
 import { apiUrl } from '../../api/client.js';
 
 /* ── Notification Context ──────────────────────────────────── */
-const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {} });
+const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {}, taskCount: 0, clearTaskCount: () => {} });
 export const useNotifications = () => useContext(NotiCtx);
 
 /* ── Attendance Toast Card ─────────────────────────────────── */
@@ -231,6 +231,7 @@ const ToastContainer = ({ notifications, onClose }) => {
 export function AttendanceNotificationProvider({ children }) {
   const [notifications, setNotifications] = useState([]);
   const [msgCount,      setMsgCount]      = useState(0);
+  const [taskCount,     setTaskCount]     = useState(0);
   const esRef = useRef(null);
 
   // useAuth is available here because AuthProvider wraps everything above Layout
@@ -251,14 +252,12 @@ export function AttendanceNotificationProvider({ children }) {
     liveAttendanceEnabledRef.current = settings.liveAttendanceNotifications !== false;
   }, [settings.liveAttendanceNotifications]);
 
-  // Settings → Company Information → "Enable Task Notifications" — unlike
-  // attendance/messages this defaults OFF (new capability, matches the
-  // moduleFlags.js convention: invasive things need an explicit opt-in).
-  // Task events also fire a native OS-level Notification() when enabled
-  // (Task Assigned / Task Completed are worth surfacing even if the tab is
-  // in the background), so permission is only requested once the setting
-  // is actually on — asking every user up front for a feature that's off
-  // by default would just be a confusing prompt for nothing.
+  // Settings → Company Information → "Enable Task Notifications" — defaults
+  // on (see DEFAULT_SETTINGS), same as attendance/message notifications;
+  // still toggle-able off per company. Task events also fire a native
+  // OS-level Notification() when enabled (Task Assigned / Task Completed are
+  // worth surfacing even if the tab is in the background), so permission is
+  // only requested once the setting is actually on.
   const taskNotificationsEnabledRef = useRef(settings.taskNotifications === true);
   useEffect(() => {
     taskNotificationsEnabledRef.current = settings.taskNotifications === true;
@@ -287,6 +286,7 @@ export function AttendanceNotificationProvider({ children }) {
   }, [remove]);
 
   const clearMsgCount = useCallback(() => setMsgCount(0), []);
+  const clearTaskCount = useCallback(() => setTaskCount(0), []);
 
   // Keeps beeping every few seconds while there's at least one unseen broadcast
   // message — stops the instant msgCount is cleared (user opens the inbox).
@@ -322,6 +322,7 @@ export function AttendanceNotificationProvider({ children }) {
             const isRecipient = uid && Array.isArray(data.recipientIds) && data.recipientIds.includes(uid);
             if (isRecipient && taskNotificationsEnabledRef.current) {
               add(data);
+              setTaskCount(c => c + 1);
               if ('Notification' in window && Notification.permission === 'granted') {
                 const n = new Notification(data.event === 'completed' ? 'Task Completed' : 'Task Assigned to You', {
                   body: data.title + (data.by ? `\n${data.event === 'completed' ? 'Completed' : 'Assigned'} by ${data.by}` : ''),
@@ -341,7 +342,7 @@ export function AttendanceNotificationProvider({ children }) {
   }, [add, currentUser?.id]);
 
   return (
-    <NotiCtx.Provider value={{ add, remove, msgCount, clearMsgCount }}>
+    <NotiCtx.Provider value={{ add, remove, msgCount, clearMsgCount, taskCount, clearTaskCount }}>
       {children}
       <ToastContainer notifications={notifications} onClose={remove} />
     </NotiCtx.Provider>

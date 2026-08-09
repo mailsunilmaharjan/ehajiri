@@ -35,7 +35,7 @@ const TopMenu = () => {
   } = useAuth();
   const { t, language, changeLanguage } = useLanguage();
   const { stats } = useData();
-  const { msgCount } = useNotifications();
+  const { msgCount, taskCount } = useNotifications();
   const { totalUnread: chatUnread } = useChat();
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -194,6 +194,9 @@ const TopMenu = () => {
           onClick={() => toggleDropdown('staff')}
         >
           <span>{t('Staff')}</span>
+          {taskCount > 0 && (
+            <span className="tm-badge" style={{ marginLeft: 4 }}>{taskCount}</span>
+          )}
           <Chevron />
 
           <div
@@ -209,8 +212,15 @@ const TopMenu = () => {
               <span>📝</span> {t('My Notes')}
             </div>
             {canView('task') && (
-              <div className="tm-dropdown-item" onClick={() => navTo('/staff/task')}>
-                <span>✅</span> {t('Task')}
+              <div className="tm-dropdown-item" onClick={() => navTo('/staff/task')}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span><span>✅</span> {t('Task')}</span>
+                {taskCount > 0 && (
+                  <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
+                    fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
+                    {taskCount}
+                  </span>
+                )}
               </div>
             )}
             {canView('staffContact') && (
