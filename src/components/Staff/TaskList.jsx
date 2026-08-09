@@ -44,7 +44,6 @@ const daysBetweenISO = (fromISO, toISO) => {
   const [y2, m2, d2] = toISO.split('-').map(Number);
   return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
 };
-const TASK_GROUP_ORDER = ['today', 'tomorrow', 'dayAfterTomorrow', 'after4th', 'after5th', 'pending'];
 
 // "Assigned To" cell — shows only the first 2 names inline (the column isn't
 // wide enough for a whole checkbox-grid's worth of assignees) with a larger,
@@ -806,44 +805,6 @@ const TaskList = () => {
     },
   ], [fd]);
 
-  // Date-bucket sections for the grid — a task due today that's still not
-  // completed once today is over auto-transfers into "Tomorrow" (and keeps
-  // landing there, however many days overdue, until it's completed) rather
-  // than piling up under "Today" forever. A completed task keeps showing
-  // under "Today" as a record rather than rolling forward. Undated tasks (or
-  // ones past the 5-day window) land in the trailing "Pending" catch-all.
-  const todayNepal            = getNepalTodayISO();
-  const tomorrowNepal         = addDaysISO(todayNepal, 1);
-  const dayAfterTomorrowNepal = addDaysISO(todayNepal, 2);
-  const after4thNepal         = addDaysISO(todayNepal, 3);
-  const after5thNepal         = addDaysISO(todayNepal, 4);
-
-  const taskGroupKey = (row) => {
-    const due = row.dueDate ? String(row.dueDate).split('T')[0] : null;
-    if (!due) return 'pending';
-    if (due < todayNepal) return row.status === 'completed' ? 'today' : 'tomorrow';
-    if (due === todayNepal) return 'today';
-    if (due === tomorrowNepal) return 'tomorrow';
-    if (due === dayAfterTomorrowNepal) return 'dayAfterTomorrow';
-    if (due === after4thNepal) return 'after4th';
-    if (due === after5thNepal) return 'after5th';
-    return 'pending';
-  };
-  // Short labels — Today/Tomorrow/Day After Tomorrow are self-explanatory on
-  // their own, so no date is spelled out; the two sections beyond that show
-  // just the plain date since "after 4th/5th day" alone isn't as meaningful.
-  const taskGroupLabel = (key) => {
-    switch (key) {
-      case 'today':            return 'Today';
-      case 'tomorrow':         return 'Tomorrow';
-      case 'dayAfterTomorrow': return 'Day After Tomorrow';
-      case 'after4th':         return fd(after4thNepal);
-      case 'after5th':         return fd(after5thNepal);
-      case 'pending':          return 'Task Pending Plan in coming Days';
-      default:                 return key;
-    }
-  };
-
   // Filter by Staff, quick filters, Advance Search — rendered inside the grid's
   // own toolbar (left of its Search box) via DataGrid's toolbarLeft prop.
   const taskFilterToolbar = (
@@ -968,9 +929,6 @@ const TaskList = () => {
                 toolbarLeft={taskFilterToolbar}
                 footerLeft={taskFooterLeft}
                 extraSearchFields={['customerPhone']}
-                groupBy={taskGroupKey}
-                groupOrder={TASK_GROUP_ORDER}
-                groupLabel={taskGroupLabel}
                 onRowClick={openFollowupPanel}
                 onFocusChange={openFollowupPanel}
                 onRowDoubleClick={openEdit}

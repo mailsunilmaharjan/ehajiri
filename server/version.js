@@ -206,4 +206,10 @@ export const VERSION_HISTORY = [
     releaseDate: '2026-08-09',
     notes      : 'Task grid Description column now truncates cleanly with a hover card for the full text instead of stretching the row. Assigned To\'s hover card now lists everyone as a numbered "Name | Post" list (e.g. "1. Sunil Maharjan | CEO") instead of a plain comma-separated line.',
   },
+  {
+    appVersion : '1.0.44',
+    dbVersion  : 90,
+    releaseDate: '2026-08-09',
+    notes      : 'Removed the Today/Tomorrow/Day After Tomorrow/... merged section header rows from the Task grid — that info now lives entirely in the Task Date column added in 1.0.42, so the grid is back to a plain flat, paginated list.',
+  },
 ];
