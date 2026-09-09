@@ -23,7 +23,12 @@ const defaultForm = {
 const ShiftManagement = () => {
   const { isAdmin, isManager } = useAuth();
   const { t } = useLanguage();
-  const { shifts, addShift, updateShift, deleteShift, employees } = useData();
+  const { shifts: allShifts, addShift, updateShift, deleteShift, employees } = useData();
+  // Day Off / Night Off (shifts.isOff) are system shifts the Duty Roster
+  // picker depends on — not something an admin creates/edits/deletes here.
+  // Hidden from this page entirely rather than just delete-blocked, so
+  // Shift Management only ever shows shifts a tenant actually manages.
+  const shifts = allShifts.filter(s => !s.isOff);
   const [modal, setModal]               = useState(null);
   const [form, setForm]                 = useState(defaultForm);
   const [editId, setEditId]             = useState(null);
@@ -56,10 +61,10 @@ const ShiftManagement = () => {
   };
 
   const toggleDay = (day) => {
-    setForm(p => ({
-      ...p,
-      days: p.days.includes(day) ? p.days.filter(d => d !== day) : [...p.days, day],
-    }));
+    setForm(p => {
+      const days = p.days || [];
+      return { ...p, days: days.includes(day) ? days.filter(d => d !== day) : [...days, day] };
+    });
   };
 
   const validate = () => {
@@ -193,8 +198,8 @@ const ShiftManagement = () => {
                   width: 22, height: 22, borderRadius: 4,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 10, fontWeight: 700,
-                  background: s.days.includes(d.key) ? `${s.color}22` : '#f3f4f6',
-                  color:      s.days.includes(d.key) ? s.color : '#9ca3af',
+                  background: (s.days || []).includes(d.key) ? `${s.color}22` : '#f3f4f6',
+                  color:      (s.days || []).includes(d.key) ? s.color : '#9ca3af',
                 }}>{d.label}</div>
               ))}
             </div>
@@ -273,9 +278,9 @@ const ShiftManagement = () => {
                     <button key={d.key} type="button" onClick={() => toggleDay(d.key)}
                       style={{
                         width: 40, height: 40, borderRadius: 8,
-                        border: `2px solid ${form.days.includes(d.key) ? form.color : '#e5e7eb'}`,
-                        background: form.days.includes(d.key) ? form.color : '#f9fafb',
-                        color: form.days.includes(d.key) ? 'white' : '#6b7280',
+                        border: `2px solid ${(form.days || []).includes(d.key) ? form.color : '#e5e7eb'}`,
+                        background: (form.days || []).includes(d.key) ? form.color : '#f9fafb',
+                        color: (form.days || []).includes(d.key) ? 'white' : '#6b7280',
                         fontWeight: 700, cursor: 'pointer', fontSize: 13,
                       }}>
                       {d.label}

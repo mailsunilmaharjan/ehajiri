@@ -40,11 +40,19 @@ import dutyRosterRouter from './routes/dutyRoster.js';
 import auditLogRouter   from './routes/auditLog.js';
 import staffNotesRouter  from './routes/staffNotes.js';
 import contactsRouter    from './routes/contacts.js';
+import eventsRouter       from './routes/events.js';
+import onlineAttendanceRouter from './routes/onlineAttendance.js';
+import guestCheckinRouter from './routes/guestCheckin.js';
 import tasksRouter        from './routes/tasks.js';
+import fieldVisitRouter  from './routes/fieldVisit.js';
 import messagesRouter    from './routes/messages.js';
 import chatRouter        from './routes/chat.js';
 import emailConfigRouter from './routes/emailConfig.js';
+import smsConfigRouter   from './routes/smsConfig.js';
+import smsRouter         from './routes/sms.js';
 import aiAnalysisRouter  from './routes/aiAnalysis.js';
+import recoApprovalRouter from './routes/recoApproval.js';
+import staffAnalyticsRouter from './routes/staffAnalytics.js';
 import bugReportsRouter  from './routes/bugReports.js';
 import { logBugReport }  from './services/bugReportService.js';
 import { licenseGuard } from './middleware/licenseGuard.js';
@@ -109,6 +117,11 @@ app.use('/api/auth',      authRouter);          // auth/login does its own licen
 // Not gated by authGuard — POST must work even without a valid session
 // (a crash can happen before login); GET/PUT/DELETE guard themselves inside.
 app.use('/api/bug-reports', licenseGuard, bugReportsRouter);
+// Public "scan the QR, check yourself in" flow — no eHajiri login on the
+// guest's own phone at all. Every route requires a valid signed token
+// (guestCheckin.js's own verifyToken) instead of authGuard; still behind
+// licenseGuard so it stops working the moment a tenant's license lapses.
+app.use('/api/guest-checkin', licenseGuard, guestCheckinRouter);
 
 // All other routes require a valid active license AND an authenticated user
 app.use('/api/employees', licenseGuard, authGuard, employeesRouter);
@@ -131,18 +144,28 @@ app.use('/api/standalone',licenseGuard, authGuard, requireRole('admin', 'superAd
 app.use('/api/standalone-sync', licenseGuard, requireModuleEnabled(FLAG_KEYS.standaloneDevice, 'StandAlone Device'), standaloneSyncTokenGuard, standaloneSyncRouter);
 app.use('/api/attendance',licenseGuard, authGuard, attendanceRouter);
 app.use('/api/overtime',    licenseGuard, authGuard, overtimeRouter);
-app.use('/api/duty-roster', licenseGuard, authGuard, dutyRosterRouter);
+app.use('/api/duty-roster', licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.dutyRoster, 'Duty Roster'), dutyRosterRouter);
 app.use('/api/audit-log',   licenseGuard, authGuard, requireRole('superAdmin'), auditLogRouter);
 app.use('/api/staff-notes',  licenseGuard, authGuard, staffNotesRouter);
 app.use('/api/contacts',     licenseGuard, authGuard, contactsRouter);
-app.use('/api/tasks',        licenseGuard, authGuard, tasksRouter);
+app.use('/api/events',       licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.guestRegistration, 'Guest Registration'), eventsRouter);
+app.use('/api/online-attendance', licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.onlineAttendance, 'Online Attendance'), onlineAttendanceRouter);
+app.use('/api/tasks',        licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.task, 'Task'), tasksRouter);
+app.use('/api/field-visit',  licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.task, 'Task'), fieldVisitRouter);
 app.use('/api/messages',     licenseGuard, authGuard, messagesRouter);
-app.use('/api/chat',         licenseGuard, authGuard, chatRouter);
+app.use('/api/chat',         licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.chat, 'Chat'), chatRouter);
 // requireRole allows admin+superAdmin (the API itself is fine with either),
 // but the module flag is Super-Admin-only to flip (see RoleManagement.jsx) —
 // so in practice this stays 503 for everyone until a Super Admin enables it.
 app.use('/api/email-config', licenseGuard, authGuard, requireRole('admin', 'superAdmin'), requireModuleEnabled(FLAG_KEYS.emailSetup, 'Email Setup'), emailConfigRouter);
+// Admin-only config CRUD/test vs. the plain-staff send endpoint below —
+// same split as WhatsApp's click-to-chat buttons (anyone can trigger a
+// send; only admin/superAdmin can set up the gateway itself).
+app.use('/api/sms-config',  licenseGuard, authGuard, requireRole('admin', 'superAdmin'), requireModuleEnabled(FLAG_KEYS.smsGateway, 'SMS Gateway'), smsConfigRouter);
+app.use('/api/sms',         licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.smsGateway, 'SMS Gateway'), smsRouter);
 app.use('/api/ai',          licenseGuard, authGuard, aiAnalysisRouter);
+app.use('/api/reco-approval', licenseGuard, authGuard, recoApprovalRouter);
+app.use('/api/staff-analytics', licenseGuard, authGuard, staffAnalyticsRouter);
 // ZKTeco ADMS push protocol — devices POST attendance to /iclock/*
 app.use('/iclock',         requireModuleEnabled(FLAG_KEYS.attendanceDevice, 'Attendance Device'), zktecoRouter);
 
@@ -250,7 +273,14 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
       throw err;
     });
 
-    if (hasTls) {
+    // In the hosted multi-tenant fleet every leaf tenant process shares this
+    // same cert dir and HTTPS_PORT with the central router (the instance with
+    // ENABLE_TENANT_RESOLVE=true, which is the one actually reachable from
+    // outside) — only the router needs the real listener. Without this check,
+    // every other tenant process retries the same doomed bind on each restart
+    // and spams its own stderr with EADDRINUSE.
+    const isLeafTenant = !!process.env.TENANT_ID && process.env.ENABLE_TENANT_RESOLVE !== 'true';
+    if (hasTls && !isLeafTenant) {
       const tlsOptions = { cert: fs.readFileSync(CERT_PATH), key: fs.readFileSync(KEY_PATH) };
       const httpsServer = https.createServer(tlsOptions, app);
       httpsServer.listen(HTTPS_PORT, () => {

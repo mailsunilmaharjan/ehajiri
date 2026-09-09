@@ -11,7 +11,7 @@ import { syncEmailDirectory } from '../services/directorySync.js';
 // is already taken by another account — including hidden system/superAdmin accounts
 // that don't appear in the Staff grid — so give a clear message instead of the raw
 // constraint name.
-function friendlyDbError(e) {
+function friendlyDbError(e, operation = 'update') {
   if (e.code === '23505' && e.constraint === 'users_username_key') {
     return 'Duplicate Email Address';
   }
@@ -19,8 +19,21 @@ function friendlyDbError(e) {
     return 'This email address is already used by another staff member';
   }
   if (e.code === '23503') {
-    return `Cannot delete — this staff still has linked records in "${e.table}". ` +
-           'Mark them Not Working via Officially Changes instead, or remove the linked records first.';
+    if (operation === 'delete') {
+      return `Cannot delete — this staff still has linked records in "${e.table}". ` +
+             'Mark them Not Working via Officially Changes instead, or remove the linked records first.';
+    }
+    // users_updated_by_fkey fails specifically when req.user.id (from an
+    // otherwise-valid, correctly tenant-scoped JWT) no longer matches any
+    // row in this tenant's own users table — e.g. the account that logged
+    // in has since been deleted here. Re-logging in mints a token off the
+    // current users table, which is the actual fix; the old wording here
+    // ("Cannot delete... Mark them Not Working") made no sense on a save
+    // and pointed at the wrong record entirely (this staff, not the actor).
+    if (e.constraint === 'users_updated_by_fkey') {
+      return 'Your session is out of date — please log out and log back in, then try saving again.';
+    }
+    return `Could not save — this update conflicts with a linked record in "${e.table}".`;
   }
   return e.message;
 }
@@ -98,7 +111,11 @@ const SEL = `
   emp_status       AS "status",
   ranking_order    AS "rankingOrder",
   remarks,
-  eligible_for_ot  AS "eligibleForOt"
+  eligible_for_ot  AS "eligibleForOt",
+  online_attendance_enabled AS "onlineAttendanceEnabled",
+  updated_by       AS "updatedBy",
+  updated_at       AS "updatedAt",
+  updated_device   AS "updatedDevice"
 `;
 
 const sql = {
@@ -111,18 +128,29 @@ const sql = {
       (employee_id, username, password, full_name, role, department, position, shift,
        email, phone, join_date, gender, avatar,
        device_id, religion, handicapped, branch, mode, grade, timing_type,
-       dob, attendance_date, emp_status, ranking_order, remarks, eligible_for_ot)
+       dob, attendance_date, emp_status, ranking_order, remarks, eligible_for_ot,
+       online_attendance_enabled)
     VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
     RETURNING ${SEL}`,
 
+  // username=$27 keeps username in sync with email, same as insert's
+  // "username = email || employeeId" — without this, editing a staff
+  // member's email leaves their OLD username permanently squatting on that
+  // old address (still enforced by users_username_key), so if that old
+  // address is ever needed again — a new hire, or reusing it for someone
+  // else — creating them fails with a "Duplicate Email Address" that looks
+  // like a real duplicate but isn't one: the email itself is free, only the
+  // stale username collides.
   update: `
     UPDATE users SET
       full_name=$1, role=$2, department=$3, position=$4, shift=$5,
       email=$6, phone=$7, join_date=$8, gender=$9, active=$10,
       device_id=$11, religion=$12, handicapped=$13, branch=$14, mode=$15,
       grade=$16, timing_type=$17, dob=$18, attendance_date=$19, emp_status=$20,
-      ranking_order=$21, remarks=$22, eligible_for_ot=$23, employee_id=$24
+      ranking_order=$21, remarks=$22, eligible_for_ot=$23, employee_id=$24,
+      online_attendance_enabled=$26, username=$27,
+      updated_by=$28, updated_at=NOW(), updated_device=$29
     WHERE id=$25
     RETURNING ${SEL}`,
 };
@@ -422,6 +450,7 @@ router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => 
     email, phone, joinDate, gender, avatar,
     deviceId, religion, handicapped, branch, mode, grade,
     timingType, dob, attendanceDate, status, rankingOrder, remarks, eligibleForOt,
+    onlineAttendanceEnabled,
   } = req.body;
   try {
     // Check staff limit from active license
@@ -468,6 +497,7 @@ router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => 
       rankingOrder ? Number(rankingOrder) : null,
       remarks      || null,
       eligibleForOt ?? false,
+      onlineAttendanceEnabled ?? false,
     ]);
     res.status(201).json(rows[0]);
     if (email) {
@@ -553,6 +583,7 @@ router.post('/import', async (req, res) => {
             dob || null, null,
             status || 'Active', null, remarks || null,
             otVal === 'yes' || otVal === 'true' || otVal === '1',
+            false, // onlineAttendanceEnabled — not part of the Excel import template, always starts off
           ]);
           created.push(idStr);
           existingIds.add(idStr); // guards against duplicate rows within the same file
@@ -571,12 +602,34 @@ router.post('/import', async (req, res) => {
   }
 });
 
+/* PUT /api/employees/online-attendance-bulk — Settings → Attendance →
+   Online Attendance → Setting page's "Enable Selected"/"Disable Selected"
+   bulk action, alongside the same per-row toggle PUT /:id already supports.
+   Registered BEFORE /:id so Express doesn't match this path as :id="online-attendance-bulk". */
+router.put('/online-attendance-bulk', requireRole('admin', 'superAdmin'), async (req, res) => {
+  const { employeeIds, enabled } = req.body;
+  if (!Array.isArray(employeeIds) || !employeeIds.length) {
+    return res.status(400).json({ error: 'employeeIds is required' });
+  }
+  try {
+    const ids = employeeIds.map(Number).filter(Number.isFinite);
+    await pool.query(
+      'UPDATE users SET online_attendance_enabled=$1 WHERE id = ANY($2::int[])',
+      [!!enabled, ids]
+    );
+    logAudit({ actor: req.user, action: 'update', entity: 'employee', entityId: null,
+      before: null, after: { onlineAttendanceEnabled: !!enabled, employeeIds: ids } });
+    res.json({ success: true, updated: ids.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) => {
   const {
     employeeId, fullName, role, department, position, shift,
     email, phone, joinDate, gender, active,
     deviceId, religion, handicapped, branch, mode, grade,
     timingType, dob, attendanceDate, status, rankingOrder, remarks, eligibleForOt,
+    onlineAttendanceEnabled, deviceInfo,
   } = req.body;
   try {
     const before = (await pool.query(`SELECT ${SEL} FROM users WHERE id=$1`, [req.params.id])).rows[0];
@@ -606,6 +659,10 @@ router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) =
       eligibleForOt ?? false,
       employeeId,
       req.params.id,
+      onlineAttendanceEnabled ?? false,
+      email || employeeId,   // username = email — same fallback as insert
+      req.user.id,
+      deviceInfo || null,
     ]);
     logAudit({ actor: req.user, action: 'update', entity: 'employee', entityId: req.params.id, before, after: rows[0] });
     res.json(rows[0]);
@@ -638,7 +695,7 @@ router.delete('/:id', canDeleteStaff, guardAdminAccountMutation, async (req, res
     logAudit({ actor: req.user, action: 'delete', entity: 'employee', entityId: req.params.id, before, after: null });
     res.json({ success: true });
     if (before?.email) syncEmailDirectory({ action: 'delete', newEmail: before.email });
-  } catch (e) { res.status(500).json({ error: friendlyDbError(e) }); }
+  } catch (e) { res.status(500).json({ error: friendlyDbError(e, 'delete') }); }
 });
 
 router.put('/:id/reset-password', canManageStaff, async (req, res) => {

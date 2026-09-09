@@ -14,8 +14,10 @@ import pool   from '../db.js';
 import { logError } from '../utils/logError.js';
 import {
   upsertDevice,
+  getDevice,
   getDeviceStamp,
   updateDeviceStamp,
+  recoverGapIfNeeded,
   incrementLogCount,
   parseAttlog,
   saveAttlogs,
@@ -216,7 +218,9 @@ async function handleZkteco(req, res) {
         const firmware = req.query.pushver    || req.headers['x-device-firmver']  || null;
         const platform = req.query.DeviceName || req.headers['x-device-platform'] || null;
 
+        const priorDevice = await getDevice(sn);
         await upsertDevice(sn, ip, { firmware, platform });
+        await recoverGapIfNeeded(sn, priorDevice?.last_seen);
         await deduplicatePending(sn);
         await queueUserValidTimeFun(sn);
         await autoRestoreTemplates(sn);  // guide §16
@@ -248,8 +252,19 @@ async function handleZkteco(req, res) {
         } catch { /* ignore parse errors */ }
       }
 
-      // Update last_seen
-      await pool.query(`UPDATE zkteco_devices SET last_seen=NOW(), last_ip=$1 WHERE serial_number=$2`, [ip, sn]);
+      // Upsert (not a plain UPDATE) — a device can reach this poll endpoint
+      // without ever having a row here yet. That happens whenever the
+      // gateway's own "approve device for a tenant" step (LicenseAdmin's
+      // Serial Numbers page) happens AFTER the device's one-time
+      // options=all handshake: at handshake time the device wasn't
+      // resolvable to any tenant, so the gateway answered with its own
+      // fallback OK instead of ever reaching this server — no row was ever
+      // created — and most devices never repeat that handshake again until
+      // a reboot, so a plain UPDATE here would silently no-op forever and
+      // the device would never appear in this tenant's Attendance Device
+      // list despite polling successfully (confirmed: SN=GED7240401865 on
+      // lmcedu, approved well after its only handshake, stuck exactly here).
+      await upsertDevice(sn, ip);
 
       const cmd = await getNextCommand(sn);
       if (cmd) {

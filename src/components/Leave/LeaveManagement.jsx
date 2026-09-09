@@ -6,6 +6,8 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { makeDateFormatter } from '../../utils/dateUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import Avatar from '../Common/Avatar.jsx';
+import RecordPreviewModal from '../Common/RecordPreviewModal.jsx';
 
 const StatusBadge = ({ status }) => {
   const map = {
@@ -22,7 +24,7 @@ const LeaveManagement = () => {
   const { t } = useLanguage();
   const { settings } = useSettings();
   const fd = makeDateFormatter(settings);
-  const { filteredLeaves: leaves, deleteLeave, getEmployeeName, getLeaveTypeName, getLeaveTypeColor, leaveTypes, filteredEmployees: employees } = useData();
+  const { filteredLeaves: leaves, deleteLeave, getEmployeeName, getEmployeeById, getLeaveTypeName, getLeaveTypeColor, leaveTypes, filteredEmployees: employees } = useData();
   const navigate = useNavigate();
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterType, setFilterType] = useState('all');
@@ -43,7 +45,13 @@ const LeaveManagement = () => {
   };
 
   const columns = [
-    { field: 'employeeId', header: t('Name'), width: 160, render: (v) => <span style={{ fontWeight: 500 }}>{getEmployeeName(v)}</span> },
+    { field: 'employeeId', header: t('Staff ID'), width: 80, sortable: false, render: (v) => getEmployeeById(v)?.employeeId || '—' },
+    { field: 'employeeId', header: t('Name'), width: 160, render: (v) => (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+        <Avatar photo={getEmployeeById(v)?.profilePhoto} name={getEmployeeName(v)} size={22} />
+        {getEmployeeName(v)}
+      </span>
+    ) },
     { field: 'leaveTypeCode', header: t('Type'), width: 140, render: (v) => (
       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: getLeaveTypeColor(v), display: 'inline-block', flexShrink: 0 }}></span>
@@ -129,46 +137,24 @@ const LeaveManagement = () => {
 
       {/* View Modal */}
       {viewLeave && (
-        <div className="modal-overlay">
-          <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>📅 {t('Leave Application')} #{viewLeave.id}</h2>
-              <button className="modal-close" onClick={() => setViewLeave(null)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                {[
-                  [t('Name'), getEmployeeName(viewLeave.employeeId)],
-                  [t('Type'), getLeaveTypeName(viewLeave.leaveTypeCode)],
-                  [t('From Date'), viewLeave.fromDate],
-                  [t('To Date'), viewLeave.toDate],
-                  [t('Days'), viewLeave.days],
-                  [t('Applied Date'), viewLeave.appliedDate],
-                  [t('Status'), <StatusBadge status={viewLeave.status} />],
-                  [t('Approved By'), getEmployeeName(viewLeave.approvedBy) || '—'],
-                ].map(([label, val], i) => (
-                  <div key={i}>
-                    <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{val}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>{t('Reason')}</div>
-                <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10, fontSize: 13 }}>{viewLeave.reason}</div>
-              </div>
-              {viewLeave.comment && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>{t('Comment')}</div>
-                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10, fontSize: 13 }}>{viewLeave.comment}</div>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setViewLeave(null)}>{t('Close')}</button>
-            </div>
-          </div>
-        </div>
+        <RecordPreviewModal
+          icon="📅" title={t('Leave Application')} id={viewLeave.id}
+          onClose={() => setViewLeave(null)} closeLabel={t('Close')}
+          avatarPhoto={getEmployeeById(viewLeave.employeeId)?.profilePhoto}
+          avatarName={getEmployeeName(viewLeave.employeeId)}
+          subtitle={`${getLeaveTypeName(viewLeave.leaveTypeCode)} · ${viewLeave.days} ${t('Days')}`}
+          statusBadge={<StatusBadge status={viewLeave.status} />}
+          fields={[
+            { icon:'📆', label:t('From Date'),    value:fd(viewLeave.fromDate) },
+            { icon:'📆', label:t('To Date'),       value:fd(viewLeave.toDate) },
+            { icon:'🗓️', label:t('Applied Date'),  value:fd(viewLeave.appliedDate) },
+            { icon:'✅', label:t('Approved By'),   value:getEmployeeName(viewLeave.approvedBy) || '—' },
+          ]}
+          sections={[
+            { label:t('Reason'),  value:viewLeave.reason },
+            { label:t('Comment'), value:viewLeave.comment },
+          ]}
+        />
       )}
 
       {/* Delete Confirm */}

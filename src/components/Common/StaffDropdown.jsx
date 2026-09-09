@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import Avatar from './Avatar.jsx';
 
 /* ── Searchable Staff Dropdown ───────────────────────────────── */
 const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
@@ -95,10 +96,15 @@ const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
           background: 'white', fontSize: 13, color: selected ? '#1f2937' : '#9ca3af',
           userSelect: 'none', outline: 'none',
           boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none' }}>
-        <span style={{ flex: 1 }}>
-          {selected
-            ? `${selected.fullName} — ${selected.department || '—'} — ${selected.deviceId || selected.employeeId || '—'}`
-            : 'Search and select staff…'}
+        <span style={{ flex: 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+          {selected ? (
+            <>
+              <Avatar photo={selected.profilePhoto} name={selected.fullName} size={20} style={{ marginRight: 6, flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {selected.fullName} — {selected.department || '—'} — {selected.deviceId || selected.employeeId || '—'}
+              </span>
+            </>
+          ) : 'Search and select staff…'}
         </span>
         <svg viewBox="0 0 20 20" fill="#9ca3af" width="14" height="14"
           style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>
@@ -119,20 +125,30 @@ const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
           <div style={{ maxHeight: 200, overflowY: 'auto' }}>
             {filtered.length === 0
               ? <div style={{ padding: '10px 12px', fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>No staff found</div>
-              : filtered.map((emp, i) => (
-                <div key={emp.id} ref={el => itemRefs.current[i] = el}
-                  onClick={() => select(emp)}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12,
-                    background: emp.id === value ? '#eff6ff' : (i === activeIndex ? '#f9fafb' : 'white'),
-                    color: emp.id === value ? '#1e40af' : '#374151',
-                    borderTop: '1px solid #f3f4f6' }}>
-                  <span style={{ fontWeight: 600 }}>{emp.fullName}</span>
-                  <span style={{ color: '#6b7280', marginLeft: 6 }}>
-                    {emp.department || '—'} · {emp.deviceId || emp.employeeId || '—'}
-                  </span>
-                </div>
-              ))}
+              : filtered.map((emp, i) => {
+                const checked  = emp.id === value;
+                const stripeBg = i % 2 === 0 ? '#fff' : '#fafafa';
+                const sub = [emp.employeeId, emp.position || emp.department].filter(Boolean).join(' - ');
+                return (
+                  <div key={emp.id} ref={el => itemRefs.current[i] = el}
+                    onClick={() => select(emp)}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    style={{ padding: '5px 12px', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8,
+                      background: checked ? '#eff6ff' : (i === activeIndex ? '#f5f8ff' : stripeBg),
+                      borderBottom: '1px solid #eef0f3' }}>
+                    <Avatar photo={emp.profilePhoto} name={emp.fullName} size={26} style={{ flexShrink: 0 }} />
+                    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      <span style={{ color: checked ? '#1e40af' : '#1f2937', fontWeight: checked ? 700 : 500,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {emp.fullName}
+                      </span>
+                      {sub && (
+                        <span style={{ fontSize: 10.5, color: '#9ca3af', fontWeight: 400 }}>{sub}</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
           </div>
         </div>,
         document.body

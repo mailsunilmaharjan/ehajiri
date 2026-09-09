@@ -4,11 +4,15 @@ import api from '../../api/client.js';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
+import { useLanguage } from '../../context/LanguageContext.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_EN, getNepalTodayISO } from '../../utils/dateUtils.js';
 import { adToISO } from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import MCS              from '../Common/MultiCheckSelect.jsx';
+import Avatar           from '../Common/Avatar.jsx';
 import ExchangeDutyModal from './ExchangeDutyModal.jsx';
+import { downloadCSV, getExcelHeaderRows } from '../../utils/printHelper.js';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 
 const DAY_KEYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const DAY_KEYS_FULL = { Sun:'Sunday', Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday', Thu:'Thursday', Fri:'Friday', Sat:'Saturday' };
@@ -35,18 +39,54 @@ const getShortName = (fullName, list = []) => {
   return found?.shortName || found?.short_name || abbrev(fullName);
 };
 
+// Single shared canvas 2D context for text-width measurement (date-column
+// auto-sizing below) — created lazily once, reused for every call instead of
+// allocating a new <canvas> per measurement.
+let _measureCtx = null;
+const measureTextWidth = (text, font) => {
+  if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+  _measureCtx.font = font;
+  return _measureCtx.measureText(text || '').width;
+};
+const VIEW_DATE_COL_FONT = '600 12.5px "Noto Sans Devanagari", "Inter", sans-serif';
+
+// Abbreviates the two "off" shift names that tend to be long in practice —
+// everything else (single-letter shift names like "M"/"N"/"E", leave codes)
+// is already short, so only these two get a display transform. Applied
+// wherever a shift's full name would otherwise show up in the grid, so the
+// legend below the grid is the one place the full name still appears.
+const SHORT_SHIFT_NAMES = { 'Day Off': 'D/O', 'Night Off': 'N/O' };
+const shortShiftLabel = (label) => {
+  if (!label) return label;
+  let out = label;
+  for (const [full, short] of Object.entries(SHORT_SHIFT_NAMES)) {
+    out = out.split(full).join(short);
+  }
+  return out;
+};
+
+// Admin-configured per-shift display code (Roster Analysis Dashboard →
+// ⚙️ → "Create Shortname for Roster"), shown in the shift picker as
+// "<code>- <startHour>-<endHour>" (e.g. "C- 09-15") instead of the full
+// shift name + time — null when a shift has no short name set, so callers
+// fall back to the regular name/time rendering.
+const shiftDropdownLabel = (s) => {
+  if (!s.rosterShortName) return null;
+  return `${s.rosterShortName}- ${s.name}`;
+};
+
 // Formats a ShiftCell-style value (string[] of shiftIds or ['OFF']) the same
 // way ShiftCell's own trigger does, for use outside the cell (Exchange Duty
 // modal's "Duty" column).
 const formatDutyText = (eff, shifts) => {
   const arr = Array.isArray(eff) ? eff : [];
-  if (arr.includes('OFF')) return 'OFF';
+  if (arr.includes('OFF')) return 'Weekend';
   if (arr.length === 0) return '—';
   return arr.map(id => {
     const s = shifts.find(sh => sh.id === id);
     if (!s) return null;
-    return s.start_time && s.end_time
-      ? `${s.start_time.slice(0,5)}-${s.end_time.slice(0,5)}`
+    return s.startTime && s.endTime
+      ? `${s.startTime.slice(0,5)}-${s.endTime.slice(0,5)}`
       : s.name;
   }).filter(Boolean).join(', ') || '—';
 };
@@ -88,7 +128,7 @@ function getPeriodDates(bsYear, bsMonth, periodType, weekOrHalf) {
    header (optional, per-cell instances only): { name, post, dateLabel } —
    shown at the top of the panel so it's unambiguous which staff/day is
    being edited. */
-const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, header, hideEmptyDash }) => {
+const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, onDelete, header, hideEmptyDash }) => {
   const [open, setOpen] = useState(false);
   const [srch, setSrch] = useState('');
   const [triggerRect, setTriggerRect] = useState(null); // live-tracked, not a one-time snapshot
@@ -135,7 +175,7 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
     }
   }, [open, triggerRect]);
 
-  const PANEL_W = 250;
+  const PANEL_W = 300;
   const openUpward = !!(triggerRect && panelH &&
     (triggerRect.bottom + 4 + panelH > window.innerHeight - 8) &&
     (triggerRect.top - panelH - 4 >= 8));
@@ -146,8 +186,19 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
   const isOff = arr.includes('OFF');
   const selIds = arr.filter(v => v !== 'OFF');
 
-  const normalShifts  = shifts.filter(s => !s.make_default);
-  const defaultShifts = shifts.filter(s =>  s.make_default);
+  // Day Off / Night Off are real shift rows (shifts.isOff) — pulled out of
+  // the regular scrollable list and offered as dedicated quick-picks at the
+  // top instead, since picking one is a whole-day replacement (not a
+  // toggle/combine like a normal shift), same spirit as Exchange Duty.
+  // Sorted "Day" before "Night" regardless of the shifts prop's own order.
+  const offShifts = shifts.filter(s => s.isOff).sort((a, b) => a.name.localeCompare(b.name));
+
+  // The default shift applies automatically to anyone with no specific
+  // roster entry — still shown (disabled, at the bottom) so it's clear
+  // which shift that is, but kept out of the regular scrollable list since
+  // it's not a real pick from here.
+  const normalShifts  = shifts.filter(s => !s.makeDefault && !s.isOff);
+  const defaultShifts = shifts.filter(s =>  s.makeDefault && !s.isOff);
   const filterFn = s => s.name.toLowerCase().includes(srch.toLowerCase());
   const filtered         = srch ? normalShifts.filter(filterFn)  : normalShifts;
   const filteredDefaults = srch ? defaultShifts.filter(filterFn) : defaultShifts;
@@ -158,15 +209,37 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
     onChange(next.length ? next : []);
   };
   const clearAll  = () => onChange([]);
+  const pickOffShift = (id) => { onChange([id]); setOpen(false); setSrch(''); };
+  // Weekend — the pre-existing 'OFF' sentinel (already used by the column-
+  // header "Weekly Off" bulk action and Exchange Duty's giving side): no
+  // shift assigned, just that single day's own day-of-week written into
+  // off_days server-side (POST /duty-roster/bulk-days). isRosterWeekend
+  // picks this up the same way the company-wide weekend pattern does, so it
+  // shows as plain "Weekend" everywhere reports do — distinct from Day
+  // Off/Night Off, which assign an actual is_off shift.
+  const pickWeekend = () => { onChange(['OFF']); setOpen(false); setSrch(''); };
 
   const hasSel = isOff || selIds.length > 0;
   const canExchange = !isColHeader && !!onExchange;
+  const canDelete   = !isColHeader && hasSel && !!onDelete;
 
-  // Navigable rows in visual order: optional "Clear selection", "Exchange
-  // Duty", then the filtered normal shifts — the disabled "Default" rows
-  // below aren't selectable so arrow-key navigation skips them.
+  // Navigable rows in visual order: optional "Clear selection", "Delete
+  // Duty", Weekend / Day Off / Night Off quick-picks, "Exchange Duty", then
+  // the filtered normal shifts — the disabled "Default" rows below aren't
+  // selectable so arrow-key navigation skips them. Indices are computed
+  // once so the render below and this list never drift out of sync.
+  let navIdx = 0;
+  const clearIdx    = hasSel     ? navIdx++ : -1;
+  const deleteIdx   = canDelete  ? navIdx++ : -1;
+  const weekendIdx  = navIdx++;
+  const offIdxStart = navIdx; navIdx += offShifts.length;
+  const exchangeIdx = canExchange ? navIdx++ : -1;
+  const shiftListStartIdx = navIdx;
   const navItems = [
     ...(hasSel ? [{ type: 'clear' }] : []),
+    ...(canDelete ? [{ type: 'delete' }] : []),
+    { type: 'weekend' },
+    ...offShifts.map(s => ({ type: 'off', id: s.id })),
     ...(canExchange ? [{ type: 'exchange' }] : []),
     ...filtered.map(s => ({ type: 'shift', id: s.id })),
   ];
@@ -174,6 +247,9 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
   const selectNav = (item) => {
     if (!item) return;
     if (item.type === 'clear') { clearAll(); }
+    else if (item.type === 'delete') { onDelete?.(); setOpen(false); setSrch(''); }
+    else if (item.type === 'weekend') { pickWeekend(); }
+    else if (item.type === 'off') { pickOffShift(item.id); }
     else if (item.type === 'exchange') { onExchange?.(); setOpen(false); setSrch(''); }
     else if (item.type === 'shift' && !isOff) { toggleShift(item.id); }
   };
@@ -199,15 +275,17 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
 
   // Trigger display — plain text, black font, no pill
   const triggerContent = isOff ? (
-    <span style={{ fontSize:13, fontWeight:700, color:'#dc2626' }}>OFF</span>
+    <span style={{ fontSize:13, fontWeight:700, color:'#b45309', display:'flex', alignItems:'center', gap:4 }}>
+      <span style={{ fontSize:13 }}>🏖️</span>Weekend
+    </span>
   ) : selIds.length > 0 ? (
     <div style={{ display:'flex', flexDirection:'column', gap:0, lineHeight:'17px' }}>
       {selIds.map(id => {
         const s = shifts.find(sh => sh.id === id);
         if (!s) return null;
-        const t = s.start_time && s.end_time
-          ? `${s.start_time.slice(0,5)} - ${s.end_time.slice(0,5)}`
-          : s.name.substring(0, 10);
+        const t = s.rosterShortName || (s.startTime && s.endTime
+          ? `${s.startTime.slice(0,5)} - ${s.endTime.slice(0,5)}`
+          : s.name.substring(0, 10));
         return <span key={id} style={{ fontSize:13, color:'#111827' }}>{t}</span>;
       })}
     </div>
@@ -244,16 +322,31 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
               ? { bottom:-6.5, borderLeft:'6.5px solid transparent', borderRight:'6.5px solid transparent', borderTop:'7px solid white' }
               : { top:-6.5,    borderLeft:'6.5px solid transparent', borderRight:'6.5px solid transparent', borderBottom:'7px solid white' }) }} />
 
-          {/* Header — which staff / which day this popup is editing */}
-          {header && (
-            <div style={{ padding:'8px 12px', borderBottom:'1px solid #e5e7eb', background:'#f8fafc',
-              borderRadius:'8px 8px 0 0', flexShrink:0 }}>
-              <div style={{ fontSize:12.5, fontWeight:700, color:'#111827' }}>
-                {header.name}{header.post && <span style={{ fontWeight:500, color:'#6b7280' }}> | {header.post}</span>}
+          {/* Top bar — header (which staff/day this popup is editing, when
+              given) plus an explicit close button. Kept as one row so the
+              close button always has reserved space and never overlaps the
+              header text or the search box below it. */}
+          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8,
+            padding: header ? '8px 8px 8px 12px' : '6px 6px 0 8px',
+            borderBottom: header ? '1px solid #e5e7eb' : 'none',
+            background: header ? '#f8fafc' : 'transparent',
+            borderRadius: header ? '8px 8px 0 0' : 0, flexShrink:0 }}>
+            {header ? (
+              <div>
+                <div style={{ fontSize:12.5, fontWeight:700, color:'#111827' }}>
+                  {header.name}{header.post && <span style={{ fontWeight:500, color:'#6b7280' }}> | {header.post}</span>}
+                </div>
+                <div style={{ fontSize:11, color:'#6b7280', marginTop:1 }}>{header.dateLabel}</div>
               </div>
-              <div style={{ fontSize:11, color:'#6b7280', marginTop:1 }}>{header.dateLabel}</div>
-            </div>
-          )}
+            ) : <span />}
+            <button type="button" title="Close"
+              onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setOpen(false); setSrch(''); }}
+              style={{ width:18, height:18, lineHeight:'16px', flexShrink:0, marginTop:1,
+                border:'none', borderRadius:'50%', background:'#f3f4f6', color:'#6b7280',
+                fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>
+              ✕
+            </button>
+          </div>
 
           {/* Search */}
           <div style={{ padding:'7px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
@@ -266,26 +359,76 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
           </div>
 
           <div style={{ overflowY:'auto', flex:1 }}>
-            {/* Clear */}
+            {/* Clear — resets this day back to the company default shift */}
             {hasSel && (
-              <div ref={el => itemRefs.current[0] = el}
-                onMouseDown={e => { e.preventDefault(); clearAll(); }}
-                onMouseEnter={() => setActiveIndex(0)}
+              <div ref={el => itemRefs.current[clearIdx] = el}
+                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); clearAll(); }}
+                onMouseEnter={() => setActiveIndex(clearIdx)}
                 style={{ padding:'5px 12px', fontSize:12, color:'#6b7280', cursor:'pointer',
                   borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:5,
-                  background: activeIndex === 0 ? '#f9fafb' : 'white' }}>
+                  background: activeIndex === clearIdx ? '#f9fafb' : 'white' }}>
                 <svg viewBox="0 0 12 12" fill="none" width="10" height="10"><path d="M2 2l8 8M10 2l-8 8" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round"/></svg>
                 Clear selection
               </div>
             )}
 
+            {/* Delete Duty — removes this day's roster row outright, no
+                default-shift fallback (unlike Clear selection above). */}
+            {canDelete && (
+              <div ref={el => itemRefs.current[deleteIdx] = el}
+                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onDelete(); setOpen(false); setSrch(''); }}
+                onMouseEnter={() => setActiveIndex(deleteIdx)}
+                style={{ padding:'5px 12px', fontSize:12, color:'#dc2626', cursor:'pointer',
+                  borderBottom:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:5,
+                  background: activeIndex === deleteIdx ? '#fef2f2' : 'white' }}>
+                <span style={{ fontSize:12 }}>🗑️</span>
+                Delete Duty
+              </div>
+            )}
+
+            {/* Weekend — no shift assigned, just marks this single day off via
+                off_days (same mechanism as the column-header "Weekly Off"
+                bulk action), distinct from Day Off/Night Off below which
+                assign an actual is_off shift. */}
+            <div ref={el => itemRefs.current[weekendIdx] = el}
+              onMouseDown={e => { e.preventDefault(); pickWeekend(); }}
+              onMouseEnter={() => setActiveIndex(weekendIdx)}
+              style={{ padding:'6px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                background: isOff ? '#fffbeb' : (activeIndex === weekendIdx ? '#f8fafc' : 'white'),
+                borderBottom:'1px solid #f1f5f9' }}>
+              <span style={{ fontSize:14 }}>🏖️</span>
+              <span style={{ fontSize:13, fontWeight: isOff ? 700 : 600, color: isOff ? '#b45309' : '#374151' }}>
+                Weekend
+              </span>
+            </div>
+
+            {/* Day Off / Night Off — quick-pick whole-day shifts (shifts.isOff),
+                pulled out of the regular scrollable list below. */}
+            {offShifts.map((s, i) => {
+              const navIdx = offIdxStart + i;
+              const selected = selIds.includes(s.id);
+              return (
+                <div key={s.id} ref={el => itemRefs.current[navIdx] = el}
+                  onMouseDown={e => { e.preventDefault(); pickOffShift(s.id); }}
+                  onMouseEnter={() => setActiveIndex(navIdx)}
+                  style={{ padding:'6px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                    background: selected ? '#eff6ff' : (activeIndex === navIdx ? '#f8fafc' : 'white'),
+                    borderBottom:'1px solid #f1f5f9' }}>
+                  <span style={{ fontSize:14 }}>{/night/i.test(s.name) ? '🌙' : '☀️'}</span>
+                  <span style={{ fontSize:13, fontWeight: selected ? 700 : 600, color: selected ? '#1e40af' : '#374151' }}>
+                    {s.name}
+                  </span>
+                </div>
+              );
+            })}
+
             {/* Exchange Duty */}
             {canExchange && (
-              <div ref={el => itemRefs.current[hasSel ? 1 : 0] = el}
+              <div ref={el => itemRefs.current[exchangeIdx] = el}
                 onMouseDown={e => { e.preventDefault(); onExchange(); setOpen(false); setSrch(''); }}
-                onMouseEnter={() => setActiveIndex(hasSel ? 1 : 0)}
+                onMouseEnter={() => setActiveIndex(exchangeIdx)}
                 style={{ padding:'6px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                  background: activeIndex === (hasSel ? 1 : 0) ? '#eff6ff' : 'white',
+                  background: activeIndex === exchangeIdx ? '#eff6ff' : 'white',
                   borderBottom:'1px solid #f1f5f9' }}>
                 <span style={{ fontSize:14 }}>🔄</span>
                 <span style={{ fontSize:13, fontWeight:700, color:'#1a56db' }}>Exchange Duty</span>
@@ -296,9 +439,10 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
             {/* Normal shifts — multi-select checkboxes */}
             {filtered.map((s, i) => {
               const sel  = selIds.includes(s.id);
-              const navIdx = (hasSel ? 1 : 0) + (canExchange ? 1 : 0) + i;
+              const navIdx = shiftListStartIdx + i;
               const highlighted = activeIndex === navIdx;
-              const time = s.start_time && s.end_time ? `${s.start_time.slice(0,5)}-${s.end_time.slice(0,5)}` : '';
+              const time = s.startTime && s.endTime ? `${s.startTime.slice(0,5)}-${s.endTime.slice(0,5)}` : '';
+              const shortLabel = shiftDropdownLabel(s);
               return (
                 <div key={s.id} ref={el => itemRefs.current[navIdx] = el}
                   onMouseDown={e => { e.preventDefault(); if (!isOff) toggleShift(s.id); }}
@@ -311,14 +455,14 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
                     style={{ width:13, height:13, cursor: isOff ? 'not-allowed' : 'pointer', accentColor:'#1a56db', flexShrink:0 }} />
                   <span style={{ fontSize:13, fontWeight: sel ? 600 : 400, color: sel ? '#1e40af' : '#111827',
                     overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, textAlign:'left' }}>
-                    {s.name}
+                    {shortLabel || s.name}
                   </span>
-                  {time && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{time}</span>}
+                  {!shortLabel && time && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{time}</span>}
                 </div>
               );
             })}
 
-            {/* Default shifts — labeled "Default", disabled, no checkbox */}
+            {/* Default shift — labeled "Default", disabled, no checkbox — pushed to the very end */}
             {filteredDefaults.length > 0 && (
               <>
                 <div style={{ padding:'4px 12px', fontSize:10, fontWeight:700, color:'#9ca3af',
@@ -326,17 +470,18 @@ const ShiftCell = ({ value = [], onChange, shifts, isColHeader, onExchange, head
                   Default (disabled)
                 </div>
                 {filteredDefaults.map(s => {
-                  const time = s.start_time && s.end_time ? `${s.start_time.slice(0,5)}-${s.end_time.slice(0,5)}` : '';
+                  const time = s.startTime && s.endTime ? `${s.startTime.slice(0,5)}-${s.endTime.slice(0,5)}` : '';
+                  const shortLabel = shiftDropdownLabel(s);
                   return (
                     <div key={s.id} style={{ padding:'6px 12px', display:'flex', alignItems:'center', gap:8,
                       cursor:'not-allowed', background:'#f9fafb', borderBottom:'1px solid #f9fafb', opacity:.5 }}
                       title="Default shift — cannot be selected">
                       <input type="checkbox" disabled style={{ width:13, height:13, flexShrink:0 }} />
                       <span style={{ fontSize:13, color:'#9ca3af', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                        {s.name}
+                        {shortLabel || s.name}
                         <span style={{ marginLeft:6, fontSize:10, background:'#f3f4f6', color:'#9ca3af', padding:'1px 5px', borderRadius:4 }}>Default</span>
                       </span>
-                      {time && <span style={{ fontSize:11, color:'#d1d5db', flexShrink:0 }}>{time}</span>}
+                      {!shortLabel && time && <span style={{ fontSize:11, color:'#d1d5db', flexShrink:0 }}>{time}</span>}
                     </div>
                   );
                 })}
@@ -457,6 +602,7 @@ const RosterMenuBtn = ({ active, onSelect }) => {
 const DutyRosterDeptWise = () => {
   const navigate     = useNavigate();
   const { settings } = useSettings();
+  const { language } = useLanguage();
   const { canEdit, currentUser } = useAuth();
   const canEditRoster = canEdit('dutyRoster');
   const { filteredEmployees: employees, getApprovedLeaveForDate, getLeaveTypeName } = useData();
@@ -527,9 +673,12 @@ const DutyRosterDeptWise = () => {
   const [exchangeSaving,  setExchangeSaving]  = useState(false);
 
   const [viewEditMode,      setViewEditMode]      = useState(false);
-  const [viewColShifts,     setViewColShifts]     = useState({});
   const [viewEditOverrides, setViewEditOverrides] = useState({});
-  const [viewRemovedEmpIds, setViewRemovedEmpIds] = useState(() => new Set()); // staff removed via the row "x" while editing, excluded from Save Changes
+  // Which of the keys in viewEditOverrides are a real "Delete Duty" (remove
+  // the row outright) rather than a plain Clear (falls back to the company
+  // default shift) — both stage the same empty [] in viewEditOverrides for
+  // display, this is what tells handleViewSave which one to actually do.
+  const [viewDeletedCells,  setViewDeletedCells]  = useState(() => new Set());
 
   // Exchange Duty (View Roster edit grid) — same idea, separate state.
   const [viewExchangeModal,  setViewExchangeModal]  = useState(null);
@@ -663,21 +812,16 @@ const DutyRosterDeptWise = () => {
   }, [employees, pageMode, advSearch, gridSearched]);
 
   // Look up existing roster shift for emp+date from saved duty_roster entries
-  // Staff dropdown options: Name - Post - Dept - DeviceID (working only), scoped
-  // to whichever department(s) are picked so the list doesn't offer staff the
-  // search can't actually return.
+  // Staff dropdown options (working only), scoped to whichever department(s)
+  // are picked so the list doesn't offer staff the search can't actually return.
   const staffOptions = useMemo(() =>
     employees
       .filter(e => e.active)
       .filter(e => advSearch.departments.length === 0 || advSearch.departments.includes(e.department || ''))
       .map(e => {
-        const parts = [
-          e.full_name || e.fullName,
-          e.position,
-          e.department,
-          e.device_id || e.deviceId,
-        ].filter(Boolean);
-        return { value: String(e.id), label: parts.join(' - ') };
+        const name = e.full_name || e.fullName;
+        const sub  = [e.employee_id || e.employeeId, e.position].filter(Boolean).join(' - ');
+        return { value: String(e.id), label: name, sub, photo: e.profile_photo || e.profilePhoto };
       }),
   [employees, advSearch.departments]);
 
@@ -724,8 +868,13 @@ const DutyRosterDeptWise = () => {
     const rawIds = entry.shiftIds || entry.shift_ids;
     const shiftId = entry.shiftId ?? entry.shift_id;
     const ids = Array.isArray(rawIds) && rawIds.length ? rawIds : (shiftId ? [shiftId] : []);
-    const label = isOff ? 'OFF' : (
-      ids.map(sid => shifts.find(s => s.id === sid)?.name).filter(Boolean).join(', ')
+    // Prefer each shift's admin-set Roster Short Name (Roster Analysis
+    // Dashboard → ⚙️ → "Create Shortname for Roster") over its full
+    // configured name, same as the shift picker itself — display only,
+    // `ids`/`isOff` below (what reports actually key off) are unaffected.
+    const label = isOff ? 'Weekend' : (
+      ids.map(sid => { const s = shifts.find(x => x.id === sid); return s?.rosterShortName || s?.name; })
+        .filter(Boolean).join(', ')
       || entry.shiftName || entry.shift_name || null
     );
     return { isOff, ids, label };
@@ -750,35 +899,146 @@ const DutyRosterDeptWise = () => {
   // an existing shift covering the period, which meant a newly-searched staff
   // member with no prior roster just silently vanished from the grid.
   const viewEmployeesFiltered = viewEmployees;
-
-  // Staff still in the batch after any row "x" removals during Edit Shifts.
-  const visibleViewEmployees = useMemo(() =>
-    viewEmployeesFiltered.filter(e => !viewRemovedEmpIds.has(e.id)),
-  [viewEmployeesFiltered, viewRemovedEmpIds]);
+  const visibleViewEmployees  = viewEmployeesFiltered;
 
   const getViewEffective = useCallback((empId, dateStr, dayKey) => {
     const k = `${empId}_${dateStr}`;
     if (k in viewEditOverrides) return viewEditOverrides[k];
-    if (dateStr in viewColShifts) return viewColShifts[dateStr];
     const existing = getExistingShift(empId, dateStr, dayKey);
     if (!existing) return [];
     return existing.isOff ? ['OFF'] : existing.ids;
-  }, [viewEditOverrides, viewColShifts, getExistingShift]);
+  }, [viewEditOverrides, getExistingShift]);
 
-  const setViewColShift = (dateStr, val) => {
-    const isFirst = viewDates.length > 0 && dateStr === viewDates[0].adDateStr;
-    if (isFirst) {
-      const filled = {};
-      viewDates.forEach(({ adDateStr }) => { filled[adDateStr] = val; });
-      setViewColShifts(filled);
-    } else {
-      setViewColShifts(p => ({ ...p, [dateStr]: val }));
+  // Text that will actually be visible in a given date column's cell — same
+  // branching as the cell's own render below, just reduced to a string so
+  // every column can be measured and auto-sized to its own content instead
+  // of every column sharing one fixed width sized for the longest label
+  // anywhere in the roster.
+  const getViewCellDisplayText = useCallback((emp, adDateStr, dayKey) => {
+    if (viewEditMode) {
+      const eff = getViewEffective(emp.id, adDateStr, dayKey);
+      if (eff.includes('OFF')) return 'OFF';
+      if (!eff.length) return '—';
+      // Selected shifts stack vertically in the cell, so only the widest
+      // single line — not their combined length — drives column width.
+      return eff.reduce((longest, id) => {
+        const s = shifts.find(sh => sh.id === id);
+        if (!s) return longest;
+        const t = s.rosterShortName || (s.startTime && s.endTime ? `${s.startTime.slice(0,5)} - ${s.endTime.slice(0,5)}` : s.name);
+        return t.length > longest.length ? t : longest;
+      }, '');
     }
+    const leave = getLeaveInfo(emp.id, adDateStr);
+    if (leave) return leave.code;
+    const existing = getExistingShift(emp.id, adDateStr, dayKey);
+    if (existing?.isOff) return 'OFF';
+    return existing?.label ? shortShiftLabel(existing.label) : '—';
+  }, [viewEditMode, getViewEffective, shifts, getLeaveInfo, getExistingShift]);
+
+  // Per-date-column width, auto-sized to the widest cell it will actually
+  // display that period (min 56px so short columns stay comfortably clickable).
+  const viewDateColWidths = useMemo(() => {
+    const widths = {};
+    viewDates.forEach(({ adDateStr, dayKey }) => {
+      let maxW = measureTextWidth('00', VIEW_DATE_COL_FONT); // floor: header day number
+      visibleViewEmployees.forEach(emp => {
+        const w = measureTextWidth(getViewCellDisplayText(emp, adDateStr, dayKey), VIEW_DATE_COL_FONT);
+        if (w > maxW) maxW = w;
+      });
+      widths[adDateStr] = Math.max(56, Math.ceil(maxW) + 20);
+    });
+    return widths;
+  }, [viewDates, visibleViewEmployees, getViewCellDisplayText]);
+
+  // Legend for whatever short codes are actually showing in the read-only
+  // grid right now (not every shift/leave type configured for the tenant) —
+  // short code -> { fullName, timeText }, in first-seen order.
+  const viewLegendEntries = useMemo(() => {
+    if (viewEditMode) return [];
+    const map = new Map();
+    viewDates.forEach(({ adDateStr, dayKey }) => {
+      visibleViewEmployees.forEach(emp => {
+        const leave = getLeaveInfo(emp.id, adDateStr);
+        if (leave) {
+          if (!map.has(leave.code)) map.set(leave.code, { fullName: leave.name, timeText: null });
+          return;
+        }
+        const existing = getExistingShift(emp.id, adDateStr, dayKey);
+        if (!existing) return;
+        if (existing.isOff) {
+          if (!map.has('OFF')) map.set('OFF', { fullName: 'Weekly Off', timeText: null });
+          return;
+        }
+        if (!existing.label) return;
+        // existing.label already prefers each shift's Roster Short Name (see
+        // getExistingShift) — for the legend we want the real full name on
+        // the right-hand side regardless, so "M" resolves to "साझा सिफ्ट",
+        // not back to "M".
+        const realName = (existing.ids || []).map(id => shifts.find(sh => sh.id === id)?.name)
+          .filter(Boolean).join(', ') || existing.label;
+        const timeText = (existing.ids || []).map(id => {
+          const s = shifts.find(sh => sh.id === id);
+          return s?.startTime && s?.endTime ? `${s.startTime.slice(0,5)} - ${s.endTime.slice(0,5)}` : null;
+        }).filter(Boolean).join(', ') || null;
+        const short = shortShiftLabel(existing.label);
+        // Skip the no-op case (shift name is already its own "short" code,
+        // e.g. a shift literally named "M") unless there's a time range to
+        // add — otherwise the legend would just read "M = M".
+        if (short === realName && !timeText) return;
+        if (!map.has(short)) map.set(short, { fullName: realName, timeText });
+      });
+    });
+    return [...map.entries()];
+  }, [viewEditMode, viewDates, visibleViewEmployees, getLeaveInfo, getExistingShift, shifts]);
+
+  // Print header shows Department/Branch once (as unique values across the
+  // visible staff) instead of per-row, so those two grid columns can be
+  // dropped in print to leave more width for the date columns.
+  const printDeptNames = useMemo(() =>
+    [...new Set(visibleViewEmployees.map(e => e.department).filter(Boolean))],
+  [visibleViewEmployees]);
+  const printBranchNames = useMemo(() =>
+    [...new Set(visibleViewEmployees.filter(e => e.branch).map(e => getShortName(e.branch, settings.branches)))],
+  [visibleViewEmployees, settings.branches]);
+
+  const exportViewCSV = () => {
+    if (!visibleViewEmployees.length || !viewDates.length) return;
+    const headers = ['SN', 'Name', 'Post', 'Dept', 'Branch',
+      ...viewDates.map(d => `${String(d.bsDay).padStart(2, '0')}(${d.dayKey})`)];
+    const dataRows = visibleViewEmployees.map((emp, i) => [
+      i + 1,
+      emp.full_name || emp.fullName,
+      getShortName(emp.position, settings.posts),
+      getShortName(emp.department, settings.departments),
+      getShortName(emp.branch, settings.branches),
+      ...viewDates.map(({ adDateStr, dayKey }) => getViewCellDisplayText(emp, adDateStr, dayKey)),
+    ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const legendLine = viewLegendEntries
+      .map(([short, { fullName, timeText }]) => `${short}=${fullName}${timeText ? ` (${timeText})` : ''}`)
+      .join('  |  ');
+    const reportSub = `${viewDates[0].adDateStr} to ${viewDates[viewDates.length - 1].adDateStr}`;
+    downloadCSV(
+      getExcelHeaderRows(settings, language, 'Create Roster — Department Wise', reportSub, legendLine)
+        + headers.join(',') + '\n' + dataRows,
+      `DutyRoster_${viewDates[0].adDateStr}_${viewDates[viewDates.length - 1].adDateStr}.csv`
+    );
   };
 
-  // Sets the shift for a single employee's single day only.
+  // Sets the shift for a single employee's single day only. Also used by
+  // "Clear selection" (val = []) — that's a plain reset-to-default, so if
+  // this key was previously staged as a real delete, undo that marker.
   const setViewCellShift = (empId, dateStr, val) => {
-    setViewEditOverrides(p => ({ ...p, [`${empId}_${dateStr}`]: val }));
+    const key = `${empId}_${dateStr}`;
+    setViewEditOverrides(p => ({ ...p, [key]: val }));
+    setViewDeletedCells(p => { if (!p.has(key)) return p; const n = new Set(p); n.delete(key); return n; });
+  };
+
+  // "Delete Duty" — stages this day's roster row for outright removal, not
+  // a fallback to the company default (that's Clear selection, above).
+  const setViewCellDelete = (empId, dateStr) => {
+    const key = `${empId}_${dateStr}`;
+    setViewEditOverrides(p => ({ ...p, [key]: [] }));
+    setViewDeletedCells(p => new Set(p).add(key));
   };
 
   // Same swap as confirmExchange (Create Roster grid) — View Roster edit
@@ -852,57 +1112,49 @@ const DutyRosterDeptWise = () => {
     setSaving(true);
     setError('');
     try {
-      const dateFrom   = viewDates[0].adDateStr;
-      const dateTo     = viewDates[viewDates.length - 1].adDateStr;
-      const createdBy  = currentUser?.fullName || currentUser?.username || 'Admin';
-      const entries        = [];
-      const overrideCalls  = [];
-      for (const emp of visibleViewEmployees) {
-        const shiftCounts = {};
-        const offDaySet   = new Set();
-        const perDate      = [];
-        for (const { adDateStr, dayKey } of viewDates) {
-          const eff = getViewEffective(emp.id, adDateStr, dayKey);
-          perDate.push({ adDateStr, dayKey, eff });
-          if (eff.includes('OFF')) offDaySet.add(dayKey);
-          else eff.forEach(id => { shiftCounts[id] = (shiftCounts[id] || 0) + 1; });
-        }
-        const primaryShiftId = Object.keys(shiftCounts).sort((a, b) => shiftCounts[b] - shiftCounts[a])[0];
-        if (!primaryShiftId) continue;
-        entries.push({ employeeId: emp.id, shiftId: parseInt(primaryShiftId), dateFrom, dateTo, offDays: [...offDaySet] });
+      const createdBy = currentUser?.fullName || currentUser?.username || 'Admin';
 
-        // Every day that deviates from this base gets a genuine single-day
-        // override persisted via bulk-days (same mechanism Exchange Duty
-        // already uses); every day that now matches the base but still has
-        // a stale override row (e.g. a prior Exchange Duty swap, or an
-        // earlier Save) gets that row cleared. This is what makes per-day
-        // assignments actually stick instead of being discarded to the
-        // period's majority shift, and what makes a stuck override
-        // editable/removable again through the normal grid.
-        for (const { adDateStr, dayKey, eff } of perDate) {
-          const baseVal = offDaySet.has(dayKey) ? ['OFF'] : [primaryShiftId];
-          if (!sameEff(baseVal, eff)) {
-            // A day left genuinely blank (eff.length === 0) needs forceBlank
-            // so it persists as "no shift" instead of a plain delete/no-op
-            // falling through to the non-blank base entry above.
-            overrideCalls.push({ employeeId: emp.id, dates: [adDateStr], shiftIds: eff, createdBy, forceBlank: eff.length === 0 });
-          } else if (hasSingleDayRow(emp.id, adDateStr)) {
-            overrideCalls.push({ employeeId: emp.id, dates: [adDateStr], shiftIds: [], createdBy });
-          }
-        }
+      // Save only the cells actually touched this edit session
+      // (viewEditOverrides), each as its own single-day entry — not a
+      // "period's majority shift" base entry spanning every visible date
+      // with per-day exceptions. That base-entry approach meant a day never
+      // touched this session (no override at all) still fed into computing
+      // the majority and could come back re-assigned to it, and a day
+      // deliberately cleared could resolve right back to whatever the
+      // majority/default shift was — both silently overwriting days the
+      // admin never asked to change. A day with no override here is simply
+      // left alone, exactly as it was before Save.
+      const byEmployee = {};
+      for (const [key, val] of Object.entries(viewEditOverrides)) {
+        const sep = key.indexOf('_');
+        const empId     = key.slice(0, sep);
+        const adDateStr = key.slice(sep + 1);
+        (byEmployee[empId] ||= []).push({ adDateStr, val });
       }
-      if (entries.length === 0) return setError('No shifts to save.');
-      await Promise.all([
-        ...entries.map(e => api.post('/duty-roster', e)),
-        ...overrideCalls.map(c => api.post('/duty-roster/bulk-days', c)),
-      ]);
+      const employeeIds = Object.keys(byEmployee);
+      if (employeeIds.length === 0) return setError('No shifts changed to save.');
+
+      await Promise.all(employeeIds.flatMap(empId =>
+        byEmployee[empId].map(({ adDateStr, val }) =>
+          api.post('/duty-roster/bulk-days', {
+            employeeId: Number(empId), dates: [adDateStr], shiftIds: val, createdBy,
+            // Cleared to nothing (not OFF, just emptied) — pin to the
+            // company default shift rather than deleting outright, so the
+            // day shows that default instead of silently reverting to
+            // whatever a broader/older roster entry underneath still says.
+            // "Delete Duty" is the one exception — that's a deliberate
+            // request to remove the row itself, so it skips this fallback.
+            forceBlank: val.length === 0 && !viewDeletedCells.has(`${empId}_${adDateStr}`),
+          })
+        )
+      ));
+
       const freshRosters = await api.get('/duty-roster');
       setRosters(freshRosters || []);
       setViewEditMode(false);
-      setViewColShifts({});
       setViewEditOverrides({});
-      setViewRemovedEmpIds(new Set());
-      setSuccessMsg(`Shifts updated for ${entries.length} staff.`);
+      setViewDeletedCells(new Set());
+      setSuccessMsg(`Shifts updated for ${employeeIds.length} staff.`);
     } catch (e) {
       setError(e.message || 'Failed to save.');
     } finally {
@@ -1056,32 +1308,57 @@ const DutyRosterDeptWise = () => {
     <div className="page-container">
       <style>{`
         @media print {
-          @page { size: A5 landscape; margin: 6mm; }
+          @page { size: A4 landscape; margin: 6mm; }
           body * { visibility: hidden !important; }
           #deptwise-print-area, #deptwise-print-area * { visibility: visible !important; }
           #deptwise-print-area {
             position: fixed !important;
             inset: 0;
-            width: 195mm;
+            width: 285mm;
             overflow: visible !important;
             padding: 0;
           }
           #deptwise-print-area .print-only { display: block !important; }
-          #deptwise-print-area colgroup col { width: auto !important; }
+          #deptwise-print-area .dw-print-hide { display: none !important; }
+          #deptwise-print-area colgroup col {
+            width: auto !important;
+            min-width: 0 !important;
+          }
           #deptwise-print-area table {
+            /* Filling the page (100%) is what we want — the date columns
+               should stretch to use the space Name/Post don't need. Capping
+               SN/Name/Post below (max-width) is what stops 100% from
+               re-inflating THEM too. */
             width: 100% !important;
             table-layout: auto !important;
             border-collapse: collapse !important;
-            font-size: 6.5pt !important;
+            font-size: 6pt !important;
           }
           #deptwise-print-area table th,
           #deptwise-print-area table td {
-            font-size: 6.5pt !important;
-            padding: 2px 3px !important;
+            font-size: 6pt !important;
+            padding: 1px 2px !important;
             overflow: visible !important;
             white-space: nowrap !important;
+            min-width: 0 !important;
+            width: auto !important;
+            /* Sticky columns keep position:sticky/left on screen for
+               horizontal-scroll pinning, which is meaningless in a static
+               print page and was preventing table-layout:auto from actually
+               shrinking the Name column to its content — it was reserving
+               the full on-screen sticky width regardless. */
+            position: static !important;
+            left: auto !important;
+            box-shadow: none !important;
           }
-          #deptwise-print-area table th div { font-size: 6pt !important; margin: 0 !important; }
+          /* SN, Name, Post — capped so the 100%-fill stretch above goes to
+             the date columns instead of re-widening these past their content. */
+          #deptwise-print-area table th:nth-child(1), #deptwise-print-area table td:nth-child(1) { max-width: 18px !important; }
+          #deptwise-print-area table th:nth-child(2), #deptwise-print-area table td:nth-child(2) { max-width: 100px !important; }
+          #deptwise-print-area table th:nth-child(3), #deptwise-print-area table td:nth-child(3) { max-width: 36px !important; }
+          #deptwise-print-area table th div { font-size: 5.5pt !important; margin: 0 !important; }
+          #deptwise-print-area .dw-avatar { display: none !important; }
+          #deptwise-print-area .dw-leave-code { border-bottom: none !important; }
         }
       `}</style>
 
@@ -1113,11 +1390,18 @@ const DutyRosterDeptWise = () => {
             {showAdvSearch ? 'Hide Search' : 'Show Search'}
           </button>
           {pageMode === 'view' && gridSearched && viewDates.length > 0 && (
-            <button onClick={() => window.print()}
-              style={{ height:30, padding:'0 11px', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:4,
-                background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:7, cursor:'pointer' }}>
-              🖨️ Print
-            </button>
+            <>
+              <button onClick={() => window.print()}
+                style={{ height:30, padding:'0 11px', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:4,
+                  background:'#eff6ff', border:'1px solid #93c5fd', color:'#1d4ed8', borderRadius:7, cursor:'pointer' }}>
+                🖨️ Print
+              </button>
+              <button onClick={exportViewCSV}
+                style={{ height:30, padding:'0 11px', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:4,
+                  background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d', borderRadius:7, cursor:'pointer' }}>
+                📥 Export
+              </button>
+            </>
           )}
           <RosterMenuBtn active="department" onSelect={key => {
             if (key === 'dashboard')       navigate('/attendance/roster-dashboard');
@@ -1246,7 +1530,7 @@ const DutyRosterDeptWise = () => {
             <div style={{ flex:'1 1 300px', minWidth:220 }}>
               <div style={{ fontSize:11, fontWeight:700, color:'#374151', marginBottom:4 }}>
                 Staff
-                <span style={{ marginLeft:6, fontSize:10, color:'#9ca3af', fontWeight:400 }}>Name · Post · Dept · Device ID</span>
+                <span style={{ marginLeft:6, fontSize:10, color:'#9ca3af', fontWeight:400 }}>Name · Staff ID · Post</span>
               </div>
               <SearchableSelect
                 value={advSearch.staffIds}
@@ -1254,6 +1538,7 @@ const DutyRosterDeptWise = () => {
                 options={staffOptions}
                 placeholder="Search and select staff..."
                 multiple={true}
+                showAvatar
               />
             </div>
 
@@ -1293,7 +1578,7 @@ const DutyRosterDeptWise = () => {
             {pageMode === 'view' && viewDates.length > 0 && (
               !viewEditMode ? (
                 canEditRoster && <button
-                  onClick={() => { setViewEditMode(true); setViewColShifts({}); setViewEditOverrides({}); setViewRemovedEmpIds(new Set()); }}
+                  onClick={() => { setViewEditMode(true); setViewEditOverrides({}); setViewDeletedCells(new Set()); }}
                   style={{ height:32, padding:'0 13px', fontSize:12, fontWeight:700,
                     background:'#f59e0b', color:'white', border:'none', borderRadius:7, cursor:'pointer',
                     flexShrink:0, boxShadow:'0 2px 8px rgba(245,158,11,.3)' }}>
@@ -1301,7 +1586,7 @@ const DutyRosterDeptWise = () => {
                 </button>
               ) : (
                 <>
-                  <button onClick={() => { setViewEditMode(false); setViewColShifts({}); setViewEditOverrides({}); setViewRemovedEmpIds(new Set()); }}
+                  <button onClick={() => { setViewEditMode(false); setViewEditOverrides({}); setViewDeletedCells(new Set()); }}
                     style={{ height:32, padding:'0 12px', fontSize:12, fontWeight:600,
                       background:'white', border:'1px solid #d1d5db', color:'#374151', borderRadius:7,
                       cursor:'pointer', flexShrink:0 }}>
@@ -1351,13 +1636,30 @@ const DutyRosterDeptWise = () => {
           <div style={{ fontSize:12, color:'#6b7280', marginBottom:8 }}>
             Showing: {viewDates[0].adDateStr} to {viewDates[viewDates.length-1].adDateStr}
             &nbsp;·&nbsp; {viewDates.length} days &nbsp;·&nbsp; {visibleViewEmployees.length} staff
-            {viewEditMode && viewRemovedEmpIds.size > 0 && (
-              <span style={{ color:'#dc2626', fontWeight:600 }}> &nbsp;({viewRemovedEmpIds.size} removed)</span>
-            )}
           </div>
           <div className="print-only" style={{ display:'none', marginBottom:8 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'48px 1fr 48px', alignItems:'center',
+              borderBottom:'2px solid #374151', paddingBottom:6, marginBottom:6 }}>
+              <div style={{ gridColumn:1 }}>
+                {settings.companyLogo && (
+                  <img src={settings.companyLogo} style={{ height:36, objectFit:'contain' }} />
+                )}
+              </div>
+              <div style={{ gridColumn:2, textAlign:'center' }}>
+                <div style={{ fontSize:15, fontWeight:800, color:'#1f2937' }}>
+                  {language === 'np' ? (settings.companyNameNp || settings.companyNameEn) : (settings.companyNameEn || settings.companyNameNp)}
+                </div>
+                <div style={{ fontSize:10, color:'#6b7280' }}>
+                  {language === 'np' ? (settings.companyAddressNp || settings.companyAddressEn) : (settings.companyAddressEn || settings.companyAddressNp)}
+                  {settings.companyPhone ? ` · Tel: ${settings.companyPhone}` : ''}
+                </div>
+              </div>
+              <div style={{ gridColumn:3 }} />
+            </div>
             <div style={{ fontSize:14, fontWeight:800, color:'#111827', marginBottom:3 }}>
               Duty Roster — Department Wise
+              {printDeptNames.length > 0 && <span> &nbsp;|&nbsp; Department : {printDeptNames.join(', ')}</span>}
+              {printBranchNames.length > 0 && <span> &nbsp;|&nbsp; Branch : {printBranchNames.join(', ')}</span>}
             </div>
             <div style={{ fontSize:10, color:'#374151', display:'flex', gap:10, flexWrap:'wrap' }}>
               <span>BS Year: {advBsYear}</span>
@@ -1366,52 +1668,39 @@ const DutyRosterDeptWise = () => {
               <span>|</span>
               <span>{viewType === 'monthly' ? (viewPeriodNum === 1 ? '1st Half' : '2nd Half') : `${['1st','2nd','3rd','4th'][viewPeriodNum-1]} Week`}</span>
               <span>|</span>
-              <span>{viewDates[0].adDateStr} to {viewDates[viewDates.length-1].adDateStr}</span>
+              <span>
+                {String(viewDates[0].bsDay).padStart(2,'0')}-{BS_MONTHS_EN[viewBsMonth - 1]}-{advBsYear}
+                {' '}to{' '}
+                {String(viewDates[viewDates.length-1].bsDay).padStart(2,'0')}-{BS_MONTHS_EN[viewBsMonth - 1]}-{advBsYear}
+              </span>
             </div>
           </div>
           <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
           <table style={{ borderCollapse:'collapse', fontSize:12.5, tableLayout:'fixed' }}>
             <colgroup>
               {STICKY_WIDTHS.map((w, i) => <col key={i} style={{ width:w, minWidth:w }} />)}
-              {viewDates.map(({ adDateStr }) => <col key={adDateStr} style={{ width:DATE_COL_W, minWidth:DATE_COL_W }} />)}
+              {viewDates.map(({ adDateStr }) => {
+                const w = viewDateColWidths[adDateStr] ?? DATE_COL_W;
+                return <col key={adDateStr} style={{ width:w, minWidth:w }} />;
+              })}
             </colgroup>
             <thead>
               <tr style={{ background:'#efefef' }}>
                 <th style={thSt(true, 0)}>SN</th>
                 <th style={thSt(true, 1)}>Name</th>
                 <th style={thSt(true, 2)}>Post</th>
-                <th style={thSt(true, 3)}>Dept.</th>
-                <th style={{ ...thSt(true, 4), boxShadow:'3px 0 6px rgba(0,0,0,.10)' }}>Branch</th>
+                <th className="dw-print-hide" style={thSt(true, 3)}>Dept.</th>
+                <th className="dw-print-hide" style={{ ...thSt(true, 4), boxShadow:'3px 0 6px rgba(0,0,0,.10)' }}>Branch</th>
                 {viewDates.map(({ bsDay, adDateStr, dayKey }) => (
                   <th key={adDateStr}
-                    style={{ ...thSt(false,-1), textAlign:'center', width:DATE_COL_W, minWidth:DATE_COL_W,
+                    style={{ ...thSt(false,-1), textAlign:'center',
+                      width: viewDateColWidths[adDateStr] ?? DATE_COL_W, minWidth: viewDateColWidths[adDateStr] ?? DATE_COL_W,
                       color: dayKey === 'Sun' ? '#dc2626' : dayKey === 'Sat' ? '#d97706' : '#374151' }}>
                     <div style={{ fontWeight:700 }}>{String(bsDay).padStart(2,'0')}</div>
                     <div style={{ fontSize:11, opacity:.8 }}>{dayKey}</div>
                   </th>
                 ))}
               </tr>
-              {viewEditMode && (
-                <tr style={{ background:'#fffbeb', borderBottom:'2px solid #fcd34d' }}>
-                  <td style={{ ...tdSt(true, 0) }} colSpan={4}>
-                    <span style={{ fontSize:11, fontWeight:700, color:'#92400e', paddingLeft:4 }}>Set shift for all</span>
-                  </td>
-                  <td style={{ ...tdSt(true, 4), boxShadow:'3px 0 6px rgba(0,0,0,.10)' }} />
-                  {viewDates.map(({ adDateStr }, di) => (
-                    <td key={adDateStr} style={{ ...tdSt(false,-1), padding:'4px 6px', textAlign:'left' }}>
-                      <ShiftCell
-                        value={viewColShifts[adDateStr] ?? []}
-                        onChange={v => setViewColShift(adDateStr, v)}
-                        shifts={shifts}
-                        isColHeader={true}
-                      />
-                      {di === 0 && (viewColShifts[adDateStr]?.length > 0) && (
-                        <div style={{ fontSize:10, color:'#059669', textAlign:'center', marginTop:2 }}>all filled</div>
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              )}
             </thead>
             <tbody>
               {visibleViewEmployees.length === 0 ? (
@@ -1426,29 +1715,25 @@ const DutyRosterDeptWise = () => {
                   onMouseEnter={e => e.currentTarget.style.background = '#f5f5f5'}
                   onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'white' : '#f3f4f6'}>
                   <td style={{ ...tdSt(true, 0), background:'#efefef', color:'#374151', fontWeight:700, textAlign:'center' }}>{idx + 1}</td>
-                  <td style={{ ...tdSt(true, 1), fontWeight:600 }}>{emp.full_name || emp.fullName}</td>
+                  <td style={{ ...tdSt(true, 1), fontWeight:600 }}>
+                    <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span className="dw-avatar">
+                        <Avatar photo={emp.profile_photo || emp.profilePhoto} name={emp.full_name || emp.fullName} size={20} />
+                      </span>
+                      {emp.full_name || emp.fullName}
+                    </span>
+                  </td>
                   <td style={{ ...tdSt(true, 2) }} title={emp.position}>{getShortName(emp.position, settings.posts)}</td>
-                  <td style={{ ...tdSt(true, 3) }} title={emp.department}>{getShortName(emp.department, settings.departments)}</td>
-                  <td style={{ ...tdSt(true, 4), boxShadow:'3px 0 6px rgba(0,0,0,.08)' }} title={emp.branch}>
-                    {viewEditMode ? (
-                      <div style={{ position:'relative', paddingRight:14 }}>
-                        <button
-                          type="button"
-                          onClick={() => setViewRemovedEmpIds(prev => { const next = new Set(prev); next.add(emp.id); return next; })}
-                          title="Remove this staff — excluded when you Save Changes"
-                          style={{ position:'absolute', top:-4, right:-6, width:15, height:15, lineHeight:'13px',
-                            border:'none', borderRadius:'50%', background:'#fee2e2', color:'#dc2626',
-                            fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>
-                          ×
-                        </button>
-                        {getShortName(emp.branch, settings.branches)}
-                      </div>
-                    ) : getShortName(emp.branch, settings.branches)}
+                  <td className="dw-print-hide" style={{ ...tdSt(true, 3) }} title={emp.department}>{getShortName(emp.department, settings.departments)}</td>
+                  <td className="dw-print-hide" style={{ ...tdSt(true, 4), boxShadow:'3px 0 6px rgba(0,0,0,.08)' }} title={emp.branch}>
+                    {getShortName(emp.branch, settings.branches)}
                   </td>
                   {viewDates.map(({ bsDay, adDateStr, dayKey }) => {
                     if (viewEditMode) {
                       const eff = getViewEffective(emp.id, adDateStr, dayKey);
-                      const isOverridden = `${emp.id}_${adDateStr}` in viewEditOverrides;
+                      const cellKey = `${emp.id}_${adDateStr}`;
+                      const isOverridden = cellKey in viewEditOverrides;
+                      const isDeleted = viewDeletedCells.has(cellKey);
                       const exchangedWith = viewExchangeBadges[`${emp.id}_${adDateStr}`];
                       const cellHeader = {
                         name: emp.full_name || emp.fullName,
@@ -1462,9 +1747,11 @@ const DutyRosterDeptWise = () => {
                             title={exchangedWith ? `Exchanged with ${exchangedWith.name}` : undefined}>
                             <ShiftCell value={eff} onChange={v => setViewCellShift(emp.id, adDateStr, v)} shifts={shifts} header={cellHeader}
                               isColHeader={false} hideEmptyDash={!!exchangedWith}
-                              onExchange={() => setViewExchangeModal({ empId: emp.id, dateStr: adDateStr, dayKey })} />
+                              onExchange={() => setViewExchangeModal({ empId: emp.id, dateStr: adDateStr, dayKey })}
+                              onDelete={() => setViewCellDelete(emp.id, adDateStr)} />
                             {isOverridden && (
-                              <span title="Override" style={{ position:'absolute', top:-2, right:-2, width:6, height:6, background:'#f59e0b', borderRadius:'50%' }} />
+                              <span title={isDeleted ? 'Marked for deletion' : 'Override'} style={{ position:'absolute', top:-2, right:-2, width:6, height:6,
+                                background: isDeleted ? '#dc2626' : '#f59e0b', borderRadius:'50%' }} />
                             )}
                             {exchangedWith && (
                               <div style={{ fontSize:9, lineHeight:'12px', fontWeight:700, color: colorForPartner(exchangedWith.partnerId) }}>
@@ -1479,13 +1766,21 @@ const DutyRosterDeptWise = () => {
                     const existing = getExistingShift(emp.id, adDateStr, dayKey);
                     const isOff = !!existing?.isOff;
                     const shift = existing?.label || null;
+                    const shiftShort = shift ? shortShiftLabel(shift) : null;
+                    // Matched on the underlying shift's real configured name, not the
+                    // rendered short label — a shift named "Day Off" still counts even
+                    // once an admin gives it a custom Roster Short Name like "DO" that
+                    // no longer literally contains "Day Off".
+                    const isDayOffType = (existing?.ids || []).some(id =>
+                      (shifts.find(s => s.id === id)?.name) in SHORT_SHIFT_NAMES);
                     const leave = getLeaveInfo(emp.id, adDateStr);
                     return (
                       <td key={adDateStr}
-                        style={{ ...tdSt(false,-1), textAlign:'center', padding:'4px 6px',
-                          background: leave ? '#fffbeb' : isOff ? '#fff5f5' : shift ? '#f0fdf4' : 'inherit' }}>
+                        style={{ ...tdSt(false,-1), textAlign:'center', padding:'4px 6px', fontSize:11.5,
+                          background: leave ? '#fffbeb' : (isOff || isDayOffType) ? '#fff5f5' : 'inherit' }}>
                         {leave ? (
                           <span
+                            className="dw-leave-code"
                             title={`${leave.name} — Approved by: ${leave.approvedBy} & Recommended by: ${leave.recommendedBy}`}
                             style={{ fontWeight:700, color:'#d97706', cursor:'help', borderBottom:'1px dotted #d97706' }}>
                             {leave.code}
@@ -1493,7 +1788,7 @@ const DutyRosterDeptWise = () => {
                         ) : isOff ? (
                           <span style={{ fontWeight:700, color:'#dc2626' }}>OFF</span>
                         ) : shift ? (
-                          <span style={{ color:'#111827' }}>{shift}</span>
+                          <span style={{ color:'#111827' }}>{shiftShort}</span>
                         ) : (
                           <span style={{ color:'#d1d5db' }}>—</span>
                         )}
@@ -1504,6 +1799,31 @@ const DutyRosterDeptWise = () => {
               ))}
             </tbody>
           </table>
+          </div>
+          {viewLegendEntries.length > 0 && (
+            <div style={{ marginTop:8, padding:'6px 10px', background:'#f8fafc', border:'1px solid #e5e7eb',
+              borderRadius:8, fontSize:11, color:'#374151', display:'flex', flexWrap:'wrap', gap:'4px 14px' }}>
+              {viewLegendEntries.map(([short, { fullName, timeText }]) => (
+                <span key={short}>
+                  <span style={{ fontWeight:700 }}>{short}</span>
+                  <span style={{ color:'#9ca3af' }}> = </span>
+                  {fullName}
+                  {timeText && <span style={{ color:'#6b7280' }}> ({timeText})</span>}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="print-only" style={{ display:'none', marginTop:22 }}>
+            <div style={{ display:'flex', justifyContent:'space-between' }}>
+              <div style={{ textAlign:'center', width:150 }}>
+                <div style={{ borderBottom:'1.5px dotted #374151', height:18, marginBottom:4 }} />
+                <div style={{ fontSize:9, fontWeight:700, color:'#374151' }}>Prepared by</div>
+              </div>
+              <div style={{ textAlign:'center', width:150 }}>
+                <div style={{ borderBottom:'1.5px dotted #374151', height:18, marginBottom:4 }} />
+                <div style={{ fontSize:9, fontWeight:700, color:'#374151' }}>Approved by</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1571,6 +1891,7 @@ const DutyRosterDeptWise = () => {
             <div style={{ overflowX:'auto', overflowY:'auto', flex:1, padding:'0' }}>
 
       {/* Roster Grid (create mode) */}
+      {loading && <LoadingIndicator />}
       {!loading && (
         <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
           <table style={{ borderCollapse:'collapse', fontSize:12.5, tableLayout:'fixed' }}>
@@ -1643,7 +1964,10 @@ const DutyRosterDeptWise = () => {
                   <td style={{ ...tdSt(true, 1), fontWeight:600,
                     boxShadow: !hasAnyShift ? 'inset 3px 0 0 #f97316' : undefined }}
                     title={!hasAnyShift ? 'No shift assigned — this staff will NOT be saved' : ''}>
-                    {emp.full_name || emp.fullName}
+                    <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <Avatar photo={emp.profile_photo || emp.profilePhoto} name={emp.full_name || emp.fullName} size={20} />
+                      {emp.full_name || emp.fullName}
+                    </span>
                     {!hasAnyShift && (
                       <div style={{ fontSize:10, color:'#c2410c', fontWeight:400 }}>
                         ⚠ No shift — won't save

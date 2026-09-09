@@ -6,6 +6,7 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 /* ── Searchable single-select dropdown ── */
 const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
@@ -114,11 +115,6 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
   );
 };
 
-/* ── Load reco/approval ── */
-const loadRecoApproval = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
-
 /* ── Date input respecting company calendar setting ── */
 const VisitDateInput = ({ value, onChange, error, settings }) => {
   const blockPast = settings.leaveBackdateEnabled === false;
@@ -150,6 +146,7 @@ const OfficeVisitApplication = () => {
   const { t }           = useLanguage();
   const { settings, refreshSettings } = useSettings();
   const { addVisit, employees } = useData(); /* employees = full unfiltered list for reco/approval name lookup */
+  const { getRecoIds, getApprovalIds } = useRecoApproval();
   const navigate = useNavigate();
 
   // Refetch on mount so a Super Admin toggling Leave/Visit backdating takes
@@ -163,16 +160,9 @@ const OfficeVisitApplication = () => {
     (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean),
   [settings.officeVisitTypes]);
 
-  /* Reco/Approval from localStorage */
-  const { reco: myReco, approval: myApproval } = useMemo(() => {
-    const saved = loadRecoApproval();
-    const r = saved[currentUser?.id]?.reco;
-    const a = saved[currentUser?.id]?.approval;
-    return {
-      reco:     Array.isArray(r) ? r : (r ? [r] : []),
-      approval: Array.isArray(a) ? a : (a ? [a] : []),
-    };
-  }, [currentUser?.id]);
+  /* Reco/Approval — live from the API */
+  const myReco     = getRecoIds(currentUser?.id);
+  const myApproval = getApprovalIds(currentUser?.id);
 
   const getEmpName = useCallback((id) =>
     (employees || []).find(e => String(e.id) === String(id))?.fullName || `#${id}`,

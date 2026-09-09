@@ -9,9 +9,27 @@ import { useModalDrag } from '../../hooks/useModalDrag.js';
    the main Contact page, so a contact created from either place shows up
    in both immediately. */
 
-export const CUSTOMER_TYPES = [
-  'Dealers', 'Partners Dealer', 'Government', 'Banks',
-  'Finance', 'Hotel & Restaurant', 'Factories', 'IT Industries', 'Other',
+export const CUSTOMER_CATEGORIES = [
+  'Suppliers', 'Dealers Inside Valley', 'Dealer Outside Valley', 'Bank & Finance',
+  'Government', 'Hotel & Restaurant, Travel', 'Factory & Industry', 'IT Company',
+  'INGO & NGO', 'Health Club', 'Hospitals & Clinic', 'Manpower & Orientation', 'Other',
+];
+
+// Nepal's 77 current districts (post-2017 federal restructuring), across the
+// 7 provinces — alphabetical for quick scanning in a single dropdown.
+export const NEPAL_DISTRICTS = [
+  'Achham', 'Arghakhanchi', 'Baglung', 'Baitadi', 'Bajhang', 'Bajura', 'Banke',
+  'Bara', 'Bardiya', 'Bhaktapur', 'Bhojpur', 'Chitwan', 'Dadeldhura', 'Dailekh',
+  'Dang', 'Darchula', 'Dhankuta', 'Dhading', 'Dhanusha', 'Dolakha', 'Dolpa',
+  'Doti', 'Eastern Rukum', 'Gorkha', 'Gulmi', 'Humla', 'Ilam', 'Jajarkot',
+  'Jhapa', 'Jumla', 'Kailali', 'Kalikot', 'Kanchanpur', 'Kapilvastu', 'Kaski',
+  'Kathmandu', 'Kavrepalanchok', 'Khotang', 'Lalitpur', 'Lamjung', 'Mahottari',
+  'Makwanpur', 'Manang', 'Morang', 'Mugu', 'Mustang', 'Myagdi', 'Nawalpur',
+  'Nuwakot', 'Okhaldhunga', 'Palpa', 'Panchthar', 'Parasi', 'Parbat', 'Parsa',
+  'Pyuthan', 'Ramechhap', 'Rasuwa', 'Rautahat', 'Rolpa', 'Rupandehi', 'Salyan',
+  'Sankhuwasabha', 'Saptari', 'Sarlahi', 'Sindhuli', 'Sindhupalchok', 'Siraha',
+  'Solukhumbu', 'Sunsari', 'Surkhet', 'Syangja', 'Tanahun', 'Taplejung',
+  'Terhathum', 'Udayapur', 'Western Rukum',
 ];
 
 export const CONTACT_EMPTY = {
@@ -30,7 +48,7 @@ export const CONTACT_EMPTY = {
   companyAddress   : '',
   workScope        : '',
   customerCategory : '',
-  customerType     : '',
+  district         : '',
 };
 
 const EMPTY_PERSON = { name: '', post: '', department: '', mobile1: '', mobile2: '', email: '', ext: '' };
@@ -218,11 +236,11 @@ const PersonsGrid = ({ persons, onAdd, onEdit, onDelete }) => {
                 </TH>
                 <TH w={32}>SN</TH>
                 <TH w={140}>Name</TH>
-                <TH w={110}>Post</TH>
-                <TH w={110}>Dept</TH>
-                <TH w={110}>Mobile 1</TH>
-                <TH w={110}>Mobile 2</TH>
-                <TH w={170}>Email</TH>
+                <TH w={100}>Post</TH>
+                <TH w={60}>Dept</TH>
+                <TH w={140}>Mobile 1</TH>
+                <TH w={140}>Mobile 2</TH>
+                <TH w={220}>Email</TH>
                 <TH w={70}>Ext</TH>
               </tr>
             </thead>
@@ -578,26 +596,22 @@ const ContactFormModal = ({ initial, onClose, onSaved }) => {
                 placeholder="Describe work relationship, services, or scope…" rows={2} />
             </FF>
 
-            {/* Customer Category + Type */}
-            <div style={{ display:'grid', gridTemplateColumns: form.customerCategory === 'customer' ? '1fr 1fr' : '1fr', gap:'0 16px' }}>
+            {/* Customer Category + District */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
               <FF label="Customer Category">
-                <select value={form.customerCategory} onChange={e => {
-                  setForm(p => ({ ...p, customerCategory: e.target.value, customerType: '' }));
-                }} className="form-control" style={{ fontSize:13 }}>
+                <select value={form.customerCategory} onChange={e => set('customerCategory')(e.target.value)}
+                  className="form-control" style={{ fontSize:13 }}>
                   <option value="">— Select —</option>
-                  <option value="supplier">Supplier</option>
-                  <option value="customer">Customer</option>
+                  {CUSTOMER_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </FF>
-              {form.customerCategory === 'customer' && (
-                <FF label="Customer Type">
-                  <select value={form.customerType} onChange={e => set('customerType')(e.target.value)}
-                    className="form-control" style={{ fontSize:13 }}>
-                    <option value="">— Select —</option>
-                    {CUSTOMER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </FF>
-              )}
+              <FF label="District">
+                <select value={form.district} onChange={e => set('district')(e.target.value)}
+                  className="form-control" style={{ fontSize:13 }}>
+                  <option value="">— Select —</option>
+                  {NEPAL_DISTRICTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </FF>
             </div>
 
             {/* ── Persons DataGrid — Company only ── */}

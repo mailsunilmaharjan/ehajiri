@@ -5,13 +5,16 @@ import LeaveApplyModal from '../Leave/LeaveApplyModal.jsx';
 import OfficeVisitApplyModal from '../OfficeVisit/OfficeVisitApplyModal.jsx';
 import MissingAttendanceApplyModal from '../Attendance/MissingAttendanceApplyModal.jsx';
 import ManualPostingApplyModal from '../Attendance/ManualPostingApplyModal.jsx';
+import OnlineAttendanceApplyModal from '../Attendance/OnlineAttendanceApplyModal.jsx';
 import { LeaveApplyProvider } from '../../context/LeaveApplyContext.jsx';
 import { OfficeVisitApplyProvider } from '../../context/OfficeVisitApplyContext.jsx';
 import { MissingAttendanceApplyProvider } from '../../context/MissingAttendanceApplyContext.jsx';
 import { ManualPostingApplyProvider } from '../../context/ManualPostingApplyContext.jsx';
+import { OnlineAttendanceApplyProvider } from '../../context/OnlineAttendanceApplyContext.jsx';
 import { AttendanceNotificationProvider } from '../Notifications/AttendanceToasts.jsx';
 import { ChatProvider } from '../../context/ChatContext.jsx';
 import ChatDock from '../Chat/ChatDock.jsx';
+import { useModuleFlags } from '../../context/ModuleFlagsContext.jsx';
 
 /**
  * Global modal keyboard behaviour (applies to every modal in the app):
@@ -20,6 +23,7 @@ import ChatDock from '../Chat/ChatDock.jsx';
  *  • On open → auto-focuses the first text/select input in the newly added overlay
  */
 const Layout = ({ children }) => {
+  const { flags: moduleFlags } = useModuleFlags();
 
   /* ── 1. ESC + Enter-as-Tab ── */
   useEffect(() => {
@@ -36,13 +40,17 @@ const Layout = ({ children }) => {
         return;
       }
 
-      /* Enter → Tab (skip buttons, textareas, checkboxes, radios) */
+      /* Enter → Tab (skip buttons, textareas, checkboxes, radios, and any
+         contentEditable element — RichTextEditor's description field is a
+         contentEditable <div>, and without this exclusion Enter there was
+         being hijacked into a focus-jump instead of inserting a newline). */
       if (e.key === 'Enter') {
         const tag   = e.target.tagName;
         const type  = e.target.type;
         if (
           tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'A' ||
-          type === 'submit'  || type === 'checkbox' || type === 'radio'
+          type === 'submit'  || type === 'checkbox' || type === 'radio' ||
+          e.target.isContentEditable
         ) return;
 
         e.preventDefault();
@@ -98,20 +106,23 @@ const Layout = ({ children }) => {
       <OfficeVisitApplyProvider>
         <MissingAttendanceApplyProvider>
           <ManualPostingApplyProvider>
-            <AttendanceNotificationProvider>
-              <ChatProvider>
-                <TopMenu />
-                <main className="main-layout">
-                  {children}
-                </main>
-                <GlobalFAB />
-                <LeaveApplyModal />
-                <OfficeVisitApplyModal />
-                <MissingAttendanceApplyModal />
-                <ManualPostingApplyModal />
-                <ChatDock />
-              </ChatProvider>
-            </AttendanceNotificationProvider>
+            <OnlineAttendanceApplyProvider>
+              <AttendanceNotificationProvider>
+                <ChatProvider>
+                  <TopMenu />
+                  <main className="main-layout">
+                    {children}
+                  </main>
+                  <GlobalFAB />
+                  <LeaveApplyModal />
+                  <OfficeVisitApplyModal />
+                  <MissingAttendanceApplyModal />
+                  <ManualPostingApplyModal />
+                  <OnlineAttendanceApplyModal />
+                  {moduleFlags.chatEnabled && <ChatDock />}
+                </ChatProvider>
+              </AttendanceNotificationProvider>
+            </OnlineAttendanceApplyProvider>
           </ManualPostingApplyProvider>
         </MissingAttendanceApplyProvider>
       </OfficeVisitApplyProvider>

@@ -46,10 +46,64 @@ export function getNepalNow() {
   return new Date(now.getTime() + NEPAL_OFFSET_MS - localOffsetMs);
 }
 
+/** Nepal calendar date (YYYY-MM-DD) for any timestamp/date input, not just "now". */
+export function toNepalISO(input) {
+  const d = new Date(new Date(input).getTime() + NEPAL_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
 /** Drop-in replacement for `new Date().toISOString().split('T')[0]` — today's Nepal calendar date as YYYY-MM-DD. */
 export function getNepalTodayISO() {
-  const d = new Date(Date.now() + NEPAL_OFFSET_MS);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  return toNepalISO(Date.now());
+}
+
+/**
+ * Adds `n` days to a YYYY-MM-DD date string, returning a new YYYY-MM-DD.
+ * Plain calendar-day math (not Nepal-offset-aware) — meant to be applied on
+ * top of an already-Nepal-derived ISO date, e.g. `addDaysISO(getNepalTodayISO(), -1)`.
+ * Originally local to TaskList.jsx's date-bucket badges/"My Yesterday Task"
+ * filter, promoted here once TaskDashboard.jsx needed the same math.
+ */
+export function addDaysISO(isoDate, n) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Converts a stored UTC timestamp into the "YYYY-MM-DDTHH:mm" shape a
+ * <input type="datetime-local"> needs, in Nepal wall-clock time — not the
+ * viewer's own OS timezone. Same fixed-offset technique as getNepalNow():
+ * shift the epoch, then read it back with UTC getters so the browser's own
+ * offset never enters into it. Originally local to TaskList.jsx (Task
+ * followups' "Next Followup & Time" + Field Visit's own checkpoint
+ * timestamps both need it), promoted here once a third caller needed it.
+ */
+export function isoToNepalLocalInput(isoUtc) {
+  if (!isoUtc) return '';
+  const d = new Date(new Date(isoUtc).getTime() + NEPAL_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+/** Date part goes through fd() (the company's AD/BS calendar setting), the time part is read straight off the Nepal-shifted string. */
+export function formatNepalDateTime(isoUtc, fd) {
+  if (!isoUtc) return '—';
+  const [datePart, timePart] = isoToNepalLocalInput(isoUtc).split('T');
+  const [hh, mm] = timePart.split(':').map(Number);
+  const ampm = hh >= 12 ? 'PM' : 'AM';
+  const hh12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${fd(datePart)} ${hh12}:${String(mm).padStart(2, '0')} ${ampm}`;
+}
+
+/** Time-of-day only ("4:30 PM"), Nepal wall-clock — for compact UI like the Field Visit journey bar. */
+export function formatNepalTime(isoUtc) {
+  if (!isoUtc) return '—';
+  const timePart = isoToNepalLocalInput(isoUtc).split('T')[1];
+  const [hh, mm] = timePart.split(':').map(Number);
+  const ampm = hh >= 12 ? 'PM' : 'AM';
+  const hh12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${hh12}:${String(mm).padStart(2, '0')} ${ampm}`;
 }
 
 /** Shared fiscal-year lookup — consolidates the identical copy previously duplicated across report files. */
@@ -73,8 +127,15 @@ export function adToBS(input) {
   const d = input instanceof Date ? input : new Date(input);
   if (isNaN(d)) return null;
 
-  const diffMs   = d - REF_AD;
-  const diffDays = Math.round(diffMs / 86400000);
+  // Normalize to a pure calendar date (midnight) before diffing. `d` often
+  // carries the actual current time-of-day (e.g. getNepalNow()'s output) —
+  // diffing that directly against REF_AD's midnight and rounding meant the
+  // fractional day crossed the 0.5-day mark at exactly 12:00 PM, rounding
+  // up to the NEXT day's BS date for the rest of the afternoon/evening even
+  // though the AD calendar date hadn't changed yet.
+  const dMidnight   = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const refMidnight = new Date(REF_AD.getFullYear(), REF_AD.getMonth(), REF_AD.getDate());
+  const diffDays = Math.round((dMidnight - refMidnight) / 86400000);
 
   let { year, month, day } = { ...REF_BS };
 

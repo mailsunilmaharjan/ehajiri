@@ -6,6 +6,8 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import Avatar from '../Common/Avatar.jsx';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import ViewMonthlyBtn from './ViewMonthlyBtn.jsx';
@@ -148,7 +150,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
     .sort((a,b) => (a.fullName||'').localeCompare(b.fullName||''))
     .map(e => ({
       value: String(e.id),
-      label: `${e.fullName||`Staff ${e.id}`}${e.position ? ` • ${abbrev(e.position)}` : ''}${e.deviceId ? ` [${e.deviceId}]` : ''}`,
+      label: e.fullName || `Staff ${e.id}`,
+      sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+      photo: e.profilePhoto,
     }));
   const filteredEmps = employees.filter(e => (e.active !== false) === activeFlag);
   const branches = [...new Set(filteredEmps.map(e=>e.branch).filter(Boolean))].sort().map(b=>({value:b,label:b}));
@@ -171,7 +175,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         <div style={{ padding:'18px 24px 14px', background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <span style={{ fontSize:17, fontWeight:700, color:'#1e40af' }}>
-            {L('एडभान्स खोज','Advance Search')}
+            {L('विस्तृत खोज','Advance Search')}
           </span>
           <button onClick={onClose} style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:20,lineHeight:1,padding:'2px 6px',borderRadius:6 }}
             onMouseEnter={e=>e.currentTarget.style.background='#f3f4f6'}
@@ -197,7 +201,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14 }}>
             <Field label={L('कर्मचारी','Staff')}>
-              <SearchableCheckSelect options={empOpts} value={local.staffId} onChange={v=>set('staffId',v)} allLabel={L('All Staff','All Staff')} />
+              <SearchableCheckSelect options={empOpts} value={local.staffId} showAvatar onChange={v=>set('staffId',v)} allLabel={L('All Staff','All Staff')} />
             </Field>
             <Field label={L('शाखा','Branch')}>
               <SearchableCheckSelect options={branches} value={local.branch} onChange={v=>set('branch',v)} allLabel={L('All Branches','All Branches')} />
@@ -253,7 +257,7 @@ const MonthlyLateEarlyReport = () => {
   const [searchParams] = useSearchParams();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
-  const { filteredEmployees: employees, shifts } = useData();
+  const { filteredEmployees: employees, shifts, getEmployeeById } = useData();
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
@@ -299,7 +303,7 @@ const MonthlyLateEarlyReport = () => {
         const e = `${year}-${pad(month)}-${pad(lastDay)}`;
         apiUrl = `/attendance/half-late-early?startDate=${s}&endDate=${e}`;
       }
-      apiUrl += `&active=${staffStatus === 'notworking' ? 'false' : 'true'}`;
+      apiUrl += `&active=${staffStatus === 'notworking' ? 'false' : 'true'}&orgScope=1`;
       setData(await api.get(apiUrl));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
@@ -347,8 +351,17 @@ const MonthlyLateEarlyReport = () => {
   /* ── DataGrid columns ── */
   const columns = [
     {
+      field:'id', header:L('स्टाफ आईडी','Staff ID'), sortable:false,
+      render: (v) => <span style={{ color:'#374151' }}>{getEmployeeById(v)?.employeeId || '—'}</span>,
+    },
+    {
       field:'fullName', header:L('कर्मचारी','Person'), sortable:true,
-      render: v => <span style={{ color:'#1f2937' }}>{v}</span>,
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
+          <Avatar photo={getEmployeeById(row.id)?.profilePhoto} name={v} size={22} />
+          {v}
+        </span>
+      ),
     },
     {
       field:'postShort', header:L('पद','Post'),
@@ -389,7 +402,7 @@ const MonthlyLateEarlyReport = () => {
         : <span style={{ color:'#d1d5db' }}>—</span>,
     },
     {
-      field:'lateInFormatted', header:L('कैफियत','Remarks'), sortable:false, wrap:true,
+      field:'lateInFormatted', header:L('कैफियत','Remarks'), sortable:false, wrap:true, fill:true,
       render: (lateIn, row) => {
         const parts = [];
         if (lateIn) parts.push(
@@ -528,7 +541,7 @@ const MonthlyLateEarlyReport = () => {
           <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
             <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
           </svg>
-          {L('एडभान्स खोज','Advance Search')}
+          {L('विस्तृत खोज','Advance Search')}
           {activeFilterCount>0 && (
             <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
@@ -560,6 +573,8 @@ const MonthlyLateEarlyReport = () => {
         <div style={{ background:'#fee2e2',border:'1px solid #fca5a5',borderRadius:8,
           padding:'10px 16px',marginBottom:12,color:'#991b1b',fontWeight:600 }}>❌ {error}</div>
       )}
+
+      {loading && <LoadingIndicator />}
 
       {/* ── DataGrid ── */}
       {!loading && data && records.length === 0 && (

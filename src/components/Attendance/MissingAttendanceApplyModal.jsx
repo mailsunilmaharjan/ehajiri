@@ -1,17 +1,15 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useMissingAttendanceApply } from '../../context/MissingAttendanceApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import SearchableSelect from '../Common/SearchableSelect.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import api from '../../api/client.js';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
-
-/* ── load saved reco/approval (same store used by Leave/Office Visit apply) ── */
-const loadRecoApproval = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 const DateInput = ({ value, onChange, max }) => {
   const { settings } = useSettings();
@@ -44,6 +42,7 @@ const MissingAttendanceApplyModal = () => {
   const { currentUser } = useAuth();
   const navigate         = useNavigate();
   const { employees: allEmployees } = useData();
+  const { getRecoIds, getApprovalIds, assignments: recoAssignments, refresh: refreshRecoApproval } = useRecoApproval();
 
   const today = getNepalTodayISO();
 
@@ -62,19 +61,15 @@ const MissingAttendanceApplyModal = () => {
   const [selectedReco,     setSelectedReco]     = useState('');
   const [selectedApproval, setSelectedApproval] = useState('');
 
-  const getEmpName = useCallback((id) =>
-    (allEmployees || []).find(e => String(e.id) === String(id))?.fullName || `#${id}`,
+  const getEmp = useCallback((id) =>
+    (allEmployees || []).find(e => String(e.id) === String(id)),
   [allEmployees]);
+  const getEmpName = useCallback((id) => getEmp(id)?.fullName || `#${id}`, [getEmp]);
 
-  const getMyRecoApproval = useCallback(() => {
-    const saved = loadRecoApproval();
-    const r = saved[activeUser?.id]?.reco;
-    const a = saved[activeUser?.id]?.approval;
-    return {
-      reco:     Array.isArray(r) ? r : (r ? [r] : []),
-      approval: Array.isArray(a) ? a : (a ? [a] : []),
-    };
-  }, [activeUser?.id]);
+  const getMyRecoApproval = useCallback(() => ({
+    reco:     getRecoIds(activeUser?.id),
+    approval: getApprovalIds(activeUser?.id),
+  }), [activeUser?.id, getRecoIds, getApprovalIds]);
 
   const validate = () => {
     const e = {};
@@ -102,6 +97,7 @@ const MissingAttendanceApplyModal = () => {
     const finalApproval = selectedApproval ? [selectedApproval] : form.approval;
     try {
       await api.post('/attendance/missing-requests', {
+        employeeId: targetEmployeeId || undefined,
         date: form.date,
         checkIn: form.checkIn || null,
         checkOut: form.checkOut || null,
@@ -128,17 +124,34 @@ const MissingAttendanceApplyModal = () => {
     setSelectedApproval('');
   };
 
-  const initForm = () => {
+  // This modal is rendered globally and stays mounted for the whole session
+  // (see Layout.jsx), so useRecoApproval's own mount-time fetch would go
+  // stale forever the moment someone edits the config after login — reset
+  // the form on open, then kick off a refetch.
+  useEffect(() => {
+    if (!isOpen) return;
     const { reco, approval } = getMyRecoApproval();
     setForm({ date: targetDate || today, checkIn: '', checkOut: '', reason: '', reco, approval });
     setSelectedReco(reco.length === 1 ? String(reco[0]) : '');
     setSelectedApproval(approval.length === 1 ? String(approval[0]) : '');
     setErrors({}); setSuccess(false); setSubmitError('');
-  };
+    refreshRecoApproval();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
-  const [prevOpen, setPrevOpen] = useState(false);
-  if (isOpen && !prevOpen) { setPrevOpen(true); initForm(); }
-  if (!isOpen && prevOpen)  { setPrevOpen(false); }
+  // Once that refetch actually resolves (recoAssignments itself changes —
+  // not some unstable function reference, which is what broke this before;
+  // see the matching comment in LeaveApplyModal.jsx), re-sync just the
+  // reco/approval fields without clobbering anything else already typed.
+  useEffect(() => {
+    if (!isOpen) return;
+    const reco     = getRecoIds(activeUser?.id);
+    const approval = getApprovalIds(activeUser?.id);
+    setForm(p => ({ ...p, reco, approval }));
+    setSelectedReco(prev => prev || (reco.length === 1 ? String(reco[0]) : ''));
+    setSelectedApproval(prev => prev || (approval.length === 1 ? String(approval[0]) : ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoAssignments, isOpen]);
 
   if (!isOpen || !activeUser) return null;
 
@@ -163,7 +176,9 @@ const MissingAttendanceApplyModal = () => {
                     Request Submitted Successfully!
                   </div>
                   <div style={{ fontSize:13, color:'#047857' }}>
-                    Missing attendance for <strong>{form.date}</strong> has been requested.
+                    {targetEmployeeId && String(targetEmployeeId) !== String(currentUser?.id)
+                      ? <>Missing attendance for <strong>{activeUser.fullName}</strong> on <strong>{form.date}</strong> has been requested.</>
+                      : <>Missing attendance for <strong>{form.date}</strong> has been requested.</>}
                   </div>
                 </div>
               </div>
@@ -262,18 +277,18 @@ const MissingAttendanceApplyModal = () => {
                   )}
                   {form.reco.length === 1 && (
                     <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                      <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                      <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px 2px 6px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                        <Avatar photo={getEmp(form.reco[0])?.profilePhoto} name={getEmpName(form.reco[0])} size={20} />
                         {getEmpName(form.reco[0])}
                       </span>
                     </div>
                   )}
                   {form.reco.length > 1 && (
                     <>
-                      <select value={selectedReco} onChange={e => setSelectedReco(e.target.value)}
-                        className={`form-control ${errors.selectedReco ? 'error' : ''}`} style={{ fontSize:13, minHeight:42 }}>
-                        <option value="">— Select Recommendator —</option>
-                        {form.reco.map(id => <option key={id} value={String(id)}>{getEmpName(id)}</option>)}
-                      </select>
+                      <SearchableSelect value={selectedReco} onChange={setSelectedReco}
+                        className={`form-control ${errors.selectedReco ? 'error' : ''}`}
+                        options={form.reco.map(id => ({ value: String(id), label: getEmpName(id), sub: [getEmp(id)?.employeeId, getEmp(id)?.position].filter(Boolean).join(' - '), photo: getEmp(id)?.profilePhoto }))}
+                        placeholder="— Select Recommendator —" showAvatar />
                       <Err msg={errors.selectedReco} />
                     </>
                   )}
@@ -288,18 +303,18 @@ const MissingAttendanceApplyModal = () => {
                   )}
                   {form.approval.length === 1 && (
                     <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                      <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                      <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 12px 2px 6px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                        <Avatar photo={getEmp(form.approval[0])?.profilePhoto} name={getEmpName(form.approval[0])} size={20} />
                         {getEmpName(form.approval[0])}
                       </span>
                     </div>
                   )}
                   {form.approval.length > 1 && (
                     <>
-                      <select value={selectedApproval} onChange={e => setSelectedApproval(e.target.value)}
-                        className={`form-control ${errors.selectedApproval ? 'error' : ''}`} style={{ fontSize:13, minHeight:42 }}>
-                        <option value="">— Select Approval Authority —</option>
-                        {form.approval.map(id => <option key={id} value={String(id)}>{getEmpName(id)}</option>)}
-                      </select>
+                      <SearchableSelect value={selectedApproval} onChange={setSelectedApproval}
+                        className={`form-control ${errors.selectedApproval ? 'error' : ''}`}
+                        options={form.approval.map(id => ({ value: String(id), label: getEmpName(id), sub: [getEmp(id)?.employeeId, getEmp(id)?.position].filter(Boolean).join(' - '), photo: getEmp(id)?.profilePhoto }))}
+                        placeholder="— Select Approval Authority —" showAvatar />
                       <Err msg={errors.selectedApproval} />
                     </>
                   )}

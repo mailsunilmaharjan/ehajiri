@@ -9,6 +9,7 @@ import { adToBS, bsToAD, getBSDays, BS_MONTHS_EN, BS_MONTHS_NP, toNepaliDigits, 
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import StaffDropdown    from '../Common/StaffDropdown.jsx';
 import MultiCheckSelect from '../Common/MultiCheckSelect.jsx';
+import Avatar           from '../Common/Avatar.jsx';
 import { CATEGORIES, categorize, fmtPunchTime, dutyRosterRange, presentFlags } from '../../utils/attendanceCalendar.js';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -143,6 +144,13 @@ const pickMostSpecificRoster = (candidates) => {
 // person is actually on, not spawn its own department card.
 const isOffTypeShift = (r) => !r.startTime || !r.endTime || /off/i.test(r.shiftName || '');
 
+// Weekend/Day Off/Night Off are three independent day-of-week sets (see
+// DutyRoster.jsx's OFF_DAY_TYPES) — a day counts as off if it falls in any
+// of them, not just the original weekend-only offDays column.
+const isOffDay = (r, dayName) => (r.offDays || []).includes(dayName)
+  || (r.dayOffDays || []).includes(dayName)
+  || (r.nightOffDays || []).includes(dayName);
+
 function getCurrentFY(fiscalYears = []) {
   const today = getNepalTodayISO();
   return fiscalYears.find(fy => fy.startDate <= today && fy.endDate >= today)
@@ -175,7 +183,7 @@ const PrintCompanyHeader = ({ settings }) => {
    Department Week Calendar
 ══════════════════════════════════════════ */
 const DeptWeekView = ({ rosters, department, weekStart, weekEnd, settings }) => {
-  const { getApprovedLeaveForDate, getLeaveTypeColor } = useData();
+  const { getApprovedLeaveForDate, getLeaveTypeColor, getEmployeeById } = useData();
   const useNP   = settings?.defaultCalendar === 'np';
   const useNPDg = useNP && settings?.nepaliDigits;
   const fmtN    = n => useNPDg ? toNepaliDigits(n) : String(n);
@@ -236,7 +244,7 @@ const DeptWeekView = ({ rosters, department, weekStart, weekEnd, settings }) => 
     const r = pickMostSpecificRoster(covering);
     if (!r) return null;
     const dayName = DAYS[dayStart.getDay()];
-    const isOff = (r.offDays || []).includes(dayName) || isOffTypeShift(r);
+    const isOff = isOffDay(r, dayName) || isOffTypeShift(r);
     return { isOff, shiftName: r.shiftName };
   };
 
@@ -305,7 +313,12 @@ const DeptWeekView = ({ rosters, department, weekStart, weekEnd, settings }) => 
                 {si + 1}
               </td>
               <td style={{ padding: '3px 8px', fontWeight: 600, color: '#111827', fontSize: 12.5,
-                borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{s.name}</td>
+                borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>
+                <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <Avatar photo={getEmployeeById(s.id)?.profilePhoto} name={s.name} size={18} />
+                  {s.name}
+                </span>
+              </td>
               <td style={{ padding: '3px 8px', textAlign: 'center', color: '#374151', fontSize: 12.5,
                 borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }} title={s.position}>
                 {getShortName(s.position, settings?.posts)}
@@ -353,7 +366,7 @@ const DeptWeekView = ({ rosters, department, weekStart, weekEnd, settings }) => 
    as a "Day Off" cell inside whichever real shift the person is on).
 ══════════════════════════════════════════ */
 const DeptShiftGrid = ({ rosters, department, shiftNames, weekStart, weekEnd, settings }) => {
-  const { getApprovedLeaveForDate, getLeaveTypeColor } = useData();
+  const { getApprovedLeaveForDate, getLeaveTypeColor, getEmployeeById } = useData();
   const useNP   = settings?.defaultCalendar === 'np';
   const useNPDg = useNP && settings?.nepaliDigits;
   const fmtN    = n => useNPDg ? toNepaliDigits(n) : String(n);
@@ -402,26 +415,40 @@ const DeptShiftGrid = ({ rosters, department, shiftNames, weekStart, weekEnd, se
     const r = pickMostSpecificRoster(covering);
     if (!r) return null;
     const dayName = DAYS[dayStart.getDay()];
-    const isOff = (r.offDays || []).includes(dayName) || isOffTypeShift(r);
+    const isOff = isOffDay(r, dayName) || isOffTypeShift(r);
     return { isOff, shiftName: r.shiftName };
   };
 
-  /* One section per real shift — staff membership comes from that shift's
-     own roster rows only (an off-type override alone doesn't put someone
-     on a shift), sorted by name within the section. */
-  const sections = useMemo(() => shiftNames.map(shiftName => {
-    const map = new Map();
-    deptRosters
-      .filter(r => r.shiftName === shiftName)
-      .forEach(r => {
-        if (r.employeeDbId && !map.has(r.employeeDbId))
-          map.set(r.employeeDbId, { name: r.employeeName || '—', position: r.position || '' });
+  /* One section per real shift — staff membership comes from each
+     employee's EFFECTIVE shift per displayed day (most-specific roster
+     wins, same precedence as the calendar cells via getDayInfo), not raw
+     roster rows. A raw-rows grouping put someone under both their wide
+     Default Shift row and a narrower override row covering the same week —
+     "double duty" in this grid — whenever both existed for that employee. */
+  const sections = useMemo(() => {
+    const shiftStaff = new Map(); // shiftName -> Map(employeeDbId -> {name, position})
+    const employeeIds = [...new Set(deptRosters.map(r => r.employeeDbId).filter(Boolean))];
+    employeeIds.forEach(empId => {
+      const effectiveShifts = new Set();
+      days.forEach(day => {
+        const info = getDayInfo(empId, day);
+        if (info && !info.leave && !info.isOff && info.shiftName) effectiveShifts.add(info.shiftName);
       });
-    const staffList = [...map.entries()]
-      .map(([id, v]) => ({ id, name: v.name, position: v.position }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    return { shiftName, staffList };
-  }).filter(s => s.staffList.length > 0), [deptRosters, shiftNames]);
+      if (effectiveShifts.size === 0) return;
+      const anyRow = deptRosters.find(r => r.employeeDbId === empId);
+      effectiveShifts.forEach(shiftName => {
+        if (!shiftStaff.has(shiftName)) shiftStaff.set(shiftName, new Map());
+        shiftStaff.get(shiftName).set(empId, { name: anyRow?.employeeName || '—', position: anyRow?.position || '' });
+      });
+    });
+    return shiftNames.map(shiftName => {
+      const map = shiftStaff.get(shiftName) || new Map();
+      const staffList = [...map.entries()]
+        .map(([id, v]) => ({ id, name: v.name, position: v.position }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return { shiftName, staffList };
+    }).filter(s => s.staffList.length > 0);
+  }, [deptRosters, shiftNames, days]);
 
   const fmtDayHeader = (d) => {
     if (useNP) {
@@ -495,7 +522,12 @@ const DeptShiftGrid = ({ rosters, department, shiftNames, weekStart, weekEnd, se
                     {ri + 1}
                   </td>
                   <td style={{ padding: '3px 8px', fontWeight: 600, color: '#111827', fontSize: 12.5,
-                    borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{s.name}</td>
+                    borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>
+                    <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <Avatar photo={getEmployeeById(s.id)?.profilePhoto} name={s.name} size={18} />
+                      {s.name}
+                    </span>
+                  </td>
                   <td style={{ padding: '3px 8px', textAlign: 'center', color: '#374151', fontSize: 12.5,
                     borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }} title={s.position}>
                     {getShortName(s.position, settings?.posts)}
@@ -640,6 +672,7 @@ const ShiftFilterModal = ({ open, onClose, depts, deptFilter, onDeptChange,
 ══════════════════════════════════════════ */
 const StaffCalendar = ({ staff, rosters, settings, initialYear, initialMonth, onMonthChange,
   employees, canChangeStaff, onChangeStaff }) => {
+  const { shifts } = useData();
   const useNP    = settings?.defaultCalendar === 'np';
   const useNPDg  = settings?.nepaliDigits && useNP;
   const today    = getNepalNow();
@@ -804,11 +837,7 @@ const StaffCalendar = ({ staff, rosters, settings, initialYear, initialMonth, on
             Roster | Name" title already printed above, so hidden for print
             (display:contents keeps them as normal flex children on screen). */}
         <div className="src-cal-avatarblock" style={{ display: 'contents' }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: '#eff6ff',
-            border: '1.5px solid #bfdbfe', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', fontSize: 18, color: '#1a56db', fontWeight: 800, flexShrink: 0 }}>
-            {(staff.fullName || '?')[0].toUpperCase()}
-          </div>
+          <Avatar photo={staff.profilePhoto} name={staff.fullName} size={40} style={{ borderRadius: 10, border: '1.5px solid #bfdbfe' }} />
           <div style={{ flex: 1, minWidth: 140 }}>
             <div className="src-cal-staffname" style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>{staff.fullName}</div>
             <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
@@ -1006,11 +1035,27 @@ const StaffCalendar = ({ staff, rosters, settings, initialYear, initialMonth, on
           })}
         </div>
 
-        {/* Roster entries footer */}
-        {rosters.length > 0 ? (
+        {/* Roster entries footer — a specific (non-default) roster entry
+            overlaps/replaces the default shift for its own date range, so
+            the default-shift row is left out here whenever another entry
+            already covers those same dates. Without this, a wide Default
+            Shift entry and a narrower override both listed side by side
+            read as double duty for the overlapping dates. */}
+        {(() => {
+          const defaultShiftName = shifts.find(s => s.makeDefault)?.name;
+          const overlaps = (a, b) => {
+            const aFrom = a.dateFrom ? new Date(a.dateFrom) : null, aTo = a.dateTo ? new Date(a.dateTo) : null;
+            const bFrom = b.dateFrom ? new Date(b.dateFrom) : null, bTo = b.dateTo ? new Date(b.dateTo) : null;
+            return (!aFrom || !bTo || aFrom <= bTo) && (!aTo || !bFrom || aTo >= bFrom);
+          };
+          const visibleRosters = rosters.filter(r =>
+            r.shiftName !== defaultShiftName ||
+            !rosters.some(other => other !== r && other.shiftName !== defaultShiftName && overlaps(r, other))
+          );
+          return visibleRosters.length > 0 ? (
           <div className="src-cal-footer" style={{ padding: '8px 16px', background: '#f8fafc', borderTop: '1px solid #e5e7eb',
             display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: '#6b7280' }}>
-            {rosters.map((r, i) => (
+            {visibleRosters.map((r, i) => (
               <span key={r.id || i} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                   background: SHIFT_COLORS[i % SHIFT_COLORS.length] }} />
@@ -1018,6 +1063,12 @@ const StaffCalendar = ({ staff, rosters, settings, initialYear, initialMonth, on
                 {': '}{fmtDate(r.dateFrom)} → {fmtDate(r.dateTo)}
                 {r.offDays?.length > 0 && (
                   <span style={{ color: '#dc2626' }}> | Off: {r.offDays.join(', ')}</span>
+                )}
+                {r.dayOffDays?.length > 0 && (
+                  <span style={{ color: '#92400e' }}> | Day Off: {r.dayOffDays.join(', ')}</span>
+                )}
+                {r.nightOffDays?.length > 0 && (
+                  <span style={{ color: '#6d28d9' }}> | Night Off: {r.nightOffDays.join(', ')}</span>
                 )}
               </span>
             ))}
@@ -1027,7 +1078,8 @@ const StaffCalendar = ({ staff, rosters, settings, initialYear, initialMonth, on
             borderTop: '1px solid #e5e7eb' }}>
             No roster assigned to this staff for this month.
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
@@ -1389,7 +1441,7 @@ const RosterReport = () => {
         const from = r.dateFrom ? new Date(r.dateFrom) : null;
         const to   = r.dateTo   ? new Date(r.dateTo)   : null;
         if (!((!from || from <= de) && (!to || to >= ds))) continue;
-        const isOff = (r.offDays || []).includes(DAYS[ds.getDay()]);
+        const isOff = isOffDay(r, DAYS[ds.getDay()]);
         return isOff ? 'Day Off' : (r.shiftName || 'On Duty');
       }
       return '';

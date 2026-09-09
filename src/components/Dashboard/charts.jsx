@@ -41,17 +41,26 @@ export const Donut = ({ segments = [], size = 120, thickness = 14, centerLabel, 
 };
 
 // Legend rows to pair with a Donut — kept separate so callers control layout.
-export const ChartLegend = ({ segments = [] }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-    {segments.map((seg, i) => (
-      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-        <span style={{ width: 9, height: 9, borderRadius: 3, background: seg.color, flexShrink: 0 }} />
-        <span style={{ color: '#64748b', flex: 1 }}>{seg.label}</span>
-        <span style={{ fontWeight: 700, color: '#1e293b' }}>{seg.value}</span>
-      </div>
-    ))}
-  </div>
-);
+// showPercent adds a small "(NN%)" next to the count, of the segments' own
+// total — purely numeric, no text, so this stays as language-agnostic as
+// the rest of this file.
+export const ChartLegend = ({ segments = [], showPercent = false }) => {
+  const total = segments.reduce((s, x) => s + (x.value || 0), 0);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      {segments.map((seg, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+          <span style={{ width: 9, height: 9, borderRadius: 3, background: seg.color, flexShrink: 0 }} />
+          <span style={{ color: '#64748b', flex: 1 }}>{seg.label}</span>
+          {showPercent && total > 0 && (
+            <span style={{ color: '#cbd5e1', fontSize: 10.5, fontWeight: 600 }}>({Math.round((seg.value / total) * 100)}%)</span>
+          )}
+          <span style={{ fontWeight: 700, color: '#1e293b', minWidth: 16, textAlign: 'right' }}>{seg.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 // Vertical bar chart. data: [{ label, value, color }]
 export const MiniBarChart = ({ data = [], height = 140 }) => {
@@ -77,10 +86,20 @@ export const MiniBarChart = ({ data = [], height = 140 }) => {
 
 // Half-circle gauge donut — same stroke-dasharray-on-path technique as Donut,
 // just applied to a semicircle arc (length π·r) instead of a full circle (2π·r).
-// Hovering a segment shows a small dark tooltip with its label/value.
-export const HalfDonut = ({ segments = [], size = 160, thickness = 16, centerLabel, centerSub }) => {
+// Adjacent slices get a small visual gap (rounded caps on each end, per the
+// existing strokeLinecap) instead of touching edge-to-edge, and the track
+// carries a soft drop-shadow for a bit more depth. Hovering a segment shows
+// a small dark tooltip with its label/value. `centerCaption` is an optional
+// third line under the number (e.g. a percentage) — left to the caller to
+// compute and translate, same as centerLabel/centerSub/segment labels, so
+// this stays a language-agnostic primitive with no text of its own.
+const GAP_PX = 3;
+let haloId = 0;
+export const HalfDonut = ({ segments = [], size = 160, thickness = 16, centerLabel, centerSub, centerCaption }) => {
   const [hover, setHover] = useState(null); // { seg, x, y }
-  const total  = segments.reduce((s, x) => s + (x.value || 0), 0);
+  const [filterId] = useState(() => `halfDonutShadow-${haloId++}`);
+  const segTotal = segments.reduce((s, x) => s + (x.value || 0), 0);
+  const visibleCount = segments.filter(s => s.value > 0).length;
   const r      = (size - thickness) / 2;
   const cx     = size / 2, cy = size / 2;
   const arcLen = Math.PI * r;
@@ -90,25 +109,35 @@ export const HalfDonut = ({ segments = [], size = 160, thickness = 16, centerLab
   return (
     <div style={{ position: 'relative', width: size, height: size / 2 + 34 }}>
       <svg width={size} height={size / 2 + 6} viewBox={`0 0 ${size} ${size / 2 + 6}`}>
+        <defs>
+          <filter id={filterId} x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#0f172a" floodOpacity="0.18" />
+          </filter>
+        </defs>
         <path d={d} fill="none" stroke="#f1f5f9" strokeWidth={thickness} strokeLinecap="round" />
-        {total > 0 && segments.map((seg, i) => {
-          if (!seg.value) return null;
-          const dash = (seg.value / total) * arcLen;
-          const path = (
-            <path key={i} d={d} fill="none" stroke={seg.color} strokeWidth={thickness}
-              strokeDasharray={`${dash} ${arcLen - dash}`} strokeDashoffset={-offset}
-              style={{ cursor: 'pointer' }}
-              onMouseEnter={(e) => setHover({ seg, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
-              onMouseMove={(e) => setHover({ seg, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
-              onMouseLeave={() => setHover(null)} />
-          );
-          offset += dash;
-          return path;
-        })}
+        <g filter={`url(#${filterId})`}>
+          {segTotal > 0 && segments.map((seg, i) => {
+            if (!seg.value) return null;
+            const rawDash = (seg.value / segTotal) * arcLen;
+            const dash = visibleCount > 1 ? Math.max(0, rawDash - GAP_PX) : rawDash;
+            const path = (
+              <path key={i} d={d} fill="none" stroke={seg.color} strokeWidth={thickness} strokeLinecap="round"
+                strokeDasharray={`${dash} ${arcLen - dash}`} strokeDashoffset={-offset}
+                style={{ cursor: 'pointer', transition: 'opacity .15s' }}
+                opacity={hover && hover.seg !== seg ? 0.55 : 1}
+                onMouseEnter={(e) => setHover({ seg, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
+                onMouseMove={(e) => setHover({ seg, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}
+                onMouseLeave={() => setHover(null)} />
+            );
+            offset += rawDash;
+            return path;
+          })}
+        </g>
       </svg>
-      <div style={{ position: 'absolute', left: 0, right: 0, top: '62%', textAlign: 'center', pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: '58%', textAlign: 'center', pointerEvents: 'none' }}>
         {centerSub && <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>{centerSub}</div>}
-        <div style={{ fontSize: 24, fontWeight: 800, color: '#1e293b', lineHeight: 1.15 }}>{centerLabel}</div>
+        <div style={{ fontSize: 26, fontWeight: 800, color: '#1e293b', lineHeight: 1.15 }}>{centerLabel}</div>
+        {centerCaption && <div style={{ fontSize: 10.5, color: '#94a3b8', fontWeight: 600, marginTop: 1 }}>{centerCaption}</div>}
       </div>
       {hover && (
         <div style={{ position: 'absolute', left: hover.x, top: Math.max(0, hover.y - 44), transform: 'translateX(-50%)',

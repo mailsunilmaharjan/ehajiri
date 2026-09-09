@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLanguage } from '../../context/LanguageContext.jsx';
 import { bsToAD } from '../../utils/dateUtils.js';
+import ReportIcon from './ReportIcon.jsx';
 
-const SUB_REPORTS = [
-  { icon:'📒', label:'Half Monthly Staff Ledger', path:'/attendance/reports/half-monthly/ledger' },
-  { icon:'✅', label:'Present Absent Report',     path:'/attendance/reports/half-monthly/present-absent' },
-  { icon:'📊', label:'Summary Report',            path:'/attendance/reports/half-monthly/summary' },
-  { icon:'🔄', label:'IN & OUT Report',           path:'/attendance/reports/half-monthly/in-out' },
-  { icon:'📅', label:'Absent Report',             path:'/attendance/reports/half-monthly/absent' },
-  { icon:'⏰', label:'Late In Early Out Report',  path:'/attendance/reports/half-monthly/late-early' },
-  { icon:'💪', label:'Over Time Report',          path:'/attendance/reports/half-monthly/overtime' },
+const SUB_REPORTS = (L) => [
+  { icon:'bookOpen',    label:L('अर्धमासिक स्टाफ लेजर','Half Monthly Staff Ledger'), path:'/attendance/reports/half-monthly/ledger' },
+  { icon:'checkCircle', label:L('उपस्थित/अनुपस्थित रिपोर्ट','Present Absent Report'), path:'/attendance/reports/half-monthly/present-absent' },
+  { icon:'barChart',    label:L('सारांश रिपोर्ट','Summary Report'),             path:'/attendance/reports/half-monthly/summary' },
+  { icon:'repeat',      label:L('अर्धमासिक IN & OUT रिपोर्ट','Half Monthly IN & OUT Report'), path:'/attendance/reports/half-monthly/in-out' },
+  { icon:'calendar',    label:L('अनुपस्थित रिपोर्ट','Absent Report'),           path:'/attendance/reports/half-monthly/absent' },
+  { icon:'clock',       label:L('ढिला/चाँडो रिपोर्ट','Late In Early Out Report'), path:'/attendance/reports/half-monthly/late-early' },
+  { icon:'zap',         label:L('ओभरटाइम रिपोर्ट','Over Time Report'),         path:'/attendance/reports/half-monthly/overtime' },
 ];
 
 /**
@@ -21,6 +23,9 @@ const SUB_REPORTS = [
  *   currentPath — pathname of the current page (used to highlight active item)
  */
 const ViewHalfMonthlyBtn = ({ year, month, half, useNP, currentPath = '' }) => {
+  const { language } = useLanguage();
+  const L = (np, en) => language === 'np' ? np : en;
+  const subReports = SUB_REPORTS(L);
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const ref = useRef();
@@ -57,7 +62,7 @@ const ViewHalfMonthlyBtn = ({ year, month, half, useNP, currentPath = '' }) => {
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
         </svg>
-        View Half Monthly Reports
+        {L('अर्धमासिक रिपोर्टहरू हेर्नुहोस्','View Half Monthly Reports')}
         <svg viewBox="0 0 20 20" fill="white" width="12" height="12"
           style={{ transform:open?'rotate(180deg)':'none', transition:'transform .2s' }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
@@ -73,9 +78,9 @@ const ViewHalfMonthlyBtn = ({ year, month, half, useNP, currentPath = '' }) => {
           <div style={{ padding:'8px 14px', background:'#f9fafb',
             borderBottom:'1px solid #f3f4f6', fontSize:11, fontWeight:700,
             color:'#6b7280', textTransform:'uppercase', letterSpacing:'.5px' }}>
-            Half Monthly Reports
+            {L('अर्धमासिक रिपोर्टहरू','Half Monthly Reports')}
           </div>
-          {SUB_REPORTS.map((r, i) => {
+          {subReports.map((r, i) => {
             const isActive = currentPath === r.path;
             return (
               <button key={r.path}
@@ -83,13 +88,13 @@ const ViewHalfMonthlyBtn = ({ year, month, half, useNP, currentPath = '' }) => {
                 style={{
                   width:'100%', display:'flex', alignItems:'center', gap:9,
                   padding:'8px 14px', border:'none',
-                  borderBottom: i < SUB_REPORTS.length-1 ? '1px solid #f0f0f0' : 'none',
+                  borderBottom: i < subReports.length-1 ? '1px solid #f0f0f0' : 'none',
                   textAlign:'left', cursor:'pointer', fontSize:13, transition:'background .1s',
                   background: isActive ? '#eff6ff' : 'white',
                   color: isActive ? '#1e40af' : '#374151',
                   fontWeight: isActive ? 700 : 500,
                 }}>
-                <span style={{ fontSize:18, flexShrink:0 }}>{r.icon}</span>
+                <ReportIcon name={r.icon} />
                 <span style={{ flex:1, whiteSpace:'nowrap' }}>{r.label}</span>
                 {isActive
                   ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13" style={{ flexShrink:0 }}>

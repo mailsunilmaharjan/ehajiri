@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
@@ -7,20 +8,15 @@ import { useAuth }     from '../../context/AuthContext.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import StaffDropdown   from '../Common/StaffDropdown.jsx';
+import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import MultiCheckSelect from '../Common/MultiCheckSelect.jsx';
 import SaveButton      from '../Common/SaveButton.jsx';
+import Avatar          from '../Common/Avatar.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import useLeaveOpening from '../../hooks/useLeaveOpening.js';
 import { branchAbbr, staffRankCompare } from '../../utils/branchUtils.js';
 import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
-
-/* ─────────────────────────────────────────── */
-/* localStorage helpers                         */
-/* ─────────────────────────────────────────── */
-const lsGet = (key, fallback) => {
-  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; }
-  catch { return fallback; }
-};
-const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+import { downloadBlob } from '../../utils/printHelper.js';
 
 /* ─────────────────────────────────────────── */
 /* GridPager — pagination footer for the bespoke multi-column editable
@@ -29,7 +25,7 @@ const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val
    component directly, but should still look and behave like one. Mirrors
    DataGrid.jsx's own footer markup/classes/page-number logic exactly. */
 /* ─────────────────────────────────────────── */
-const GridPager = ({ page, setPage, pageSize, setPageSize, total, L, itemLabel }) => {
+export const GridPager = ({ page, setPage, pageSize, setPageSize, total, L, itemLabel }) => {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const startIdx = (page - 1) * pageSize;
   const pageNumbers = useMemo(() => {
@@ -78,19 +74,40 @@ const GridPager = ({ page, setPage, pageSize, setPageSize, total, L, itemLabel }
 /* ─────────────────────────────────────────── */
 /* MultiSelectDropdown                          */
 /* ─────────────────────────────────────────── */
-const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', maxHeight = 220, tabIndex = 0 }) => {
+const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', maxHeight = 220, tabIndex = 0, showAvatar = false }) => {
   const [open,        setOpen]        = useState(false);
-  const [openUp,      setOpenUp]      = useState(false);
   const [localSearch, setLocalSearch] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
-  const ref  = useRef(null);
+  const [rect,        setRect]        = useState(null);
+  const ref     = useRef(null);  // trigger
+  const dropRef = useRef(null);  // portalled panel
   const itemRefs = useRef([]);
 
+  // Portalled to document.body so the panel isn't clipped by an ancestor's
+  // overflow:auto/hidden (e.g. the Advanced Filter modal card, which sizes
+  // itself to its content and so is often shorter than the dropdown needs).
   useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
+    if (!open) { setRect(null); return; }
+    if (ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      const openUp = window.innerHeight - r.bottom < 280;
+      setRect({
+        left: r.left, width: r.width,
+        ...(openUp ? { bottom: window.innerHeight - r.top + 2 } : { top: r.bottom + 2 }),
+      });
+    }
+    const close = (e) => {
+      if (ref.current?.contains(e.target) || dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const scroll = (e) => {
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    window.addEventListener('scroll', scroll, true);
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', scroll, true); };
+  }, [open]);
 
   const isAll    = value.length === 0;
   const toggle   = (v) => onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v]);
@@ -105,8 +122,6 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
 
   const handleToggle = () => {
     if (!open) {
-      const rect = ref.current?.getBoundingClientRect();
-      if (rect) setOpenUp(window.innerHeight - rect.bottom < 280);
       setLocalSearch('');
       const idx = value.length === 1 ? navItems.findIndex(o => o && o.value === value[0]) : 0;
       setActiveIndex(idx >= 0 ? idx : 0);
@@ -116,7 +131,7 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
 
   const handleTriggerKey = (e) => {
     if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); handleToggle(); }
-    else if (e.key === 'Escape')            { setOpen(false); }
+    else if (e.key === 'Escape')            { e.stopPropagation(); setOpen(false); }
     else if (e.key === 'Tab')               { setOpen(false); }
   };
   const handleSearchKeyDown = (e) => {
@@ -131,6 +146,7 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
       if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
     } else if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       setOpen(false);
     }
   };
@@ -162,13 +178,9 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
         </span>
         <span style={{ fontSize:9, color:'#9ca3af', marginLeft:4, flexShrink:0 }}>{open ? '▲' : '▼'}</span>
       </div>
-      {open && (
-        <div style={{
-          position:'absolute',
-          ...(openUp
-            ? { bottom:'calc(100% + 2px)', top:'auto' }
-            : { top:'calc(100% + 2px)',    bottom:'auto' }),
-          left:0, right:0, zIndex:9999,
+      {open && rect && createPortal(
+        <div ref={dropRef} style={{
+          position:'fixed', ...rect, zIndex:999999,
           background:'white', border:'1.5px solid #d1d5db', borderRadius:6,
           boxShadow:'0 10px 28px rgba(0,0,0,.18)',
           display:'flex', flexDirection:'column',
@@ -194,6 +206,7 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
               const isAllRow = opt === null;
               const checked  = isAllRow ? isAll : value.includes(opt.value);
               const highlighted = i === activeIndex;
+              const stripeBg = isAllRow ? 'transparent' : ((i - 1) % 2 === 0 ? '#fff' : '#fafafa');
               return (
                 <label key={isAllRow ? '__all' : opt.value}
                   ref={el => itemRefs.current[i] = el}
@@ -201,15 +214,21 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
                   onMouseEnter={() => setActiveIndex(i)}
                   style={{
                     display:'flex', alignItems:'center', gap:8,
-                    padding: isAllRow ? '8px 12px' : '7px 12px', cursor:'pointer',
-                    background: checked ? '#eff6ff' : (highlighted ? '#f8fafc' : 'transparent'),
-                    borderBottom: isAllRow ? '2px solid #e5e7eb' : (i < navItems.length - 1 ? '1.5px solid #e5e7eb' : 'none'),
+                    padding: isAllRow ? '8px 12px' : '5px 12px', cursor:'pointer',
+                    background: checked ? '#eff6ff' : (highlighted ? '#f8fafc' : stripeBg),
+                    borderBottom: isAllRow ? '2px solid #e5e7eb' : (i < navItems.length - 1 ? '1px solid #eef0f3' : 'none'),
                     userSelect:'none',
                   }}
                 >
-                  <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#1a56db' }} onClick={e => e.stopPropagation()} />
-                  <span style={{ fontSize:13, color: checked ? '#1e40af' : '#374151', fontWeight: checked || isAllRow ? 600 : 400, whiteSpace:'nowrap' }}>
-                    {isAllRow ? 'All' : opt.label}
+                  <input type="checkbox" checked={checked} readOnly style={{ accentColor:'#1a56db', flexShrink:0 }} onClick={e => e.stopPropagation()} />
+                  {showAvatar && !isAllRow && <Avatar photo={opt.photo} name={opt.label} size={26} style={{ flexShrink:0 }} />}
+                  <span style={{ display:'flex', flexDirection:'column', minWidth:0 }}>
+                    <span style={{ fontSize:13, color: checked ? '#1e40af' : '#1f2937', fontWeight: checked || isAllRow ? 600 : 400, whiteSpace:'nowrap' }}>
+                      {isAllRow ? 'All' : opt.label}
+                    </span>
+                    {!isAllRow && opt.sub && (
+                      <span style={{ fontSize:10.5, color:'#9ca3af', fontWeight:400 }}>{opt.sub}</span>
+                    )}
                   </span>
                 </label>
               );
@@ -218,14 +237,15 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
               <div style={{ padding:'10px 12px', textAlign:'center', color:'#9ca3af', fontSize:12 }}>No results found</div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
 };
 
 /* module-level shortName helper */
-const shortOf = (name, list) => {
+export const shortOf = (name, list) => {
   if (!name || name === '—') return '—';
   return (list||[]).find(x => x.name === name)?.shortName || name?.slice(0, 8) || '—';
 };
@@ -233,13 +253,42 @@ const shortOf = (name, list) => {
 /* ─────────────────────────────────────────── */
 /* Shared Advanced Filter Modal                 */
 /* ─────────────────────────────────────────── */
-const LeaveAdvancedFilter = ({
+export const LeaveAdvancedFilter = ({
   isOpen, onClose, onApply, onReset,
   fyId, setFyId, fiscalYears,
   tempF, setTF,
   branchOpts, deptOpts, postOpts, gradeOpts, modeOpts, statusOpts, staffOpts, leaveTypeOpts,
-  showFY = true, showAccum = true, L,
+  showFY = true, showAccum = true, showLeave = true, L,
+  // Opt-in extras for the read-only Reports pages (LeaveReports/OfficeVisitReports) —
+  // every existing caller leaves these at their defaults and renders exactly as before.
+  showWorkingStatus = false, // replaces the employeeStatuses Status field with an
+                              // All/Working/Not Working checkbox group (tempF.workingStatus)
+  showFYMulti = false,       // adds a multi-select Fiscal Year field (tempF.fyIds) —
+                              // separate from the single-select `showFY` above
+  fyMultiOpts = [],          // [{ value, label, startDate, endDate }] — startDate/endDate
+                              // (AD ISO) drive the auto-filled date range below
+  showDateRange = false,     // adds From Date / To Date fields (tempF.fromDate/toDate)
+  settings,                  // needed only when showDateRange, for calendar-aware input
 }) => {
+  const handleFyMultiChange = (ids) => {
+    setTF('fyIds', ids);
+    if (!showDateRange || ids.length === 0) return;
+    const selected = fyMultiOpts.filter(o => ids.includes(o.value));
+    const minStart = selected.reduce((min, o) => (!min || o.startDate < min) ? o.startDate : min, null);
+    const maxEnd   = selected.reduce((max, o) => (!max || o.endDate   > max) ? o.endDate   : max, null);
+    if (minStart) setTF('fromDate', minStart);
+    if (maxEnd)   setTF('toDate', maxEnd);
+  };
+  // Escape closes the whole modal — but only once nothing narrower already
+  // consumed it; each MultiSelectDropdown's own Escape handler closes just
+  // its open list first and calls stopPropagation so it never reaches here.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
   const funnelIcon = (
     <svg viewBox="0 0 20 20" fill="currentColor" width={16} height={16} style={{ color:'#1a56db' }}>
@@ -271,14 +320,20 @@ const LeaveAdvancedFilter = ({
           }}
         >
 
-          {/* ── Row 1: FY (optional) | Branch | Department ── */}
-          <div style={{ display:'grid', gridTemplateColumns: showFY ? '1fr 1fr 1fr' : '1fr 1fr', gap:12 }}>
+          {/* ── Row 1: FY (optional, single or multi) | Branch | Department ── */}
+          <div style={{ display:'grid', gridTemplateColumns: (showFY || showFYMulti) ? '1fr 1fr 1fr' : '1fr 1fr', gap:12 }}>
             {showFY && (
               <div className="form-group" style={{ marginBottom:0 }}>
                 <label className="form-label required">{L('आर्थिक वर्ष','Fiscal Year')}</label>
                 <select className="form-control" style={{ fontSize:13 }} tabIndex={1} value={fyId} onChange={e => setFyId(e.target.value)}>
                   {(fiscalYears||[]).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
                 </select>
+              </div>
+            )}
+            {showFYMulti && (
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">{L('आर्थिक वर्ष','Fiscal Year')}</label>
+                <MultiSelectDropdown tabIndex={1} options={fyMultiOpts} value={tempF.fyIds} onChange={handleFyMultiChange} placeholder={L('सबै','All')} />
               </div>
             )}
             <div className="form-group" style={{ marginBottom:0 }}>
@@ -290,6 +345,24 @@ const LeaveAdvancedFilter = ({
               <MultiSelectDropdown tabIndex={3} options={deptOpts} value={tempF.departments} onChange={v => setTF('departments', v)} placeholder={L('सबै','All')} />
             </div>
           </div>
+
+          {/* ── Optional Row: From Date | To Date (report pages only) ── */}
+          {showDateRange && (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">{L('मिति देखि','From Date')}</label>
+                {settings?.defaultCalendar === 'np'
+                  ? <NepaliDatePicker value={tempF.fromDate} onChange={v => setTF('fromDate', v)} maxToday={false} minToday={false} />
+                  : <input type="date" className="form-control" style={{ fontSize:13 }} value={tempF.fromDate || ''} onChange={e => setTF('fromDate', e.target.value)} />}
+              </div>
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">{L('मिति सम्म','To Date')}</label>
+                {settings?.defaultCalendar === 'np'
+                  ? <NepaliDatePicker value={tempF.toDate} onChange={v => setTF('toDate', v)} maxToday={false} minToday={false} />
+                  : <input type="date" className="form-control" style={{ fontSize:13 }} value={tempF.toDate || ''} onChange={e => setTF('toDate', e.target.value)} />}
+              </div>
+            </div>
+          )}
 
           {/* ── Row 2: Post | Grade | Mode | Status ── */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:12 }}>
@@ -307,20 +380,41 @@ const LeaveAdvancedFilter = ({
             </div>
             <div className="form-group" style={{ marginBottom:0 }}>
               <label className="form-label">{L('स्थिति','Status')}</label>
-              <MultiSelectDropdown tabIndex={7} options={statusOpts} value={tempF.statuses} onChange={v => setTF('statuses', v)} placeholder={L('सबै','All')} />
+              {showWorkingStatus ? (
+                <div style={{ display:'flex', gap:14, marginTop:8, flexWrap:'wrap' }}>
+                  {[
+                    { val:'all',        np:'सबै',      en:'All' },
+                    { val:'working',    np:'कार्यरत',  en:'Working' },
+                    { val:'notworking', np:'अवकाश',    en:'Not Working' },
+                  ].map(opt => (
+                    <label key={opt.val} style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', userSelect:'none' }}>
+                      <input type="checkbox" checked={tempF.workingStatus === opt.val}
+                        onChange={() => setTF('workingStatus', opt.val)}
+                        style={{ accentColor:'#1a56db', width:15, height:15, cursor:'pointer' }} />
+                      <span style={{ fontSize:13, fontWeight: tempF.workingStatus===opt.val?700:400, color: tempF.workingStatus===opt.val?'#1e40af':'#374151' }}>
+                        {L(opt.np, opt.en)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <MultiSelectDropdown tabIndex={7} options={statusOpts} value={tempF.statuses} onChange={v => setTF('statuses', v)} placeholder={L('सबै','All')} />
+              )}
             </div>
           </div>
 
-          {/* ── Row 3: Staff | Leave ── */}
-          <div style={{ display:'grid', gridTemplateColumns:'1.2fr 1fr', gap:12 }}>
+          {/* ── Row 3: Staff | Leave (Leave omitted where not applicable, e.g. Office Visit) ── */}
+          <div style={{ display:'grid', gridTemplateColumns: showLeave ? '1.2fr 1fr' : '1fr', gap:12 }}>
             <div className="form-group" style={{ marginBottom:0 }}>
               <label className="form-label">{L('कर्मचारी','Staff')}</label>
-              <MultiSelectDropdown tabIndex={8} options={staffOpts} value={tempF.staffIds} onChange={v => setTF('staffIds', v)} placeholder={L('सबै कर्मचारी','All Staff')} maxHeight={210} />
+              <MultiSelectDropdown tabIndex={8} options={staffOpts} value={tempF.staffIds} onChange={v => setTF('staffIds', v)} placeholder={L('सबै कर्मचारी','All Staff')} maxHeight={210} showAvatar />
             </div>
-            <div className="form-group" style={{ marginBottom:0 }}>
-              <label className="form-label">{L('बिदा','Leave')}</label>
-              <MultiSelectDropdown tabIndex={9} options={leaveTypeOpts} value={tempF.leaveTypes} onChange={v => setTF('leaveTypes', v)} placeholder={L('सबै बिदा','All Leaves')} maxHeight={210} />
-            </div>
+            {showLeave && (
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">{L('बिदा','Leave')}</label>
+                <MultiSelectDropdown tabIndex={9} options={leaveTypeOpts} value={tempF.leaveTypes} onChange={v => setTF('leaveTypes', v)} placeholder={L('सबै बिदा','All Leaves')} maxHeight={210} />
+              </div>
+            )}
           </div>
 
           {/* ── Leave Category (hidden where the tab is accumulate-only) ── */}
@@ -363,12 +457,12 @@ const LeaveAdvancedFilter = ({
 /* ═══════════════════════════════════════════ */
 /* TAB 1 — Leave Opening                       */
 /* ═══════════════════════════════════════════ */
-const DEFAULT_ADV_FILTERS = {
+export const DEFAULT_ADV_FILTERS = {
   branches: [], departments: [], posts: [], grades: [],
   statuses: [], modes: [], staffIds: [], leaveTypes: [], leaveAccum: 'all',
 };
 
-const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
+const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingLoaded }) => {
   const defaultFY = (settings.fiscalYears||[]).find(f=>f.isDefault) || (settings.fiscalYears||[])[0];
   const ltConfigs = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
 
@@ -384,25 +478,35 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
   const [page,       setPage]       = useState(1);
   const [pageSize,   setPageSize]   = useState(25);
 
-  /* init editVals when FY selector changes */
+  /* init editVals when FY selector changes — blank (not the leave type's Max)
+     for any employee who was never actually given an opening balance, so the
+     grid doesn't look like every single staff member was assigned the Max
+     when really nobody has been touched yet. The Max still shows as a
+     placeholder hint in each cell.
+     Also re-runs once `openingLoaded` flips true: `opening` now comes from an
+     async API fetch (useLeaveOpening), so on a fresh mount this effect would
+     otherwise fire before that fetch resolves and freeze editVals at the
+     still-empty {} it started with — every saved value would look missing
+     until something else (e.g. switching tabs and back) remounted the
+     component after the fetch had already completed. */
   useEffect(() => {
     const init = {};
     (employees||[]).filter(e=>e.active).forEach(emp => {
       ltConfigs.forEach(lt => {
-        init[`${emp.id}_${lt.shortName}`] =
-          opening[fyId]?.[emp.id]?.[lt.shortName] ?? lt.daysPerYear ?? 0;
+        const saved = opening[fyId]?.[emp.id]?.[lt.shortName];
+        init[`${emp.id}_${lt.shortName}`] = saved ?? '';
       });
     });
     setEditVals(init);
     setHeaderVals({});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fyId]);
+  }, [fyId, openingLoaded]);
 
   const showToast = (msg, type='success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 2500);
   };
 
-  const getVal = (empId, code) => editVals[`${empId}_${code}`] ?? 0;
+  const getVal = (empId, code) => editVals[`${empId}_${code}`] ?? '';
 
   /* validate value against daysPerYear ceiling */
   const validate = (val, ltName, daysPerYear) => {
@@ -448,11 +552,18 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
   const handleSave = () => {
     const fyData = {};
     (employees||[]).filter(e=>e.active).forEach(emp => {
-      fyData[emp.id] = {};
-      ltConfigs.forEach(lt => { fyData[emp.id][lt.shortName] = getVal(emp.id, lt.shortName); });
+      const empData = {};
+      ltConfigs.forEach(lt => {
+        const v = getVal(emp.id, lt.shortName);
+        // Blank stays unassigned rather than being written as 0 — otherwise
+        // an untouched cell would look identical to a genuine 0-day opening
+        // once reloaded, permanently losing the "never set" distinction.
+        if (v !== '') empData[lt.shortName] = Number(v);
+      });
+      fyData[emp.id] = empData;
     });
     const next = { ...opening, [fyId]: fyData };
-    setOpening(next);
+    setOpening(next, [fyId]);
     showToast(L('बिदा प्रारम्भिक सुरक्षित भयो', 'Current Year Leave Opening saved successfully'));
   };
 
@@ -479,7 +590,9 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
   const modeOpts   = useMemo(() => (settings.modes||[]).map(m => ({ value:m.name, label:m.name })), [settings.modes]);
   const staffOpts  = useMemo(() => (employees||[]).filter(e=>e.active).map(e => ({
     value: String(e.id),
-    label: `${e.fullName} [${e.position || '—'} | ${e.deviceId || '—'}]`,
+    label: e.fullName,
+    sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+    photo: e.profilePhoto,
   })), [employees]);
   const leaveTypeOpts  = useMemo(() => ltConfigs.map(lt => ({ value:lt.shortName, label:`${lt.name} (${lt.shortName})` })), [ltConfigs]);
 
@@ -498,7 +611,9 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
       .sort((a, b) => staffRankCompare(a, b, settings))
       .map(emp => ({
       id:          emp.id,
+      employeeId:  emp.employeeId,
       fullName:    emp.fullName,
+      profilePhoto: emp.profilePhoto,
       branch:      emp.branch      || '',
       department:  emp.department  || '',
       position:    emp.position    || '',
@@ -631,6 +746,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
               <tr className="dg-header-row">
                 {/* SN */}
                 <th className="dg-th dg-sn-col" style={{ width:42 }}>SN</th>
+                <th className="dg-th" style={{ width:80 }}>{L('स्टाफ आईडी','Staff ID')}</th>
                 <th className="dg-th" style={{ minWidth:160 }}>{L('कर्मचारी नाम','Staff Name')}</th>
                 <th className="dg-th" style={{ width:80 }}>{L('पद','Post')}</th>
                 <th className="dg-th" style={{ width:80 }}>{L('विभाग','Dept')}</th>
@@ -642,7 +758,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
                     </div>
                     <input
                       type="text" inputMode="numeric" pattern="[0-9.]*"
-                      placeholder={String(lt.daysPerYear)}
+                      placeholder="0"
                       value={headerVals[lt.shortName] ?? ''}
                       onChange={e => {
                         const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
@@ -664,7 +780,15 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening }) => {
                 return (
                   <tr key={row.id} className="dg-row">
                     <td className="dg-sn-col">{(page - 1) * pageSize + ri + 1}</td>
-                    <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>{row.fullName}</td>
+                    <td className="dg-td" style={{ padding:'3px 8px' }}>
+                      <span style={{ color:'#1f2937' }}>{row.employeeId || '—'}</span>
+                    </td>
+                    <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>
+                      <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <Avatar photo={row.profilePhoto} name={row.fullName} size={22} />
+                        {row.fullName}
+                      </span>
+                    </td>
                     <td className="dg-td" style={{ padding:'3px 8px' }}>
                       <span style={{ color:'#1f2937' }}>{row.postShort}</span>
                     </td>
@@ -815,7 +939,9 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   const tStatusOpts    = useMemo(() => (settings.employeeStatuses||[]).map(s => ({ value:s.name, label:s.name })), [settings.employeeStatuses]);
   const tStaffOpts     = useMemo(() => (employees||[]).filter(e=>e.active).map(e => ({
     value: String(e.id),
-    label: `${e.fullName} [${e.position || '—'} | ${e.deviceId || '—'}]`,
+    label: e.fullName,
+    sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+    photo: e.profilePhoto,
   })), [employees]);
   const tLeaveTypeOpts = useMemo(() => ltConfigs.filter(lt => lt.carryForward)
     .map(lt => ({ value:lt.shortName, label:`${lt.name} (${lt.shortName})` })), [ltConfigs]);
@@ -839,7 +965,9 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
       .map(emp => {
       const row = {
         id:          emp.id,
+        employeeId:  emp.employeeId,
         fullName:    emp.fullName,
+        profilePhoto: emp.profilePhoto,
         branch:      emp.branch      || '',
         department:  emp.department  || '',
         position:    emp.position    || '',
@@ -914,7 +1042,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
         if (k in editVals) next[fyId][row.id][lt.shortName] = Number(editVals[k]) || 0;
       });
     });
-    setOpening(next);
+    setOpening(next, [prevOpeningKey, fyId]);
     setEditMode(false);
     setEditVals({});
     showToast(L('बिदा सुरक्षित भयो', 'Saved successfully'));
@@ -969,10 +1097,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
       ...ltConfigs.flatMap(lt => [r[`${lt.shortName}_prev`], r[`${lt.shortName}_curr`]]),
     ]);
     const csv = [hdr,...csvRows].map(row => row.map(v=>`"${v}"`).join(',')).join('\n');
-    const a   = document.createElement('a');
-    a.href    = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download = `leave_transfer_${fyId}_${getNepalTodayISO()}.csv`;
-    a.click();
+    downloadBlob(new Blob([csv],{type:'text/csv'}), `leave_transfer_${fyId}_${getNepalTodayISO()}.csv`);
   };
 
   /* apply search + advanced filters */
@@ -1098,6 +1223,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
               <thead>
                 <tr className="dg-header-row">
                   <th className="dg-th dg-sn-col" style={{ width:40 }}>SN</th>
+                  <th className="dg-th" style={{ width:80 }}>{L('स्टाफ आईडी','Staff ID')}</th>
                   <th className="dg-th" style={{ minWidth:160, textAlign:'left' }}>{L('कर्मचारी','Staff')}</th>
                   <th className="dg-th" style={{ width:80 }}>{L('पद','Post')}</th>
                   <th className="dg-th" style={{ width:80 }}>{L('विभाग','Dept')}</th>
@@ -1110,7 +1236,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                   ))}
                 </tr>
                 <tr style={{ background:'#f8fafc' }}>
-                  <th colSpan={5} className="dg-th" style={{ textAlign:'left', paddingLeft:12, letterSpacing:'.3px', background:'#f8fafc' }}>
+                  <th colSpan={6} className="dg-th" style={{ textAlign:'left', paddingLeft:12, letterSpacing:'.3px', background:'#f8fafc' }}>
                     {prevFY ? prevFY.name : ''} {currentFY ? `→ ${currentFY.name}` : ''}
                   </th>
                   {visibleLtConfigs.map(lt => (
@@ -1125,7 +1251,15 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                 {pagedRows.map((row, ri) => (
                   <tr key={row.id} className="dg-row">
                     <td className="dg-sn-col">{(page - 1) * pageSize + ri + 1}</td>
-                    <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>{row.fullName}</td>
+                    <td className="dg-td" style={{ padding:'3px 8px' }}>
+                      <span style={{ color:'#1f2937' }}>{row.employeeId || '—'}</span>
+                    </td>
+                    <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>
+                      <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <Avatar photo={row.profilePhoto} name={row.fullName} size={22} />
+                        {row.fullName}
+                      </span>
+                    </td>
                     <td className="dg-td" style={{ textAlign:'center' }}>
                       <span style={{ color:'#1f2937' }}>{row.postShort}</span>
                     </td>
@@ -1314,7 +1448,9 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
   const bStatusOpts    = useMemo(() => (settings.employeeStatuses||[]).map(s => ({ value:s.name, label:s.name })), [settings.employeeStatuses]);
   const bStaffOpts     = useMemo(() => (employees||[]).filter(e=>e.active).map(e => ({
     value: String(e.id),
-    label: `${e.fullName} [${e.position || '—'} | ${e.deviceId || '—'}]`,
+    label: e.fullName,
+    sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+    photo: e.profilePhoto,
   })), [employees]);
   const bLeaveTypeOpts = useMemo(() => ltConfigs.map(lt => ({ value:lt.shortName, label:`${lt.name} (${lt.shortName})` })), [ltConfigs]);
 
@@ -1343,7 +1479,9 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
     .sort((a, b) => staffRankCompare(a, b, settings))
     .map(emp => ({
     id:          emp.id,
+    employeeId:  emp.employeeId,
     fullName:    emp.fullName,
+    profilePhoto: emp.profilePhoto,
     branch:      emp.branch      || '',
     department:  emp.department  || '',
     position:    emp.position    || '',
@@ -1383,7 +1521,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
       });
     });
 
-    setOpening(next);
+    setOpening(next, [nextPrevKey]);
     setTransferDone(true);
     setTimeout(() => setTransferDone(false), 3000);
   }, [opening, allEmpRows, ltConfigs, prevOpeningKey, fyId, nextFY, leaves]);
@@ -1406,7 +1544,9 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         rows.push({
           sn,
           empId:       emp.id,
+          employeeId:  emp.employeeId,
           fullName:    emp.fullName,
+          profilePhoto: emp.profilePhoto,
           branch:      emp.branch,
           department:  emp.department,
           position:    emp.position,
@@ -1456,18 +1596,29 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
   [balanceRows, page, pageSize]);
 
   /* mark rowSpan for the Leave Type cell — merges consecutive rows of the
-     same employee + same type (Accumulated/Non Accumulated) into one cell.
-     Computed from pagedRows (not the full balanceRows) so a merge never
-     visually spans across a page boundary. */
+     same employee + same type (Accumulated/Non Accumulated) into one cell —
+     and for the Staff ID/Name cell, which merges across ALL of that
+     employee's rows regardless of leave type. Computed from pagedRows (not
+     the full balanceRows) so a merge never visually spans across a page
+     boundary. */
   const balanceRowsSpanned = useMemo(() => pagedRows.map((r, i) => {
+    const prevEmp = pagedRows[i - 1];
+    let empSpan = 0;
+    if (!prevEmp || prevEmp.empId !== r.empId) {
+      empSpan = 1;
+      for (let j = i + 1; j < pagedRows.length; j++) {
+        if (pagedRows[j].empId === r.empId) empSpan++;
+        else break;
+      }
+    }
     const prev = pagedRows[i - 1];
-    if (prev && prev.empId === r.empId && prev.ltType === r.ltType) return { ...r, _ltTypeSpan: 0 };
+    if (prev && prev.empId === r.empId && prev.ltType === r.ltType) return { ...r, _ltTypeSpan: 0, _empSpan: empSpan };
     let span = 1;
     for (let j = i + 1; j < pagedRows.length; j++) {
       if (pagedRows[j].empId === r.empId && pagedRows[j].ltType === r.ltType) span++;
       else break;
     }
-    return { ...r, _ltTypeSpan: span };
+    return { ...r, _ltTypeSpan: span, _empSpan: empSpan };
   }), [pagedRows]);
 
   /* unique employee count */
@@ -1490,21 +1641,28 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
   const handlePrint = () => {
     if (!balanceRows.length) return;
     const spanned = balanceRows.map((r, i) => {
+      const prevEmp = balanceRows[i - 1];
+      let empSpan = 0;
+      if (!prevEmp || prevEmp.empId !== r.empId) {
+        empSpan = 1;
+        for (let j = i + 1; j < balanceRows.length; j++) {
+          if (balanceRows[j].empId === r.empId) empSpan++;
+          else break;
+        }
+      }
       const prev = balanceRows[i - 1];
-      if (prev && prev.empId === r.empId && prev.ltType === r.ltType) return { ...r, _ltTypeSpan: 0 };
+      if (prev && prev.empId === r.empId && prev.ltType === r.ltType) return { ...r, _ltTypeSpan: 0, _empSpan: empSpan };
       let span = 1;
       for (let j = i + 1; j < balanceRows.length; j++) {
         if (balanceRows[j].empId === r.empId && balanceRows[j].ltType === r.ltType) span++;
         else break;
       }
-      return { ...r, _ltTypeSpan: span };
+      return { ...r, _ltTypeSpan: span, _empSpan: empSpan };
     });
     const bodyRows = spanned.map((r, i) => `<tr>
       <td>${i + 1}</td>
-      <td class="left">${r.fullName}</td>
-      <td>${r.postShort}</td>
-      <td>${r.deptShort}</td>
-      <td>${r.branchShort}</td>
+      ${r._empSpan > 0 ? `<td rowspan="${r._empSpan}">${r.employeeId || '—'}</td>` : ''}
+      ${r._empSpan > 0 ? `<td class="left" rowspan="${r._empSpan}"><b>${r.fullName}</b><br><span style="font-size:10px;color:#6b7280">${[r.postShort, r.deptShort ? `Dept: ${r.deptShort}` : ''].filter(Boolean).join(' | ')}${r.branchShort ? `<br>Branch: ${r.branchShort}` : ''}</span></td>` : ''}
       ${r._ltTypeSpan > 0 ? `<td rowspan="${r._ltTypeSpan}">${r.ltType}</td>` : ''}
       <td class="left">${r.ltName}</td>
       <td>${r.prevYear}</td>
@@ -1515,8 +1673,8 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
     </tr>`).join('');
     const printContent = `<table>
       <thead><tr>
-        <th>SN</th><th class="left">${L('कर्मचारी','Staff')}</th><th>${L('पद','Post')}</th>
-        <th>${L('विभाग','Dept')}</th><th>${L('शाखा','Branch')}</th><th>${L('बिदा प्रकार','Leave Type')}</th>
+        <th>SN</th><th>${L('स्टाफ आईडी','Staff ID')}</th><th class="left">${L('कर्मचारी','Staff')}</th>
+        <th>${L('बिदा प्रकार','Leave Type')}</th>
         <th class="left">${L('बिदा','Leave')}</th><th>${L('अघिल्लो वर्ष','Prev. Year')}</th>
         <th>${L('चालु वर्ष','Curr. Year')}</th><th>${L('जम्मा','Total')}</th>
         <th>${L('लिएको','Used')}</th><th>${L('बाँकी','Balance')}</th>
@@ -1549,10 +1707,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
       [co], ['Leave Balance Report'], [`Fiscal Year: ${currentFY?.name||''}`], [],
       hdr, ...csvRows
     ].map(row => row.map(v=>`"${v}"`).join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href  = URL.createObjectURL(new Blob([csv], { type:'text/csv' }));
-    a.download = `leave_balance_${fyId}_${getNepalTodayISO()}.csv`;
-    a.click();
+    downloadBlob(new Blob([csv], { type:'text/csv' }), `leave_balance_${fyId}_${getNepalTodayISO()}.csv`);
   };
 
   /* cell styles */
@@ -1615,10 +1770,8 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
           <thead>
             <tr>
               <th style={{ ...thS, width:40 }}>SN</th>
-              <th style={{ ...thS, textAlign:'left', minWidth:160, paddingLeft:12 }}>{L('कर्मचारी','Staff')}</th>
-              <th style={{ ...thS, width:75 }}>{L('पद','Post')}</th>
-              <th style={{ ...thS, width:75 }}>{L('विभाग','Dept')}</th>
-              <th style={{ ...thS, width:75 }}>{L('शाखा','Branch')}</th>
+              <th style={{ ...thS, width:85 }}>{L('स्टाफ आईडी','Staff ID')}</th>
+              <th style={{ ...thS, textAlign:'left', minWidth:200, paddingLeft:12 }}>{L('कर्मचारी','Staff')}</th>
               <th style={{ ...thS, width:110, background:'#f5f3ff', color:'#6d28d9' }}>{L('बिदा प्रकार','Leave Type')}</th>
               <th style={{ ...thS, minWidth:130, background:'#eff6ff', color:'#1a56db' }}>{L('बिदा','Leave')}</th>
               <th style={{ ...thS, width:90, background:'#fef3c7', color:'#92400e' }}>{L('अघिल्लो वर्ष','Prev. Year')}</th>
@@ -1632,16 +1785,27 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
             {balanceRowsSpanned.map((r, ri) => (
               <tr key={`${r.empId}-${r.ltName}-${ri}`} style={{ background: ri % 2 === 0 ? 'white' : '#f3f4f6' }}>
                 <td style={{ ...tdS, color:'#9ca3af' }}>{(page - 1) * pageSize + ri + 1}</td>
-                <td className="left" style={{ ...tdS, textAlign:'left', fontWeight:600, color:'#1f2937', paddingLeft:12 }}>{r.fullName}</td>
-                <td style={{ ...tdS }}>
-                  <span style={{ color:'#1f2937' }}>{r.postShort}</span>
-                </td>
-                <td style={{ ...tdS }}>
-                  <span style={{ color:'#1f2937' }}>{r.deptShort}</span>
-                </td>
-                <td style={{ ...tdS }}>
-                  <span style={{ color:'#1f2937' }}>{r.branchShort}</span>
-                </td>
+                {r._empSpan > 0 && (
+                  <td rowSpan={r._empSpan} style={{ ...tdS, verticalAlign:'top' }}>
+                    <span style={{ color:'#1f2937' }}>{r.employeeId || '—'}</span>
+                  </td>
+                )}
+                {r._empSpan > 0 && (
+                  <td rowSpan={r._empSpan} className="left" style={{ ...tdS, textAlign:'left', paddingLeft:12, verticalAlign:'top' }}>
+                    <div style={{ display:'flex', alignItems:'flex-start', gap:6 }}>
+                      <Avatar photo={r.profilePhoto} name={r.fullName} size={26} />
+                      <div>
+                        <div style={{ fontWeight:700, color:'#1f2937' }}>{r.fullName}</div>
+                        <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>
+                          {[r.postShort, r.deptShort ? `Dept: ${r.deptShort}` : ''].filter(Boolean).join('  |  ')}
+                        </div>
+                        {r.branchShort && (
+                          <div style={{ fontSize:11, color:'#6b7280' }}>Branch: {r.branchShort}</div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                )}
                 {r._ltTypeSpan > 0 && (
                   <td rowSpan={r._ltTypeSpan} style={{ ...tdS, textAlign:'center' }}>
                     <span style={{
@@ -1678,7 +1842,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
               </tr>
             ))}
             {balanceRows.length === 0 && (
-              <tr><td colSpan={12} style={{ padding:32, textAlign:'center', color:'#9ca3af' }}>
+              <tr><td colSpan={10} style={{ padding:32, textAlign:'center', color:'#9ca3af' }}>
                 {L('कुनै रेकर्ड फेला परेन','No records found')}
               </td></tr>
             )}
@@ -1701,15 +1865,16 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         const empName = (id) =>
           id ? ((employees||[]).find(e=>String(e.id)===String(id))?.fullName || `#${id}`) : null;
 
-        /* ── shared cell styles (like Staff Detail grid) ── */
+        /* ── shared cell styles — standard DataGrid format (see CLAUDE.md
+           UI/DataGrid Standards: #efefef header / #374151 text / #dedede border) ── */
         const thS = {
-          padding:'10px 14px', fontWeight:700, fontSize:12.5, color:'#111827',
-          background:'#f0f5fa', borderBottom:'2px solid #c8d6e5',
-          borderRight:'1px solid #dce6f0', whiteSpace:'nowrap', textAlign:'left',
+          padding:'10px 14px', fontWeight:700, fontSize:12, color:'#374151',
+          background:'#efefef', borderBottom:'2px solid #dedede',
+          borderRight:'1px solid #dedede', whiteSpace:'nowrap', textAlign:'left',
         };
         const tdS = {
           padding:'10px 14px', fontSize:12.5, color:'#374151',
-          borderBottom:'1px solid #eef0f4', borderRight:'1px solid #f3f4f6',
+          borderBottom:'1px solid #dedede', borderRight:'1px solid #dedede',
           verticalAlign:'middle',
         };
         const dash = <span style={{ color:'#d1d5db' }}>—</span>;
@@ -1717,7 +1882,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         return (
           <div className="modal-overlay">
             <div onClick={e => e.stopPropagation()} style={{
-              background:'white', borderRadius:14, width:'96vw', maxWidth:1060,
+              background:'white', borderRadius:14, width:'96vw', maxWidth:1320,
               maxHeight:'88vh', display:'flex', flexDirection:'column',
               boxShadow:'0 25px 60px rgba(0,0,0,.18)', overflow:'hidden',
             }}>
@@ -1822,18 +1987,18 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                     </tbody>
                     {/* ── Summary footer row ── */}
                     <tfoot>
-                      <tr style={{ background:'#f8fafc' }}>
+                      <tr style={{ background:'#f1f5f9' }}>
                         <td colSpan={3} style={{ padding:'10px 14px', fontWeight:700, fontSize:12.5, color:'#374151',
-                          borderTop:'2px solid #c8d6e5' }}>
+                          borderTop:'2px solid #d1d5db' }}>
                           {L('जम्मा','Total')}
                         </td>
-                        <td style={{ padding:'10px 14px', textAlign:'center', borderTop:'2px solid #c8d6e5' }}>
+                        <td style={{ padding:'10px 14px', textAlign:'center', borderTop:'2px solid #d1d5db' }}>
                           <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:8,
                             padding:'2px 12px', fontWeight:800, fontSize:14 }}>
                             {totalDays}
                           </span>
                         </td>
-                        <td colSpan={5} style={{ borderTop:'2px solid #c8d6e5' }}></td>
+                        <td colSpan={5} style={{ borderTop:'2px solid #d1d5db' }}></td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1877,7 +2042,13 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
 /* defaults to the logged-in user's own leave;  */
 /* Admin/Branch Manager/Dept Head can switch)   */
 /* ═══════════════════════════════════════════ */
-const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBalances }) => {
+export const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBalances,
+  // forcedEmpId (opt-in): externally locks which employee is shown, e.g. a
+  // drill-down opened by clicking a row elsewhere (LeaveReports.jsx's own
+  // Leave Balance Report tab) — overrides the self-select-current-user
+  // default below. hideStaffPicker hides the Staff dropdown/label in that
+  // case, since the caller already made the choice.
+  forcedEmpId = null, hideStaffPicker = false }) => {
   const { currentUser, isAdmin, isBranchManager, isDeptHead } = useAuth();
   const canChangeStaff = isAdmin || isBranchManager || isDeptHead;
 
@@ -1889,12 +2060,13 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
 
   const activeEmployees = useMemo(() => (employees||[]).filter(e => e.active), [employees]);
 
-  const [selectedEmpId, setSelectedEmpId] = useState(null);
+  const [selectedEmpId, setSelectedEmpId] = useState(forcedEmpId);
 
   /* Default to the logged-in user's own record; elevated roles with no
      linked record fall back to the first staff member instead of showing
      nothing — same convention as RosterReport.jsx's Staff Wise. */
   useEffect(() => {
+    if (forcedEmpId != null) { setSelectedEmpId(forcedEmpId); return; }
     if (!currentUser || !activeEmployees.length || selectedEmpId != null) return;
     const me = activeEmployees.find(e => String(e.id) === String(currentUser.id));
     if (me) { setSelectedEmpId(me.id); }
@@ -1902,7 +2074,7 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
       const first = [...activeEmployees].sort((a, b) => (a.fullName||'').localeCompare(b.fullName||''))[0];
       if (first) setSelectedEmpId(first.id);
     }
-  }, [currentUser, activeEmployees, canChangeStaff, selectedEmpId]);
+  }, [forcedEmpId, currentUser, activeEmployees, canChangeStaff, selectedEmpId]);
 
   const selectedEmp = activeEmployees.find(e => String(e.id) === String(selectedEmpId)) || null;
 
@@ -1911,11 +2083,24 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
   const [leaveTypeFilter, setLeaveTypeFilter] = useState([]);
   const ltShortNameToName = (sn) => ltConfigs.find(c => c.shortName === sn)?.name || sn;
 
+  // Accumulate / Non-Accumulate filter — same carryForward split as the
+  // Leave Balance tab's own filter (bAdvFilters.leaveAccum).
+  const [leaveAccum, setLeaveAccum] = useState('all');
+  const visibleLTConfigs = useMemo(() => {
+    if (leaveAccum === 'accumulate')    return ltConfigs.filter(lt => lt.carryForward);
+    if (leaveAccum === 'nonAccumulate') return ltConfigs.filter(lt => !lt.carryForward);
+    return ltConfigs;
+  }, [ltConfigs, leaveAccum]);
+  const visibleLTShortNames = useMemo(() => new Set(visibleLTConfigs.map(c => c.shortName)), [visibleLTConfigs]);
+  // Leave Type's own selections can go stale when the Accumulate/Non-Accumulate
+  // category changes underneath it (e.g. a picked type no longer in the list).
+  useEffect(() => { setLeaveTypeFilter([]); }, [leaveAccum]);
+
   /* Same Transferred/Assigned/Total/Taken/Balance math as the Leave
      Balance tab, scoped to one employee instead of every staff row. */
   const summaryRowsAll = useMemo(() => {
     if (!selectedEmp) return [];
-    return ltConfigs.map(lt => {
+    return visibleLTConfigs.map(lt => {
       const prevYear = Number(opening[prevFYKey]?.[selectedEmp.id]?.[lt.shortName] ?? 0);
       const currYear = Number(opening[fyId]?.[selectedEmp.id]?.[lt.shortName]      ?? 0);
       const used     = (leaves||[])
@@ -1928,7 +2113,7 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
       const balance = total - used;
       return { ltName: lt.name, ltShortName: lt.shortName, prevYear, currYear, total, used, balance };
     }).filter(r => !(r.prevYear === 0 && r.currYear === 0 && r.used === 0 && r.balance === 0));
-  }, [selectedEmp, ltConfigs, opening, fyId, prevFYKey, leaves]);
+  }, [selectedEmp, visibleLTConfigs, opening, fyId, prevFYKey, leaves]);
 
   const summaryRows = useMemo(() => (
     leaveTypeFilter.length === 0 ? summaryRowsAll : summaryRowsAll.filter(r => leaveTypeFilter.includes(r.ltShortName))
@@ -1939,6 +2124,7 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
     const balanceByType = new Map(summaryRowsAll.map(r => [r.ltShortName, r.balance]));
     return (leaves||[])
       .filter(l => String(l.employeeId) === String(selectedEmp.id) && l.status === 'approved')
+      .filter(l => visibleLTShortNames.has(l.leaveTypeCode))
       .filter(l => leaveTypeFilter.length === 0 || leaveTypeFilter.includes(l.leaveTypeCode))
       .map(l => ({
         id: l.id,
@@ -1950,7 +2136,7 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
         approvedDate: l.approvedDate,
       }))
       .sort((a, b) => new Date(a.fromDate) - new Date(b.fromDate));
-  }, [selectedEmp, leaves, ltConfigs, summaryRowsAll, leaveTypeFilter]);
+  }, [selectedEmp, leaves, ltConfigs, summaryRowsAll, leaveTypeFilter, visibleLTShortNames]);
 
   const handlePrint = () => {
     if (!selectedEmp) return;
@@ -2064,7 +2250,7 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
           </select>
         </div>
 
-        {canChangeStaff ? (
+        {hideStaffPicker ? null : canChangeStaff ? (
           <div style={{ minWidth:280 }}>
             <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
               {L('कर्मचारी','Staff')}
@@ -2083,12 +2269,24 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
           </div>
         ) : null}
 
+        <div>
+          <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
+            {L('संचित / गैर-संचित','Leave Accumulate')}
+          </label>
+          <select className="form-control" style={{ width:170, fontSize:13, height:36 }}
+            value={leaveAccum} onChange={e => setLeaveAccum(e.target.value)}>
+            <option value="all">{L('सबै','All')}</option>
+            <option value="accumulate">{L('संचित','Accumulate')}</option>
+            <option value="nonAccumulate">{L('गैर-संचित','Non Accumulate')}</option>
+          </select>
+        </div>
+
         <div style={{ minWidth:220 }}>
           <MultiCheckSelect
             label={L('बिदाको प्रकार','Leave Type')}
             value={leaveTypeFilter}
             onChange={setLeaveTypeFilter}
-            options={ltConfigs.map(c => c.shortName)}
+            options={visibleLTConfigs.map(c => c.shortName)}
             displayFn={ltShortNameToName}
             placeholder={L('सबै','All')}
           />
@@ -2140,6 +2338,24 @@ const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, leaveBal
               defaultPageSize={10}
             />
           </div>
+
+          {/* Bottom actions — same Export/Print as the top toolbar, repeated
+              here so a long report doesn't force scrolling back up to act on it. */}
+          <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', gap:10,
+            padding:'14px 18px', background:'linear-gradient(135deg,#f8fafc,#eef2ff)',
+            border:'1px solid #e0e7ff', borderRadius:12 }}>
+            <span style={{ fontSize:12, color:'#6b7280', marginRight:'auto' }}>
+              👤 <strong style={{ color:'#374151' }}>{selectedEmp.fullName}</strong> — {currentFY?.name || ''}
+            </span>
+            <button className="btn btn-outline" onClick={handleExport} disabled={!selectedEmp}
+              style={{ display:'flex', alignItems:'center', gap:6 }}>
+              {downloadIcon} {L('एक्सेल निर्यात','Export Excel')}
+            </button>
+            <button className="btn btn-outline" onClick={handlePrint} disabled={!selectedEmp}
+              style={{ display:'flex', alignItems:'center', gap:6 }}>
+              {printIcon} {L('प्रिन्ट','Print')}
+            </button>
+          </div>
         </>
       )}
     </div>
@@ -2169,14 +2385,9 @@ const LeaveCalculation = () => {
   useEffect(() => { refreshLeaveBalances(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [activeTab, setActiveTab] = useState('opening');
-  const [opening,   setOpeningRaw] = useState(() => lsGet('ls_leaveOpening', {}));
+  const { opening, saveOpening: setOpening, loaded: openingLoaded } = useLeaveOpening();
 
-  const setOpening = useCallback((next) => {
-    setOpeningRaw(next);
-    lsSet('ls_leaveOpening', next);
-  }, []);
-
-  const sharedProps = { employees, leaveTypes, L, fd, settings, opening, setOpening };
+  const sharedProps = { employees, leaveTypes, L, fd, settings, opening, setOpening, openingLoaded };
 
   return (
     <div className="page-container">

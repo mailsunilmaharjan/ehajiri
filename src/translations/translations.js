@@ -15,6 +15,7 @@ const translations = {
 
   // Top menu — Staff dropdown & misc items
   'Staff Details': 'कर्मचारी विवरण',
+  'Analysis Staff Report': 'स्टाफ विश्लेषण प्रतिवेदन',
   'My Notes': 'मेरा टिपोटहरू',
   'Contact': 'सम्पर्क',
   'Message': 'सन्देश',
@@ -103,6 +104,8 @@ const translations = {
   'Reset': 'रिसेट',
   'Search': 'खोज्नुस',
   'Filter': 'फिल्टर',
+  'Advance Search': 'विस्तृत खोज',
+  'Advanced Search': 'विस्तृत खोज',
   'Export': 'निर्यात',
   'Import': 'आयात',
   'Print': 'प्रिन्ट',

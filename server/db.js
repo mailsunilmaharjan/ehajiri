@@ -18,7 +18,16 @@ const pool = new Pool({
   user    : process.env.DB_USER || 'postgres',
   password: process.env.DB_PASS || 'postgres',
   database: process.env.DB_NAME || 'ehajiri_db',
-  max     : 10,
+  // Every tenant is its own Node process, each with its own pool against the
+  // SAME shared Postgres server (max_connections) — at max:10, N tenants can
+  // demand up to 10*N connections in the worst case, which outgrows the
+  // server's ceiling long before any single tenant is actually using 10 at
+  // once (26 tenants × 10 = 260 vs. a 100-connection server). Lowered to 5,
+  // alongside raising the server's own max_connections, after this exact
+  // scenario locked a tenant out with "remaining connection slots are
+  // reserved for roles with the SUPERUSER attribute" while every other
+  // tenant's pool sat mostly idle.
+  max     : 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
   // Every report/dashboard query buckets attendance by calendar day via

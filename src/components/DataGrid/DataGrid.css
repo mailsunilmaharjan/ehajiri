@@ -329,6 +329,14 @@ th.dg-sn-col {
 .dg-action-btn.approve:hover { background: #dcfce7; }
 .dg-action-btn.reject  { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
 .dg-action-btn.reject:hover  { background: #fee2e2; }
+.dg-action-btn.followup { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; position: relative; }
+.dg-action-btn.followup:hover { background: #ddd6fe; }
+.dg-action-btn-count {
+  position: absolute; top: -6px; right: -6px; min-width: 15px; height: 15px;
+  border-radius: 8px; background: #7c3aed; color: #fff;
+  font-size: 9px; font-weight: 800; line-height: 15px; text-align: center;
+  padding: 0 3px; box-shadow: 0 0 0 1.5px #fff;
+}
 
 /* ── Right-click context menu ── */
 .dg-ctx-menu {

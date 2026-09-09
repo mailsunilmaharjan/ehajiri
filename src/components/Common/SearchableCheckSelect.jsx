@@ -4,17 +4,22 @@
  * Matches the design shown in the screenshot.
  *
  * Props:
- *   options     – [{ value, label }]
+ *   options     – [{ value, label, sub?, photo? }] — `photo` only matters when
+ *                 showAvatar is true; `sub` (e.g. "Staff ID - Post") renders as
+ *                 a small gray line under the label when present.
  *   value       – current selected value ('' = All)
  *   onChange    – (value: string) => void
  *   allLabel    – label for the "All" option (default "All")
  *   placeholder – trigger text when nothing is selected
  *   tabIndex    – tabIndex for the trigger (default 0)
+ *   showAvatar  – bool (default false) — when options represent staff, shows
+ *                 each person's small profile-photo circle next to their name
  */
 import React, { useState, useRef, useEffect } from 'react';
+import Avatar from './Avatar.jsx';
 
 /* ── Checkbox row item ─────────────────────────────────────── */
-const OptionRow = ({ label, checked, highlighted, onClick, onMouseEnter, itemRef }) => {
+const OptionRow = ({ label, sub, photo, showAvatar, checked, highlighted, stripeBg, onClick, onMouseEnter, itemRef }) => {
   return (
     <div
       ref={itemRef}
@@ -23,8 +28,8 @@ const OptionRow = ({ label, checked, highlighted, onClick, onMouseEnter, itemRef
       style={{
         display:'flex', alignItems:'center', gap:8, padding:'5px 10px',
         cursor:'pointer', userSelect:'none',
-        background: checked ? '#eff6ff' : highlighted ? '#f5f8ff' : 'white',
-        borderBottom:'1px solid #e9ecef',
+        background: checked ? '#eff6ff' : highlighted ? '#f5f8ff' : stripeBg,
+        borderBottom:'1px solid #eef0f3',
         transition:'background .1s',
       }}>
       {/* Custom checkbox */}
@@ -42,11 +47,19 @@ const OptionRow = ({ label, checked, highlighted, onClick, onMouseEnter, itemRef
           </svg>
         )}
       </div>
-      <span style={{
-        fontSize:13, color: checked ? '#1e40af' : '#374151',
-        fontWeight: checked ? 700 : 400,
-      }}>
-        {label}
+      {showAvatar && photo !== undefined && <Avatar photo={photo} name={label} size={26} style={{ flexShrink:0 }} />}
+      <span style={{ display:'flex', flexDirection:'column', minWidth:0 }}>
+        <span style={{
+          fontSize:13, color: checked ? '#1e40af' : '#1f2937',
+          fontWeight: checked ? 700 : 400,
+        }}>
+          {label}
+        </span>
+        {sub && (
+          <span style={{ fontSize:10.5, color:'#9ca3af', fontWeight:400 }}>
+            {sub}
+          </span>
+        )}
       </span>
     </div>
   );
@@ -60,6 +73,7 @@ const SearchableCheckSelect = ({
   allLabel = 'All',
   placeholder,
   tabIndex = 0,
+  showAvatar = false,
 }) => {
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
@@ -97,9 +111,8 @@ const SearchableCheckSelect = ({
   const navItems = [{ value: '', label: allLabel }, ...filtered];
   itemRefs.current = [];
 
-  const selectedLabel = value
-    ? (options.find(o => o.value === value)?.label ?? value)
-    : (allLabel);
+  const selectedOption = value ? options.find(o => o.value === value) : null;
+  const selectedLabel = selectedOption?.label ?? (value || allLabel);
 
   const select = (v) => {
     onChange(v);
@@ -161,8 +174,13 @@ const SearchableCheckSelect = ({
           transition:'border-color .12s, box-shadow .12s',
           fontWeight: value ? 600 : 400, outline:'none',
         }}>
-        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-          {selectedLabel}
+        <span style={{ display:'flex', alignItems:'center', overflow:'hidden', flex:1 }}>
+          {showAvatar && selectedOption && (
+            <Avatar photo={selectedOption.photo} name={selectedOption.label} size={20} style={{ marginRight:6, flexShrink:0 }} />
+          )}
+          <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {selectedLabel}
+          </span>
         </span>
         <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"
           style={{ flexShrink:0, marginLeft:6, color:'#9ca3af',
@@ -224,8 +242,12 @@ const SearchableCheckSelect = ({
                 key={o.value}
                 itemRef={el => itemRefs.current[i + 1] = el}
                 label={o.label}
+                sub={o.sub}
+                photo={o.photo}
+                showAvatar={showAvatar}
                 checked={value === o.value}
                 highlighted={activeIndex === i + 1}
+                stripeBg={i % 2 === 0 ? '#fff' : '#fafafa'}
                 onMouseEnter={() => setActiveIndex(i + 1)}
                 onClick={() => select(o.value)}
               />

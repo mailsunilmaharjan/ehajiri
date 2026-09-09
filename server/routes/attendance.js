@@ -8,12 +8,13 @@ import pool    from '../db.js';
 import { registerClient, broadcastNotification } from '../services/liveNotifications.js';
 import { buildPunchNotification }                from '../services/punchNotification.js';
 import { logError } from '../utils/logError.js';
-import { resolveEmployeeScope, isEmployeeScopedUser } from './attendanceScope.js';
+import { resolveEmployeeScope } from './attendanceScope.js';
 import { resolveOrgEmployeeIds } from './orgScope.js';
 import { notifyUsers } from '../services/internalMessages.js';
 import { sendMissingAttendanceApplication, sendManualPostingApplication } from '../services/emailService.js';
 import { requireRole } from '../middleware/roleGuard.js';
 import { logAudit } from '../services/auditLog.js';
+import { authorizeRecoAction, authorizeOwnEditDelete } from '../services/recoApprovalGuard.js';
 
 const router = express.Router();
 
@@ -143,6 +144,20 @@ function loadShiftsById(rows) {
   return map;
 }
 
+// Looks up an is_off=true shift by name convention among all configured
+// shifts — used to resolve Create Roster (Staff Wise)'s day-of-week Day
+// Off/Night Off checkboxes to an actual shift (so its time-fields/name
+// apply exactly like the Department Wise per-day shift picker's explicit
+// selection would), without needing the UI to also pick a specific shift id.
+// 'night' matches any is_off shift whose name contains "night"; 'day'
+// matches the first is_off shift that does NOT — same /night/i convention
+// already used elsewhere (e.g. Present/Absent Report's DO/NO split).
+function findOffShiftByType(shiftsById, type) {
+  const offShifts = Object.values(shiftsById).filter(s => s.isOff);
+  if (type === 'night') return offShifts.find(s => /night/i.test(s.name)) || null;
+  return offShifts.find(s => !/night/i.test(s.name)) || null;
+}
+
 function resolveRotationShift(entry, dateStr, shiftsById) {
   const ids = (entry.shiftIds && entry.shiftIds.length) ? entry.shiftIds : (entry.shiftId ? [entry.shiftId] : []);
   if (!ids.length) return null;
@@ -185,6 +200,8 @@ export const loadRosterMap = async (startDate, endDate) => {
                dr.date_from::text  AS date_from,
                dr.date_to::text    AS date_to,
                dr.off_days,
+               dr.day_off_days,
+               dr.night_off_days,
                dr.shift_id,
                dr.shift_ids
         FROM   duty_roster dr
@@ -203,10 +220,12 @@ export const loadRosterMap = async (startDate, endDate) => {
     for (const r of rosterRes.rows) {
       if (!map[r.employee_id]) map[r.employee_id] = [];
       map[r.employee_id].push({
-        id:       r.id,
-        dateFrom: String(r.date_from).split('T')[0],
-        dateTo:   String(r.date_to).split('T')[0],
-        offDays:  Array.isArray(r.off_days) ? r.off_days : [],
+        id:            r.id,
+        dateFrom:      String(r.date_from).split('T')[0],
+        dateTo:        String(r.date_to).split('T')[0],
+        offDays:       Array.isArray(r.off_days)       ? r.off_days       : [],
+        dayOffDays:    Array.isArray(r.day_off_days)   ? r.day_off_days   : [],
+        nightOffDays:  Array.isArray(r.night_off_days) ? r.night_off_days : [],
         shiftIds: Array.isArray(r.shift_ids) ? r.shift_ids : (r.shift_id ? [r.shift_id] : []),
         shiftId:  r.shift_id,
       });
@@ -229,7 +248,21 @@ export const getEffectiveRoster = (rosterMap, empId, dateStr) => {
                 entries.filter(e => e.dateTo < dateStr).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
                 null;
   if (!entry) return null;
-  const shift = resolveRotationShift(entry, dateStr, rosterMap._shiftsById || {});
+  const shiftsById = rosterMap._shiftsById || {};
+  // Create Roster (Staff Wise)'s day-of-week Day Off/Night Off checkboxes —
+  // a recurring pattern across the whole date range, same as offDays/Weekend
+  // already was, just distinguishing which kind of off day it is. Only
+  // honored for an entry that actually covers dateStr (exact), never the
+  // most-recent-past fallback, same reasoning as isOff below. Night Off
+  // checked wins over Day Off if a day-of-week were ever marked under both.
+  let shift = null;
+  if (exact) {
+    const [gy, gm, gd] = dateStr.split('-').map(Number);
+    const dayKey = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(gy, gm - 1, gd).getDay()];
+    if (entry.nightOffDays?.includes(dayKey))    shift = findOffShiftByType(shiftsById, 'night');
+    else if (entry.dayOffDays?.includes(dayKey)) shift = findOffShiftByType(shiftsById, 'day');
+  }
+  if (!shift) shift = resolveRotationShift(entry, dateStr, shiftsById);
   return {
     dateFrom: entry.dateFrom, dateTo: entry.dateTo, offDays: entry.offDays,
     shiftId:    shift?.id        ?? null,
@@ -245,24 +278,40 @@ export const getEffectiveRoster = (rosterMap, empId, dateStr) => {
     // past its range (otherwise a single-day Day Off would mark every day
     // after it as off too, forever, until the next roster entry is created).
     isOff:      exact ? !!shift?.isOff : false,
+    // Same "actually covers dateStr, not a stale past fallback" distinction
+    // as isOff above — isRosterWeekend uses this to know whether the roster
+    // is authoritative for this exact date, or whether it's just the most
+    // recent shift on file with nothing really scheduled here.
+    hasExactEntry: !!exact,
   };
 };
 
-// A roster entry only overrides the company-wide weekend pattern with its own
-// offDays when it assigns a shift OTHER than the system default — a staff
-// member still nominally on the default shift always follows the live
-// weekend setting, so changing that setting takes effect immediately without
-// having to touch every existing roster row (previously, ANY roster entry —
-// even one just re-affirming the default shift — froze that employee onto
-// whatever weekend pattern was snapshotted into its offDays at creation time,
-// so a later company-wide weekend change silently stopped applying to them).
-// Day Off/Night Off (`roster.isOff`, the shift literally resolved for this
-// exact date) always counts as weekend regardless of default vs custom shift.
+// Once a roster entry actually covers this date, it's authoritative for
+// whether the day is off — the company-wide weekend pattern (Settings →
+// Weekend Management) only fills in when there's no roster override for
+// this date at all. Previously a roster-assigned working day still showed
+// as "Weekend" whenever it fell on the company's Sat/Sun pattern (unless
+// that specific roster entry also carried its own recurring offDays), so a
+// staff member roster'd to actually work a Saturday still had that Saturday
+// reported as Weekend in every attendance report — the roster's Day
+// Off/Night Off assignments are what make a day "weekend" for that staff
+// member once a roster is set, not the calendar day of week.
+//
+// That fix over-corrected one case: `roster.offDays` empty doesn't
+// necessarily mean "this person has zero weekly offs" — the common case is
+// a roster entry that only assigned a shift/rotation (e.g. via the bulk
+// dept-wise roster tool) without ever touching the weekly-off pattern at
+// all. Treating an empty offDays list as "never off" made every Sat/Sun
+// report as a working day with no punch, i.e. AB instead of Weekend, for
+// any staff with a roster but no explicit weekly-off configured. Only defer
+// to the roster's offDays when it actually lists some; an empty list still
+// falls back to the company weekend pattern.
 export function isRosterWeekend(roster, dayKey, weekends, defaultShiftId) {
   if (roster?.isOff) return true;
-  const usesNonDefaultShift = roster?.shiftId != null && defaultShiftId != null && roster.shiftId !== defaultShiftId;
-  const effOffDays = (usesNonDefaultShift && roster.offDays?.length > 0) ? roster.offDays : weekends;
-  return effOffDays.includes(dayKey);
+  if (roster?.hasExactEntry && roster.offDays?.length > 0) {
+    return roster.offDays.includes(dayKey);
+  }
+  return weekends.includes(dayKey);
 }
 
 // Groups raw punch timestamps into "shift-days" instead of plain calendar
@@ -331,7 +380,7 @@ export function bucketPunchesByShiftDay(punchTimestamps, empId, rosterMap, defau
 // that range (or when the policy is off/unset) the shift's normal resolved
 // start/end/grace apply unchanged. `date` and the policy's startDate/endDate
 // are all plain 'YYYY-MM-DD' AD strings, so they compare lexicographically.
-function resolveWinterShift(date, shiftStart, shiftEnd, graceStart, graceEnd, winterPolicyEnabled, winterPolicy) {
+export function resolveWinterShift(date, shiftStart, shiftEnd, graceStart, graceEnd, winterPolicyEnabled, winterPolicy) {
   const normal = { shiftStart, shiftEnd, graceStart, graceEnd };
   if (!winterPolicyEnabled || !winterPolicy) return normal;
   const wp = typeof winterPolicy === 'string' ? JSON.parse(winterPolicy) : winterPolicy;
@@ -406,6 +455,10 @@ export async function computeDailyAttendance(date) {
            most-recent-past fallback (prio=2), or a single-day Day Off would
            mark every subsequent day as off too, forever. */
         CASE WHEN dr.prio = 1 THEN COALESCE(rs.is_off, FALSE) ELSE FALSE END AS roster_is_off,
+        /* Same prio=1 (actually covers this date, not the past fallback)
+           distinction as roster_is_off above — isRosterWeekend uses this to
+           know whether the roster is authoritative for this exact date. */
+        COALESCE(dr.prio = 1, FALSE) AS roster_has_entry,
 
         /* post short name — fallback to first 5 chars of name */
         COALESCE(NULLIF(TRIM(p.short_name),''), LEFT(p.name,5))  AS post_short,
@@ -445,13 +498,24 @@ export async function computeDailyAttendance(date) {
       LEFT   JOIN LATERAL (
         SELECT sub.off_days, sub.prio,
                CASE
+                 /* Create Roster (Staff Wise)'s day-of-week Day Off/Night Off
+                    checkboxes — a recurring pattern across the whole date
+                    range, resolved the same way an explicit shift-rotation
+                    pick would be (see getEffectiveRoster's identical logic in
+                    JS). Only for an entry that actually covers this date
+                    (prio=1), never the past-entry fallback. Night wins if a
+                    day-of-week were ever marked under both. */
+                 WHEN sub.prio = 1 AND sub.night_off_days ? to_char($1::date, 'Dy') THEN
+                   (SELECT id FROM shifts WHERE is_off = TRUE AND name ILIKE '%night%' ORDER BY id LIMIT 1)
+                 WHEN sub.prio = 1 AND sub.day_off_days ? to_char($1::date, 'Dy') THEN
+                   (SELECT id FROM shifts WHERE is_off = TRUE AND name NOT ILIKE '%night%' ORDER BY id LIMIT 1)
                  WHEN sub.shift_ids IS NOT NULL AND jsonb_array_length(sub.shift_ids) > 0 THEN
                    (sub.shift_ids ->> MOD(MOD(($1::date - sub.date_from), jsonb_array_length(sub.shift_ids))
                                           + jsonb_array_length(sub.shift_ids), jsonb_array_length(sub.shift_ids)))::int
                  ELSE sub.shift_id
                END AS shift_id
         FROM (
-          (SELECT dr2.off_days, dr2.shift_id, dr2.shift_ids, dr2.date_from, 1 AS prio
+          (SELECT dr2.off_days, dr2.day_off_days, dr2.night_off_days, dr2.shift_id, dr2.shift_ids, dr2.date_from, 1 AS prio
            FROM   duty_roster dr2
            WHERE  dr2.employee_id = u.id
              AND  $1::date BETWEEN dr2.date_from AND dr2.date_to
@@ -460,7 +524,7 @@ export async function computeDailyAttendance(date) {
               override landing inside a broader date-range roster. */
            ORDER  BY (dr2.date_to - dr2.date_from) ASC, dr2.created_at DESC LIMIT 1)
           UNION ALL
-          (SELECT dr2.off_days, dr2.shift_id, dr2.shift_ids, dr2.date_from, 2 AS prio
+          (SELECT dr2.off_days, dr2.day_off_days, dr2.night_off_days, dr2.shift_id, dr2.shift_ids, dr2.date_from, 2 AS prio
            FROM   duty_roster dr2
            WHERE  dr2.employee_id = u.id
              AND  dr2.date_to < $1::date
@@ -583,7 +647,7 @@ export async function computeDailyAttendance(date) {
         leave_id, leave_type_name, visit_id, visit_purpose, visit_location,
         leave_appr_name, leave_reco_name, leave_reason, leave_comment,
         visit_appr_name, visit_reco_name,
-        roster_off_days, roster_is_off, roster_shift_id, default_shift_id,
+        roster_off_days, roster_is_off, roster_shift_id, roster_has_entry, default_shift_id,
       } = r;
 
       // Winter Facilities Policy — swap in the shift's winter start/end/grace
@@ -592,11 +656,12 @@ export async function computeDailyAttendance(date) {
         resolveWinterShift(date, rawShiftStart, rawShiftEnd, rawGraceStart, rawGraceEnd, winter_policy_enabled, winter_policy);
 
       // Per-employee weekend: today's roster shift being Day Off/Night Off
-      // (roster_is_off) always counts as weekend; otherwise the roster's own
-      // off_days only override the company-wide weekend when this employee is
-      // actually on a non-default shift — see isRosterWeekend().
+      // (roster_is_off) always counts as weekend; otherwise, once a roster
+      // entry actually covers this date (roster_has_entry), it's
+      // authoritative over the company-wide weekend pattern — see
+      // isRosterWeekend().
       const isEmpWeekend = isRosterWeekend(
-        { isOff: roster_is_off, offDays: roster_off_days, shiftId: roster_shift_id },
+        { isOff: roster_is_off, offDays: roster_off_days, shiftId: roster_shift_id, hasExactEntry: roster_has_entry },
         dayKey, weekends, default_shift_id,
       );
 
@@ -653,10 +718,16 @@ export async function computeDailyAttendance(date) {
 
       // â”€â”€ Status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       let status = 'Absent';
-      if (leave_id)            status = leave_type_name || 'Leave';
-      else if (isEmpWeekend)   status = 'Weekend';
-      else if (time_in)        status = 'Present';
-      else if (holidayName)    status = 'Public Holiday';
+      // Day Off/Night Off is a specific roster designation, not just the
+      // company-wide weekend pattern — show it as such instead of the
+      // generic "Weekend" label. roster_is_off is already gated to a roster
+      // entry actually covering this date (never a stale fallback), so
+      // shift_name from the same resolved roster shift is safe to trust here.
+      if (leave_id)             status = leave_type_name || 'Leave';
+      else if (roster_is_off)   status = r.shift_name || 'Weekend';
+      else if (isEmpWeekend)    status = 'Weekend';
+      else if (time_in)         status = 'Present';
+      else if (holidayName)     status = 'Public Holiday';
 
       // â”€â”€ Remarks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const parts = [];
@@ -821,7 +892,8 @@ router.get('/staff-ledger', async (req, res) => {
     // â”€â”€ Duty roster entries for this employee in the period â”€â”€â”€â”€â”€â”€â”€
     const [rosterRes, ledgerShiftsRes] = await Promise.all([
       pool.query(`
-        SELECT dr.id, dr.date_from::text AS date_from, dr.date_to::text AS date_to, dr.off_days,
+        SELECT dr.id, dr.date_from::text AS date_from, dr.date_to::text AS date_to,
+               dr.off_days, dr.day_off_days, dr.night_off_days,
                dr.shift_id, dr.shift_ids
         FROM   duty_roster dr
         WHERE  dr.employee_id = $1
@@ -834,10 +906,12 @@ router.get('/staff-ledger', async (req, res) => {
     ]);
     const ledgerShiftsById = loadShiftsById(ledgerShiftsRes.rows);
     const rosterEntries = rosterRes.rows.map(r => ({
-      id:       r.id,
-      dateFrom: String(r.date_from).split('T')[0],
-      dateTo:   String(r.date_to).split('T')[0],
-      offDays:  Array.isArray(r.off_days) ? r.off_days : [],
+      id:           r.id,
+      dateFrom:     String(r.date_from).split('T')[0],
+      dateTo:       String(r.date_to).split('T')[0],
+      offDays:      Array.isArray(r.off_days)       ? r.off_days       : [],
+      dayOffDays:   Array.isArray(r.day_off_days)   ? r.day_off_days   : [],
+      nightOffDays: Array.isArray(r.night_off_days) ? r.night_off_days : [],
       shiftIds: Array.isArray(r.shift_ids) ? r.shift_ids : (r.shift_id ? [r.shift_id] : []),
       shiftId:  r.shift_id,
     }));
@@ -851,7 +925,16 @@ router.get('/staff-ledger', async (req, res) => {
                     rosterEntries.filter(e => e.dateTo < ds).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
                     null;
       if (!entry) return null;
-      const shift = resolveRotationShift(entry, ds, ledgerShiftsById);
+      // Day-of-week Day Off/Night Off override — see getEffectiveRoster's
+      // identical comment above for why.
+      let shift = null;
+      if (exact) {
+        const [gy, gm, gd] = ds.split('-').map(Number);
+        const dayKey = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(gy, gm - 1, gd).getDay()];
+        if (entry.nightOffDays?.includes(dayKey))    shift = findOffShiftByType(ledgerShiftsById, 'night');
+        else if (entry.dayOffDays?.includes(dayKey)) shift = findOffShiftByType(ledgerShiftsById, 'day');
+      }
+      if (!shift) shift = resolveRotationShift(entry, ds, ledgerShiftsById);
       return {
         offDays: entry.offDays,
         shiftId:    shift?.id        ?? null,
@@ -864,6 +947,9 @@ router.get('/staff-ledger', async (req, res) => {
         // see getEffectiveRoster's comment above for why the past-entry
         // fallback must never carry isOff forward.
         isOff:      exact ? !!shift?.isOff : false,
+        // Same distinction — isRosterWeekend uses this to know whether the
+        // roster is authoritative for this exact date (see its own comment).
+        hasExactEntry: !!exact,
       };
     };
 
@@ -902,7 +988,7 @@ router.get('/staff-ledger', async (req, res) => {
 
     // â”€â”€ Approved leaves â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const leaveRes = await pool.query(`
-      SELECT l.from_date, l.to_date, lt.name AS leave_type,
+      SELECT l.from_date, l.to_date, lt.name AS leave_type, l.half_day,
              ru.full_name AS reco_name, au.full_name AS appr_name
       FROM   leaves l
       LEFT   JOIN leave_types lt ON lt.code = l.leave_type_code
@@ -913,6 +999,7 @@ router.get('/staff-ledger', async (req, res) => {
       [emp.id, endDate, startDate]
     );
     const leaveDates = {};
+    const leaveHalfDates = {}; // ds -> true when that leave record is a half-day application
     const leaveRecoMap = {};
     for (const l of leaveRes.rows) {
       const from=new Date(l.from_date), to=new Date(l.to_date);
@@ -920,6 +1007,7 @@ router.get('/staff-ledger', async (req, res) => {
         const ds=d.toISOString().split('T')[0];
         if (ds>=startDate&&ds<=endDate) {
           leaveDates[ds] = l.leave_type || 'Leave';
+          leaveHalfDates[ds] = !!l.half_day;
           if (l.reco_name || l.appr_name) leaveRecoMap[ds] = { recoName: l.reco_name, apprName: l.appr_name };
         }
       }
@@ -928,7 +1016,8 @@ router.get('/staff-ledger', async (req, res) => {
     // â”€â”€ Approved office visits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const visitRes = await pool.query(`
       SELECT ov.from_date, ov.to_date, ov.purpose, ov.location,
-             ru.full_name AS reco_name, au.full_name AS appr_name
+             ru.full_name AS reco_name, au.full_name AS appr_name,
+             ov.approved_by AS appr_id, au.profile_photo AS appr_photo
       FROM   office_visits ov
       LEFT   JOIN users ru ON ru.id = ov.recommended_by
       LEFT   JOIN users au ON au.id = ov.approved_by
@@ -1041,18 +1130,39 @@ router.get('/staff-ledger', async (req, res) => {
       let status='Absent', timeIn=null, timeOut=null, lateMins=null,
           earlyMins=null, otMinDay=null, totalMinDay=null, remarks='';
       let inStatusStr=null, outStatusStr=null;
+      let isHalfDayLeave = false;
 
       if (isWeekend) {
-        status='Weekend';
+        // Day Off/Night Off is a specific roster designation, not just the
+        // company-wide weekend pattern — show it as such instead of the
+        // generic "Weekend" label (dayRoster.isOff only reflects a roster
+        // entry actually covering this date, never a stale fallback — see
+        // getEffectiveRoster's isOff comment).
+        status = dayRoster?.isOff ? (dayRoster.shiftName || 'Weekend') : 'Weekend';
+        // Still show the real punch if the employee actually worked this
+        // day despite being scheduled off — previously this branch left
+        // timeIn/timeOut at their initial null regardless of a real punch,
+        // so "present in weekend" never displayed (and its own summary
+        // stat, which already just checks isWeekend && timeIn, silently
+        // always read 0).
+        if (log?.time_in) {
+          timeIn  = log.time_in;
+          timeOut = (log.punches >= 2) ? (log.time_out || null) : null;
+          if (timeOut) {
+            const worked = Math.round((new Date(timeOut) - new Date(timeIn)) / 60000);
+            if (worked > 0) { totalMinDay = worked; totalMins += worked; }
+          }
+        }
       } else if (leave) {
-        status = leave; leaveCount++;
+        isHalfDayLeave = !!leaveHalfDates[dateStr];
+        status = leave; leaveCount += isHalfDayLeave ? 0.5 : 1;
         const leaveReco = leaveRecoMap[dateStr];
         const lMeta = [];
         if (leaveReco?.recoName) lMeta.push(`Recom. by ${leaveReco.recoName}`);
         if (leaveReco?.apprName) lMeta.push(`App. by ${leaveReco.apprName}`);
         const lParts = [];
         if (lMeta.length) lParts.push(lMeta.join(', '));
-        lParts.push(`Leave: ${leave}`);
+        lParts.push(`Leave: ${leave}${isHalfDayLeave ? ' (½ Half Day)' : ''}`);
         if (phName) lParts.push(phName);
         remarks = lParts.join(' | ');
       } else if (log?.time_in) {
@@ -1178,7 +1288,16 @@ router.get('/staff-ledger', async (req, res) => {
         totalFormatted  : totalMinDay? minsToHHMM(totalMinDay): null,
         otApprovedMins      : otApprovedMinsDay,
         otApprovedFormatted : otApprovedMinsDay ? minsToHHMM(otApprovedMinsDay) : null,
-        remarks, leave, hasVisit:!!visit, isPublicHoliday: !!phName, holidayName: phName||null,
+        // Structured office-visit fields (place/reason + the approver's own
+        // id/name/photo) for consumers that want to render these directly
+        // instead of parsing them back out of the combined `remarks` text —
+        // e.g. Dashboard's "My Office Visit this Month" card.
+        visitPlace          : visit?.location   || null,
+        visitReason         : visit?.purpose    || null,
+        visitApproverId     : visit?.appr_id    || null,
+        visitApproverName   : visit?.appr_name  || null,
+        visitApproverPhoto  : visit?.appr_photo || null,
+        remarks, leave, isHalfDayLeave, hasVisit:!!visit, isPublicHoliday: !!phName, holidayName: phName||null,
       });
 
       cur.setDate(cur.getDate() + 1);  // advance to next day
@@ -1271,6 +1390,19 @@ router.get('/half-monthly', async (req, res) => {
     const shiftRes = await pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`);
     const defShift = shiftRes.rows[0];
     const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
+    // employeeId (optional) narrows everything below to one staff member —
+    // see the identical note on /present-absent; the Yearly Present/Absent
+    // report also hits this endpoint (for late/early stats) over a full
+    // year for just its one selected staff member.
+    const requestedEmployeeId = req.query.employeeId ? parseInt(req.query.employeeId) : null;
+    const effectiveEmployeeId = isScoped ? scopeEmployeeId : requestedEmployeeId;
+    // A management-role caller (branchManager/departmentHead) with no single
+    // employeeId requested is narrowed to their own branch/department instead
+    // — same org-scope helper Duty Roster/OT Approval already use — when the
+    // client opts in via ?orgScope=1. Without this, a Dept Head saw every
+    // department's staff, not just their own (confirmed on Omni tenant).
+    const orgScopeIds = (!effectiveEmployeeId && req.query.orgScope === '1')
+      ? await resolveOrgEmployeeIds(req) : null;
 
     // â”€â”€ All active employees (with per-employee shift info) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const empRes = await pool.query(`
@@ -1282,9 +1414,10 @@ router.get('/half-monthly', async (req, res) => {
       FROM   users u
       LEFT   JOIN shifts s ON s.code = u.shift
       WHERE  u.active=TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
+             ${effectiveEmployeeId ? 'AND u.id = $1' : orgScopeIds ? 'AND u.id = ANY($1)' : ''}
       ORDER  BY (SELECT b.ranking_order FROM branches b WHERE b.name = u.branch) ASC NULLS LAST,
                u.ranking_order ASC NULLS LAST, u.full_name ASC
-    `);
+    `, effectiveEmployeeId ? [effectiveEmployeeId] : orgScopeIds ? [orgScopeIds] : []);
     const employees = isScoped
       ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
       : empRes.rows;
@@ -1312,18 +1445,19 @@ router.get('/half-monthly', async (req, res) => {
     // MIN/MAX aggregation per employee below, roster-aware, instead of a
     // plain GROUP BY check_time::date (which pairs the wrong punches
     // together for a shift that crosses midnight).
+    const empIdClauseHalf = effectiveEmployeeId ? 'AND employee_id = $3' : '';
     const rawLogsResHalf = await pool.query(`
       SELECT employee_id, check_time FROM zkteco_attendance_logs
-      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL ${empIdClauseHalf}
       UNION ALL
       SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
       FROM   attendance_manual_postings
-      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved' ${empIdClauseHalf}
       UNION ALL
       SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
       FROM   attendance_manual_postings
-      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
-    `, [rangeStartHalf, rangeEndHalf]);
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved' ${empIdClauseHalf}
+    `, effectiveEmployeeId ? [rangeStartHalf, rangeEndHalf, effectiveEmployeeId] : [rangeStartHalf, rangeEndHalf]);
 
     const rawByEmpHalf = new Map();
     for (const r of rawLogsResHalf.rows) {
@@ -1342,21 +1476,27 @@ router.get('/half-monthly', async (req, res) => {
 
     // â”€â”€ Leaves for period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const leavesRes = await pool.query(`
-      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type
+      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.half_day
       FROM   leaves l
       LEFT   JOIN leave_types lt ON lt.code = l.leave_type_code
       WHERE  l.status='approved'
         AND  l.from_date <= $2 AND l.to_date >= $1
-    `, [startDate, endDate]);
+        ${effectiveEmployeeId ? 'AND l.employee_id = $3' : ''}
+    `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]);
 
-    const leaveMap = {};  // empId â†’ Set of leave dates
+    const leaveMap = {};      // empId â†’ [dates]
+    const halfLeaveMap = {};  // empId â†’ Set of half-day leave dates (subset of leaveMap)
     for (const l of leavesRes.rows) {
-      if (!leaveMap[l.employee_id]) leaveMap[l.employee_id] = [];
+      if (!leaveMap[l.employee_id])     leaveMap[l.employee_id]     = [];
+      if (!halfLeaveMap[l.employee_id]) halfLeaveMap[l.employee_id] = new Set();
       const from = new Date(l.from_date);
       const to   = new Date(l.to_date);
       for (let d = new Date(from); d <= to; d.setDate(d.getDate()+1)) {
         const ds = d.toISOString().split('T')[0];
-        if (ds >= startDate && ds <= endDate) leaveMap[l.employee_id].push(ds);
+        if (ds >= startDate && ds <= endDate) {
+          leaveMap[l.employee_id].push(ds);
+          if (l.half_day) halfLeaveMap[l.employee_id].add(ds);
+        }
       }
     }
 
@@ -1364,7 +1504,8 @@ router.get('/half-monthly', async (req, res) => {
     const visitRes2 = await pool.query(`
       SELECT employee_id, from_date, to_date FROM office_visits
       WHERE  status='approved' AND from_date <= $2 AND to_date >= $1
-    `, [startDate, endDate]);
+             ${effectiveEmployeeId ? 'AND employee_id = $3' : ''}
+    `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]);
     const visitMap2 = {};  // empId â†’ Set of visit dates
     for (const v of visitRes2.rows) {
       if (!visitMap2[v.employee_id]) visitMap2[v.employee_id] = new Set();
@@ -1385,8 +1526,9 @@ router.get('/half-monthly', async (req, res) => {
     const toHHMM = (mins) => `${pad2(Math.floor(Math.abs(mins)/60))}:${pad2(Math.abs(mins)%60)}`;
 
     const stats = employees.map(emp => {
-      const empLogs  = logsMap[emp.id]   || {};
-      const empLeave = new Set(leaveMap[emp.id] || []);
+      const empLogs      = logsMap[emp.id]     || {};
+      const empLeave     = new Set(leaveMap[emp.id] || []);
+      const empHalfLeave = halfLeaveMap[emp.id] || new Set();
       const empVisit = visitMap2[emp.id] || new Set();
 
       // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
@@ -1421,7 +1563,7 @@ router.get('/half-monthly', async (req, res) => {
       const otMinutes = halfApprovedOTSumMap.get(emp.id) || 0;
 
       for (const { dateStr, roster } of empWorkingDatesH) {
-        if (empLeave.has(dateStr)) { leaveDays++; continue; }
+        if (empLeave.has(dateStr)) { leaveDays += empHalfLeave.has(dateStr) ? 0.5 : 1; continue; }
 
         const log = empLogs[dateStr];
         if (!log || !log.timeIn) { absentDays++; continue; }
@@ -1682,18 +1824,23 @@ router.get('/monthly', async (req, res) => {
     }
 
     const leavesRes = await pool.query(`
-      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type
+      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.half_day
       FROM leaves l LEFT JOIN leave_types lt ON lt.code = l.leave_type_code
       WHERE l.status='approved' AND l.from_date <= $2 AND l.to_date >= $1
     `, [startDate, endDate]);
 
     const leaveMap = {};
+    const halfLeaveMap = {}; // empId â†’ Set of half-day leave dates (subset of leaveMap)
     for (const l of leavesRes.rows) {
-      if (!leaveMap[l.employee_id]) leaveMap[l.employee_id] = [];
+      if (!leaveMap[l.employee_id])     leaveMap[l.employee_id]     = [];
+      if (!halfLeaveMap[l.employee_id]) halfLeaveMap[l.employee_id] = new Set();
       const from = new Date(l.from_date), to = new Date(l.to_date);
       for (let d = new Date(from); d <= to; d.setDate(d.getDate()+1)) {
         const ds = d.toISOString().split('T')[0];
-        if (ds >= startDate && ds <= endDate) leaveMap[l.employee_id].push(ds);
+        if (ds >= startDate && ds <= endDate) {
+          leaveMap[l.employee_id].push(ds);
+          if (l.half_day) halfLeaveMap[l.employee_id].add(ds);
+        }
       }
     }
 
@@ -1705,8 +1852,9 @@ router.get('/monthly', async (req, res) => {
     const monthlyApprovedOTSumMap = await loadApprovedOTSumMap(startDate, endDate);
 
     let stats = employees.map(emp => {
-      const empLogs  = logsMap[emp.id] || {};
-      const empLeave = new Set(leaveMap[emp.id] || []);
+      const empLogs      = logsMap[emp.id] || {};
+      const empLeave     = new Set(leaveMap[emp.id] || []);
+      const empHalfLeave = halfLeaveMap[emp.id] || new Set();
 
       // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
       const getEmpRosterM = (ds) => getEffectiveRoster(rosterMapMon, emp.id, ds);
@@ -1742,7 +1890,7 @@ router.get('/monthly', async (req, res) => {
       const otMinutes = monthlyApprovedOTSumMap.get(emp.id) || 0;
 
       for (const { dateStr, roster } of empWorkingDatesM) {
-        if (empLeave.has(dateStr)) { leaveDays++; continue; }
+        if (empLeave.has(dateStr)) { leaveDays += empHalfLeave.has(dateStr) ? 0.5 : 1; continue; }
         const log = empLogs[dateStr];
         if (!log || !log.timeIn) { absentDays++; continue; }
         presentDays++;
@@ -1902,39 +2050,60 @@ router.get('/half-in-out', async (req, res) => {
     }
 
     const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
+    // employeeId (optional) narrows everything below to one staff member —
+    // see the identical note on /present-absent; the Yearly In & Out report
+    // hits this endpoint over a full year for just its one selected staff
+    // member.
+    const requestedEmployeeId = req.query.employeeId ? parseInt(req.query.employeeId) : null;
+    const effectiveEmployeeId = isScoped ? scopeEmployeeId : requestedEmployeeId;
+    // Management-role caller (branchManager/departmentHead), no single
+    // employeeId requested → narrow to their own branch/department (opt-in
+    // via ?orgScope=1) instead of every employee — see /half-monthly's
+    // identical comment for why this is needed.
+    const orgScopeIds = (!effectiveEmployeeId && req.query.orgScope === '1')
+      ? await resolveOrgEmployeeIds(req) : null;
     const [empRes, leavesRes, visitRes] = await Promise.all([
       pool.query(`
         SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
                NULLIF(TRIM(COALESCE(p.short_name,'')), '')  AS "postShort",
                NULLIF(TRIM(COALESCE(dd.short_name,'')), '') AS "deptShort",
                NULLIF(TRIM(COALESCE(br.short_name,'')), '') AS "branchShort",
-               u.position, u.department, u.branch, u.eligible_for_ot
+               u.position, u.department, u.branch, u.eligible_for_ot,
+               u.grade, u.mode, u.timing_type AS "timingType", u.shift
         FROM   users u
         LEFT JOIN posts       p  ON p.name  = u.position
         LEFT JOIN departments dd ON dd.name = u.department
         LEFT JOIN branches    br ON br.name = u.branch
         WHERE  u.active = TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
+               ${effectiveEmployeeId ? 'AND u.id = $1' : orgScopeIds ? 'AND u.id = ANY($1)' : ''}
         ORDER  BY br.ranking_order ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC
-      `),
+      `, effectiveEmployeeId ? [effectiveEmployeeId] : orgScopeIds ? [orgScopeIds] : []),
       pool.query(`
-        SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type
+        SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.half_day
         FROM   leaves l LEFT JOIN leave_types lt ON lt.code = l.leave_type_code
         WHERE  l.status='approved' AND l.from_date <= $2 AND l.to_date >= $1
-      `, [startDate, endDate]),
+               ${effectiveEmployeeId ? 'AND l.employee_id = $3' : ''}
+      `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]),
       pool.query(`
         SELECT employee_id, from_date, to_date, purpose, location
         FROM   office_visits WHERE status='approved' AND from_date <= $2 AND to_date >= $1
-      `, [startDate, endDate]),
+               ${effectiveEmployeeId ? 'AND employee_id = $3' : ''}
+      `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]),
     ]);
 
-    // Build per-employee leave map
+    // Build per-employee leave map — a half-day leave still has a real punch
+    // (the employee worked the other half), so callers need to know both the
+    // leave type AND whether it's half-day to show "13:00 / AL 1/2" instead
+    // of just silently showing the time with no indication leave was taken.
     const leaveMap = {};
     for (const l of leavesRes.rows) {
       if (!leaveMap[l.employee_id]) leaveMap[l.employee_id] = {};
       const from = new Date(l.from_date), to = new Date(l.to_date);
       for (let d = new Date(from); d <= to; d.setDate(d.getDate()+1)) {
         const ds = d.toISOString().split('T')[0];
-        if (ds >= startDate && ds <= endDate) leaveMap[l.employee_id][ds] = l.leave_type || 'Leave';
+        if (ds >= startDate && ds <= endDate) {
+          leaveMap[l.employee_id][ds] = { name: l.leave_type || 'Leave', halfDay: !!l.half_day };
+        }
       }
     }
 
@@ -1967,19 +2136,20 @@ router.get('/half-in-out', async (req, res) => {
     // check_time::date pairs the wrong punches together in that case).
     const rangeStartIO = toDateStr(new Date(new Date(startDate).getTime() - 86400000));
     const rangeEndIO   = toDateStr(new Date(new Date(endDate).getTime()   + 86400000));
+    const empIdClauseIO = effectiveEmployeeId ? 'AND employee_id = $3' : '';
     const [rawLogsResIO, rosterMapIO] = await Promise.all([
       pool.query(`
         SELECT employee_id, check_time FROM zkteco_attendance_logs
-        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+        WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL ${empIdClauseIO}
         UNION ALL
         SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
         FROM   attendance_manual_postings
-        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+        WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved' ${empIdClauseIO}
         UNION ALL
         SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
         FROM   attendance_manual_postings
-        WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
-      `, [rangeStartIO, rangeEndIO]),
+        WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved' ${empIdClauseIO}
+      `, effectiveEmployeeId ? [rangeStartIO, rangeEndIO, effectiveEmployeeId] : [rangeStartIO, rangeEndIO]),
       loadRosterMap(rangeStartIO, rangeEndIO),
     ]);
 
@@ -2011,7 +2181,7 @@ router.get('/half-in-out', async (req, res) => {
       const empLeave = leaveMap[emp.id]    || {};
       const empVisit = visitMapIO[emp.id]  || {};
       const days = {};
-      for (const { date } of dates) {
+      for (const { date, dayKey } of dates) {
         const log     = empLogs[date];
         const inDt    = log?.timeIn  ? new Date(log.timeIn)  : null;
         const outDt   = log?.timeOut ? new Date(log.timeOut) : null;
@@ -2030,11 +2200,22 @@ router.get('/half-in-out', async (req, res) => {
         const rawIn  = log?.timeIn  ? new Date(log.timeIn).toISOString()  : null;
         const rawOut = log?.timeOut ? new Date(log.timeOut).toISOString() : null;
 
+        // Per-employee roster override — the dates[] array's own isWeekend is
+        // just the flat company-wide pattern shared by everyone; once a
+        // roster entry actually covers this date for THIS employee, it's
+        // authoritative (see isRosterWeekend()), same as every other report.
+        const empRoster    = getEffectiveRoster(rosterMapIO, emp.id, date);
+        const empIsWeekend = isRosterWeekend(empRoster, dayKey, weekends, defShift?.id);
+        const offType = empRoster?.isOff
+          ? (/night/i.test(empRoster.shiftName || '') ? 'Night Off' : 'Day Off')
+          : null;
+
         days[date] = {
           timeIn:  rawIn,
           timeOut: rawOut,
           punches: log?.punches || 0,
           workedHrs, otHrs,
+          isWeekend: empIsWeekend, offType,
           leave : empLeave[date] || null,
           visit : empVisit[date] || null,
         };
@@ -2052,6 +2233,13 @@ router.get('/half-in-out', async (req, res) => {
         postShort:   emp.postShort   || abbrev(emp.position)   || '—',
         deptShort:   emp.deptShort   || abbrev(emp.department) || '—',
         branchShort: emp.branchShort || abbrev(emp.branch)     || '—',
+        // Full (non-abbreviated) values — needed by the Advance Search
+        // filter in MonthlyInOutReport/HalfInOutReport, which compares
+        // against these exact field names (matching /attendance/daily's
+        // convention). Without these the filter always compared a real
+        // string to undefined and silently zeroed out the grid.
+        position: emp.position, department: emp.department, branch: emp.branch,
+        grade: emp.grade, mode: emp.mode, timingType: emp.timingType, shift: emp.shift,
         eligibleForOt: !!emp.eligible_for_ot,
         totalWorkedHrs: totalWorkedMins > 0 ? minsToHHMM(totalWorkedMins) : '—',
         totalApprovedOTMins,
@@ -2187,9 +2375,16 @@ router.get('/half-late-early', async (req, res) => {
     }
 
     // Build flat records — one row per late/early occurrence
-    const employees = isScoped
+    let employees = isScoped
       ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
       : empRes.rows;
+    // Management-role caller, not self-scoped → narrow to their own
+    // branch/department (opt-in via ?orgScope=1) — see /half-monthly's
+    // identical comment for why this is needed.
+    if (!isScoped && req.query.orgScope === '1') {
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids) employees = employees.filter(emp => ids.includes(emp.id));
+    }
     const records = [];
     for (const emp of employees) {
       const empLogs = logsMap[emp.id] || {};
@@ -2322,9 +2517,19 @@ router.get('/present-absent', async (req, res) => {
     }
     const totalWorkingDays = dates.filter(d => !d.isWeekend && !d.isHoliday).length;
 
-    // Employees — active=true by default; pass ?active=false for not-working staff
+    // Employees — active=true by default; pass ?active=false for not-working staff.
+    // employeeId (optional) narrows everything below to one staff member —
+    // the Yearly Present/Absent report calls this endpoint over a FULL YEAR
+    // just to read one selected staff member's own calendar (see
+    // YearlyPresentAbsentReport.jsx), but this endpoint used to always
+    // compute and return every active employee's full day-by-day matrix
+    // regardless, which dominated that report's load time. isScoped (branch
+    // manager/dept head) always wins over a requested employeeId, same as
+    // the isScoped filter already below.
     const activeParam = req.query.active !== 'false';
     const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
+    const requestedEmployeeId  = req.query.employeeId ? parseInt(req.query.employeeId) : null;
+    const effectiveEmployeeId  = isScoped ? scopeEmployeeId : requestedEmployeeId;
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
              u.branch, u.department, u.position, u.grade, u.mode,
@@ -2337,11 +2542,19 @@ router.get('/present-absent', async (req, res) => {
       LEFT JOIN departments dd ON LOWER(TRIM(dd.name)) = LOWER(TRIM(u.department))
       LEFT JOIN branches    br ON LOWER(TRIM(br.name)) = LOWER(TRIM(u.branch))
       WHERE  u.active = $1 AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
+             ${effectiveEmployeeId ? 'AND u.id = $2' : ''}
       ORDER  BY br.ranking_order ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC
-    `, [activeParam]);
-    const employees = isScoped
+    `, effectiveEmployeeId ? [activeParam, effectiveEmployeeId] : [activeParam]);
+    let employees = isScoped
       ? empRes.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
       : empRes.rows;
+    // Management-role caller, not self-scoped → narrow to their own
+    // branch/department (opt-in via ?orgScope=1) — see /half-monthly's
+    // identical comment for why this is needed.
+    if (!isScoped && req.query.orgScope === '1') {
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids) employees = employees.filter(emp => ids.includes(emp.id));
+    }
 
     // â”€â”€ Attendance logs, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Raw punches (widened range) — bucketPunchesByShiftDay aggregates per
@@ -2349,18 +2562,19 @@ router.get('/present-absent', async (req, res) => {
     // a night-shift employee "Present" on both calendar dates a single
     // overnight session happens to touch (or miss it on the day it actually
     // belongs to), instead of once on the correct shift-day.
+    const empIdClausePA = effectiveEmployeeId ? 'AND employee_id = $3' : '';
     const rawLogsResPA = await pool.query(`
       SELECT employee_id, check_time FROM zkteco_attendance_logs
-      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL
+      WHERE  check_time::date BETWEEN $1 AND $2 AND employee_id IS NOT NULL ${empIdClausePA}
       UNION ALL
       SELECT employee_id, (date + check_in)::timestamp::timestamptz AS check_time
       FROM   attendance_manual_postings
-      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved'
+      WHERE  date BETWEEN $1 AND $2 AND check_in IS NOT NULL AND status = 'approved' ${empIdClausePA}
       UNION ALL
       SELECT employee_id, (date + check_out)::timestamp::timestamptz AS check_time
       FROM   attendance_manual_postings
-      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved'
-    `, [rangeStartPA, rangeEndPA]);
+      WHERE  date BETWEEN $1 AND $2 AND check_out IS NOT NULL AND status = 'approved' ${empIdClausePA}
+    `, effectiveEmployeeId ? [rangeStartPA, rangeEndPA, effectiveEmployeeId] : [rangeStartPA, rangeEndPA]);
 
     const rawByEmpPA = new Map();
     for (const r of rawLogsResPA.rows) {
@@ -2368,7 +2582,7 @@ router.get('/present-absent', async (req, res) => {
       rawByEmpPA.get(r.employee_id).push(r.check_time);
     }
     const logsMap = {};
-    for (const emp of empRes.rows) {
+    for (const emp of employees) {
       const buckets = bucketPunchesByShiftDay(rawByEmpPA.get(emp.id) || [], emp.id, rosterMapPA, defShift);
       logsMap[emp.id] = {};
       for (const [dateStr, b] of buckets) {
@@ -2381,7 +2595,8 @@ router.get('/present-absent', async (req, res) => {
     const leavesRes = await pool.query(`
       SELECT l.employee_id, l.from_date, l.to_date, l.half_day
       FROM   leaves l WHERE l.status='approved' AND l.from_date <= $2 AND l.to_date >= $1
-    `, [startDate, endDate]);
+             ${effectiveEmployeeId ? 'AND l.employee_id = $3' : ''}
+    `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]);
 
     const leaveMap = {};     // empId â†’ Set of date strings (full day leave)
     const halfLeaveMap = {}; // empId â†’ Set of date strings (half day leave)
@@ -2403,7 +2618,8 @@ router.get('/present-absent', async (req, res) => {
     const visitRes = await pool.query(`
       SELECT employee_id, from_date, to_date FROM office_visits
       WHERE  status='approved' AND from_date <= $2 AND to_date >= $1
-    `, [startDate, endDate]);
+             ${effectiveEmployeeId ? 'AND employee_id = $3' : ''}
+    `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]);
 
     const visitMap = {};
     for (const v of visitRes.rows) {
@@ -2436,16 +2652,20 @@ router.get('/present-absent', async (req, res) => {
         const punches  = log?.punches || 0;
         let st;
 
-        // Roster override: Day Off/Night Off shift, or a custom recurring
-        // off-day, replaces the company-wide weekend for this employee/date —
-        // but only when this employee is actually on a non-default shift; see
-        // isRosterWeekend().
+        // Roster override: once a roster entry covers this date, it's
+        // authoritative for whether it's a working day — see isRosterWeekend().
         const roster       = getEffectiveRoster(rosterMapPA, emp.id, date);
         const empIsWeekend = isRosterWeekend(roster, dayKey, weekends, defShiftId);
 
-        if (empIsWeekend)                { st='H';  totalH++;  }
-        else if (leave)                  { st='L';  totalL++;  }
-        else if (halfLeave)              { st='LH'; totalL++;  }  // Half-day leave
+        if (empIsWeekend) {
+          // Distinguish the roster's own Day Off/Night Off from the plain
+          // company-wide weekend, same as the other reports.
+          st = roster?.isOff ? (/night/i.test(roster.shiftName || '') ? 'NO' : 'DO') : 'H';
+          totalH++;
+        }
+        else if (leave)                  { st='L';  totalL++;    }
+        else if (halfLeave && log?.hasIn){ st='PLH'; totalL+=0.5; totalP+=0.5; }  // Present + half-day leave
+        else if (halfLeave)              { st='LH'; totalL+=0.5; }  // Half-day leave, no attendance
         else if (log?.hasIn && isHoliday){ st='PP'; totalP++;  }  // Present on Public Holiday
         else if (log?.hasIn && punches===1){ st='P1'; totalP++; }  // Single punch
         else if (log?.hasIn)             { st='P';  totalP++;  }
@@ -2649,14 +2869,28 @@ router.get('/yearly-analytics', async (req, res) => {
     const [wkRows, publicHolidays, empRows, shiftRow] = await Promise.all([
       pool.query(`SELECT weekends, effective_date FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date ASC, id ASC`, [endDate]),
       loadPublicHolidays(),
-      pool.query(`SELECT id, employee_id AS "empCode", full_name AS "fullName", department, position, shift, join_date AS "joinDate" FROM users WHERE active=TRUE AND (is_system IS NOT TRUE AND role NOT IN ('superAdmin'))
-        ORDER BY (SELECT b.ranking_order FROM branches b WHERE b.name = branch) ASC NULLS LAST, ranking_order ASC NULLS LAST, full_name ASC`),
+      pool.query(`
+        SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName", u.department, u.position, u.shift, u.join_date AS "joinDate",
+               s.start_time AS shift_start, s.end_time AS shift_end,
+               s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed,
+               s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
+        FROM users u
+        LEFT JOIN shifts s ON s.code = u.shift
+        WHERE u.active=TRUE AND (u.is_system IS NOT TRUE AND u.role NOT IN ('superAdmin'))
+        ORDER BY (SELECT b.ranking_order FROM branches b WHERE b.name = u.branch) ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC`),
       pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
 
-    const employees = isScoped
+    let employees = isScoped
       ? empRows.rows.filter(emp => String(emp.id) === String(scopeEmployeeId))
       : empRows.rows;
+    // Management-role caller, not self-scoped → narrow to their own
+    // branch/department (opt-in via ?orgScope=1) — see /half-monthly's
+    // identical comment for why this is needed.
+    if (!isScoped && req.query.orgScope === '1') {
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids) employees = employees.filter(emp => ids.includes(emp.id));
+    }
     const defShift  = shiftRow.rows[0];
     const getHoliday = makeHolidayChecker(publicHolidays);
     const DOW_KEYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -2740,7 +2974,7 @@ router.get('/yearly-analytics', async (req, res) => {
     const lvRes = await pool.query(`
       SELECT l.employee_id, l.from_date, l.to_date,
              lt.name AS leave_type, lt.code AS leave_code,
-             l.days AS leave_days_count
+             l.days AS leave_days_count, l.half_day
       FROM leaves l
       LEFT JOIN leave_types lt ON lt.code = l.leave_type_code
       WHERE l.status = 'approved'
@@ -2748,15 +2982,20 @@ router.get('/yearly-analytics', async (req, res) => {
     `, [startDate, endDate]);
 
     const leaveMap     = {};  // empId â†’ Set of date strings on leave
-    const leaveDaysMap = {};  // empId â†’ total approved leave days
+    const halfLeaveMap = {};  // empId â†’ Set of half-day leave dates (subset of leaveMap)
+    const leaveDaysMap = {};  // empId â†’ total approved leave days (authoritative — sums the stored `days`, 0.5-aware)
     for (const l of lvRes.rows) {
       if (!leaveMap[l.employee_id])     leaveMap[l.employee_id]     = new Set();
+      if (!halfLeaveMap[l.employee_id]) halfLeaveMap[l.employee_id] = new Set();
       if (!leaveDaysMap[l.employee_id]) leaveDaysMap[l.employee_id] = 0;
       leaveDaysMap[l.employee_id] += parseFloat(l.leave_days_count || 0);
       const from = new Date(l.from_date), to = new Date(l.to_date);
       for (let d = new Date(from); d <= to; d.setDate(d.getDate()+1)) {
         const ds = d.toISOString().split('T')[0];
-        if (ds >= startDate && ds <= endDate) leaveMap[l.employee_id].add(ds);
+        if (ds >= startDate && ds <= endDate) {
+          leaveMap[l.employee_id].add(ds);
+          if (l.half_day) halfLeaveMap[l.employee_id].add(ds);
+        }
       }
     }
 
@@ -2776,8 +3015,9 @@ router.get('/yearly-analytics', async (req, res) => {
     }));
 
     const allStats = employees.map(emp => {
-      const empLogs  = logsMap[emp.id] || {};
-      const empLeave = leaveMap[emp.id] || new Set();
+      const empLogs      = logsMap[emp.id] || {};
+      const empLeave     = leaveMap[emp.id] || new Set();
+      const empHalfLeave = halfLeaveMap[emp.id] || new Set();
 
       // Effective start = join date (if within this year) or Jan 1 of the year
       const rawJoin = emp.joinDate
@@ -2806,8 +3046,9 @@ router.get('/yearly-analytics', async (req, res) => {
       for (const ds of empWorkingDays) {
         const mi = parseInt(ds.split('-')[1]) - 1;
         if (empLeave.has(ds)) {
-          leaveDays++;
-          monthlyTrend[mi].leave++;
+          const halfDay = empHalfLeave.has(ds) ? 0.5 : 1;
+          leaveDays += halfDay;
+          monthlyTrend[mi].leave += halfDay;
           continue;
         }
         const log = empLogs[ds];
@@ -2822,19 +3063,37 @@ router.get('/yearly-analytics', async (req, res) => {
 
         const inDt  = new Date(log.timeIn);
         const outDt = (log.timeOut && log.punches >= 2) ? new Date(log.timeOut) : null;
-        const fallbackShiftYr = resolveWinterShift(ds, shiftStart, shiftEnd, graceSt, graceEd, defWinterEnabled, defWinterPolicy);
-        const [sh, sm] = fallbackShiftYr.shiftStart.split(':').map(Number);
-        const [eh, em] = fallbackShiftYr.shiftEnd.split(':').map(Number);
+
+        // Effective shift for this employee on this date: roster override
+        // (assigned/changed via Duty Roster) > the employee's own shift >
+        // the company default — same precedence every other roster-aware
+        // report uses. Previously this used the company default shift for
+        // every employee's late/early/OT math regardless of their own shift
+        // or any roster assignment.
+        const rosterYr = getEffectiveRoster(rosterMapYr, emp.id, ds);
+        const empShiftStartYr = emp.shift_start?.toString().substring(0,5) || shiftStart;
+        const empShiftEndYr   = emp.shift_end?.toString().substring(0,5)   || shiftEnd;
+        const empGraceStYr    = emp.grace_st ?? graceSt;
+        const empGraceEdYr    = emp.grace_ed ?? graceEd;
+        const empWinterEnabledYr = emp.shift_start ? emp.shift_winter_enabled : defWinterEnabled;
+        const empWinterPolicyYr  = emp.shift_start ? emp.shift_winter_policy  : defWinterPolicy;
+        const fallbackShiftYr = resolveWinterShift(ds, empShiftStartYr, empShiftEndYr, empGraceStYr, empGraceEdYr, empWinterEnabledYr, empWinterPolicyYr);
+        const effShiftStartYr = rosterYr?.shiftStart || fallbackShiftYr.shiftStart;
+        const effShiftEndYr   = rosterYr?.shiftEnd   || fallbackShiftYr.shiftEnd;
+        const effGraceStYr    = rosterYr?.graceSt    != null ? rosterYr.graceSt : fallbackShiftYr.graceStart;
+        const effGraceEdYr    = rosterYr?.graceEd    != null ? rosterYr.graceEd : fallbackShiftYr.graceEnd;
+        const [sh, sm] = effShiftStartYr.split(':').map(Number);
+        const [eh, em] = effShiftEndYr.split(':').map(Number);
         const [y2, mo2, dd2] = ds.split('-').map(Number);
         const sDt = shiftToUTC(y2, mo2, dd2, sh, sm);
         const eDt = shiftToUTC(y2, mo2, dd2, eh, em);
         if (eDt <= sDt) eDt.setUTCDate(eDt.getUTCDate()+1);
 
-        const lateMins = Math.round((inDt - sDt) / 60000) - fallbackShiftYr.graceStart;
+        const lateMins = Math.round((inDt - sDt) / 60000) - effGraceStYr;
         if (lateMins > 0) { lateCount++; lateMinsTotal += lateMins; monthlyTrend[mi].late++; }
 
         if (outDt) {
-          const earlyMins = Math.round((eDt - outDt) / 60000) - fallbackShiftYr.graceEnd;
+          const earlyMins = Math.round((eDt - outDt) / 60000) - effGraceEdYr;
           if (earlyMins > 0) { earlyCount++; earlyMinsTotal += earlyMins; }
           const ot = Math.round((outDt - eDt) / 60000);
           if (ot > 0) {
@@ -2998,6 +3257,8 @@ router.get('/manual-postings', async (req, res) => {
         mp.employee_id       AS "employeeId",
         mp.recommended_by    AS "recommendedById",
         mp.approved_by       AS "approvedById",
+        mp.updated_by         AS "updatedById",
+        mp.updated_device     AS "updatedDevice",
         u.full_name          AS "fullName",
         u.employee_id        AS "staffId",
         COALESCE(NULLIF(TRIM(p.short_name),''),  LEFT(u.position,5))   AS "postShort",
@@ -3005,7 +3266,8 @@ router.get('/manual-postings', async (req, res) => {
         COALESCE(NULLIF(TRIM(br.short_name),''), LEFT(u.branch,4))     AS "branchShort",
         cb.full_name         AS "createdBy",
         rb.full_name         AS "recommendedByName",
-        ab.full_name         AS "approvedByName"
+        ab.full_name         AS "approvedByName",
+        ub.full_name          AS "updatedByName"
       FROM attendance_manual_postings mp
       JOIN  users u  ON u.id = mp.employee_id
       LEFT JOIN posts       p  ON LOWER(TRIM(p.name))  = LOWER(TRIM(u.position))
@@ -3014,6 +3276,7 @@ router.get('/manual-postings', async (req, res) => {
       LEFT JOIN users cb ON cb.id = mp.created_by
       LEFT JOIN users rb ON rb.id = mp.recommended_by
       LEFT JOIN users ab ON ab.id = mp.approved_by
+      LEFT JOIN users ub ON ub.id = mp.updated_by
       ORDER BY mp.date DESC, u.full_name ASC
     `);
     res.json(rows);
@@ -3026,7 +3289,7 @@ router.get('/manual-postings', async (req, res) => {
 const isManualPostingAdmin = (req) => ['admin', 'superAdmin'].includes(req.user?.role);
 
 router.post('/manual-postings', async (req, res) => {
-  let { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy } = req.body;
+  let { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy, deviceInfo } = req.body;
   const isAdmin = isManualPostingAdmin(req);
 
   // Self-service "Inform Late In/Early Out" (FAB, staff role) always posts
@@ -3040,20 +3303,27 @@ router.post('/manual-postings', async (req, res) => {
 
   // Mirrors leaves.js's POST: pending status leaves approved_by/approved_date
   // null — those are only ever set by an actual /approve or /reject call,
-  // never at submission time. recommendedBy is passed straight through purely
-  // to know who to notify; it isn't otherwise validated or persisted as an
-  // "assignment" beyond that (same as the existing Leave/Office Visit flow).
+  // never at submission time. recommendedBy is likewise only persisted for
+  // admin (the Manual Posting tool, backfilling/recording a decision that
+  // already happened) — for a plain self-service submission it must NOT be
+  // written into recommended_by at creation, since that column is meant to
+  // be set only by the dedicated /recommend action once someone genuinely
+  // acts on it (recommended_by ending up non-null the instant a staff
+  // member merely picks a name in the apply form made every submission look
+  // already-recommended, defeating "Recommendation Compulsory" entirely).
   const status = isAdmin ? 'approved' : 'pending';
+  const finalRecoBy     = isAdmin ? (recommendedBy || null) : null;
   const finalApprovedBy = status === 'approved' ? (approvedBy || null) : null;
 
   try {
     const { rows } = await pool.query(`
       INSERT INTO attendance_manual_postings
-        (employee_id, date, check_in, check_out, remark, recommended_by, approved_by, created_by, status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        (employee_id, date, check_in, check_out, remark, recommended_by, approved_by, created_by, status, updated_by, updated_device)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       RETURNING *
     `, [employeeId, date, checkIn || null, checkOut || null, remark || null,
-        recommendedBy || null, finalApprovedBy, req.user?.id || null, status]);
+        finalRecoBy, finalApprovedBy, req.user?.id || null, status,
+        req.user?.id || null, deviceInfo || null]);
 
     // Best-effort notification — never fail the request over email/message issues.
     try {
@@ -3092,20 +3362,36 @@ router.post('/manual-postings', async (req, res) => {
   }
 });
 
-// Editing an existing entry (as opposed to applying for a new one) is an
-// admin-only action today (ManualPostings.jsx's own grid already gates its
-// edit UI on canManageSystem) — enforced here too so a raw API call can't
-// bypass that and rewrite someone else's already-posted attendance.
-router.put('/manual-postings/:id', requireRole('admin', 'superAdmin'), async (req, res) => {
-  const { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy } = req.body;
+// Admins can always edit any entry; a staff member can edit their own
+// self-service entry too, but only while it's still pending — once anyone
+// has acted on it (recommended/approved/rejected) it's locked, same rule as
+// Leave/Office Visit.
+const MANUAL_POSTING_PRIVILEGED_ROLES = ['admin', 'superAdmin'];
+
+router.put('/manual-postings/:id', async (req, res) => {
+  const { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy, deviceInfo } = req.body;
   try {
+    const { rows: existingRows } = await pool.query('SELECT employee_id, status, recommended_by FROM attendance_manual_postings WHERE id=$1', [req.params.id]);
+    if (!existingRows[0]) return res.status(404).json({ error: 'Not found' });
+    const authError = authorizeOwnEditDelete(req, existingRows[0].employee_id, existingRows[0]);
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
+    // See leaves.js PUT for why: recommended_by/approved_by/employee_id are
+    // only ever taken from the request for admin/superAdmin — a
+    // non-privileged owner is only authorized above because their entry is
+    // still pending/untouched.
+    const isPrivileged = MANUAL_POSTING_PRIVILEGED_ROLES.includes(req.user.role);
+    const finalEmployeeId = isPrivileged ? employeeId : existingRows[0].employee_id;
+    const finalRecoBy     = isPrivileged ? (recommendedBy || null) : null;
+    const finalAppBy      = isPrivileged ? (approvedBy    || null) : null;
+
     const { rows } = await pool.query(`
       UPDATE attendance_manual_postings
       SET employee_id=$1, date=$2, check_in=$3, check_out=$4, remark=$5,
-          recommended_by=$6, approved_by=$7, updated_at=NOW()
-      WHERE id=$8 RETURNING *
-    `, [employeeId, date, checkIn || null, checkOut || null, remark || null,
-        recommendedBy || null, approvedBy || null, req.params.id]);
+          recommended_by=$6, approved_by=$7, updated_at=NOW(), updated_by=$8, updated_device=$9
+      WHERE id=$10 RETURNING *
+    `, [finalEmployeeId, date, checkIn || null, checkOut || null, remark || null,
+        finalRecoBy, finalAppBy, req.user.id, deviceInfo || null, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
   } catch (e) {
@@ -3114,13 +3400,38 @@ router.put('/manual-postings/:id', requireRole('admin', 'superAdmin'), async (re
   }
 });
 
-router.patch('/manual-postings/:id/approve', async (req, res) => {
-  const { approvedBy, comment } = req.body;
+router.patch('/manual-postings/:id/recommend', async (req, res) => {
   try {
+    const { rows: existingRows } = await pool.query('SELECT employee_id FROM attendance_manual_postings WHERE id=$1', [req.params.id]);
+    if (!existingRows[0]) return res.status(404).json({ error: 'Not found' });
+    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'recommend');
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
+    const { rows } = await pool.query(
+      `UPDATE attendance_manual_postings SET recommended_by=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (e) {
+    logError('[manual-postings recommend]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/manual-postings/:id/approve', async (req, res) => {
+  const { comment } = req.body;
+  try {
+    const { rows: existingRows } = await pool.query('SELECT employee_id, recommended_by FROM attendance_manual_postings WHERE id=$1', [req.params.id]);
+    if (!existingRows[0]) return res.status(404).json({ error: 'Not found' });
+    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'approve',
+      { alreadyRecommended: !!existingRows[0].recommended_by });
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
     const { rows } = await pool.query(`
       UPDATE attendance_manual_postings SET status='approved', approved_by=$1, approved_date=CURRENT_DATE, comment=$2, updated_at=NOW()
       WHERE id=$3 RETURNING *
-    `, [approvedBy || null, comment || '', req.params.id]);
+    `, [req.user.id, comment || '', req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
     logAudit({ actor: req.user, action: 'approve', entity: 'manual-posting', entityId: req.params.id, before: null, after: rows[0] });
     res.json(rows[0]);
@@ -3131,12 +3442,17 @@ router.patch('/manual-postings/:id/approve', async (req, res) => {
 });
 
 router.patch('/manual-postings/:id/reject', async (req, res) => {
-  const { approvedBy, comment } = req.body;
+  const { comment } = req.body;
   try {
+    const { rows: existingRows } = await pool.query('SELECT employee_id FROM attendance_manual_postings WHERE id=$1', [req.params.id]);
+    if (!existingRows[0]) return res.status(404).json({ error: 'Not found' });
+    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'reject');
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
     const { rows } = await pool.query(`
       UPDATE attendance_manual_postings SET status='rejected', approved_by=$1, approved_date=CURRENT_DATE, comment=$2, updated_at=NOW()
       WHERE id=$3 RETURNING *
-    `, [approvedBy || null, comment || '', req.params.id]);
+    `, [req.user.id, comment || '', req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
     logAudit({ actor: req.user, action: 'reject', entity: 'manual-posting', entityId: req.params.id, before: null, after: rows[0] });
     res.json(rows[0]);
@@ -3148,6 +3464,11 @@ router.patch('/manual-postings/:id/reject', async (req, res) => {
 
 router.delete('/manual-postings/:id', async (req, res) => {
   try {
+    const { rows: existingRows } = await pool.query('SELECT employee_id, status, recommended_by FROM attendance_manual_postings WHERE id=$1', [req.params.id]);
+    if (!existingRows[0]) return res.status(404).json({ error: 'Not found' });
+    const authError = authorizeOwnEditDelete(req, existingRows[0].employee_id, existingRows[0]);
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
     await pool.query('DELETE FROM attendance_manual_postings WHERE id=$1', [req.params.id]);
     res.json({ success: true });
   } catch (e) {
@@ -3197,7 +3518,12 @@ router.get('/missing-requests', async (req, res) => {
 
 router.post('/missing-requests', async (req, res) => {
   const { date, checkIn, checkOut, reason, recommendedBy, approvedBy } = req.body;
-  const employeeId = req.user.id;
+  // Self-service always posts about the caller's own record. Only
+  // admin/superAdmin (posting on an employee's behalf from a grid's context
+  // menu) can target someone else — same rule as Leave/Office Visit posting.
+  let { employeeId } = req.body;
+  const isPrivileged = MANUAL_POSTING_PRIVILEGED_ROLES.includes(req.user.role);
+  if (!isPrivileged || !employeeId) employeeId = req.user.id;
   if (!date || !reason?.trim()) {
     return res.status(400).json({ error: 'Date and reason are required' });
   }
@@ -3251,10 +3577,8 @@ router.patch('/missing-requests/:id/recommend', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
     const existing = rows[0];
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    const isAssigned = String(existing.recommended_by) === String(req.user.id);
-    if (!isAssigned && isEmployeeScopedUser(req.user)) {
-      return res.status(403).json({ error: 'Not authorized to recommend this request' });
-    }
+    const authError = await authorizeRecoAction(req, existing.employee_id, 'recommend');
+    if (authError) return res.status(authError.status).json({ error: authError.error });
     if (existing.status !== 'pending') {
       return res.status(400).json({ error: `Cannot recommend a request that is already ${existing.status}` });
     }
@@ -3274,10 +3598,9 @@ router.patch('/missing-requests/:id/approve', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
     const existing = rows[0];
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    const isAssigned = String(existing.approved_by) === String(req.user.id);
-    if (!isAssigned && isEmployeeScopedUser(req.user)) {
-      return res.status(403).json({ error: 'Not authorized to approve this request' });
-    }
+    const authError = await authorizeRecoAction(req, existing.employee_id, 'approve',
+      { alreadyRecommended: existing.status === 'recommended' || existing.status === 'approved' });
+    if (authError) return res.status(authError.status).json({ error: authError.error });
     if (!['pending', 'recommended'].includes(existing.status)) {
       return res.status(400).json({ error: `Cannot approve a request that is already ${existing.status}` });
     }
@@ -3312,10 +3635,8 @@ router.patch('/missing-requests/:id/reject', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
     const existing = rows[0];
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    const isAssigned = String(existing.approved_by) === String(req.user.id) || String(existing.recommended_by) === String(req.user.id);
-    if (!isAssigned && isEmployeeScopedUser(req.user)) {
-      return res.status(403).json({ error: 'Not authorized to reject this request' });
-    }
+    const authError = await authorizeRecoAction(req, existing.employee_id, 'reject');
+    if (authError) return res.status(authError.status).json({ error: authError.error });
     if (!['pending', 'recommended'].includes(existing.status)) {
       return res.status(400).json({ error: `Cannot reject a request that is already ${existing.status}` });
     }
@@ -3336,12 +3657,8 @@ router.delete('/missing-requests/:id', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
     const existing = rows[0];
     if (!existing) return res.status(404).json({ error: 'Not found' });
-    if (String(existing.employee_id) !== String(req.user.id)) {
-      return res.status(403).json({ error: 'You can only cancel your own request' });
-    }
-    if (existing.status !== 'pending') {
-      return res.status(400).json({ error: `Cannot cancel a request that is already ${existing.status}` });
-    }
+    const authError = authorizeOwnEditDelete(req, existing.employee_id, existing);
+    if (authError) return res.status(authError.status).json({ error: authError.error });
     await pool.query('DELETE FROM attendance_missing_requests WHERE id=$1', [req.params.id]);
     res.json({ success: true });
   } catch (e) {

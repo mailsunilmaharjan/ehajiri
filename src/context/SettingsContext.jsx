@@ -1,6 +1,7 @@
 ﻿import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import api from '../api/client.js';
 import { useAuth } from './AuthContext.jsx';
+import { useLanguage } from './LanguageContext.jsx';
 import { getNepalNow, getNepalTodayISO } from '../utils/dateUtils.js';
 
 const SettingsContext = createContext(null);
@@ -39,7 +40,9 @@ const DEFAULT_SETTINGS = {
   defaultCalendar  : 'np',
   defaultDateFormat: 'dd-MMM-yyyy',
   nepaliDigits     : false,
+  defaultLanguage  : 'en', // fallback display language for a browser that has never had one explicitly chosen — see LanguageContext.jsx's applyTenantDefault
   leaveBackdateEnabled: true, // Off = block picking a past From Date on Leave/Office Visit apply (Super Admin only)
+  recoApprovalCompulsory: false, // On = Leave/Office Visit approve button stays disabled until the assigned recommendator has recommended first (Staff Detail → Set Recommendator & Approval)
   fiscalYears      : [
     { id:1, name:'FY 2081/082', startDate:'2024-07-17', endDate:'2025-07-15', isDefault:false, isSystem:false },
     { id:2, name:'FY 2082/083', startDate:'2025-07-16', endDate:'2026-07-15', isDefault:true,  isSystem:false },
@@ -91,31 +94,35 @@ const DEFAULT_SETTINGS = {
   publicHolidays: [],
 };
 
-const load = () => {
-  try { const s = localStorage.getItem('app_settings'); return s ? { ...DEFAULT_SETTINGS, ...JSON.parse(s) } : DEFAULT_SETTINGS; }
-  catch { return DEFAULT_SETTINGS; }
-};
+// NOTE: no localStorage persistence for settings — see DataContext.jsx's
+// identical note. This app is multi-tenant on one shared origin (every
+// tenant differs only by a /t/<slug>/ path prefix), so a cached
+// `app_settings` blob in localStorage isn't scoped per tenant: viewing
+// Tenant A then Tenant B in the same browser showed Tenant B's page with
+// Tenant A's company name/logo/leave types/etc. until the real fetch below
+// resolved and overwrote it (and reset()/persist() writes further re-primed
+// that same stale-across-tenants cache). State is always exactly whatever
+// the live API for the CURRENT tenant returns, or DEFAULT_SETTINGS's
+// generic placeholders in the brief window before that (or if it fails).
 
 export const SettingsProvider = ({ children }) => {
   const { currentUser } = useAuth();
-  const [settings, setSettings] = useState(load);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [apiOk, setApiOk] = useState(false);
 
-  /* Re-fetches /settings and applies it to state + localStorage. Used both on
-     login below and on-demand (e.g. by an apply-leave/apply-office-visit
-     modal right as it opens) — this app only ever fetches settings once per
-     login, so a session left open across a Super Admin toggling something
-     like Leave/Visit backdating would otherwise keep enforcing whatever was
-     true when this tab last loaded, not the current server value, until the
-     page is refreshed. */
+  /* Re-fetches /settings and applies it to state. Used both on login below
+     and on-demand (e.g. by an apply-leave/apply-office-visit modal right as
+     it opens) — this app only ever fetches settings once per login, so a
+     session left open across a Super Admin toggling something like
+     Leave/Visit backdating would otherwise keep enforcing whatever was true
+     when this tab last loaded, not the current server value, until the page
+     is refreshed. */
   const refreshSettings = useCallback(async () => {
     if (!currentUser) return;
     try {
       const remoteSettings = await api.get('/settings');
       if (remoteSettings.main) {
-        const merged = { ...DEFAULT_SETTINGS, ...remoteSettings.main };
-        setSettings(merged);
-        localStorage.setItem('app_settings', JSON.stringify(merged));
+        setSettings({ ...DEFAULT_SETTINGS, ...remoteSettings.main });
         setApiOk(true);
       }
     } catch {
@@ -164,7 +171,6 @@ export const SettingsProvider = ({ children }) => {
     }
     const next = updater(base);
     setSettings(next);
-    localStorage.setItem('app_settings', JSON.stringify(next));
     if (apiOk) {
       await api.put('/settings', { main: next }).catch(() => {});
     }
@@ -195,31 +201,28 @@ export const SettingsProvider = ({ children }) => {
     if (!apiOk) throw new Error('Not connected to the server — weekend setting was not saved.');
     const changedDate = getNepalTodayISO();
     const saved = await api.post('/settings/weekendHistory', { ...entry, changedDate });
-    setSettings(prev => {
-      const next = {
-        ...prev,
-        defaultWeekends : entry.weekends,
-        weekendStartDate: entry.effectiveDate,
-        weekendHistory  : [...(prev.weekendHistory || []), saved],
-      };
-      localStorage.setItem('app_settings', JSON.stringify(next));
-      return next;
-    });
+    setSettings(prev => ({
+      ...prev,
+      defaultWeekends : entry.weekends,
+      weekendStartDate: entry.effectiveDate,
+      weekendHistory  : [...(prev.weekendHistory || []), saved],
+    }));
   }, [apiOk]);
 
   const updateWeekendHistory = useCallback(async (id, entry) => {
     if (!apiOk) throw new Error('Not connected to the server — weekend setting was not saved.');
-    const saved = await api.put(`/settings/weekendHistory/${id}`, entry);
-    setSettings(prev => {
-      const next = {
-        ...prev,
-        defaultWeekends : entry.weekends,
-        weekendStartDate: entry.effectiveDate,
-        weekendHistory  : (prev.weekendHistory || []).map(h => h.id === id ? { ...h, ...saved } : h),
-      };
-      localStorage.setItem('app_settings', JSON.stringify(next));
-      return next;
-    });
+    // changedDate/changedBy must be resent on every edit, same as addWeekendHistory —
+    // the generic PUT route overwrites every column in cfg.cols with whatever
+    // the request sends (defaulting anything missing to NULL), so omitting
+    // these here was silently wiping "Changed On"/"Changed By" on every edit.
+    const changedDate = getNepalTodayISO();
+    const saved = await api.put(`/settings/weekendHistory/${id}`, { ...entry, changedDate });
+    setSettings(prev => ({
+      ...prev,
+      defaultWeekends : entry.weekends,
+      weekendStartDate: entry.effectiveDate,
+      weekendHistory  : (prev.weekendHistory || []).map(h => h.id === id ? { ...h, ...saved } : h),
+    }));
   }, [apiOk]);
 
   const deleteWeekendHistory = useCallback(async (id) => {
@@ -232,12 +235,20 @@ export const SettingsProvider = ({ children }) => {
 
   const resetSettings = () => {
     setSettings(DEFAULT_SETTINGS);
-    localStorage.removeItem('app_settings');
     if (apiOk) api.put('/settings', { main: DEFAULT_SETTINGS }).catch(() => {});
   };
 
   const getCompanyName = (language) =>
     language === 'np' ? settings.companyNameNp : settings.companyNameEn;
+
+  /* Propagate Company Setting's "Default Language" to anyone who hasn't
+     picked their own — see LanguageContext.jsx's applyTenantDefault for why
+     this only takes effect pre-choice, and only once real settings (not the
+     DEFAULT_SETTINGS placeholder) have loaded for this tenant. */
+  const { applyTenantDefault } = useLanguage();
+  useEffect(() => {
+    if (apiOk) applyTenantDefault(settings.defaultLanguage);
+  }, [apiOk, settings.defaultLanguage, applyTenantDefault]);
 
   return (
     <SettingsContext.Provider value={{

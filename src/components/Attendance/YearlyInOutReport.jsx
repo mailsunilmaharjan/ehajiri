@@ -6,6 +6,8 @@ import { useData }     from '../../context/DataContext.jsx';
 import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewYearlyBtn from './ViewYearlyBtn.jsx';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
@@ -38,6 +40,11 @@ const ROWS = [
   { key:'wh',  label:'WorkedHour', color:'#374151' },
   { key:'ot',  label:'OT',         color:'#7c3aed' },
 ];
+// ROWS is module-level (defined before `language` exists), so its `label`
+// stays untranslated English there — resolve the displayed text at render
+// time instead.
+const ROW_LABEL_NP = { in:'आउने', out:'जाने', wh:'घण्टा', ot:'ओभरटाइम' };
+const rowLabel = (key, language, fallback) => (language === 'np' ? (ROW_LABEL_NP[key] || fallback) : fallback);
 
 /* ── Staff Select dropdown ── */
 const StaffSelect = ({ employees, value, onChange, L }) => {
@@ -62,11 +69,14 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
           height:36,padding:'0 10px',border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
           borderRadius:8,background:'white',cursor:'pointer',
           boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none',transition:'all .15s' }}>
-        <span style={{ fontSize:13,color:selected?'#1f2937':'#9ca3af',
-          fontWeight:selected?600:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1 }}>
-          {selected
-            ? `${selected.fullName}${selected.position?` • ${abbrev(selected.position)}`:''}${selected.deviceId?` [${selected.deviceId}]`:''}`
-            : `— ${L('कर्मचारी छान्नुस','Select Staff Member')} —`}
+        <span style={{ display:'flex', alignItems:'center', gap:6, overflow:'hidden', flex:1 }}>
+          {selected && <Avatar photo={selected.profilePhoto} name={selected.fullName} size={22} style={{ flexShrink:0 }} />}
+          <span style={{ fontSize:13,color:selected?'#1f2937':'#9ca3af',
+            fontWeight:selected?600:400,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>
+            {selected
+              ? `${selected.fullName}${selected.position?` • ${abbrev(selected.position)}`:''}`
+              : `— ${L('कर्मचारी छान्नुस','Select Staff Member')} —`}
+          </span>
         </span>
         <svg viewBox="0 0 20 20" fill={open?'#1a56db':'#9ca3af'} width="13" height="13"
           style={{ flexShrink:0,marginLeft:6,transform:open?'rotate(180deg)':'none',transition:'transform .2s' }}>
@@ -94,24 +104,21 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
           <div style={{ maxHeight:260,overflowY:'auto' }}>
             {filtered.length===0 && <div style={{ padding:'12px',textAlign:'center',color:'#9ca3af',fontSize:12 }}>No staff found</div>}
             {filtered.map((e,idx) => {
-              const active = String(e.id)===String(value);
+              const active   = String(e.id)===String(value);
+              const stripeBg = idx % 2 === 0 ? '#fff' : '#fafafa';
+              const sub      = [e.employeeId, e.position].filter(Boolean).join(' - ');
               return (
                 <div key={e.id}
                   onMouseDown={ev=>{ ev.preventDefault(); onChange(String(e.id)); setOpen(false); setSearch(''); }}
-                  style={{ display:'flex',alignItems:'center',gap:10,padding:'8px 14px',cursor:'pointer',
-                    background:active?'#eff6ff':'white',borderBottom:'1px solid #f3f4f6',transition:'background .1s' }}
+                  style={{ display:'flex',alignItems:'center',gap:10,padding:'6px 14px',cursor:'pointer',
+                    background:active?'#eff6ff':stripeBg,borderBottom:'1px solid #eef0f3',transition:'background .1s' }}
                   onMouseEnter={ev=>{ if(!active) ev.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':'white'; }}>
-                  <div style={{ width:22,height:22,borderRadius:'50%',background:active?'#1a56db':'#f3f4f6',
-                    color:active?'white':'#9ca3af',fontSize:10,fontWeight:700,flexShrink:0,
-                    display:'flex',alignItems:'center',justifyContent:'center' }}>{idx+1}</div>
+                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':stripeBg; }}>
+                  <Avatar photo={e.profilePhoto} name={e.fullName} size={26} style={{ flexShrink:0 }} />
                   <div style={{ flex:1,minWidth:0 }}>
                     <div style={{ fontSize:13,fontWeight:active?700:600,color:active?'#1e40af':'#1f2937',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>{e.fullName}</div>
-                    <div style={{ fontSize:11,color:'#9ca3af',display:'flex',gap:8 }}>
-                      {e.position && <span style={{ color:'#0369a1',fontWeight:600 }}>{abbrev(e.position)}</span>}
-                      {e.deviceId && <span style={{ fontFamily:'monospace' }}>[{e.deviceId}]</span>}
-                    </div>
+                    {sub && <div style={{ fontSize:10.5,color:'#9ca3af',fontWeight:400 }}>{sub}</div>}
                   </div>
                   {active && <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>}
                 </div>
@@ -162,7 +169,10 @@ const YearlyInOutReport = () => {
         if (sAD&&eAD) { startDate=isoDate(sAD); endDate=isoDate(eAD); }
       }
       if (!startDate) { startDate=`${year}-01-01`; endDate=`${year}-12-31`; }
-      setData(await api.get(`/attendance/half-in-out?startDate=${startDate}&endDate=${endDate}`));
+      // employeeId narrows the endpoint down to just this one staff member
+      // server-side instead of computing/returning the whole company's
+      // day-by-day matrix for a full year just to read one row of it here.
+      setData(await api.get(`/attendance/half-in-out?startDate=${startDate}&endDate=${endDate}&employeeId=${selectedId}`));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
   }, [year, selectedId, useNP]);
@@ -266,7 +276,10 @@ const YearlyInOutReport = () => {
               const maxD = maxDays;
               const dayHeaders = Array.from({length:maxD},(_,i)=>`<th style="padding:3px 2px;border:1px solid #dedede;background:#efefef;font-size:9px;min-width:32px">${i+1}</th>`).join('');
               const rowKeys = ['in','out','wh','ot'];
-              const rowLabels = {in:'IN',out:'OUT',wh:'WH',ot:'OT'};
+              const rowLabels = {
+                in:  rowLabel('in', language, 'IN'),  out: rowLabel('out', language, 'OUT'),
+                wh:  rowLabel('wh', language, 'WH'),  ot:  rowLabel('ot', language, 'OT'),
+              };
               const dataRows = matrix.flatMap(m => {
                 const empty = Array.from({length:maxD-m.days.length},()=>`<td style="border:1px solid #ebebeb"></td>`);
                 const wdCells = m.days.map(d => {
@@ -275,7 +288,7 @@ const YearlyInOutReport = () => {
                 });
                 const wdRow = `<tr>
                   <td rowspan="5" style="padding:3px 5px;border:1px solid #dedede;font-weight:700;vertical-align:middle">${m.label}</td>
-                  <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:8px;font-weight:700;color:#9ca3af;background:#f8fafc">Day</td>
+                  <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:8px;font-weight:700;color:#9ca3af;background:#f8fafc">${L('दिन','Day')}</td>
                   ${wdCells.join('')}${empty.join('')}
                 </tr>`;
                 const rows = rowKeys.map(rk => {
@@ -292,8 +305,8 @@ const YearlyInOutReport = () => {
               }).join('');
               const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:10px">
                 <thead><tr>
-                  <th style="padding:4px 6px;border:1px solid #dedede;background:#efefef">Month</th>
-                  <th style="padding:4px 6px;border:1px solid #dedede;background:#efefef">Row</th>
+                  <th style="padding:4px 6px;border:1px solid #dedede;background:#efefef">${L('महिना','Month')}</th>
+                  <th style="padding:4px 6px;border:1px solid #dedede;background:#efefef">${L('पंक्ति','Row')}</th>
                   ${dayHeaders}
                 </tr></thead>
                 <tbody>${dataRows}</tbody>
@@ -373,12 +386,12 @@ const YearlyInOutReport = () => {
 
       {!selectedId && <div style={{ textAlign:'center',padding:'60px',color:'#9ca3af' }}><div style={{ fontSize:36,marginBottom:8 }}>👤</div><div style={{ fontWeight:600,fontSize:14,color:'#374151' }}>{L('माथिबाट कर्मचारी छान्नुस','Select a staff member above')}</div></div>}
 
-      {loading && <div style={{ textAlign:'center',padding:'60px',color:'#9ca3af' }}><div style={{ fontSize:36,marginBottom:8 }}>⏳</div><div style={{ fontWeight:600,fontSize:14 }}>Loading year data…</div></div>}
+      {loading && <LoadingIndicator label="Loading year data…" />}
 
       {/* Matrix */}
       {!loading && matrix.length>0 && (
         <>
-          <div style={{ fontSize:13,fontWeight:700,color:'#374151',marginBottom:8 }}>Detail</div>
+          <div style={{ fontSize:13,fontWeight:700,color:'#374151',marginBottom:8 }}>{L('विवरण','Detail')}</div>
           <div style={{ overflowX:'auto',borderRadius:8,border:'1px solid #dedede',boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
             <table style={{ borderCollapse:'collapse',width:'100%' }}>
               <thead>
@@ -408,7 +421,7 @@ const YearlyInOutReport = () => {
                         position:'sticky',left:78,zIndex:1,
                         borderLeft:'3px solid #e5e7eb',
                         borderBottom:'1px solid #e5e7eb',minWidth:82 }}>
-                        Day
+                        {L('दिन','Day')}
                       </td>
                       {Array.from({length:maxDays},(_,di)=>{
                         const dayData = month.days[di];
@@ -440,7 +453,7 @@ const YearlyInOutReport = () => {
                           borderLeft:`3px solid ${row.color}33`,
                           borderBottom:rowBorder,
                           minWidth:82 }}>
-                          {row.label}
+                          {rowLabel(row.key, language, row.label)}
                         </td>
 
                         {/* Day cells */}
@@ -479,9 +492,9 @@ const YearlyInOutReport = () => {
             color:'#6b7280',padding:'8px 12px',background:'#f9fafb',
             borderRadius:8,border:'1px solid #e5e7eb',alignItems:'center' }}>
             <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
-            {ROWS.map(r=><span key={r.key}><strong style={{ color:r.color,fontFamily:'monospace' }}>HH:MM</strong> = {r.label}</span>)}
-            <span style={{ background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:4,padding:'1px 7px',color:'#9ca3af',fontWeight:700 }}>W</span>= Weekend
-            <span style={{ background:'#fef3c7',border:'1px solid #fde68a',borderRadius:4,padding:'1px 7px',color:'#92400e',fontWeight:700 }}>PH</span>= Public Holiday
+            {ROWS.map(r=><span key={r.key}><strong style={{ color:r.color,fontFamily:'monospace' }}>HH:MM</strong> = {rowLabel(r.key, language, r.label)}</span>)}
+            <span style={{ background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:4,padding:'1px 7px',color:'#9ca3af',fontWeight:700 }}>W</span>= {L('विकेन्ड','Weekend')}
+            <span style={{ background:'#fef3c7',border:'1px solid #fde68a',borderRadius:4,padding:'1px 7px',color:'#92400e',fontWeight:700 }}>PH</span>= {L('सार्वजनिक बिदा','Public Holiday')}
           </div>
         </>
       )}

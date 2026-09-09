@@ -208,7 +208,7 @@ const GmailSetupModal = ({ onClose, onSaved }) => {
 // ══════════════════════════════════════════════════════════════════════════════
 const StaffNotes = () => {
   const { t } = useLanguage();
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
 
   const [notes,       setNotes]       = useState([]);
   const [loading,     setLoading]     = useState(true);
@@ -372,10 +372,10 @@ const StaffNotes = () => {
     finally { setSaving(false); }
   };
 
-  // A "public" note is visible to everyone but only its own owner can edit/
-  // delete it (enforced server-side too — this just keeps the UI from
-  // offering a button that would just 404).
-  const isOwner = (row) => !row.userId || String(row.userId) === String(currentUser?.id);
+  // A "public" note is visible to everyone but only its own owner — or an
+  // admin/superAdmin — can edit/delete it (enforced server-side too — this
+  // just keeps the UI from offering a button that would just 404).
+  const isOwner = (row) => isAdmin || !row.userId || String(row.userId) === String(currentUser?.id);
 
   const del = async (id) => {
     if (!confirm('Delete this note?')) return;
@@ -413,14 +413,13 @@ const StaffNotes = () => {
       render: (v, row) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 16 }}>{row.noteType === 'credential' ? '🔑' : '📝'}</span>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 600 }}>{v}</div>
-            {!isOwner(row) && row.ownerName && (
-              <div style={{ fontSize: 10.5, color: '#9ca3af' }}>by {row.ownerName}</div>
-            )}
-          </div>
+          <div style={{ minWidth: 0, fontWeight: 600 }}>{v}</div>
         </div>
       ),
+    },
+    {
+      field: 'ownerName', header: 'Posted By', width: 150,
+      render: v => v || <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'noteType', header: 'Note Type', width: 170, align: 'center',

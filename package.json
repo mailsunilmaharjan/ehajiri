@@ -1,6 +1,6 @@
 {
   "name": "attendance-software",
-  "version": "1.0.52",
+  "version": "1.0.187",
   "description": "हाजिरी व्यवस्थापन प्रणाली - Attendance Management System",
   "author": "eHajiri",
   "private": true,
@@ -23,6 +23,8 @@
   },
   "dependencies": {
     "embedded-postgres": "^18.4.0-beta.17",
+    "exceljs": "^4.4.0",
+    "leaflet": "^1.9.4",
     "qrcode": "^1.5.4",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

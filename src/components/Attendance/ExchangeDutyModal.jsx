@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import Avatar from '../Common/Avatar.jsx';
 
 /* Pick a staff member to swap duty with, for one specific employee + date.
    Single-select via row click; the selected row is called out on the Staff
@@ -18,7 +19,8 @@ const ExchangeDutyModal = ({ open, onClose, employee, dateStr, dateLabel, candid
     { field: 'full_name', header: 'Staff Name', render: (v, row) => {
         const isSel = String(row.id) === String(selectedId);
         return (
-          <span style={{ fontWeight: isSel ? 700 : 400, color: isSel ? '#1a56db' : '#111827' }}>
+          <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight: isSel ? 700 : 400, color: isSel ? '#1a56db' : '#111827' }}>
+            <Avatar photo={row.profile_photo || row.profilePhoto} name={v || row.fullName} size={20} />
             {isSel && '✓ '}{v || row.fullName || '—'}
           </span>
         );

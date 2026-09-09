@@ -21,6 +21,7 @@ const SEL = `
   work_scope        AS "workScope",
   customer_category AS "customerCategory",
   customer_type     AS "customerType",
+  district,
   created_by        AS "createdBy",
   created_at        AS "createdAt",
   updated_at        AS "updatedAt"
@@ -46,7 +47,7 @@ router.post('/', async (req, res) => {
     contactType, contactInfo,
     personName, office, mobile1, mobile2, officePhone, email, address,
     companyName, companyPhone, companyEmail, companyAddress,
-    workScope, customerCategory, customerType,
+    workScope, customerCategory, customerType, district,
   } = req.body;
 
   if (contactInfo === 'personal' && !personName?.trim())
@@ -60,8 +61,8 @@ router.post('/', async (req, res) => {
          (contact_type, contact_info, person_name, office, mobile1, mobile2,
           office_phone, email, address, company_name, company_phone,
           company_email, company_address, work_scope,
-          customer_category, customer_type, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          customer_category, customer_type, district, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING ${SEL}`,
       [
         contactType || 'public', contactInfo || 'personal',
@@ -70,12 +71,22 @@ router.post('/', async (req, res) => {
         companyName || null, companyPhone || null,
         companyEmail || null, companyAddress || null,
         workScope || null,
-        customerCategory || null, customerType || null,
+        customerCategory || null, customerType || null, district || null,
         req.user.id,
       ]
     );
     res.status(201).json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    // 23503 on this specific FK only ever means one thing: req.user.id (from
+    // the JWT) no longer exists in users — the account was deleted after this
+    // token was issued (tokens last 30 days, authGuard never re-checks the
+    // user still exists). Not a generic DB error — force the stale session
+    // to log out cleanly instead of surfacing a raw SQL error.
+    if (e.code === '23503' && e.constraint === 'staff_contacts_created_by_fkey') {
+      return res.status(401).json({ authError: true, error: 'Session expired — please log in again' });
+    }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /* PUT /api/contacts/:id */
@@ -94,7 +105,7 @@ router.put('/:id', async (req, res) => {
     contactType, contactInfo,
     personName, office, mobile1, mobile2, officePhone, email, address,
     companyName, companyPhone, companyEmail, companyAddress,
-    workScope, customerCategory, customerType,
+    workScope, customerCategory, customerType, district,
   } = req.body;
 
   try {
@@ -104,8 +115,8 @@ router.put('/:id', async (req, res) => {
            mobile1=$5, mobile2=$6, office_phone=$7, email=$8, address=$9,
            company_name=$10, company_phone=$11, company_email=$12,
            company_address=$13, work_scope=$14,
-           customer_category=$15, customer_type=$16, updated_at=NOW()
-       WHERE id=$17
+           customer_category=$15, customer_type=$16, district=$17, updated_at=NOW()
+       WHERE id=$18
        RETURNING ${SEL}`,
       [
         contactType || 'public', contactInfo || 'personal',
@@ -114,7 +125,7 @@ router.put('/:id', async (req, res) => {
         companyName || null, companyPhone || null,
         companyEmail || null, companyAddress || null,
         workScope || null,
-        customerCategory || null, customerType || null,
+        customerCategory || null, customerType || null, district || null,
         id,
       ]
     );
@@ -169,6 +180,14 @@ router.post('/:id/persons', async (req, res) => {
   const { name, post, department, mobile1, mobile2, email, ext } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   try {
+    // Same company, same name (case/whitespace-insensitive) — guard against
+    // the exact duplicate that kept showing up as two identical-looking
+    // tabs on the guest panel (e.g. two "Sunil Maharjan" entries).
+    const { rows: dup } = await pool.query(
+      `SELECT id FROM staff_contact_persons WHERE contact_id=$1 AND LOWER(TRIM(name))=LOWER(TRIM($2))`,
+      [contactId, name]
+    );
+    if (dup[0]) return res.status(409).json({ error: `${name.trim()} already exists for this company` });
     const { rows } = await pool.query(
       `INSERT INTO staff_contact_persons (contact_id, name, post, department, mobile1, mobile2, email, ext)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${PSEL}`,
@@ -185,6 +204,13 @@ router.put('/:id/persons/:pid', async (req, res) => {
   const { name, post, department, mobile1, mobile2, email, ext } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   try {
+    const { rows: existing } = await pool.query('SELECT contact_id FROM staff_contact_persons WHERE id=$1', [pid]);
+    if (!existing[0]) return res.status(404).json({ error: 'Not found' });
+    const { rows: dup } = await pool.query(
+      `SELECT id FROM staff_contact_persons WHERE contact_id=$1 AND id!=$2 AND LOWER(TRIM(name))=LOWER(TRIM($3))`,
+      [existing[0].contact_id, pid, name]
+    );
+    if (dup[0]) return res.status(409).json({ error: `${name.trim()} already exists for this company` });
     const { rows } = await pool.query(
       `UPDATE staff_contact_persons
        SET name=$1, post=$2, department=$3, mobile1=$4, mobile2=$5,

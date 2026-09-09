@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import { downloadBlob } from '../../utils/printHelper.js';
 
 /* ═══ constants ══════════════════════════════════════════════ */
 const PRIV_LABELS   = { 0:'User',1:'Enroller',2:'Manager',6:'Admin',14:'Super Admin' };
@@ -363,11 +364,7 @@ const DeviceControlModal = ({ device, allDevices, onClose, showToast, onRefresh 
                       📋 {L('कपी','Copy')}
                     </button>
                     <button className="btn btn-outline btn-sm" onClick={() => {
-                      const blob = new Blob([JSON.stringify(syncConfig, null, 2)], { type:'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url; a.download = 'sync-config.json'; a.click();
-                      URL.revokeObjectURL(url);
+                      downloadBlob(new Blob([JSON.stringify(syncConfig, null, 2)], { type:'application/json' }), 'sync-config.json');
                     }}>
                       ⬇️ {L('डाउनलोड','Download')}
                     </button>

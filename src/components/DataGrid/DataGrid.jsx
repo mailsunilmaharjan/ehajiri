@@ -1,11 +1,14 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import './DataGrid.css';
 import { useLanguage } from '../../context/LanguageContext.jsx';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 
 const DataGrid = ({
   columns = [],
   data = [],
+  loading = false,            // true = show the branded loading state instead of rows (grid chrome/header stays put)
   defaultPageSize = 10,
+  pageSizeOptions = [5, 10, 25, 50, 100],
   showSearch = true,
   searchPlaceholder = null,   // null = use language-aware default
   title = '',
@@ -26,7 +29,7 @@ const DataGrid = ({
   showFilterButton = true,    // set false to hide the column-filter toggle button
   filterButtonLabel = null,   // override label; null = default "Filter" / "फिल्टर"
   selectionActions = null,    // extra buttons rendered in the selection bar
-  contextMenu = null,         // [{ label, icon, onClick(row), className? }] — shown on right-click
+  contextMenu = null,         // [{ label: string|(row)=>string, icon, onClick(row), className? }] — shown on right-click
   extraSearchFields = [],     // extra row fields to include in global search (not shown as columns)
   className = '',             // extra class on the outer container, for scoping one-off style overrides
   showFooter = true,          // set false to hide the pagination/info footer (e.g. small fixed-size reports)
@@ -35,6 +38,7 @@ const DataGrid = ({
   groupOrder = null,          // [groupKey, ...] display order for sections; a key with no matching rows still renders its header. Defaults to first-seen order when omitted
   groupLabel = null,          // (groupKey, rowCount) => ReactNode — section header content; defaults to the raw key
   footerLeft = null,          // extra content on the footer's left side (e.g. a selected-row preview strip) — pushes the Total/pagination info to the right instead of leaving it alone on the left
+  toolbarRightInset = 0,      // px — shifts the search/filter/toolbar block left so a fixed-position side panel (e.g. a detail drawer) doesn't cover it
 }) => {
   const { language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
@@ -67,6 +71,7 @@ const DataGrid = ({
   }, [ctxMenu]);
 
   const placeholder = searchPlaceholder ?? L('खोज्नुस...', 'Search...');
+  const hasFillColumn = columns.some(c => c.fill);
 
   const handleSort = (field) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -97,18 +102,22 @@ const DataGrid = ({
   const processed = useMemo(() => {
     let result = [...data];
     if (globalSearch) {
-      const q = globalSearch.toLowerCase();
+      // Split on whitespace so each word can match anywhere across the row
+      // (any column, any order) instead of requiring the whole typed string —
+      // spaces included — to appear together inside one single field. Lets
+      // "John Doe" find a row whose name is "John Karki" and whose
+      // organization is "Doe Traders", not just a field literally containing
+      // "John Doe" as one contiguous substring.
+      const terms = globalSearch.toLowerCase().trim().split(/\s+/).filter(Boolean);
       result = result.filter(row => {
-        const inColumns = columns.some(col => {
-          if (col.filterable === false || col.field === 'actions') return false;
-          const v = row[col.field];
-          return v != null && String(v).toLowerCase().includes(q);
-        });
-        if (inColumns) return true;
-        return extraSearchFields.some(field => {
-          const v = row[field];
-          return v != null && String(v).toLowerCase().includes(q);
-        });
+        const rowText = columns
+          .filter(col => col.filterable !== false && col.field !== 'actions')
+          .map(col => row[col.field])
+          .concat(extraSearchFields.map(field => row[field]))
+          .filter(v => v != null)
+          .map(v => String(v).toLowerCase())
+          .join('  ');
+        return terms.every(term => rowText.includes(term));
       });
     }
     Object.entries(filters).forEach(([field, val]) => {
@@ -255,7 +264,7 @@ const DataGrid = ({
       {hasToolbar && (
       <div className="dg-toolbar">
         {(title || toolbarLeft) && <div className="dg-toolbar-left">{title && <div className="dg-title">{title}</div>}{toolbarLeft}</div>}
-        <div className="dg-toolbar-right">
+        <div className="dg-toolbar-right" style={toolbarRightInset ? { marginRight: toolbarRightInset } : undefined}>
           {showSearch && (
             <div className="dg-searchbox">
               <svg className="dg-search-icon" viewBox="0 0 20 20" fill="currentColor">
@@ -321,7 +330,16 @@ const DataGrid = ({
         style={{ outline: 'none', cursor: 'default' }}
       >
         <table className={`dg-table ${striped ? 'striped' : ''} ${compact ? 'compact' : ''} ${ultraCompact ? 'ultra-compact' : ''} ${autoWidth ? 'auto-width' : ''}`}
-          style={ autoWidth ? { tableLayout:'auto' } : {} }>
+          style={ autoWidth
+            // A fill column's width:'100%' hint (below) is only meaningful
+            // relative to a table with a DEFINITE width — against the
+            // .auto-width class's own width:auto (size-to-content), it reads
+            // instead as "claim 100% of the container on top of whatever the
+            // other columns already need", which is what was overflowing the
+            // table past its container and forcing a horizontal scrollbar.
+            ? (hasFillColumn ? { tableLayout:'auto', width:'100%' } : { tableLayout:'auto' })
+            : {}
+          }>
           <thead>
             <tr className="dg-header-row">
               {showCheckbox && (
@@ -341,7 +359,8 @@ const DataGrid = ({
                   key={col.field || i}
                   className={`dg-th ${col.sortable !== false && col.field !== 'actions' ? 'sortable' : ''} ${sortField === col.field ? (sortDir === 'asc' ? 'sort-asc' : 'sort-desc') : ''}`}
                   style={ autoWidth
-                    ? { textAlign: col.align || 'left', whiteSpace:'nowrap', width: col.wrap ? undefined : '1px' }
+                    ? { textAlign: col.align || 'left', whiteSpace:'nowrap',
+                        width: col.fill ? '100%' : (col.wrap ? (col.width || undefined) : '1px') }
                     : { width: col.width, minWidth: col.minWidth || 80, textAlign: col.align || 'left' }
                   }
                   onClick={() => col.sortable !== false && col.field !== 'actions' && handleSort(col.field)}
@@ -374,7 +393,13 @@ const DataGrid = ({
             )}
           </thead>
           <tbody>
-            {isGrouped ? (() => {
+            {loading ? (
+              <tr>
+                <td colSpan={totalCols} style={{ border: 'none', padding: 0 }}>
+                  <LoadingIndicator />
+                </td>
+              </tr>
+            ) : isGrouped ? (() => {
               let flatIdx = -1; // keeps incrementing across sections — matches pageData's flattened order (keyboard nav)
               return groupSections.map(({ key, rows }) => (
                 <React.Fragment key={`dg-grp-${key}`}>
@@ -453,7 +478,7 @@ const DataGrid = ({
                   onClick={() => { setCtxMenu(null); item.onClick(ctxMenu.row); }}
                 >
                   {item.icon && <span className="dg-ctx-icon">{item.icon}</span>}
-                  {item.label}
+                  {typeof item.label === 'function' ? item.label(ctxMenu.row) : item.label}
                 </button>
               )
           ))}
@@ -484,7 +509,7 @@ const DataGrid = ({
             <div className="dg-pagesize">
               <label>{L('प्रति पृष्ठ:', 'Per page:')}</label>
               <select value={pageSize} onChange={e => { setPageSize(+e.target.value); setCurrentPage(1); }}>
-                {[5, 10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                {pageSizeOptions.map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
             <div className="dg-page-btns">

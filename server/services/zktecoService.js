@@ -103,6 +103,42 @@ export async function queueCommand(deviceSn, commandType, params = '') {
   return rows[0];
 }
 
+// ── Auto-recovery: backfill ATTLOG after a real outage ────────────────────
+// If a device reconnects (options=all handshake) after being silent for
+// longer than this, the passive ATTLOGStamp-based push isn't reliable on
+// all firmware — some devices echo a placeholder Stamp (seen in the wild:
+// literal "9999") and just keep re-sending their recent onboard buffer
+// instead of resuming from where they actually left off. The only reliable
+// way to force a specific-range replay is the explicit DATA QUERY ATTLOG
+// command (same one "Get All Logs" in Settings issues by hand). Detect the
+// gap here and issue that pull automatically instead of depending on
+// someone noticing missing reports days or weeks later.
+const GAP_RECOVERY_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2h — past any routine reconnect blip
+
+export async function recoverGapIfNeeded(sn, previousLastSeen) {
+  if (!previousLastSeen) return; // brand-new device — nothing to recover
+  const gapMs = Date.now() - new Date(previousLastSeen).getTime();
+  if (gapMs < GAP_RECOVERY_THRESHOLD_MS) return;
+
+  // Don't pile on if a backfill pull is already in flight for this device
+  // (e.g. the same reconnect firing options=all more than once in a row).
+  const { rows: existing } = await pool.query(
+    `SELECT id FROM zkteco_commands
+     WHERE device_sn=$1 AND status IN ('PENDING','SENT')
+       AND command_payload LIKE '%DATA QUERY ATTLOG%'
+     LIMIT 1`,
+    [sn]
+  );
+  if (existing[0]) return;
+
+  // 15min safety buffer for clock skew between server and device.
+  const startTime = formatZkTime(new Date(new Date(previousLastSeen).getTime() - 15 * 60000));
+  const endTime    = formatZkTime();
+  await queueCommand(sn, 'RELOAD OPTIONS');
+  await queueCommand(sn, 'DATA QUERY ATTLOG', `StartTime=${startTime}\tEndTime=${endTime}`);
+  console.log(`[ZK] Auto-recovery: SN=${sn} silent for ${(gapMs/3600000).toFixed(1)}h — queued backfill pull ${startTime} → ${endTime}`);
+}
+
 export async function getNextCommand(deviceSn) {
   const { rows } = await pool.query(
     `SELECT id, command_payload FROM zkteco_commands
@@ -362,7 +398,7 @@ export async function saveDeviceUser(deviceSn, kv) {
   const empRes    = await pool.query('SELECT id FROM users WHERE device_id=$1 LIMIT 1', [pin]);
   const employeeId = empRes.rows[0]?.id || null;
 
-  await pool.query(
+  const { rows } = await pool.query(
     `INSERT INTO zkteco_users
        (device_sn, pin, name, privilege, card_no, fp_count, face_count, passwd, employee_id, last_sync)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
@@ -374,9 +410,122 @@ export async function saveDeviceUser(deviceSn, kv) {
        face_count  = EXCLUDED.face_count,
        passwd      = EXCLUDED.passwd,
        employee_id = COALESCE(EXCLUDED.employee_id, zkteco_users.employee_id),
-       last_sync   = NOW()`,
+       last_sync   = NOW()
+     RETURNING (xmax = 0) AS is_new_row`,
     [deviceSn, pin, name, privilege, card, fpCount, faceCount, passwd, employeeId]
   );
+
+  // Only for a genuinely new person on this device — an enrollment done
+  // directly on the device itself (walk-up, no app involved), which is the
+  // one path that never went through upload-user's own area cascade. A
+  // routine re-report of an already-known user (the common case on every
+  // OPERLOG batch) must NOT re-trigger this, or every device in an Area
+  // would get its command queue flooded on every normal sync.
+  if (rows[0]?.is_new_row) {
+    await cascadeToAreaSiblings(deviceSn, pin).catch(err =>
+      console.error(`[ZK Area] cascadeToAreaSiblings (new user) failed for PIN=${pin}:`, err.message || err));
+  }
+}
+
+/**
+ * Mirrors a user (+ their fingerprint templates) into the LOCAL bookkeeping
+ * for a device a push was just queued to. The physical device applies a
+ * commanded DATA UPDATE USERINFO/FINGERTMP fine on its own (confirmed via
+ * its own CHECK-reported user_count/fp_count going up correctly) but does
+ * not reliably echo it back as an OPERLOG report the way an organic,
+ * on-device enrollment does — so without this, zkteco_users/
+ * zkteco_fingerprints for the TARGET device silently never catch up, and
+ * the Devices grid's Users/Finger/Face/Card columns stay stuck at their old
+ * counts forever even though the real biometric data landed correctly.
+ * Called by every "push a user to another device" path (copy-user,
+ * copy-users, area cascade — both the app-initiated one in
+ * routes/zktecoApi.js and cascadeToAreaSiblings below) right after queuing
+ * the commands, instead of waiting on a device echo that may never come.
+ */
+export async function recordPushedUserLocally(targetSn, user, fingerprints = []) {
+  await pool.query(
+    `INSERT INTO zkteco_users (device_sn, pin, name, privilege, card_no, employee_id, face_photo, last_sync)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+     ON CONFLICT (device_sn, pin) DO UPDATE SET
+       name        = EXCLUDED.name,
+       privilege   = EXCLUDED.privilege,
+       card_no     = EXCLUDED.card_no,
+       employee_id = COALESCE(EXCLUDED.employee_id, zkteco_users.employee_id),
+       face_photo  = COALESCE(EXCLUDED.face_photo, zkteco_users.face_photo),
+       last_sync   = NOW()`,
+    [targetSn, user.pin, user.name || '', user.privilege || 0, user.cardNo || '0', user.employeeId || null, user.facePhoto || null]
+  );
+  for (const fp of fingerprints) {
+    await pool.query(
+      `INSERT INTO zkteco_fingerprints (device_sn,pin,finger_id,template_size,valid,template_data,enrolled_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       ON CONFLICT (device_sn,pin,finger_id) DO UPDATE SET
+         template_size = EXCLUDED.template_size,
+         valid         = EXCLUDED.valid,
+         template_data = COALESCE(EXCLUDED.template_data, zkteco_fingerprints.template_data),
+         enrolled_at   = NOW()`,
+      [targetSn, user.pin, fp.finger_id, fp.template_size, fp.valid || 1, fp.template_data]
+    );
+  }
+}
+
+/**
+ * A person enrolled directly on one device (walk-up, no app involved) only
+ * ever lands in THIS device's zkteco_users/zkteco_fingerprints — nothing
+ * pushes them onward to other devices sharing the same Area, so devices in
+ * one Area silently drift apart over time (confirmed on a live tenant: two
+ * devices in the same Area, 7 people apart, neither side ever informed the
+ * other). Enrolling *through the app* already cascades itself (see
+ * pushUserToAreaDevices in routes/zktecoApi.js, called from the
+ * upload-user route) — this covers the other path, called from
+ * saveDeviceUser/saveFingerprintRecord below whenever either lands a
+ * genuinely NEW row for a device that belongs to an Area.
+ *
+ * Deliberately self-contained rather than importing pushUserToAreaDevices
+ * from the route layer (routes depend on services here, not the reverse).
+ * Pushes with the device's plain default Grp — these people were never run
+ * through the app's own Access Level picker to begin with (that's an
+ * app-mediated concept a keypad enrollment has no way to set), so there is
+ * no "real" Access Level to preserve here, unlike the app-initiated cascade.
+ */
+async function cascadeToAreaSiblings(originSn, pin) {
+  const { rows: devRows } = await pool.query(
+    'SELECT area_id FROM zkteco_devices WHERE serial_number=$1', [originSn]
+  );
+  const areaId = devRows[0]?.area_id;
+  if (!areaId) return;
+
+  const { rows: siblings } = await pool.query(
+    `SELECT serial_number FROM zkteco_devices
+     WHERE area_id=$1 AND serial_number IS NOT NULL AND active=TRUE AND serial_number <> $2`,
+    [areaId, originSn]
+  );
+  if (!siblings.length) return;
+
+  const { rows: userRows } = await pool.query(
+    'SELECT name, privilege, card_no, passwd, employee_id, face_photo FROM zkteco_users WHERE device_sn=$1 AND pin=$2',
+    [originSn, pin]
+  );
+  const u = userRows[0];
+  if (!u) return;
+
+  const { rows: fps } = await pool.query(
+    'SELECT * FROM zkteco_fingerprints WHERE pin=$1 AND template_data IS NOT NULL ORDER BY finger_id',
+    [pin]
+  );
+
+  const uParams = `PIN=${pin}\tName=${u.name || ''}\tPri=${u.privilege || 0}\tPasswd=${u.passwd || ''}\tCard=${u.card_no || ''}\tGrp=1\tTZ=0000000000000000\tVerify=0`;
+  for (const sib of siblings) {
+    await queueCommand(sib.serial_number, 'DATA UPDATE USERINFO', uParams);
+    for (const fp of fps) {
+      const fpParams = `PIN=${fp.pin}\tFID=${fp.finger_id}\tSize=${fp.template_size}\tValid=${fp.valid || 1}\tTMP=${fp.template_data}`;
+      await queueCommand(sib.serial_number, 'DATA UPDATE FINGERTMP', fpParams);
+    }
+    await recordPushedUserLocally(sib.serial_number,
+      { pin, name: u.name, privilege: u.privilege, cardNo: u.card_no, employeeId: u.employee_id, facePhoto: u.face_photo },
+      fps);
+  }
+  console.log(`[ZK Area] cascadeToAreaSiblings: PIN=${pin} from ${originSn} pushed to ${siblings.length} area sibling(s)`);
 }
 
 // ── Fingerprint storage (with full template data) ─────────────────────────
@@ -401,6 +550,16 @@ export async function saveFingerprintRecord(deviceSn, kv) {
     try { realSize = Buffer.byteLength(tmpData, 'base64'); } catch { realSize = size; }
   }
 
+  // Checked before the upsert (not RETURNING (xmax=0), which only tells us
+  // the ROW was new — a routine full resync re-reports an already-known
+  // template on every RELOAD OPTIONS, which would re-cascade it every time
+  // otherwise). Only a template going from absent to present is new.
+  const existing = await pool.query(
+    'SELECT template_data FROM zkteco_fingerprints WHERE device_sn=$1 AND pin=$2 AND finger_id=$3',
+    [deviceSn, pin, fingerId]
+  );
+  const hadTemplate = !!existing.rows[0]?.template_data;
+
   await pool.query(
     `INSERT INTO zkteco_fingerprints (device_sn,pin,finger_id,template_size,valid,template_data,enrolled_at)
      VALUES ($1,$2,$3,$4,$5,$6,NOW())
@@ -411,6 +570,14 @@ export async function saveFingerprintRecord(deviceSn, kv) {
        enrolled_at   = NOW()`,
     [deviceSn, pin, fingerId, realSize, valid, tmpData]
   );
+
+  // Same walk-up-enrollment gap as saveDeviceUser above — a template that
+  // just became available for the first time on this device should reach
+  // any sibling devices in the same Area too.
+  if (tmpData && !hadTemplate) {
+    await cascadeToAreaSiblings(deviceSn, pin).catch(err =>
+      console.error(`[ZK Area] cascadeToAreaSiblings (new fingerprint) failed for PIN=${pin}:`, err.message || err));
+  }
 }
 
 // ── Device info ────────────────────────────────────────────────────────────

@@ -12,10 +12,14 @@ import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
 import ImportExcelModal       from './ImportExcelModal.jsx';
 import RecoApprovalModal from './RecoApprovalModal.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import SaveButton       from '../Common/SaveButton.jsx';
+import LastSavedBy      from '../Common/LastSavedBy.jsx';
 import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
+import useNewShortcut   from '../../hooks/useNewShortcut.js';
 import api, { apiUrl }  from '../../api/client.js';
 import { staffRankCompare, branchRankOf } from '../../utils/branchUtils.js';
+import { getDeviceInfo } from '../../utils/deviceInfo.js';
 
 const ROLE_COLORS = {
   admin:'#7e3af2', branchManager:'#1a56db', departmentHead:'#0e9f6e',
@@ -793,7 +797,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
       case 'branch':
         return [
           ...(settings.companyNameEn ? [{ value: settings.companyNameEn, label: `${settings.companyNameEn} (HQ)` }] : []),
-          ...(settings.branches || []).map(b => ({ value:b.name, label:`${b.name} Branch` })),
+          ...(settings.branches || []).map(b => ({ value:b.name, label:b.name })),
         ];
       case 'position':   return (settings.posts       || []).map(p => ({ value:p.name, label:p.name }));
       case 'department': return (settings.departments || []).map(d => ({ value:d.name, label:d.name }));
@@ -1431,6 +1435,213 @@ const StaffIdentityTab = ({ employeeId }) => {
 
 /* ────────────────────────────────── */
 
+// Fires from handleOfficialChangeApplied when a status change to a
+// non-Working status takes effect immediately — nothing removes an
+// employee's fingerprint/face templates from a device automatically (see
+// employees.js's applyDueOfficialChanges, which only touches users.*
+// columns), so this offers to do it via the same delete-user action the
+// Attendance Device page already exposes per-device.
+const DeviceCleanupPrompt = ({ employee, onClose }) => {
+  const { t } = useLanguage();
+  const [loading,  setLoading]  = useState(true);
+  const [rows,     setRows]     = useState([]);
+  const [selected, setSelected] = useState(() => new Set());
+  const [busy,     setBusy]     = useState(false);
+  const [error,    setError]    = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.get(`/zkteco/device-users?pin=${encodeURIComponent(employee.deviceId)}`);
+        if (cancelled) return;
+        setRows(data || []);
+        setSelected(new Set((data || []).map(r => r.id)));
+      } catch (e) { if (!cancelled) setError(e.message || 'Failed to load device enrollments.'); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [employee.deviceId]);
+
+  const toggle = (id) => setSelected(p => {
+    const n = new Set(p);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const confirmDelete = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const targets = rows.filter(r => selected.has(r.id) && r.device_row_id);
+      for (const r of targets) {
+        await api.post(`/zkteco/devices/${r.device_row_id}/delete-user`, { pin: r.pin });
+      }
+      onClose(targets.length);
+    } catch (e) { setError(e.message || 'Failed to remove from device(s).'); setBusy(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={() => !busy && onClose(0)}>
+      <div className="modal modal-sm" style={{ maxWidth:480 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>🗑️ {t('Remove from Devices?')}</h2>
+          <button className="modal-close" onClick={() => !busy && onClose(0)}>✕</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize:13, color:'#374151', marginTop:0 }}>
+            <strong>{employee.fullName}</strong>{' '}
+            {t("'s status was just changed to a non-working status. Remove their fingerprint/face samples from the device(s) below?")}
+          </p>
+          {error && (
+            <div style={{ background:'#fff5f5', color:'#991b1b', border:'1px solid #fecaca',
+              borderRadius:6, padding:'8px 12px', fontSize:13, marginBottom:10 }}>
+              {error}
+            </div>
+          )}
+          {loading ? (
+            <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:13 }}>{t('Loading device enrollments...')}</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:13 }}>{t('Not currently enrolled on any device.')}</div>
+          ) : (
+            <div style={{ border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden', maxHeight:220, overflowY:'auto' }}>
+              {rows.map(r => (
+                <label key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
+                  borderBottom:'1px solid #f3f4f6', fontSize:13, cursor:'pointer' }}>
+                  <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
+                  <span style={{ flex:1 }}>{r.device_name || r.device_sn}</span>
+                  <span style={{ color:'#9ca3af', fontSize:11 }}>{r.device_location || r.device_sn}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-outline" onClick={() => onClose(0)} disabled={busy}>{t('Skip')}</button>
+          {rows.length > 0 && (
+            <button className="btn btn-danger" onClick={confirmDelete} disabled={busy || loading || selected.size === 0}>
+              {busy ? t('Removing...') : `${t('Remove from')} ${selected.size} ${selected.size === 1 ? t('device') : t('devices')}`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Fires from handleOfficialChangeApplied when a branch change takes effect
+// immediately — offers to copy the employee's fingerprint/face templates
+// straight from a device they're already enrolled on to a device at the new
+// branch (no branch↔device mapping exists in the schema, so the admin picks
+// the target device rather than it being inferred automatically).
+const DeviceTransferPrompt = ({ employee, newBranch, onClose }) => {
+  const { t } = useLanguage();
+  const [loading,  setLoading]  = useState(true);
+  const [enrolled, setEnrolled] = useState([]);
+  const [devices,  setDevices]  = useState([]);
+  const [sourceId, setSourceId] = useState('');
+  const [targetId, setTargetId] = useState('');
+  const [removeFromSource, setRemoveFromSource] = useState(true);
+  const [busy,  setBusy]  = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [du, all] = await Promise.all([
+          api.get(`/zkteco/device-users?pin=${encodeURIComponent(employee.deviceId)}`),
+          api.get('/zkteco/devices'),
+        ]);
+        if (cancelled) return;
+        setEnrolled(du || []);
+        setDevices(all || []);
+        if ((du || [])[0]?.device_row_id) setSourceId(String(du[0].device_row_id));
+      } catch (e) { if (!cancelled) setError(e.message || 'Failed to load device enrollments.'); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [employee.deviceId]);
+
+  const confirmTransfer = async () => {
+    if (!sourceId || !targetId) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.post(`/zkteco/devices/${targetId}/copy-users/${sourceId}`, {
+        pins: [employee.deviceId], deleteAfter: removeFromSource,
+      });
+      onClose(true);
+    } catch (e) { setError(e.message || 'Transfer failed.'); setBusy(false); }
+  };
+
+  const targetOptions = devices.filter(d => String(d.id) !== String(sourceId));
+
+  return (
+    <div className="modal-overlay" onClick={() => !busy && onClose(false)}>
+      <div className="modal modal-sm" style={{ maxWidth:480 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>🔄 {t('Send Fingerprint to New Branch Device?')}</h2>
+          <button className="modal-close" onClick={() => !busy && onClose(false)}>✕</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize:13, color:'#374151', marginTop:0 }}>
+            <strong>{employee.fullName}</strong> {t('was just transferred to')} <strong>{newBranch}</strong>.{' '}
+            {t('Copy their fingerprint/face sample to a device at the new branch?')}
+          </p>
+          {error && (
+            <div style={{ background:'#fff5f5', color:'#991b1b', border:'1px solid #fecaca',
+              borderRadius:6, padding:'8px 12px', fontSize:13, marginBottom:10 }}>
+              {error}
+            </div>
+          )}
+          {loading ? (
+            <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:13 }}>{t('Loading device enrollments...')}</div>
+          ) : enrolled.length === 0 ? (
+            <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:13 }}>
+              {t('Not currently enrolled on any device — nothing to copy.')}
+            </div>
+          ) : (
+            <>
+              <div className="form-group">
+                <label className="form-label">{t('From device (current)')}</label>
+                <select className="form-control" value={sourceId} onChange={e => setSourceId(e.target.value)}>
+                  {enrolled.map(r => (
+                    <option key={r.id} value={r.device_row_id || ''}>{r.device_name || r.device_sn}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label required">{t('To device (new branch)')}</label>
+                <select className="form-control" value={targetId} onChange={e => setTargetId(e.target.value)}>
+                  <option value="">— {t('Select')} —</option>
+                  {targetOptions.map(d => (
+                    <option key={d.id} value={d.id}>{d.name || d.serial_number}{d.location ? ` (${d.location})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, marginTop:10, cursor:'pointer' }}>
+                <input type="checkbox" checked={removeFromSource} onChange={e => setRemoveFromSource(e.target.checked)} />
+                {t('Also remove from the old device after copying')}
+              </label>
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-outline" onClick={() => onClose(false)} disabled={busy}>{t('Skip')}</button>
+          {enrolled.length > 0 && (
+            <button className="btn btn-primary" onClick={confirmTransfer} disabled={busy || loading || !sourceId || !targetId}>
+              {busy ? t('Copying...') : t('Copy to New Device')}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ────────────────────────────────── */
+
 const defaultForm = {
   employeeId:'', deviceId:'', fullName:'', gender:'male', religion:'',
   handicapped:false, eligibleForOt:false, email:'', phone:'',
@@ -1441,7 +1652,7 @@ const defaultForm = {
 };
 
 const UserManagement = () => {
-  const { isAdmin, canManageStaff, isBranchManager, isDeptHead, currentUser, filterByRole } = useAuth();
+  const { isAdmin, canManageStaff, isBranchManager, isDeptHead, currentUser, filterByRole, canView } = useAuth();
   const { t }        = useLanguage();
   const { filteredEmployees: employees, addEmployee, updateEmployee, deleteEmployee, shifts, refreshEmployees } = useData();
   const [importModal,    setImportModal]    = useState(false);
@@ -1458,6 +1669,12 @@ const UserManagement = () => {
   const [errors,        setErrors]        = useState({});
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [viewUser,      setViewUser]      = useState(null);
+  // { id, fullName, deviceId } | null — prompt shown after an Officially
+  // Changes status edit takes an employee out of a Working status.
+  const [deviceCleanupPrompt,  setDeviceCleanupPrompt]  = useState(null);
+  // { employee: {...}, newBranch } | null — prompt shown after an
+  // Officially Changes branch edit takes effect immediately.
+  const [deviceTransferPrompt, setDeviceTransferPrompt] = useState(null);
   const [toast,         setToast]         = useState(null);
   const [qaModal,       setQaModal]       = useState(null);
   const [dupAlert,      setDupAlert]      = useState(null);
@@ -1470,6 +1687,7 @@ const UserManagement = () => {
   const [resetPwdLoading,   setResetPwdLoading]   = useState(false);
   const [resetPwdShowPass,  setResetPwdShowPass]  = useState(false);
   const modalBodyRef = useRef(null);
+  const deviceIdInputRef = useRef(null);
   const [advFilters, setAdvFilters] = useState({
     q: '',
     branches: [], departments: [], positions: [], grades: [],
@@ -1671,9 +1889,23 @@ const UserManagement = () => {
     if (dups.length) { setDupAlert(dups); return; }
 
     try {
-      if (editId) { await updateEmployee(editId, form); showToast(t('Record updated successfully')); }
-      else        { await addEmployee(form);            showToast(t('Record saved successfully'));   }
-      setModal(false);
+      if (editId) {
+        await updateEmployee(editId, { ...form, deviceInfo: getDeviceInfo() });
+        showToast(t('Record updated successfully'));
+        setModal(false);
+      } else {
+        await addEmployee(form);
+        showToast(t('Record saved successfully'));
+        // Stay on the Add Staff Management form instead of closing, so a run of
+        // new staff can be entered back-to-back without touching the mouse —
+        // clear the fields and send focus back to Attendance Device ID, the
+        // first field, ready for the next entry.
+        setForm({ ...defaultForm, ...buildDefaults(), employeeId:`EMP${String(employees.length+2).padStart(3,'0')}` });
+        setErrors({});
+        setActiveTab('Staff Detail');
+        setQuickDeviceView(false);
+        deviceIdInputRef.current?.focus();
+      }
     } catch (e) {
       if (e?.data?.code === 'STAFF_LIMIT') {
         const max = e?.data?.maxStaff || 25;
@@ -1688,6 +1920,8 @@ const UserManagement = () => {
   /* Ctrl+S saves the Edit/Add Staff modal — same action as the Save button.
      Skipped on tabs without a footer Save (Device Connectivity, Officially Changes). */
   useSaveShortcut(modal && activeTab !== 'Device Connectivity' && activeTab !== 'Officially Changes' && activeTab !== 'Staff Identity', handleSave);
+  /* Ctrl+N opens a blank Add Staff Management form when no modal is open. */
+  useNewShortcut(!modal, openAdd);
 
   /* Called by the Officially Changes tab after a change is saved/edited.
      If it took effect immediately (effective date ≤ today), sync the form so a
@@ -1706,6 +1940,20 @@ const UserManagement = () => {
         active:     user.active,
       }));
       showToast(t('Change applied successfully'));
+
+      // These only fire for a change that took effect immediately — a
+      // future-dated change applies later via the unattended sweep
+      // (applyDueOfficialChanges), with nobody present to answer a prompt.
+      if (user.deviceId) {
+        if (change.field === 'status') {
+          const toType = (settings.statuses || []).find(s => s.name === change.toValue)?.statusType;
+          if (toType && toType !== 'Working') {
+            setDeviceCleanupPrompt({ id: user.id, fullName: user.fullName, deviceId: user.deviceId });
+          }
+        } else if (change.field === 'branch' && change.toValue !== change.fromValue) {
+          setDeviceTransferPrompt({ employee: { id: user.id, fullName: user.fullName, deviceId: user.deviceId }, newBranch: change.toValue });
+        }
+      }
     } else {
       showToast(t('Change scheduled for the effective date'));
     }
@@ -1909,7 +2157,12 @@ const UserManagement = () => {
     { field:'employeeId', header:'Staff ID',   width:90,
       render:v=><span style={{fontFamily:'monospace',background:'#f3f4f6',padding:'2px 6px',borderRadius:4}}>{v}</span> },
     { field:'fullName',   header:'Full Name',  width:160,
-      render:v=><span style={{color:'#1f2937'}}>{v}</span> },
+      render:(v,row)=>(
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
+          <Avatar photo={row.profilePhoto} name={v} size={22} />
+          {v}
+        </span>
+      ) },
     { field:'deviceId',   header:'Device ID',  width:90,
       render:v=>v?<span style={{fontFamily:'monospace',color:'#1f2937'}}>{v}</span>:<span style={{color:'#d1d5db'}}>—</span> },
     { field:'position',   header:'Post',       width:140,
@@ -2018,7 +2271,7 @@ const UserManagement = () => {
             <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
               <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
             </svg>
-            Advanced Search
+            {t('Advanced Search')}
             {activeFilterCount > 0 && (
               <span style={{ background:'#ef4444', color:'#fff', borderRadius:10,
                 fontSize:10, fontWeight:700, padding:'1px 6px', minWidth:18, textAlign:'center' }}>
@@ -2227,7 +2480,7 @@ const UserManagement = () => {
                   <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#1a56db' }}>
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
-                  <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>Advanced Search</span>
+                  <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>{t('Advanced Search')}</span>
                   {activeFilterCount > 0 && (
                     <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active
@@ -2381,9 +2634,9 @@ const UserManagement = () => {
             </button>
           ) : null
         }
-        filterButtonLabel="Advance Search"
+        filterButtonLabel={t('Advance Search')}
         toolbar={
-          canManageStaff && (
+          canManageStaff && canView('recoApprovalConfig') && (
             <button onClick={() => setRecoModal(true)} style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               padding: '5px 12px', height: 30,
@@ -2433,6 +2686,7 @@ const UserManagement = () => {
                     <Fg idx={0}>
                       <Fl required>Attendance Device ID</Fl>
                       <input type="text"
+                        ref={deviceIdInputRef}
                         className={`form-control ${errors.deviceId?'error':''}`}
                         style={{ fontSize:13, background: editId ? '#f3f4f6' : 'white', color: editId ? '#6b7280' : undefined }}
                         placeholder="DEV-001"
@@ -2510,7 +2764,7 @@ const UserManagement = () => {
                         placeholder="— None —"
                         options={[
                           ...(settings.companyNameEn ? [{value: settings.companyNameEn, label: `${settings.companyNameEn} (HQ)`}] : []),
-                          ...(settings.branches||[]).map(b => ({value: b.name, label: `${b.name} Branch`})),
+                          ...(settings.branches||[]).map(b => ({value: b.name, label: b.name})),
                         ]}
                       />
                     </Fg>
@@ -2688,10 +2942,26 @@ const UserManagement = () => {
             </div>
 
             <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setModal(false)}>{t('Cancel')}</button>
-              {activeTab !== 'Device Connectivity' && activeTab !== 'Officially Changes' && activeTab !== 'Staff Identity' && (
-                <SaveButton onClick={handleSave} label={t('Save')} />
+              {editId && (
+                <LastSavedBy
+                  // Falls back to "—" if the saver was a superAdmin — that
+                  // role is deliberately excluded from the Staff list itself
+                  // (sql.list in employees.js), so it can't resolve to a name
+                  // here any more than an approvedBy/recommendedBy elsewhere
+                  // in the app can for the same reason. Date/time/device still
+                  // show correctly either way.
+                  updatedByName={employees.find(e => String(e.id) === String(form.updatedBy))?.fullName}
+                  updatedAt={form.updatedAt}
+                  updatedDevice={form.updatedDevice}
+                  fd={fd}
+                />
               )}
+              <div style={{ display:'flex', gap:10, marginLeft:'auto' }}>
+                <button className="btn btn-outline" onClick={() => setModal(false)}>{t('Cancel')}</button>
+                {activeTab !== 'Device Connectivity' && activeTab !== 'Officially Changes' && activeTab !== 'Staff Identity' && (
+                  <SaveButton onClick={handleSave} label={t('Save')} />
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -2929,6 +3199,27 @@ const UserManagement = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {deviceCleanupPrompt && (
+        <DeviceCleanupPrompt
+          employee={deviceCleanupPrompt}
+          onClose={(count) => {
+            setDeviceCleanupPrompt(null);
+            if (count > 0) showToast(`${t('Removed from')} ${count} ${count === 1 ? t('device') : t('devices')}`);
+          }}
+        />
+      )}
+
+      {deviceTransferPrompt && (
+        <DeviceTransferPrompt
+          employee={deviceTransferPrompt.employee}
+          newBranch={deviceTransferPrompt.newBranch}
+          onClose={(copied) => {
+            setDeviceTransferPrompt(null);
+            if (copied) showToast(t('Fingerprint copied to the new device'));
+          }}
+        />
       )}
 
       {/* Toast */}

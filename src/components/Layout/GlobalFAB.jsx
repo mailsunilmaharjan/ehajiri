@@ -4,15 +4,27 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { useLeaveApply } from '../../context/LeaveApplyContext.jsx';
 import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
 import { useManualPostingApply } from '../../context/ManualPostingApplyContext.jsx';
+import { useOnlineAttendanceApply } from '../../context/OnlineAttendanceApplyContext.jsx';
+import api from '../../api/client.js';
 
 const GlobalFAB = () => {
   const location        = useLocation();
   const { open: openLeaveApply }       = useLeaveApply();
   const { open: openOfficeVisitApply } = useOfficeVisitApply();
   const { open: openManualPostingApply } = useManualPostingApply();
+  const { open: openOnlineAttendanceApply } = useOnlineAttendanceApply();
   const { canView, currentUser } = useAuth();
   const [open, setOpen] = useState(false);
   const fabRef = useRef(null);
+
+  // Online Attendance is gated by a PER-STAFF flag (currentUser.onlineAttendanceEnabled),
+  // not a role/page permission — plus the tenant-wide module toggle, which
+  // isn't in currentUser at all, so it's fetched separately here the same
+  // way EventVisitorRegistration.jsx checks it for its own page.
+  const [onlineAttendanceModuleOn, setOnlineAttendanceModuleOn] = useState(false);
+  useEffect(() => {
+    api.get('/module-flags').then(f => setOnlineAttendanceModuleOn(!!f.onlineAttendanceEnabled)).catch(() => {});
+  }, []);
 
   /* close on outside click */
   useEffect(() => {
@@ -50,6 +62,13 @@ const GlobalFAB = () => {
       bg:     '#fef3c7',
       action: () => { setOpen(false); openManualPostingApply(); },
     },
+    onlineAttendanceModuleOn && currentUser?.onlineAttendanceEnabled && {
+      label:  'Online Attendance',
+      icon:   '🌐',
+      color:  '#00A651',
+      bg:     '#e6f7ee',
+      action: () => { setOpen(false); openOnlineAttendanceApply(); },
+    },
   ].filter(Boolean);
 
   if (actions.length === 0) return null;
@@ -58,7 +77,12 @@ const GlobalFAB = () => {
     <div
       ref={fabRef}
       style={{
-        position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+        // Below .modal-overlay's z-index:1000 (index.css) — a quick-action
+        // shortcut has no business floating above an open modal, which is
+        // meant to be the topmost, focused UI element blocking everything
+        // else. Confirmed visible bleeding through the Copy/Transfer
+        // Samples modal (Settings → Attendance Device) at 9999.
+        position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', zIndex: 500,
         display: 'flex', flexDirection: 'column-reverse', alignItems: 'center', gap: 10,
       }}
     >

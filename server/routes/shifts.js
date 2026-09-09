@@ -8,6 +8,7 @@ const toRow = r => ({
   name                 : r.name,
   nameEn               : r.name_en,
   code                 : r.code,
+  rosterShortName      : r.roster_short_name,
   startTime            : r.start_time,
   endTime              : r.end_time,
   workHours            : parseFloat(r.work_hours),
@@ -42,12 +43,12 @@ router.post('/', async (req, res) => {
     }
     const { rows } = await client.query(
       `INSERT INTO shifts
-       (name,name_en,code,start_time,end_time,work_hours,grace_period_start,grace_period_end,
+       (name,name_en,code,roster_short_name,start_time,end_time,work_hours,grace_period_start,grace_period_end,
         make_default,active,color,exceptional_day_enabled,exceptional_days,exceptional_start_time,
         exceptional_end_time,exceptional_work_hours,winter_policy_enabled,winter_policy)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
-      [s.name,s.nameEn,s.code,s.startTime,s.endTime,s.workHours,
-       s.gracePeriodStart||5,s.gracePeriodEnd||5,s.makeDefault||false,s.active??true,s.color,
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+      [s.name,s.nameEn,s.code,s.rosterShortName||null,s.startTime,s.endTime,s.workHours,
+       s.gracePeriodStart??5,s.gracePeriodEnd??5,s.makeDefault||false,s.active??true,s.color,
        s.exceptionalDayEnabled||false,JSON.stringify(s.exceptionalDays||[]),
        s.exceptionalStartTime||null,s.exceptionalEndTime||null,s.exceptionalWorkHours||0,
        s.winterPolicyEnabled||false,s.winterPolicy?JSON.stringify(s.winterPolicy):null]
@@ -77,13 +78,13 @@ router.put('/:id', async (req, res) => {
       await client.query('UPDATE shifts SET make_default = FALSE WHERE id != $1', [req.params.id]);
     }
     const { rows } = await client.query(
-      `UPDATE shifts SET name=$1,name_en=$2,code=$3,start_time=$4,end_time=$5,work_hours=$6,
-       grace_period_start=$7,grace_period_end=$8,make_default=$9,active=$10,color=$11,
-       exceptional_day_enabled=$12,exceptional_days=$13,exceptional_start_time=$14,
-       exceptional_end_time=$15,exceptional_work_hours=$16,winter_policy_enabled=$17,winter_policy=$18
-       WHERE id=$19 RETURNING *`,
-      [s.name,s.nameEn,s.code,s.startTime,s.endTime,s.workHours,
-       s.gracePeriodStart||5,s.gracePeriodEnd||5,s.makeDefault||false,s.active??true,s.color,
+      `UPDATE shifts SET name=$1,name_en=$2,code=$3,roster_short_name=$4,start_time=$5,end_time=$6,work_hours=$7,
+       grace_period_start=$8,grace_period_end=$9,make_default=$10,active=$11,color=$12,
+       exceptional_day_enabled=$13,exceptional_days=$14,exceptional_start_time=$15,
+       exceptional_end_time=$16,exceptional_work_hours=$17,winter_policy_enabled=$18,winter_policy=$19
+       WHERE id=$20 RETURNING *`,
+      [s.name,s.nameEn,s.code,s.rosterShortName||null,s.startTime,s.endTime,s.workHours,
+       s.gracePeriodStart??5,s.gracePeriodEnd??5,s.makeDefault||false,s.active??true,s.color,
        s.exceptionalDayEnabled||false,JSON.stringify(s.exceptionalDays||[]),
        s.exceptionalStartTime||null,s.exceptionalEndTime||null,s.exceptionalWorkHours||0,
        s.winterPolicyEnabled||false,s.winterPolicy?JSON.stringify(s.winterPolicy):null,req.params.id]
@@ -106,6 +107,17 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const id = req.params.id;
+
+    /* Day Off / Night Off (is_off=true, seeded by migrations 76/134) are
+       system shifts the roster picker and every off-day report depend on —
+       there's no UI to recreate them once gone, only a migration re-seed.
+       Blocking their deletion here is what actually prevents that: they
+       start out unused (0 work hours, no staff/roster referencing them),
+       so the checks below never catch an admin deleting them by mistake. */
+    const { rows: offCheck } = await pool.query('SELECT is_off FROM shifts WHERE id=$1', [id]);
+    if (offCheck[0]?.is_off) {
+      return res.status(409).json({ error: 'This is a system shift (Day Off / Night Off) and cannot be deleted.' });
+    }
 
     /* Check if shift is assigned to any staff (users.shift stores the shift code) */
     const staffCheck = await pool.query(

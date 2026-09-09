@@ -264,6 +264,40 @@ export async function sendOfficeVisitStatusUpdate({ to, fullName, status, fromDa
   });
 }
 
+export async function sendTaskAssigned({ to, fullName, taskTitle, by }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.taskAssignedCompleted) return { skipped: true };
+  return sendEmail({
+    to, subject: `eHajiri TMS — New Task Assigned: ${taskTitle}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:480px">
+      <h2 style="color:#1a56db">Task Assigned to You</h2>
+      <p>Hello <strong>${fullName}</strong>,</p>
+      <p><strong>${by}</strong> assigned you a task:</p>
+      <div style="background:#f3f4f6;padding:14px;border-radius:8px;margin:16px 0">
+        <strong>${taskTitle}</strong>
+      </div>
+      <p style="color:#6b7280;font-size:12px">Please log in to eHajiri TMS to view the full details.</p>
+    </div>`,
+  });
+}
+
+export async function sendTaskCompleted({ to, fullName, taskTitle, by }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.taskAssignedCompleted) return { skipped: true };
+  return sendEmail({
+    to, subject: `eHajiri TMS — Task Completed: ${taskTitle}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:480px">
+      <h2 style="color:#16a34a">Task Completed</h2>
+      <p>Hello <strong>${fullName}</strong>,</p>
+      <p><strong>${by}</strong> marked this task as completed:</p>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:14px;border-radius:8px;margin:16px 0">
+        <strong>${taskTitle}</strong>
+      </div>
+      <p style="color:#6b7280;font-size:12px">Please log in to eHajiri TMS to view the full details.</p>
+    </div>`,
+  });
+}
+
 export async function sendStaffCreated({ to, fullName, username, password, role, loginUrl }) {
   const cfg = await getEmailConfig();
   if (!cfg?.notifications?.staffCreated) return { skipped: true };

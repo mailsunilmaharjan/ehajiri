@@ -7,6 +7,8 @@ import { useData }     from '../../context/DataContext.jsx';
 import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import ReportIcon from './ReportIcon.jsx';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -100,17 +102,20 @@ const StatPill = ({ label, value, color, bg }) => (
 );
 
 /* ── Sub-report menu ─────────────────────────────────────────── */
-const SUB_REPORTS = [
-  { icon:'📒', label:'Monthly Staff Ledger',       path:'/attendance/reports/monthly/ledger' },
-  { icon:'✅', label:'Present Absent Report',      path:'/attendance/reports/monthly/present-absent' },
-  { icon:'📊', label:'Summary Report',             path:'/attendance/reports/monthly/summary' },
-  { icon:'🔄', label:'IN & OUT Report',            path:'/attendance/reports/monthly/in-out' },
-  { icon:'📅', label:'Absent Report',              path:'/attendance/reports/monthly/absent' },
-  { icon:'⏰', label:'Late In Early Out Report',   path:'/attendance/reports/monthly/late-early' },
-  { icon:'💪', label:'Over Time Report',           path:'/attendance/reports/monthly/overtime' },
+const SUB_REPORTS = (L) => [
+  { icon:'bookOpen',    label:L('मासिक स्टाफ लेजर','Monthly Staff Ledger'),      path:'/attendance/reports/monthly/ledger' },
+  { icon:'checkCircle', label:L('उपस्थित/अनुपस्थित रिपोर्ट','Present Absent Report'), path:'/attendance/reports/monthly/present-absent' },
+  { icon:'barChart',    label:L('सारांश रिपोर्ट','Summary Report'),             path:'/attendance/reports/monthly/summary' },
+  { icon:'repeat',      label:L('IN & OUT रिपोर्ट','IN & OUT Report'),          path:'/attendance/reports/monthly/in-out' },
+  { icon:'calendar',    label:L('अनुपस्थित रिपोर्ट','Absent Report'),           path:'/attendance/reports/monthly/absent' },
+  { icon:'clock',       label:L('ढिला/चाँडो रिपोर्ट','Late In Early Out Report'), path:'/attendance/reports/monthly/late-early' },
+  { icon:'zap',         label:L('ओभरटाइम रिपोर्ट','Over Time Report'),         path:'/attendance/reports/monthly/overtime' },
 ];
 
 const ViewReportsBtn = ({ year, month, useNP }) => {
+  const { language } = useLanguage();
+  const L = (np, en) => language === 'np' ? np : en;
+  const subReports = SUB_REPORTS(L);
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const ref = useRef();
@@ -144,7 +149,7 @@ const ViewReportsBtn = ({ year, month, useNP }) => {
           <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
           <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
         </svg>
-        View Monthly Reports
+        {L('मासिक रिपोर्टहरू हेर्नुहोस्','View Monthly Reports')}
         <svg viewBox="0 0 20 20" fill="white" width="12" height="12"
           style={{ transform:open?'rotate(180deg)':'none',transition:'transform .2s' }}>
           <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
@@ -157,17 +162,17 @@ const ViewReportsBtn = ({ year, month, useNP }) => {
           boxShadow:'0 8px 28px rgba(0,0,0,.13)',overflow:'hidden',minWidth:240 }}>
           <div style={{ padding:'8px 14px',background:'#f9fafb',borderBottom:'1px solid #f3f4f6',
             fontSize:11,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:'.5px' }}>
-            Monthly Reports
+            {L('मासिक रिपोर्टहरू','Monthly Reports')}
           </div>
-          {SUB_REPORTS.map((r, i) => (
+          {subReports.map((r, i) => (
             <button key={r.path} onClick={() => go(r.path)}
               style={{ width:'100%',display:'flex',alignItems:'center',gap:9,
                 padding:'7px 14px',background:'white',border:'none',
-                borderBottom:i<SUB_REPORTS.length-1?'1px solid #f0f0f0':'none',
+                borderBottom:i<subReports.length-1?'1px solid #f0f0f0':'none',
                 textAlign:'left',cursor:'pointer',fontSize:13,color:'#374151' }}
               onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
               onMouseLeave={e=>e.currentTarget.style.background='white'}>
-              <span style={{ fontSize:18,flexShrink:0 }}>{r.icon}</span>
+              <ReportIcon name={r.icon} />
               <span style={{ fontWeight:500 }}>{r.label}</span>
               <svg viewBox="0 0 20 20" fill="#d1d5db" width="12" height="12" style={{ marginLeft:'auto',flexShrink:0 }}>
                 <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/>
@@ -215,7 +220,7 @@ const MonthlyReport = () => {
         const adDate = bsToAD(year, month, 15);
         if (adDate) { apiYear = adDate.getFullYear(); apiMonth = adDate.getMonth() + 1; }
       }
-      const query = `/attendance/monthly?year=${apiYear}&month=${apiMonth}${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
+      const query = `/attendance/monthly?year=${apiYear}&month=${apiMonth}&orgScope=1${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
       setData(await api.get(query));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
@@ -309,12 +314,7 @@ const MonthlyReport = () => {
         </div>
       )}
 
-      {loading && (
-        <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af' }}>
-          <div style={{ fontSize:40,marginBottom:12 }}>📅</div>
-          <div style={{ fontWeight:600,fontSize:15 }}>Analysing monthly attendance data…</div>
-        </div>
-      )}
+      {loading && <LoadingIndicator label="Analysing monthly attendance data…" />}
 
       {!loading && data && (
         <>

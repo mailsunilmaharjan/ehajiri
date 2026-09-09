@@ -1,21 +1,30 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
+import { useModuleFlags } from '../../context/ModuleFlagsContext.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import DateTimePicker from '../Common/DateTimePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import RichTextEditor from '../Common/RichTextEditor.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import HoverCard from '../Common/HoverCard.jsx';
+import EmpMultiSelect from '../Common/EmpMultiSelect.jsx';
 import ContactFormModal, { CONTACT_EMPTY } from './ContactFormModal.jsx';
 import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
-import { getNepalTodayISO } from '../../utils/dateUtils.js';
+import { getNepalTodayISO, toNepalISO, isoToNepalLocalInput, formatNepalDateTime, formatNepalTime, addDaysISO } from '../../utils/dateUtils.js';
+import FieldVisitJourneyPanel, { CHECKOUT_STATUS_LABEL } from './FieldVisitJourneyPanel.jsx';
+import { haversineKm } from '../../utils/geoUtils.js';
+// Temporarily disabled — the Leaflet import chain breaks the production
+// bundle app-wide (see StaffTrackFlowModal.jsx's top for details). Re-enable
+// once that's fixed with a lazy-loaded/code-split import instead.
+// import StaffTrackFlowModal from './StaffTrackFlowModal.jsx';
 
 /* Task tracker (Staff > Task) — standard DataGrid layout, matching every
    other list page in the app (Staff Detail, Manual Postings, etc.). Visible
@@ -32,15 +41,11 @@ const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const emptyTask = { title: '', description: '', contactId: '', contactPersonId: '', categoryId: '', priorityId: '', dueDate: todayISO(), assignedTo: [], status: 'pending' };
+const emptyTask = { title: '', description: '', contactId: '', contactPersonId: '', categoryId: '', priorityId: '', dueDate: todayISO(), assignedTo: [], status: 'pending', isFieldVisit: false };
 
-// Task grid date-bucket sections ("Today", "Tomorrow", ...).
-const addDaysISO = (isoDate, n) => {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + n);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-};
+// Task grid date-bucket sections ("Today", "Tomorrow", ...). addDaysISO now
+// lives in dateUtils.js (imported above) since TaskDashboard.jsx needs the
+// same day-offset math.
 const daysBetweenISO = (fromISO, toISO) => {
   const [y1, m1, d1] = fromISO.split('-').map(Number);
   const [y2, m2, d2] = toISO.split('-').map(Number);
@@ -91,6 +96,147 @@ const AssigneeCell = ({ assignees }) => {
   return <HoverCard trigger={trigger} content={fullList} minWidth={220} />;
 };
 
+// WhatsApp-style emoji reactions — used on both a Followup's own description
+// and each individual reply in its thread. One reaction per person per
+// target: clicking a pill you're already part of removes your reaction
+// (via onReact re-sending the same emoji, which the server toggles off);
+// clicking any other pill or the "+" picker sets/switches yours to it.
+// Hovering a pill shows who reacted, photo + name, same as WhatsApp's
+// tap-a-reaction-to-see-who popup.
+const REACTION_EMOJI = ['✅', '👍', '👎', '❤️', '😂'];
+const ReactionBar = ({ reactions, currentUserId, onReact }) => {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setPickerOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [pickerOpen]);
+
+  const groups = [];
+  (reactions || []).forEach(r => {
+    let g = groups.find(g => g.emoji === r.emoji);
+    if (!g) { g = { emoji: r.emoji, users: [] }; groups.push(g); }
+    g.users.push(r);
+  });
+
+  const pick = (emoji) => { onReact(emoji); setPickerOpen(false); };
+
+  return (
+    <div ref={ref} style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 5, position: 'relative' }}
+      onClick={e => e.stopPropagation()}>
+      {groups.map(g => {
+        const mine = g.users.some(u => String(u.userId) === String(currentUserId));
+        return (
+          <HoverCard key={g.emoji}
+            trigger={
+              <button onClick={() => pick(g.emoji)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 3, height: 20, padding: '0 6px',
+                  borderRadius: 10, border: `1px solid ${mine ? '#93c5fd' : '#e5e7eb'}`,
+                  background: mine ? '#eff6ff' : '#f9fafb', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>
+                <span>{g.emoji}</span>
+                <span style={{ color: mine ? '#1d4ed8' : '#6b7280', fontWeight: 700 }}>{g.users.length}</span>
+              </button>
+            }
+            content={
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {g.users.map(u => (
+                  <div key={u.userId} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Avatar photo={u.userPhoto} name={u.userName} size={20} />
+                    <span style={{ fontSize: 12.5 }}>{u.userName}</span>
+                  </div>
+                ))}
+              </div>
+            }
+            minWidth={150} />
+        );
+      })}
+      <div style={{ position: 'relative' }}>
+        <button onClick={() => setPickerOpen(p => !p)} title="React"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20,
+            borderRadius: '50%', border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: 12, color: '#9ca3af', lineHeight: 1 }}>
+          +
+        </button>
+        {pickerOpen && (
+          <div style={{ position: 'absolute', bottom: 24, left: 0, zIndex: 20, display: 'flex', gap: 2,
+            background: '#fff', border: '1px solid #e5e7eb', borderRadius: 20, padding: '4px 6px',
+            boxShadow: '0 6px 18px rgba(0,0,0,.15)' }}>
+            {REACTION_EMOJI.map(e => (
+              <button key={e} onClick={() => pick(e)} title={e}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '2px 4px', borderRadius: 6 }}
+                onMouseEnter={ev => ev.currentTarget.style.background = '#f3f4f6'}
+                onMouseLeave={ev => ev.currentTarget.style.background = 'none'}>
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// "Seen by" — WhatsApp-style overlapping avatar stack, used on the Task
+// itself (New/Edit Task form + Followup History panel header) and on each
+// individual Followup entry. Hovering one avatar shows who they are and the
+// exact date/time they last opened it (task_views.seen_at); once the list
+// grows past MAX_SEEN_AVATARS the rest collapse into a plain "+N" chip.
+const MAX_SEEN_AVATARS = 6;
+const SeenByAvatars = ({ seenBy, fd }) => {
+  if (!Array.isArray(seenBy) || !seenBy.length) return null;
+  const shown = seenBy.slice(0, MAX_SEEN_AVATARS);
+  const extra = seenBy.length - shown.length;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 10.5, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '.3px' }}>
+        👀 Seen by
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        {shown.map((v, i) => (
+          <HoverCard key={v.userId}
+            trigger={
+              <div style={{ marginLeft: i === 0 ? 0 : -8, borderRadius: '50%', border: '2px solid #fff',
+                boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i }}>
+                <Avatar photo={v.userPhoto} name={v.userName} size={22} />
+              </div>
+            }
+            content={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Avatar photo={v.userPhoto} name={v.userName} size={26} />
+                <div>
+                  <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{v.userName || '—'}</div>
+                  <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>Seen {formatNepalDateTime(v.seenAt, fd)}</div>
+                </div>
+              </div>
+            }
+            minWidth={170} />
+        ))}
+        {extra > 0 && (
+          <div title={`+${extra} more`} style={{ marginLeft: -8, width: 22, height: 22, borderRadius: '50%',
+            border: '2px solid #fff', boxShadow: '0 0 0 1px #e5e7eb', background: '#e5e7eb', color: '#6b7280',
+            fontSize: 9.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            +{extra}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// "Followed up by {Name} ({Post})" byline under a Followup entry's own
+// description — who actually logged this entry, same idea as the "Name
+// (Post): message" line each reply already carries.
+const FollowedByLine = ({ f }) => !f ? null : (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 11, color: '#9ca3af' }}>
+    <Avatar photo={f.followedByPhoto} name={f.followedByName} size={18} />
+    <span>
+      Followed up by <strong style={{ color: '#6b7280' }}>{f.followedByName || '—'}</strong>
+      {f.followedByPost && <span> ({f.followedByPost})</span>}
+    </span>
+  </div>
+);
+
 // "General Manager" -> "GM", "Administration" -> "Admin" — same short-name
 // fallback convention used by the attendance reports (abbrev() there),
 // applied client-side since the plain /api/employees list doesn't carry
@@ -108,6 +254,7 @@ const STATUS_OPTIONS = [
   { value: 'pending',     label: 'Pending' },
   { value: 'in_progress', label: 'In Progress' },
   { value: 'completed',   label: 'Completed' },
+  { value: 'cancelled',   label: 'Cancelled' },
 ];
 
 const FOLLOWUP_MODES = [
@@ -118,30 +265,6 @@ const FOLLOWUP_MODES = [
 ];
 
 const emptyFollowup = { mode: 'phone', followupDate: todayISO(), description: '', nextCategoryId: '', nextFollowupAt: '', handedOverTo: '' };
-
-// Converts a stored UTC timestamp into the "YYYY-MM-DDTHH:mm" shape a
-// <input type="datetime-local"> needs, in Nepal wall-clock time (UTC+5:45,
-// no DST) — not the viewer's own OS timezone. Same fixed-offset technique as
-// getNepalNow() in src/utils/dateUtils.js: shift the epoch, then read it
-// back with UTC getters so the browser's own offset never enters into it.
-const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
-const isoToNepalLocalInput = (isoUtc) => {
-  if (!isoUtc) return '';
-  const d = new Date(new Date(isoUtc).getTime() + NEPAL_OFFSET_MS);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-};
-
-// Date part goes through fd() (the company's AD/BS calendar setting), the
-// time part is just read straight off the same Nepal-shifted string so it
-// never needs a second timezone conversion.
-const formatNepalDateTime = (isoUtc, fd) => {
-  if (!isoUtc) return '—';
-  const [datePart, timePart] = isoToNepalLocalInput(isoUtc).split('T');
-  const [hh, mm] = timePart.split(':').map(Number);
-  const ampm = hh >= 12 ? 'PM' : 'AM';
-  const hh12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${fd(datePart)} ${hh12}:${String(mm).padStart(2, '0')} ${ampm}`;
-};
 
 // Compact relative timestamp for the reply thread ("4d", "2h", "just now") —
 // full date/time is still one click away via the title attribute.
@@ -159,6 +282,62 @@ const timeAgo = (isoUtc) => {
   if (weeks < 5) return `${weeks}w`;
   const months = Math.floor(days / 30);
   return months < 12 ? `${months}mo` : `${Math.floor(days / 365)}y`;
+};
+
+// Duration between two ISO timestamps ("2h 15m") — used by the Field Visit
+// Log card for a stop's "Total Hour Stayed".
+const fmtDuration = (fromIso, toIso) => {
+  if (!fromIso || !toIso) return '—';
+  const mins = Math.max(0, Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 60000));
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+};
+
+// Same duration, "HH:MM" instead — used by the Field Visit Log's per-stop
+// summary line specifically (fmtDuration's "2h 15m" is for the individual
+// checkpoint card above it).
+const fmtHHMM = (fromIso, toIso) => {
+  if (!fromIso || !toIso) return '—';
+  const mins = Math.max(0, Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 60000));
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+};
+
+// A GPS fix is never pixel-exact — staff_contacts.latitude/longitude is
+// itself just refreshed from the most recent check-in (see fieldVisit.js's
+// migration comment), not a surveyed address, so "same location" has to mean
+// "close enough", not "identical". 500m covers ordinary GPS drift and being
+// somewhere else in a large complex/building without being so loose it'd
+// pass a check-in from genuinely the wrong place.
+const LOCATION_VERIFY_RADIUS_KM = 0.5;
+const isLocationVerified = (lat, lng, clientLat, clientLng) => {
+  if (lat == null || lng == null || clientLat == null || clientLng == null) return null; // nothing on file to verify against
+  return haversineKm(lat, lng, clientLat, clientLng) <= LOCATION_VERIFY_RADIUS_KM;
+};
+
+// Yes / No / — (verified === null means there's no client location on file yet
+// to compare against — e.g. this is the very first visit ever logged for this
+// client, before staff_contacts.latitude/longitude has anything to go on).
+const VerifyBadge = ({ verified }) => (
+  <span style={{
+    fontSize: 10.5, fontWeight: 700, padding: '1px 7px', borderRadius: 8,
+    background: verified == null ? '#f3f4f6' : verified ? '#d1fae5' : '#fee2e2',
+    color:      verified == null ? '#9ca3af' : verified ? '#065f46' : '#991b1b',
+  }}>
+    Location Verified: {verified == null ? '—' : verified ? 'Yes' : 'No'}
+  </span>
+);
+
+// The address/location-name label for one Field Visit checkpoint, clickable
+// straight to that exact GPS pin on Google Maps when the coordinates are on
+// file — no API key needed, just a plain maps.google.com link.
+const LocationPin = ({ lat, lng, label }) => {
+  if (lat == null || lng == null) return label ? <span>{label}</span> : null;
+  return (
+    <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" rel="noopener noreferrer"
+      style={{ color: '#1a56db', fontWeight: 600, textDecoration: 'none' }}>
+      📍 {label || 'View Location'}
+    </a>
+  );
 };
 
 const DateInput = ({ value, onChange }) => {
@@ -192,16 +371,31 @@ const stripHtml = (html) => {
   return new DOMParser().parseFromString(html, 'text/html').body.textContent || '';
 };
 
-const TaskList = () => {
+// fieldVisitOnly — reused by the separate "Field Visit" nav page (Staff >
+// Field Visit) to show the exact same list/grid/Add-Task experience as the
+// regular Task page, filtered down to Field-Visit-flagged tasks only (see
+// the "Field Visit" checkbox on the Add/Edit form below and the "Mark/Remove
+// Field Visit" context-menu action). Its own unread badge (fieldVisitTaskCount)
+// is kept separate from the regular Task badge — see AttendanceToasts.jsx.
+const TaskList = ({ fieldVisitOnly = false }) => {
   const navigate = useNavigate();
-  const { canManageSystem, currentUser } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { canManageSystem, currentUser, isAdmin, isSuperAdmin, isBranchManager, isDeptHead } = useAuth();
   const { employees, filteredEmployees } = useData();
-  const { clearTaskCount } = useNotifications();
+  const { refreshTaskCounts } = useNotifications();
+  const { flags: moduleFlags } = useModuleFlags();
+  const { settings } = useSettings();
   const fd = useDateFormat();
 
-  // Clears the Staff/Task nav badge the moment this page is actually opened
-  // — same convention as StaffMessage.jsx clearing the message badge on mount.
-  useEffect(() => { clearTaskCount(); }, [clearTaskCount]);
+  // The Staff/Task nav badge is meant to keep blinking per-task until that
+  // task is actually acted on — double-clicked open, or a followup logged
+  // against it (see openEdit/saveFollowup below) — NOT cleared in bulk just
+  // from opening this list page. (Previously this cleared every unread
+  // notification the instant the page mounted, so the blink never had a
+  // chance to mean anything.)
+  const markTaskRead = (taskId) => {
+    api.post(`/tasks/${taskId}/notifications/read`).then(refreshTaskCounts).catch(() => {});
+  };
 
   const [tasks,      setTasks]      = useState([]);
   const [categories, setCategories] = useState([]);
@@ -213,14 +407,28 @@ const TaskList = () => {
   const [editId,  setEditId]  = useState(null);
   const [form,    setForm]    = useState(emptyTask);
   const [errors,  setErrors]  = useState({});
+  // Emoji reactions + "Seen by" for whichever existing task is open in the
+  // Add/Edit Task modal — meaningless for a brand-new task (nothing to react
+  // to or have seen yet), so this only ever gets populated in openEdit.
+  const [taskModalMeta, setTaskModalMeta] = useState({ reactions: [], seenBy: [] });
+  const [trackFlowOpen, setTrackFlowOpen] = useState(false);
   const [saving,  setSaving]  = useState(false);
 
-  // Filter by Staff — every role defaults to seeing only their own tasks
-  // (creator or assignee); the dropdown also offers "Show All Task", scoped
-  // by role server-side (admin/superAdmin -> everyone, Branch Manager/Dept
-  // Head -> their own branch/department, employee -> stays own-only). See
+  // Filter by Staff — a plain employee defaults to seeing only their own
+  // tasks (creator or assignee); anyone with company-wide or branch/
+  // department oversight (admin/superAdmin/branch manager/dept head)
+  // defaults straight to "Show All Task" instead, since limiting THEM to
+  // just their own personally-created/assigned tasks on first open looked
+  // like the page was silently dropping most of the company's tasks —
+  // they'd have to already know to click "Show All Task" every single time
+  // to see what they actually have oversight of. The dropdown still lets
+  // anyone narrow to a specific person or (for an employee) there's simply
+  // nothing wider to switch to. Scoped by role server-side either way — see
   // GET /api/tasks's ?staffId= handling in server/routes/tasks.js.
-  const [staffFilter, setStaffFilter] = useState(() => currentUser ? String(currentUser.id) : '');
+  const [staffFilter, setStaffFilter] = useState(() => {
+    if (!currentUser) return '';
+    return (isAdmin || isSuperAdmin || isBranchManager || isDeptHead) ? 'all' : String(currentUser.id);
+  });
 
   // Quick filters, next to Filter by Staff — "My Yesterday Task" is always
   // scoped to the logged-in user specifically (creator or assignee),
@@ -254,12 +462,11 @@ const TaskList = () => {
   // still has to press Send in themselves. Numbers come from the assignee's
   // own Staff Detail mobile (employees[].phone), never a customer's.
   const [whatsappPicker, setWhatsappPicker] = useState(null); // { task, assignees } when a task has 2+ assignees to choose from
+  const [smsPicker, setSmsPicker] = useState(null); // { task, assignees } when a task has 2+ assignees to choose from
+  const [smsSending, setSmsSending] = useState(false);
 
   // "+ Add New" next to Customer Name — the real Contact form, in a popup
   const [contactModal, setContactModal] = useState(false);
-
-  // Assign Task — filters the staff checkbox grid by name/post/department/branch
-  const [assigneeSearch, setAssigneeSearch] = useState('');
 
   // Right-side Followup History panel — clicking a row opens it for that task
   const [followupTask,    setFollowupTask]    = useState(null);
@@ -276,6 +483,20 @@ const TaskList = () => {
 
   // Footer preview defaults to the most recent followup whenever the list (re)loads
   useEffect(() => { setSelectedFollowup(followups[0] || null); }, [followups]);
+
+  // Field Visit Log — this task's own GPS check-in/check-out stops (across
+  // every trip that's visited it), shown as a small card in the side panel
+  // below Description. Only relevant for a field-visit-flagged task.
+  const [fieldVisitStops, setFieldVisitStops] = useState([]);
+  const [fieldVisitStopsLoading, setFieldVisitStopsLoading] = useState(false);
+  useEffect(() => {
+    if (!followupTask?.isFieldVisit) { setFieldVisitStops([]); return; }
+    setFieldVisitStopsLoading(true);
+    api.get(`/field-visit/tasks/${followupTask.id}/stops`)
+      .then(rows => setFieldVisitStops(Array.isArray(rows) ? rows : []))
+      .catch(() => setFieldVisitStops([]))
+      .finally(() => setFieldVisitStopsLoading(false));
+  }, [followupTask?.id, followupTask?.isFieldVisit]);
 
   // Replies thread on the Description card's selected followup
   const [followupReplies,        setFollowupReplies]        = useState([]);
@@ -294,6 +515,14 @@ const TaskList = () => {
       .finally(() => setFollowupRepliesLoading(false));
     setNewReplyText('');
     setReplyingTo(null);
+    // Selecting an entry counts as reading it — same "Seen by" read receipt
+    // as the task itself, just target_type='followup' server-side.
+    const taskId = followupTask.id, followupId = selectedFollowup.id;
+    api.put(`/tasks/${taskId}/followups/${followupId}/seen`).then(seenBy => {
+      if (!seenBy) return;
+      setFollowups(prev => prev.map(f => f.id === followupId ? { ...f, seenBy } : f));
+      setSelectedFollowup(prev => (prev && prev.id === followupId) ? { ...prev, seenBy } : prev);
+    }).catch(() => {});
   }, [followupTask?.id, selectedFollowup?.id]);
 
   const sendReply = async () => {
@@ -312,6 +541,41 @@ const TaskList = () => {
       setReplySaving(false);
     }
   };
+
+  const reactToFollowup = async (followupId, emoji) => {
+    if (!followupTask) return;
+    try {
+      const reactions = await api.put(`/tasks/${followupTask.id}/followups/${followupId}/reactions`, { emoji });
+      setFollowups(prev => prev.map(f => f.id === followupId ? { ...f, reactions } : f));
+      setSelectedFollowup(prev => (prev && prev.id === followupId) ? { ...prev, reactions } : prev);
+    } catch (e) { showToast(e.message || 'Reaction failed', 'error'); }
+  };
+
+  const reactToReply = async (replyId, emoji) => {
+    if (!followupTask || !selectedFollowup) return;
+    try {
+      const reactions = await api.put(`/tasks/${followupTask.id}/followups/${selectedFollowup.id}/replies/${replyId}/reactions`, { emoji });
+      setFollowupReplies(prev => prev.map(r => r.id === replyId ? { ...r, reactions } : r));
+    } catch (e) { showToast(e.message || 'Reaction failed', 'error'); }
+  };
+
+  // Emoji reactions on the task itself — same one-per-person mechanism as a
+  // followup's description (reactToFollowup above), just target_type='task'
+  // server-side. Used by both the Add/Edit Task modal and the Followup
+  // History panel header, so it returns the fresh list rather than writing
+  // straight into one specific piece of state.
+  const reactToTask = async (taskId, emoji) => {
+    try {
+      return await api.put(`/tasks/${taskId}/reactions`, { emoji });
+    } catch (e) { showToast(e.message || 'Reaction failed', 'error'); return null; }
+  };
+
+  // "Seen by" read receipt — fired the moment the caller actually opens the
+  // Edit Task form or the Followup History panel/a specific followup entry
+  // (see openEdit, openFollowupPanel, and the selectedFollowup effect below).
+  // Silently no-ops on failure — a missed read receipt shouldn't surface as
+  // an error to whoever's just trying to look at a task.
+  const markTaskSeen = (taskId) => api.put(`/tasks/${taskId}/seen`).catch(() => null);
 
   // Shared between the compact Description card and the full-size popup it opens on click.
   // Threaded: replies can reply to a specific reply (unlimited depth), grouped
@@ -349,6 +613,7 @@ const TaskList = () => {
                 {timeAgo(r.createdAt)}
               </span>
             </div>
+            <ReactionBar reactions={r.reactions} currentUserId={currentUser?.id} onReact={emoji => reactToReply(r.id, emoji)} />
           </div>
         </div>
         {(byParent.get(r.id) || []).length > 0 && (
@@ -398,12 +663,28 @@ const TaskList = () => {
       [f.mode, f.description, f.nextCategoryName, f.followedByName, f.handedOverToName].some(v => v && v.toLowerCase().includes(q)));
   }, [followups, followupSearch]);
 
+  // Sequence guard — Filter by Staff defaults to "Show All Task" for anyone
+  // with oversight (admin/superAdmin/branch manager/dept head), so the very
+  // first fetch on mount is already the big unscoped query. Picking a
+  // specific staff member right after that fires a second, usually much
+  // smaller/faster request — without this guard, if the initial "all" fetch
+  // happens to resolve AFTER the newer filtered one (a real race, not just
+  // theoretical: a full company-wide scan is the slower query of the two),
+  // its stale response clobbers the correctly-filtered result and the grid
+  // silently shows everyone's tasks again despite the picker showing one
+  // specific person selected. Only the most-recently-fired request's
+  // response is ever applied.
+  const loadTasksSeqRef = useRef(0);
   const loadTasks = () => {
     setLoading(true);
+    const seq = ++loadTasksSeqRef.current;
     const qs = staffFilter ? `?staffId=${encodeURIComponent(staffFilter)}` : '';
-    api.get(`/tasks${qs}`).then(rows => setTasks(Array.isArray(rows) ? rows : []))
-      .catch(e => showToast(e.message || 'Failed to load tasks', 'error'))
-      .finally(() => setLoading(false));
+    api.get(`/tasks${qs}`).then(rows => {
+      if (seq !== loadTasksSeqRef.current) return; // superseded by a newer request
+      setTasks(Array.isArray(rows) ? rows : []);
+    })
+      .catch(e => { if (seq === loadTasksSeqRef.current) showToast(e.message || 'Failed to load tasks', 'error'); })
+      .finally(() => { if (seq === loadTasksSeqRef.current) setLoading(false); });
   };
   const loadCategories = () => api.get('/settings/taskCategories').then(rows => setCategories(Array.isArray(rows) ? rows : [])).catch(() => setCategories([]));
   const loadPriorities = () => api.get('/settings/taskPriorities').then(rows => setPriorities(Array.isArray(rows) ? rows : [])).catch(() => setPriorities([]));
@@ -412,13 +693,23 @@ const TaskList = () => {
   useEffect(() => { loadCategories(); loadPriorities(); loadContacts(); }, []);
   useEffect(() => { loadTasks(); }, [staffFilter]);
 
-  const staffFilterOptions = useMemo(() => [
-    { value: 'all', label: '🗂 Show All Task' },
-    ...filteredEmployees.map(e => ({
-      value: String(e.id),
-      label: currentUser && String(e.id) === String(currentUser.id) ? `${e.fullName} (Me)` : e.fullName,
-    })),
-  ], [filteredEmployees, currentUser]);
+  // filteredEmployees (DataContext) deliberately excludes superAdmin accounts
+  // company-wide (they're not a manageable "staff" row on most pages) — but
+  // that means a superAdmin login would never see a "(Me)" option here and
+  // could never filter Field Visit/Task down to just their own tasks. Patch
+  // them back into this dropdown only (not the shared list) when missing.
+  const staffFilterOptions = useMemo(() => {
+    const selfMissing = currentUser && !filteredEmployees.some(e => String(e.id) === String(currentUser.id));
+    const list = selfMissing ? [...filteredEmployees, currentUser] : filteredEmployees;
+    return [
+      { value: 'all', label: '🗂 Show All Task' },
+      ...list.map(e => ({
+        value: String(e.id),
+        label: currentUser && String(e.id) === String(currentUser.id) ? `${e.fullName} (Me)` : e.fullName,
+        photo: e.profilePhoto,
+      })),
+    ];
+  }, [filteredEmployees, currentUser]);
 
   // employees (not filteredEmployees) — Advance Search needs to resolve branch/
   // department/post for ANY assignee on an already-authorized task, even one
@@ -432,7 +723,14 @@ const TaskList = () => {
   // Quick filters + Advance Search apply client-side, on top of whatever
   // Filter by Staff already scoped server-side.
   const visibleTasks = useMemo(() => {
-    let result = tasks;
+    // A completed task stays visible on its completion day and the following
+    // day, then drops off the list — otherwise every finished task pile up
+    // here forever, struck-through, next to the ones still open.
+    const todayNepal = getNepalTodayISO();
+    let result = tasks.filter(t => {
+      if (t.status !== 'completed' || !t.completedAt) return true;
+      return daysBetweenISO(toNepalISO(t.completedAt), todayNepal) <= 1;
+    });
 
     if (yesterdayOnly) {
       const yesterdayNepal = addDaysISO(getNepalTodayISO(), -1);
@@ -445,6 +743,8 @@ const TaskList = () => {
     }
 
     if (quickPriorityId) result = result.filter(t => String(t.priorityId) === quickPriorityId);
+
+    if (fieldVisitOnly) result = result.filter(t => t.isFieldVisit);
 
     if (advSearchActive) {
       result = result.filter(t => {
@@ -465,7 +765,7 @@ const TaskList = () => {
     }
 
     return result;
-  }, [tasks, yesterdayOnly, quickPriorityId, advSearch, advSearchActive, employeeById, currentUser]);
+  }, [tasks, yesterdayOnly, quickPriorityId, fieldVisitOnly, advSearch, advSearchActive, employeeById, currentUser]);
 
   // WhatsApp notify — click-to-chat only (no Business API on file for this
   // tenant), so "sending" opens a pre-filled wa.me chat the user still has
@@ -495,6 +795,34 @@ const TaskList = () => {
   const notifyAssigneeWhatsApp = (row, assignee) => {
     const emp = employeeById.get(String(assignee.id));
     sendWhatsAppTo(emp?.phone, composeTaskMessage(row), assignee.name);
+  };
+
+  // Real send (not click-to-chat) via the phone-gateway SMS Gateway module —
+  // POSTs to the server, which relays it to a phone on the local network.
+  const sendSmsTo = async (phone, message, missingLabel) => {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (!digits) { showToast(`No mobile number on file for ${missingLabel}`, 'error'); return; }
+    const target = digits.length === 10 ? `+977${digits}` : (digits.startsWith('+') ? digits : `+${digits}`);
+    setSmsSending(true);
+    try {
+      await api.post('/sms/send', { to: target, text: message });
+      showToast(`SMS sent to ${missingLabel}`);
+    } catch (e) { showToast(e.message || 'Failed to send SMS', 'error'); }
+    finally { setSmsSending(false); }
+  };
+
+  const notifyAssigneeSms = (row, assignee) => {
+    const emp = employeeById.get(String(assignee.id));
+    sendSmsTo(emp?.phone, composeTaskMessage(row), assignee.name);
+  };
+
+  // Actions column's SMS button — sends straight to the one assignee, or
+  // opens a small picker when there's more than one to choose from.
+  const handleSmsClick = (row) => {
+    const assignees = Array.isArray(row.assignees) ? row.assignees : [];
+    if (!assignees.length) { showToast('This task has no assignee to notify', 'error'); return; }
+    if (assignees.length === 1) { notifyAssigneeSms(row, assignees[0]); return; }
+    setSmsPicker({ task: row, assignees });
   };
 
   // Actions column's WhatsApp button — sends straight to the one assignee, or
@@ -533,17 +861,6 @@ const TaskList = () => {
   const contactOptions = useMemo(() => contacts.map(c => ({ value: String(c.id), label: contactLabel(c) })), [contacts]);
   const selectedContact = useMemo(() => contacts.find(c => String(c.id) === String(form.contactId)) || null, [contacts, form.contactId]);
 
-  // Assign Task — staff checkbox grid, filtered by the search box above it
-  const assigneeOptions = useMemo(() => {
-    const q = assigneeSearch.trim().toLowerCase();
-    if (!q) return filteredEmployees;
-    return filteredEmployees.filter(e =>
-      [e.fullName, e.position, e.department, e.branch].some(v => v && v.toLowerCase().includes(q)));
-  }, [filteredEmployees, assigneeSearch]);
-  const toggleAssignee = (id) => {
-    const key = String(id);
-    setForm(p => ({ ...p, assignedTo: p.assignedTo.includes(key) ? p.assignedTo.filter(x => x !== key) : [...p.assignedTo, key] }));
-  };
 
   // Company contacts can have multiple named people (staff_contact_persons)
   // with their own phone numbers — fetched fresh whenever the selected
@@ -554,10 +871,9 @@ const TaskList = () => {
     api.get(`/contacts/${form.contactId}/persons`).then(rows => setContactPersons(Array.isArray(rows) ? rows : [])).catch(() => setContactPersons([]));
   }, [form.contactId, selectedContact?.contactInfo]);
 
-  const openAdd = () => { setEditId(null); setForm({ ...emptyTask, dueDate: todayISO() }); setErrors({}); setAssigneeSearch(''); setModal(true); };
+  const openAdd = () => { setEditId(null); setForm({ ...emptyTask, dueDate: todayISO(), isFieldVisit: fieldVisitOnly }); setErrors({}); setTaskModalMeta({ reactions: [], seenBy: [] }); setModal(true); };
   const openEdit = (row) => {
     setEditId(row.id);
-    setAssigneeSearch('');
     setForm({
       title: row.title || '', description: row.description || '',
       contactId: row.contactId ? String(row.contactId) : '',
@@ -567,8 +883,12 @@ const TaskList = () => {
       dueDate: row.dueDate ? String(row.dueDate).split('T')[0] : todayISO(),
       assignedTo: Array.isArray(row.assignees) ? row.assignees.map(a => String(a.id)) : [],
       status: row.status || 'pending',
+      isFieldVisit: !!row.isFieldVisit,
     });
     setErrors({});
+    setTaskModalMeta({ reactions: row.reactions || [], seenBy: row.seenBy || [] });
+    markTaskSeen(row.id).then(seenBy => { if (seenBy) setTaskModalMeta(p => ({ ...p, seenBy })); });
+    markTaskRead(row.id); // opening a task for edit (double-click) is an explicit "seen it" — stops the nav badge blinking for it
     setModal(true);
   };
 
@@ -592,6 +912,7 @@ const TaskList = () => {
       dueDate: form.dueDate || null,
       assignedTo: form.assignedTo.map(Number),
       status: form.status,
+      isFieldVisit: !!form.isFieldVisit,
     };
     try {
       const saved = editId ? await api.put(`/tasks/${editId}`, payload) : await api.post('/tasks', payload);
@@ -639,6 +960,18 @@ const TaskList = () => {
     } catch (e) { showToast(e.message || 'Update failed', 'error'); }
   };
 
+  // Right-click "Mark/Remove Field Visit" — flips the flag without reopening
+  // the whole Edit Task form. In the Field Visit page (fieldVisitOnly) an
+  // unmarked task simply drops out of visibleTasks on the next render.
+  const toggleFieldVisit = async (row) => {
+    const next = !row.isFieldVisit;
+    try {
+      await api.patch(`/tasks/${row.id}/field-visit`, { isFieldVisit: next });
+      setTasks(prev => prev.map(t => t.id === row.id ? { ...t, isFieldVisit: next } : t));
+      showToast(next ? 'Marked as Field Visit' : 'Removed from Field Visit');
+    } catch (e) { showToast(e.message || 'Update failed', 'error'); }
+  };
+
   const handleContactSaved = (saved) => {
     loadContacts();
     setForm(p => ({ ...p, contactId: String(saved.id) }));
@@ -646,16 +979,75 @@ const TaskList = () => {
     showToast('Contact added');
   };
 
-  const staffOptions = useMemo(() => filteredEmployees.map(e => ({ value: String(e.id), label: e.fullName })), [filteredEmployees]);
+  const staffOptions = useMemo(() => filteredEmployees.map(e => ({ value: String(e.id), label: e.fullName, photo: e.profilePhoto })), [filteredEmployees]);
 
   const loadFollowups = (taskId) => {
     setFollowupsLoading(true);
+    // Clear the previous task's followups up front — otherwise a failed
+    // fetch here leaves them in place, which used to make a real "no access
+    // to this task" error look like a silently-loaded (but stale) list.
+    setFollowups([]);
     api.get(`/tasks/${taskId}/followups`).then(rows => setFollowups(Array.isArray(rows) ? rows : []))
       .catch(e => showToast(e.message || 'Failed to load followups', 'error'))
       .finally(() => setFollowupsLoading(false));
   };
-  const openFollowupPanel = (row) => { setFollowupTask(row); setFollowupSearch(''); loadFollowups(row.id); };
+  // Followup History isn't shown on the Field Visit page (see FieldVisitJourneyPanel
+  // in the side panel below) — skip fetching it there entirely.
+  const openFollowupPanel = (row) => {
+    setFollowupTask(row);
+    setFollowupSearch('');
+    if (!fieldVisitOnly) loadFollowups(row.id);
+    markTaskSeen(row.id).then(seenBy => {
+      if (seenBy) setFollowupTask(prev => (prev && prev.id === row.id) ? { ...prev, seenBy } : prev);
+    });
+  };
   const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); setFollowupSearch(''); setDescriptionModalOpen(false); };
+
+  // Status dropdown in the Followup History panel header — same PATCH the
+  // grid's own complete/reopen checkbox uses, just offering the full
+  // Pending/In Progress/Completed/Cancelled set instead of a binary toggle.
+  const updateFollowupTaskStatus = async (status) => {
+    if (!followupTask) return;
+    try {
+      await api.patch(`/tasks/${followupTask.id}/status`, { status });
+      setTasks(prev => prev.map(t => t.id === followupTask.id ? { ...t, status } : t));
+      setFollowupTask(prev => prev ? { ...prev, status } : prev);
+    } catch (e) { showToast(e.message || 'Update failed', 'error'); }
+  };
+
+  // Deep link from a task notification's "View" button (see TaskToast in
+  // AttendanceToasts.jsx) — ?openTaskId=<id> in the URL. Broadens to "Show
+  // All Task" first: the notification may be about a task the viewer only
+  // has oversight of (admin, matching Department Head) rather than one
+  // they personally created/are assigned to, which the default "my own
+  // tasks" filter wouldn't include. For a plain employee this is always a
+  // safe no-op — the server silently keeps them scoped to their own tasks
+  // either way, which already covers anything they'd be notified about.
+  // openEvent (see TaskToast in AttendanceToasts.jsx) tells us which kind of
+  // notification this was: a brand-new "assigned" popup opens the Task form
+  // itself (the whole point is to see/accept the new task); every other
+  // event — completed, status/description changed, a new followup logged —
+  // means something happened on an EXISTING task, so it opens the Followup
+  // History panel instead, where that change actually shows up.
+  const openTaskIdParam = searchParams.get('openTaskId');
+  const openEventParam = searchParams.get('openEvent');
+  const openedFromNotiRef = useRef(false);
+  useEffect(() => {
+    if (openTaskIdParam && !openedFromNotiRef.current) setStaffFilter('all');
+  }, [openTaskIdParam]);
+  useEffect(() => {
+    if (!openTaskIdParam || openedFromNotiRef.current || loading) return;
+    const target = tasks.find(t => String(t.id) === String(openTaskIdParam));
+    if (target) {
+      openedFromNotiRef.current = true;
+      if (openEventParam === 'assigned') openEdit(target);
+      else openFollowupPanel(target);
+      const next = new URLSearchParams(searchParams);
+      next.delete('openTaskId');
+      next.delete('openEvent');
+      setSearchParams(next, { replace: true });
+    }
+  }, [tasks, loading, openTaskIdParam, openEventParam]);
 
   // Esc closes the followup drawer — but only when nothing else is already
   // claiming it. Layout.jsx's own global Esc handler closes the topmost
@@ -726,6 +1118,7 @@ const TaskList = () => {
       setFollowupModal(false);
       loadFollowups(followupTask.id);
       loadTasks(); // a hand-over may have added a new assignee, and a category transfer changed the task itself
+      markTaskRead(followupTask.id); // logging a followup is an explicit "seen it" — stops the nav badge blinking for it
       // Keep the open panel's own header/category in sync too — loadTasks() only refreshes the grid's copy.
       if (payload.nextCategoryId) {
         setFollowupTask(prev => prev ? { ...prev, categoryId: payload.nextCategoryId } : prev);
@@ -801,12 +1194,28 @@ const TaskList = () => {
       field: 'title', header: 'Task', minWidth: 170,
       render: (v, row) => (
         <span style={{ fontWeight: 600, color: row.status === 'completed' ? '#9ca3af' : '#1e293b',
-          textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>{v}</span>
+          textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>
+          {/* Only shown on the regular Task page — every row on the Field Visit
+              page is already a field visit, so the icon would be redundant there. */}
+          {row.isFieldVisit && !fieldVisitOnly && <span title="Field Visit" style={{ marginRight: 5 }}>🚗</span>}
+          {v}
+        </span>
       ),
     },
     {
       field: 'customerName', header: 'Customer', width: 150,
-      render: (v) => v ? <span style={{ fontSize: 12.5, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
+      render: (v, row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          {v ? <span style={{ fontSize: 12.5, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
+          {row.followupCount > 0 && (
+            <span title={`${row.followupCount} followup${row.followupCount === 1 ? '' : 's'} logged`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: '#fef2f2', color: '#dc2626',
+                border: '1px solid #fecaca', borderRadius: 10, padding: '1px 6px', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+              💬 {row.followupCount}
+            </span>
+          )}
+        </span>
+      ),
     },
     {
       field: 'personName', header: 'Person Name', width: 130,
@@ -851,7 +1260,10 @@ const TaskList = () => {
     {
       field: 'status', header: 'Status', width: 100, align: 'center',
       render: (v) => {
-        const s = v === 'completed' ? { bg: '#f0fdf4', color: '#15803d' } : v === 'in_progress' ? { bg: '#eff6ff', color: '#1d4ed8' } : { bg: '#fffbeb', color: '#b45309' };
+        const s = v === 'completed' ? { bg: '#f0fdf4', color: '#15803d' }
+          : v === 'cancelled' ? { bg: '#f3f4f6', color: '#6b7280' }
+          : v === 'in_progress' ? { bg: '#eff6ff', color: '#1d4ed8' }
+          : { bg: '#fffbeb', color: '#b45309' };
         return <span style={{ fontSize: 10.5, fontWeight: 700, background: s.bg, color: s.color, borderRadius: 20, padding: '3px 10px', textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
       },
     },
@@ -878,11 +1290,16 @@ const TaskList = () => {
           <button className="dg-action-btn" title="Notify via WhatsApp"
             style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}
             onClick={e => { e.stopPropagation(); handleWhatsAppClick(row); }}>💬</button>
+          {moduleFlags.smsGatewayEnabled && (
+            <button className="dg-action-btn" title="Notify via SMS" disabled={smsSending}
+              style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', opacity: smsSending ? .6 : 1 }}
+              onClick={e => { e.stopPropagation(); handleSmsClick(row); }}>📱</button>
+          )}
           <button className="dg-action-btn delete" title="Delete" onClick={e => { e.stopPropagation(); setDeleteConfirm(row.id); }}>🗑</button>
         </div>
       ),
     },
-  ], [fd]);
+  ], [fd, moduleFlags.smsGatewayEnabled, smsSending, fieldVisitOnly]);
 
   // Filter by Staff, quick filters, Advance Search — rendered inside the grid's
   // own toolbar (left of its Search box) via DataGrid's toolbarLeft prop.
@@ -896,6 +1313,7 @@ const TaskList = () => {
             onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
             options={staffFilterOptions}
             placeholder="— Select staff —"
+            showAvatar
           />
         </div>
       </div>
@@ -965,7 +1383,9 @@ const TaskList = () => {
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexShrink: 0 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0 }}>✅ Task</h1>
+        <h1 className="page-title">
+          {fieldVisitOnly ? '🚗 Field Visit' : '✅ Task'}
+        </h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {canManageSystem && (
             <div ref={gearRef} style={{ position: 'relative' }}>
@@ -997,10 +1417,11 @@ const TaskList = () => {
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 18px', background: '#1a56db',
               color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(26,86,219,.25)' }}>
-            + Add Task
+            + Add {fieldVisitOnly ? 'Field Visit' : 'Task'}
           </button>
         </div>
       </div>
+
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1012,7 +1433,7 @@ const TaskList = () => {
                 columns={columns}
                 data={visibleTasks}
                 rowKey="id"
-                defaultPageSize={20}
+                defaultPageSize={30}
                 compact={true}
                 className="task-list-grid"
                 showFilterButton={false}
@@ -1025,7 +1446,8 @@ const TaskList = () => {
                 onDeleteKey={(row) => setDeleteConfirm(row.id)}
                 onDeleteSelected={removeSelected}
                 contextMenu={[
-                  { label: 'Edit',   icon: '✏️', onClick: (row) => openEdit(row) },
+                  { label: 'Edit', icon: '✏️', onClick: (row) => openEdit(row) },
+                  { label: (row) => row.isFieldVisit ? 'Remove Field Visit' : 'Mark as Field Visit', icon: '🚗', onClick: (row) => toggleFieldVisit(row) },
                   'divider',
                   { label: 'Delete', icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
                 ]}
@@ -1048,6 +1470,21 @@ const TaskList = () => {
                   <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center', gap: 6 }}>
                     📄 {followupTask.title}
                   </div>
+                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                    <select value={followupTask.status} onChange={e => updateFollowupTaskStatus(e.target.value)}
+                      style={{ height: 26, border: '1px solid #d1d5db', borderRadius: 6, padding: '0 8px',
+                        fontSize: 11, fontWeight: 700, background: '#fff', color: '#374151', cursor: 'pointer' }}>
+                      {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
+                    <ReactionBar reactions={followupTask.reactions} currentUserId={currentUser?.id}
+                      onReact={async emoji => {
+                        const r = await reactToTask(followupTask.id, emoji);
+                        if (r) setFollowupTask(prev => prev ? { ...prev, reactions: r } : prev);
+                      }} />
+                  </div>
+                  <div style={{ marginTop: 6 }}>
+                    <SeenByAvatars seenBy={followupTask.seenBy} fd={fd} />
+                  </div>
                   <div style={{ marginTop: 6, padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 7 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#166534' }}>
                       {followupTask.customerName || 'No client linked'}
@@ -1066,83 +1503,238 @@ const TaskList = () => {
             </div>
 
             <div style={{ flex: 1, minHeight: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
-              {/* Followup History — blue card, matches the section-header convention on the Company detail panel */}
-              <div style={{ flex: 1, minHeight: 160, display: 'flex', flexDirection: 'column',
-                border: '1px solid #dbeafe', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ background: '#eff6ff', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7,
-                  borderBottom: '1px solid #dbeafe', flexShrink: 0 }}>
-                  <span style={{ fontSize: 12 }}>📋</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px', whiteSpace: 'nowrap' }}>FOLLOWUP HISTORY</span>
-                  <button onClick={openNewFollowup}
-                    style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, height: 26, padding: '0 10px',
-                      background: '#1a56db', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
-                    + New
-                  </button>
-                  <input type="text" value={followupSearch} onChange={e => setFollowupSearch(e.target.value)}
-                    placeholder="Search followups…"
-                    style={{ height: 26, width: 150, border: '1px solid #bfdbfe', borderRadius: 6,
-                      padding: '0 9px', fontSize: 11.5, color: '#1e3a8a', background: '#fff', outline: 'none', boxSizing: 'border-box', flexShrink: 0 }} />
-                </div>
-                <div style={{ flex: 1, minHeight: 0, padding: 8, background: '#fff' }}>
-                  {followupsLoading ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Loading…</div>
-                  ) : (
-                    <div className="dg-fixed-height" style={{ height: '100%' }}>
-                      <DataGrid
-                        columns={followupColumns}
-                        data={filteredFollowups}
-                        rowKey="id"
-                        className="followup-history-grid"
-                        showCheckbox={false}
-                        showFilterButton={false}
-                        showSearch={false}
-                        compact
-                        onRowClick={setSelectedFollowup}
-                        onRowDoubleClick={openEditFollowup}
-                      />
+              {/* On the dedicated Field Visit page, Followup History/Description
+                  (a call-log/notes concept for regular Task work) don't apply —
+                  the panel's one job here is the live journey status/actions for
+                  this specific task (FieldVisitJourneyPanel, below) plus its
+                  visit log. The regular Task page keeps these two cards
+                  unchanged, even for a field-visit-flagged task. */}
+              {!fieldVisitOnly && (
+                <>
+                  {/* Followup History — blue card, matches the section-header convention on the Company detail panel */}
+                  <div style={{ flex: 1, minHeight: 160, display: 'flex', flexDirection: 'column',
+                    border: '1px solid #dbeafe', borderRadius: 10, overflow: 'hidden' }}>
+                    <div style={{ background: '#eff6ff', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7,
+                      borderBottom: '1px solid #dbeafe', flexShrink: 0 }}>
+                      <span style={{ fontSize: 12 }}>📋</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#1d4ed8', letterSpacing: '.4px', whiteSpace: 'nowrap' }}>FOLLOWUP HISTORY</span>
+                      <button onClick={openNewFollowup}
+                        style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, height: 26, padding: '0 10px',
+                          background: '#1a56db', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+                        + New
+                      </button>
+                      <input type="text" value={followupSearch} onChange={e => setFollowupSearch(e.target.value)}
+                        placeholder="Search followups…"
+                        style={{ height: 26, width: 150, border: '1px solid #bfdbfe', borderRadius: 6,
+                          padding: '0 9px', fontSize: 11.5, color: '#1e3a8a', background: '#fff', outline: 'none', boxSizing: 'border-box', flexShrink: 0 }} />
                     </div>
-                  )}
-                </div>
-              </div>
+                    <div style={{ flex: 1, minHeight: 0, padding: 8, background: '#fff' }}>
+                      {followupsLoading ? (
+                        <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Loading…</div>
+                      ) : (
+                        <div className="dg-fixed-height" style={{ height: '100%' }}>
+                          <DataGrid
+                            columns={followupColumns}
+                            data={filteredFollowups}
+                            rowKey="id"
+                            className="followup-history-grid"
+                            showCheckbox={false}
+                            showFilterButton={false}
+                            showSearch={false}
+                            compact
+                            onRowClick={setSelectedFollowup}
+                            onRowDoubleClick={openEditFollowup}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-              {/* Description — amber card, two columns (Description | Replies) with an
-                  arrow connecting them, same layout as the popup this opens into. Click
-                  either side (except the reply input) to open the full popup — this
-                  compact version only shows ~2 replies before it needs scrolling. */}
-              <div style={{ flexShrink: 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
-                  <span style={{ fontSize: 12 }}>📝</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
-                </div>
-                <div style={{ display: 'flex', background: '#fff' }}>
-                  <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
-                    style={{ flex: 1, minWidth: 0, padding: '10px 12px', cursor: selectedFollowup ? 'pointer' : 'default' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>
-                      Description
+                  {/* Description — amber card, two columns (Description | Replies) with an
+                      arrow connecting them, same layout as the popup this opens into. Click
+                      either side (except the reply input) to open the full popup — this
+                      compact version only shows ~2 replies before it needs scrolling. */}
+                  <div style={{ flexShrink: 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
+                    <div style={{ background: '#fffbeb', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #fde68a' }}>
+                      <span style={{ fontSize: 12 }}>📝</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309', letterSpacing: '.4px' }}>DESCRIPTION</span>
                     </div>
-                    <div style={{ fontSize: 12, color: '#374151', maxHeight: 110, overflow: 'hidden' }}>
-                      {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                    <div style={{ display: 'flex', background: '#fff' }}>
+                      <div style={{ flex: 1, minWidth: 0, padding: '10px 12px' }}>
+                        <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
+                          style={{ cursor: selectedFollowup ? 'pointer' : 'default' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>
+                            Description
+                          </div>
+                          <div style={{ fontSize: 12, color: '#374151', maxHeight: 110, overflow: 'hidden' }}>
+                            {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
+                          </div>
+                        </div>
+                        <FollowedByLine f={selectedFollowup} />
+                        {selectedFollowup && (
+                          <>
+                            <ReactionBar reactions={selectedFollowup.reactions} currentUserId={currentUser?.id}
+                              onReact={emoji => reactToFollowup(selectedFollowup.id, emoji)} />
+                            <div style={{ marginTop: 6 }}>
+                              <SeenByAvatars seenBy={selectedFollowup.seenBy} fd={fd} />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', color: '#fbbf24', fontSize: 16, flexShrink: 0 }}>➜</div>
+                      <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #fef3c7', background: '#fffdf7', padding: '10px 12px' }}>
+                        <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
+                          style={{ cursor: selectedFollowup ? 'pointer' : 'default' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>
+                            Replies
+                          </div>
+                          {/* Anyone with access to the task (creator or any assignee: HOD,
+                              admin, branch manager, whoever) can weigh in on this entry. */}
+                          <div style={{ maxHeight: 100, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {renderReplyBubbles()}
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          {renderReplyInput()}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', color: '#fbbf24', fontSize: 16, flexShrink: 0 }}>➜</div>
-                  <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #fef3c7', background: '#fffdf7', padding: '10px 12px' }}>
-                    <div onClick={() => selectedFollowup && setDescriptionModalOpen(true)}
-                      style={{ cursor: selectedFollowup ? 'pointer' : 'default' }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>
-                        Replies
-                      </div>
-                      {/* Anyone with access to the task (creator or any assignee: HOD,
-                          admin, branch manager, whoever) can weigh in on this entry. */}
-                      <div style={{ maxHeight: 100, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {renderReplyBubbles()}
-                      </div>
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                      {renderReplyInput()}
-                    </div>
+                </>
+              )}
+
+              {/* Journey Status — the dedicated Field Visit page's replacement for
+                  Followup History/Description: live Office Out/Check In/Check
+                  Out/Next Field Visit/Move to Office controls for THIS task. */}
+              {fieldVisitOnly && followupTask.isFieldVisit && (
+                <FieldVisitJourneyPanel task={followupTask} tasks={tasks} currentUser={currentUser} showToast={showToast} />
+              )}
+
+              {/* Field Visit Log — this task's own GPS check-in/check-out
+                  history (see FieldVisitJourneyPanel.jsx), shown on both
+                  pages whenever the task is field-visit-flagged. */}
+              {followupTask.isFieldVisit && (
+                <div style={{ flexShrink: 0, border: '1px solid #bbf7d0', borderRadius: 10, overflow: 'hidden' }}>
+                  <div style={{ background: '#f0fdf4', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: '1px solid #bbf7d0' }}>
+                    <span style={{ fontSize: 12 }}>🚗</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#166534', letterSpacing: '.4px' }}>FIELD VISIT LOG</span>
+                  </div>
+                  <div style={{ padding: '10px 12px', background: '#fff', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {fieldVisitStopsLoading ? (
+                      <div style={{ color: '#9ca3af', fontSize: 12 }}>Loading…</div>
+                    ) : !fieldVisitStops.length ? (
+                      <div style={{ color: '#d1d5db', fontSize: 12 }}>No visits logged yet</div>
+                    ) : fieldVisitStops.map((s, idx) => (
+                      <React.Fragment key={s.id}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderBottom: '1px solid #f1f5f9', paddingBottom: 10 }}>
+                          <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12 }}>{s.employeeName}</div>
+
+                          {/* One movement, three columns in the same line:
+                              Check Out (where this leg started) | Check In (arrival at the
+                              client) | Check Out (departure from the client). Only the trip's
+                              first stop actually departed from the office — a chained "Head
+                              Here Next" stop departed from the previous client instead, so its
+                              own departure timestamp/location isn't tracked per-stop, only the
+                              resulting travel distance/estimate. */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                            <div style={{ background: '#eff6ff', border: '1px solid #dbeafe', borderRadius: 7, padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '.2px' }}>
+                                Check Out — {s.isFirstStopOfSession ? 'From Office' : 'From Last Office'}
+                              </div>
+                              {s.isFirstStopOfSession ? (
+                                <>
+                                  <div style={{ fontSize: 11.5, color: '#374151' }}>{formatNepalTime(s.sessionOfficeOutAt)}</div>
+                                  <LocationPin lat={settings.officeLatitude} lng={settings.officeLongitude} label={settings.officeLocationName} />
+                                </>
+                              ) : <div style={{ fontSize: 11.5, color: '#d1d5db' }}>—</div>}
+                              {s.travelKm != null && <div style={{ fontSize: 11, color: '#6b7280' }}>Distance Avg: {s.travelKm.toFixed(1)} km</div>}
+                              {s.estimatedMinutes != null && <div style={{ fontSize: 11, color: '#6b7280' }}>Time est. Bike: {s.estimatedMinutes}m</div>}
+                            </div>
+
+                            <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 7, padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: '#c2410c', textTransform: 'uppercase', letterSpacing: '.2px' }}>
+                                Check In{s.checkInClientName ? ` — ${s.checkInClientName}` : ''}
+                              </div>
+                              <div style={{ fontSize: 11.5, color: '#374151' }}>{s.checkInAt ? formatNepalTime(s.checkInAt) : <span style={{ color: '#d1d5db' }}>—</span>}</div>
+                              <LocationPin lat={s.checkInLat} lng={s.checkInLng} label={s.checkInLocationName} />
+                              {s.checkInAt && (
+                                <VerifyBadge verified={isLocationVerified(s.checkInLat, s.checkInLng, s.customerLat, s.customerLng)} />
+                              )}
+                              {s.travelKm != null && <div style={{ fontSize: 11, color: '#6b7280' }}>Distance: {s.travelKm.toFixed(1)} km</div>}
+                              {s.travelMinutes != null && <div style={{ fontSize: 11, color: '#6b7280' }}>Time Take: {s.travelMinutes}m</div>}
+                              <div style={{ fontSize: 11, color: '#6b7280' }}>In Remarks: {s.checkInRemarks || '—'}</div>
+                            </div>
+
+                            <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 7, padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '.2px' }}>
+                                Check Out{s.checkInClientName ? ` — ${s.checkInClientName}` : ''}
+                              </div>
+                              <div style={{ fontSize: 11.5, color: '#374151' }}>{s.checkOutAt ? formatNepalTime(s.checkOutAt) : <span style={{ color: '#d1d5db' }}>—</span>}</div>
+                              <LocationPin lat={s.checkOutLat} lng={s.checkOutLng} label={s.checkInLocationName} />
+                              {s.checkOutAt && (
+                                <VerifyBadge verified={isLocationVerified(s.checkOutLat, s.checkOutLng, s.customerLat, s.customerLng)} />
+                              )}
+                              {s.checkInAt && s.checkOutAt && <div style={{ fontSize: 11, color: '#6b7280' }}>Stayed Duration: {fmtDuration(s.checkInAt, s.checkOutAt)}</div>}
+                              <div style={{ fontSize: 11, color: '#6b7280' }}>
+                                Status: {s.checkOutWorkProgress ? (CHECKOUT_STATUS_LABEL[s.checkOutWorkProgress] || s.checkOutWorkProgress) : '—'}
+                              </div>
+                              <div style={{ fontSize: 11, color: '#6b7280' }}>Out Remarks: {s.checkOutRemarks || '—'}</div>
+                            </div>
+                          </div>
+
+                          {/* Back to Office — shown once, on whichever stop was the last
+                              of a trip that's actually been closed out. */}
+                          {s.isLastStopOfSession && s.sessionOfficeInAt && (
+                            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 7, padding: '6px 10px' }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '.3px' }}>
+                                Check In — Back to Office
+                              </div>
+                              <div style={{ fontSize: 12, color: '#374151', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                <span>{formatNepalTime(s.sessionOfficeInAt)}</span>
+                                <LocationPin lat={s.sessionOfficeInLat} lng={s.sessionOfficeInLng} label={settings.officeLocationName} />
+                              </div>
+                              {s.sessionReturnTravelKm != null && (
+                                <div style={{ fontSize: 11.5, color: '#6b7280', marginTop: 2 }}>
+                                  Time Taken: {s.sessionReturnTravelMinutes}m · Distance: {s.sessionReturnTravelKm.toFixed(1)} km · Est. by Bike: {s.sessionReturnEstimatedMinutes}m
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Summary — a plain-language recap of this one stop, and where
+                              the trip went afterward. "Next" is found by id, not array
+                              position — fieldVisitStops is newest-first, so a chained
+                              "Head Here Next" stop within the same session actually sits
+                              right before this one in the array, not after. */}
+                          {(() => {
+                            const stopLabel = s.checkInClientName || s.customerName || s.taskTitle || 'this client';
+                            const nextStop = fieldVisitStops
+                              .filter(s2 => s2.sessionId === s.sessionId && s2.id > s.id)
+                              .sort((a, b) => a.id - b.id)[0];
+                            const nextLabel = nextStop
+                              ? `➡️ Next: ${nextStop.checkInClientName || nextStop.customerName || nextStop.taskTitle || 'next client'}`
+                              : s.isLastStopOfSession && s.sessionOfficeInAt ? `🏢 Moved to ${settings.officeLocationName || 'Office'}`
+                              : '⏳ Still in progress';
+                            const statusRemarks = s.checkOutWorkProgress || s.checkOutRemarks
+                              ? `${s.checkOutWorkProgress ? (CHECKOUT_STATUS_LABEL[s.checkOutWorkProgress] || s.checkOutWorkProgress) : 'Pending'}${s.checkOutRemarks ? ` — ${s.checkOutRemarks}` : ''}`
+                              : null;
+                            return (
+                              <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 7, padding: '7px 10px',
+                                display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#374151' }}>
+                                <div style={{ fontSize: 9.5, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '.2px' }}>Summary</div>
+                                {s.travelMinutes != null && <div>Took {s.travelMinutes}m to reach {stopLabel}</div>}
+                                {s.checkInAt && s.checkOutAt && <div>Stayed {fmtHHMM(s.checkInAt, s.checkOutAt)} at {stopLabel}</div>}
+                                {statusRemarks && <div>{statusRemarks}</div>}
+                                <div style={{ fontWeight: 600 }}>{nextLabel}</div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </React.Fragment>
+                    ))}
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -1164,6 +1756,11 @@ const TaskList = () => {
                 <div style={{ fontSize: 13.5, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                   {selectedFollowup?.description || <span style={{ color: '#d1d5db' }}>—</span>}
                 </div>
+                <FollowedByLine f={selectedFollowup} />
+                {selectedFollowup && (
+                  <ReactionBar reactions={selectedFollowup.reactions} currentUserId={currentUser?.id}
+                    onReact={emoji => reactToFollowup(selectedFollowup.id, emoji)} />
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', color: '#fbbf24', fontSize: 20, flexShrink: 0 }}>➜</div>
               <div style={{ width: 340, flexShrink: 0, borderLeft: '1px solid #f1f5f9', paddingLeft: 20,
@@ -1217,6 +1814,7 @@ const TaskList = () => {
                   onChange={v => setAdvSearchDraft(p => ({ ...p, staffId: v }))}
                   options={staffOptions}
                   placeholder="— Any —"
+                  showAvatar
                 />
               )}
               {field('Task Category', false, null,
@@ -1271,6 +1869,18 @@ const TaskList = () => {
               {errors._submit && (
                 <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#991b1b' }}>
                   {errors._submit}
+                </div>
+              )}
+
+              {editId && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap',
+                  gap: 10, padding: '8px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                  <ReactionBar reactions={taskModalMeta.reactions} currentUserId={currentUser?.id}
+                    onReact={async emoji => {
+                      const r = await reactToTask(editId, emoji);
+                      if (r) setTaskModalMeta(p => ({ ...p, reactions: r }));
+                    }} />
+                  <SeenByAvatars seenBy={taskModalMeta.seenBy} fd={fd} />
                 </div>
               )}
 
@@ -1369,49 +1979,24 @@ const TaskList = () => {
               </div>
 
               {field('Assign Task', false, null,
-                <div>
-                  <input type="text" value={assigneeSearch} onChange={e => setAssigneeSearch(e.target.value)}
-                    placeholder="Search by name, post, department, branch..."
-                    style={{ height: 32, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px',
-                      fontSize: 12.5, boxSizing: 'border-box', outline: 'none', marginBottom: 6 }} />
-                  <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #dedede', borderRadius: 6 }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                      <thead>
-                        <tr>
-                          {['', 'Name', 'Post', 'Department', 'Branch'].map(h => (
-                            <th key={h} style={{ position: 'sticky', top: 0, zIndex: 1, background: '#efefef', color: '#374151',
-                              fontSize: 10, fontWeight: 700, textAlign: 'left', padding: '4px 8px',
-                              borderBottom: '2px solid #dedede', borderRight: '1px solid #dedede' }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {assigneeOptions.length === 0 ? (
-                          <tr><td colSpan={5} style={{ padding: '10px 8px', textAlign: 'center', color: '#9ca3af', fontSize: 11.5 }}>No staff found</td></tr>
-                        ) : assigneeOptions.map(e => {
-                          const key = String(e.id);
-                          const sel = form.assignedTo.includes(key);
-                          return (
-                            <tr key={e.id} onClick={() => toggleAssignee(e.id)}
-                              style={{ cursor: 'pointer', background: sel ? '#eff6ff' : '#fff' }}>
-                              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9' }}>
-                                <input type="checkbox" checked={sel} onChange={() => {}}
-                                  style={{ width: 12, height: 12, accentColor: '#1a56db', cursor: 'pointer' }} />
-                              </td>
-                              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9', fontWeight: 600, color: '#1e293b' }}>{e.fullName}</td>
-                              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9', color: '#6b7280' }}>{abbrev(e.position)}</td>
-                              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9', borderRight: '1px solid #f1f5f9', color: '#6b7280' }}>{abbrev(e.department)}</td>
-                              <td style={{ padding: '4px 8px', borderBottom: '1px solid #f1f5f9', color: '#6b7280' }}>{abbrev(e.branch)}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  {form.assignedTo.length > 0 && (
-                    <div style={{ marginTop: 4, fontSize: 11, color: '#6b7280' }}>{form.assignedTo.length} staff selected</div>
-                  )}
-                </div>
+                <EmpMultiSelect
+                  value={form.assignedTo}
+                  onChange={v => setForm(p => ({ ...p, assignedTo: v }))}
+                  employees={employees}
+                  placeholder="Search by name, post, department, branch..."
+                  formatLabel={e => `${e.fullName} — ${abbrev(e.position)} · ${abbrev(e.department)} · ${abbrev(e.branch)}`}
+                  showNamesWhenMultiple
+                  showAvatars
+                />
+              )}
+
+              {field('Field Visit', false, null,
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.isFieldVisit}
+                    onChange={e => setForm(p => ({ ...p, isFieldVisit: e.target.checked }))}
+                    style={{ width: 16, height: 16, accentColor: '#1a56db', cursor: 'pointer' }} />
+                  <span style={{ fontSize: 12.5, color: '#374151' }}>🚗 This is a Field Visit task</span>
+                </label>
               )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -1464,7 +2049,7 @@ const TaskList = () => {
                     <button key={m.value} type="button" onClick={() => {
                         setFollowupForm(p => ({ ...p, mode: m.value }));
                         if (m.value === 'email')    openGmailCompose(followupTask.customerEmail);
-                        if (m.value === 'whatsapp') openWhatsAppChat(followupTask.customerMobile || followupTask.customerMobile2);
+                        if (m.value === 'whatsapp') openWhatsAppChat(followupTask.customerMobile || followupTask.customerMobile2 || followupTask.customerPhone);
                       }}
                       style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '8px 6px',
                         border: `2px solid ${followupForm.mode === m.value ? '#1a56db' : '#e5e7eb'}`, borderRadius: 8, cursor: 'pointer',
@@ -1496,9 +2081,8 @@ const TaskList = () => {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {field('Next Followup & Time', false, null,
-                  <input type="datetime-local" value={followupForm.nextFollowupAt}
-                    onChange={e => setFollowupForm(p => ({ ...p, nextFollowupAt: e.target.value }))}
-                    style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
+                  <DateTimePicker value={followupForm.nextFollowupAt}
+                    onChange={v => setFollowupForm(p => ({ ...p, nextFollowupAt: v }))} />
                 )}
                 {field('Hand Over', false, null,
                   <SearchableSelect
@@ -1506,6 +2090,7 @@ const TaskList = () => {
                     onChange={v => setFollowupForm(p => ({ ...p, handedOverTo: v }))}
                     options={staffOptions}
                     placeholder="— None —"
+                    showAvatar
                   />
                 )}
               </div>
@@ -1578,6 +2163,30 @@ const TaskList = () => {
                     border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 13 }}>
                   <span>{a.name}{a.post ? ` | ${a.post}` : ''}</span>
                   <span>💬</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SMS assignee picker — shown when a task has 2+ assignees */}
+      {smsPicker && (
+        <div className="modal-overlay" onClick={() => setSmsPicker(null)}>
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📱 Notify via SMS</h2>
+              <button className="modal-close" onClick={() => setSmsPicker(null)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <p style={{ fontSize: 12.5, color: '#6b7280', margin: '0 0 4px' }}>Who should get this by SMS?</p>
+              {smsPicker.assignees.map(a => (
+                <button key={a.id}
+                  onClick={() => { notifyAssigneeSms(smsPicker.task, a); setSmsPicker(null); }}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px',
+                    border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 13 }}>
+                  <span>{a.name}{a.post ? ` | ${a.post}` : ''}</span>
+                  <span>📱</span>
                 </button>
               ))}
             </div>

@@ -19,29 +19,31 @@ const FB_SHIFTS = [
   { id:2, name:'बिहान सिफ्ट',  nameEn:'Morning Shift',  code:'morning',  startTime:'06:00', endTime:'14:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#e3a008', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
   { id:3, name:'बेलुकी सिफ्ट', nameEn:'Evening Shift',  code:'evening',  startTime:'14:00', endTime:'22:00', workHours:8, gracePeriodStart:5, gracePeriodEnd:5, makeDefault:false,active:true, color:'#7e3af2', isSystem:false,days:['Sun','Mon','Tue','Wed','Thu','Fri'], exceptionalDayEnabled:false, exceptionalDays:[], winterPolicyEnabled:false, winterPolicy:null },
 ];
-/* ── localStorage helpers ── */
-const lsGet = (key, fallback) => {
-  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
-};
-const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
-
-// One-time cleanup: a since-removed fallback used to seed these 3 fake
-// employees into ls_employees whenever the initial API fetch failed. Strip
-// them out of whatever's already cached so browsers that hit that fallback
-// before it was removed don't keep resurfacing them.
-const RETIRED_DEMO_EMPLOYEE_IDS = new Set(['EMP001', 'EMP002', 'EMP003']);
-const stripRetiredDemoEmployees = (emps) =>
-  Array.isArray(emps) ? emps.filter(e => !RETIRED_DEMO_EMPLOYEE_IDS.has(e.employeeId)) : emps;
+// NOTE: this app is multi-tenant on a single shared origin — every tenant is
+// served from the same host, differing only by a /t/<slug>/ path prefix, so
+// browser storage (localStorage/sessionStorage/cookies) is NOT isolated per
+// tenant the way it would be on separate subdomains. This context used to
+// cache employees/shifts/leaveTypes/leaveBalances/leaves/officeVisits in
+// localStorage (keys like ls_leaves) as an offline-resilience fallback and
+// to "merge in local-only records submitted while offline" after a fresh
+// API fetch. In a single-tenant desktop/offline context that's harmless,
+// but here it meant: view Tenant A, then open Tenant B in the same browser
+// — Tenant B's initial render (and the "local-only" merge, keyed by id, so
+// stale records that don't match Tenant B's fresh ids all survived as
+// "local-only") showed Tenant A's leaves/visits/employees. Removed
+// entirely — no client-side persistence of tenant data across page loads;
+// state is always exactly whatever the live API for the CURRENT tenant
+// returns.
 
 export const DataProvider = ({ children }) => {
   const { filterByRole, isAdmin, currentUser } = useAuth();
 
-  const [employees,    setEmployees]    = useState(() => stripRetiredDemoEmployees(lsGet('ls_employees', [])));
-  const [shifts,       setShifts]       = useState(() => lsGet('ls_shifts', []));
-  const [leaveTypes,   setLeaveTypes]   = useState(() => lsGet('ls_leaveTypes', FB_LEAVE_TYPES));
-  const [leaveBalances,setLeaveBalances]= useState(() => lsGet('ls_leaveBalances', []));
-  const [leaves,       setLeaves]       = useState(() => lsGet('ls_leaves', []));
-  const [officeVisits, setOfficeVisits] = useState(() => lsGet('ls_officeVisits', []));
+  const [employees,    setEmployees]    = useState([]);
+  const [shifts,       setShifts]       = useState([]);
+  const [leaveTypes,   setLeaveTypes]   = useState(FB_LEAVE_TYPES);
+  const [leaveBalances,setLeaveBalances]= useState([]);
+  const [leaves,       setLeaves]       = useState([]);
+  const [officeVisits, setOfficeVisits] = useState([]);
   const [apiOk,        setApiOk]        = useState(false);
 
   /* Bumped whenever duty roster is mutated — attendance components watch this to auto-refetch */
@@ -79,14 +81,6 @@ export const DataProvider = ({ children }) => {
     [officeVisits, _scopeIds, currentUser],
   );
 
-  /* ── Persist state changes to localStorage ── */
-  useEffect(() => { lsSet('ls_employees',    employees);    }, [employees]);
-  useEffect(() => { lsSet('ls_shifts',       shifts);       }, [shifts]);
-  useEffect(() => { lsSet('ls_leaveTypes',   leaveTypes);   }, [leaveTypes]);
-  useEffect(() => { lsSet('ls_leaveBalances',leaveBalances);}, [leaveBalances]);
-  useEffect(() => { lsSet('ls_leaves',       leaves);       }, [leaves]);
-  useEffect(() => { lsSet('ls_officeVisits', officeVisits); }, [officeVisits]);
-
   /* ── Load all data from API on login (and on startup for an already
      logged-in session). Every endpoint below is behind authGuard, so
      fetching while logged out can only ever 401 — worse, the form login
@@ -95,6 +89,10 @@ export const DataProvider = ({ children }) => {
      for the whole session until a manual refresh. ── */
   useEffect(() => {
     if (!currentUser) return;
+    // Reset to empty immediately on every (re)fetch — e.g. switching tenants
+    // without a full page reload — so the previous tenant's data can never
+    // stay on screen even for the moment before this fetch resolves.
+    setEmployees([]); setShifts([]); setLeaveBalances([]); setLeaves([]); setOfficeVisits([]);
     (async () => {
       try {
         const [emps, shfts, lvTypes, lvBals, lvs, visits] = await Promise.all([
@@ -109,24 +107,14 @@ export const DataProvider = ({ children }) => {
         setShifts(shfts);
         setLeaveTypes(lvTypes);
         setLeaveBalances(lvBals);
-        /* Merge API data with local-only records (submitted while offline) */
-        setLeaves(prev => {
-          const apiIds = new Set(lvs.map(l => String(l.id)));
-          const localOnly = prev.filter(l => !apiIds.has(String(l.id)));
-          return [...lvs, ...localOnly];
-        });
-        setOfficeVisits(prev => {
-          const apiIds = new Set(visits.map(v => String(v.id)));
-          const localOnly = prev.filter(v => !apiIds.has(String(v.id)));
-          return [...visits, ...localOnly];
-        });
+        setLeaves(lvs);
+        setOfficeVisits(visits);
         setApiOk(true);
       } catch {
-        // API unavailable — use localStorage data. Staff is real org data, so
-        // unlike shifts there's no seeded fallback here: if there's nothing
-        // cached, the UI shows an empty state rather than fake people.
-        const localShifts = lsGet('ls_shifts', null);
-        if (!localShifts || (Array.isArray(localShifts) && localShifts.length === 0)) setShifts(FB_SHIFTS);
+        // API unavailable — fall back to the hardcoded shift defaults only;
+        // no cached-from-disk data (see note above), so this is genuinely
+        // just "the app couldn't reach the server," not real org data.
+        setShifts(FB_SHIFTS);
         setApiOk(false);
       }
     })();
@@ -155,7 +143,7 @@ export const DataProvider = ({ children }) => {
   const getEmployeeById   = (id) => employees.find(e => String(e.id) === String(id));
   const getEmployeeName   = (id) => employees.find(e => String(e.id) === String(id))?.fullName || '-';
   const refreshEmployees  = async () => {
-    try { const emps = await api.get('/employees'); setEmployees(emps); lsSet('ls_employees', emps); }
+    try { const emps = await api.get('/employees'); setEmployees(emps); }
     catch { /* keep existing */ }
   };
 
@@ -214,15 +202,15 @@ export const DataProvider = ({ children }) => {
     }
     return localId;
   };
-  const recommendLeave = async (id, recommendedBy, recoComment='') => {
+  const recommendLeave = async (id, recommendedBy, recommendComment='') => {
     const today = getNepalTodayISO();
     setLeaves(p => p.map(x => String(x.id) === String(id)
-      ? { ...x, recommendedBy, recommendedDate: today, recoComment }
+      ? { ...x, recommendedBy, recommendedDate: today, recommendComment }
       : x
     ));
     if (apiOk) {
       try {
-        const l = await api.patch(`/leaves/${id}/recommend`, { recommendedBy });
+        const l = await api.patch(`/leaves/${id}/recommend`, { recommendedBy, comment: recommendComment });
         setLeaves(p => p.map(x => String(x.id) === String(id) ? { ...x, ...l } : x));
       } catch {}
     }
@@ -328,15 +316,15 @@ export const DataProvider = ({ children }) => {
     }
     return localId;
   };
-  const recommendVisit = async (id, recommendedBy, recoComment='') => {
+  const recommendVisit = async (id, recommendedBy, recommendComment='') => {
     const today = getNepalTodayISO();
     setOfficeVisits(p => p.map(x => String(x.id) === String(id)
-      ? { ...x, recommendedBy, recommendedDate: today, recoComment }
+      ? { ...x, recommendedBy, recommendedDate: today, recommendComment }
       : x
     ));
     if (apiOk) {
       try {
-        const v = await api.patch(`/visits/${id}/recommend`, { recommendedBy, recoComment });
+        const v = await api.patch(`/visits/${id}/recommend`, { recommendedBy, comment: recommendComment });
         setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? { ...x, ...v } : x));
       } catch {}
     }

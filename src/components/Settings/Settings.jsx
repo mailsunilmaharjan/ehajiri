@@ -18,11 +18,13 @@ import {
   toNepaliDigits, getNepalNow, getNepalTodayISO,
 } from '../../utils/dateUtils.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
+import { downloadBlob } from '../../utils/printHelper.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useNewShortcut from '../../hooks/useNewShortcut.js';
+import { getCurrentLocation } from '../../utils/geoUtils.js';
 
 /* ─────────────── constants ─────────────── */
 const ALL_DAYS = [
@@ -319,6 +321,11 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
   const [form,       setForm]       = useState({});
   const [errors,     setErrors]     = useState({});
   const [delConfirm, setDelConfirm] = useState(null);
+  const [toast,      setToast]      = useState(null);
+  const firstFieldRef = useRef(null);
+
+  const showToast = (msg, type='danger') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
+  const focusFirstField = () => firstFieldRef.current?.querySelector('input, select, textarea')?.focus();
 
   const buildEmpty = () =>
     fields.reduce((acc, f) => ({
@@ -332,17 +339,35 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
   const openAdd  = () => { setForm(buildEmpty()); setErrors({}); setEditId(null); setModal(true); };
   const openEdit = (item) => { setForm({ ...item }); setErrors({}); setEditId(item.id); setModal(true); };
 
+  const isDupe = (key, value) => {
+    const v = String(value ?? '').trim().toLowerCase();
+    if (!v) return false;
+    return data.some(d => d.id !== editId && String(d[key] ?? '').trim().toLowerCase() === v);
+  };
+
   const validate = () => {
     const errs = {};
     fields.filter(f => f.required).forEach(f => {
       if (String(form[f.key] ?? '').trim() === '') errs[f.key] = L('आवश्यक छ','Required');
     });
+    // Name and Short Name (where the section has one) must be unique — every
+    // report/picker that resolves a record by its name or short code would
+    // otherwise silently pick whichever duplicate comes first.
+    if (!errs.name && fields.some(f => f.key === 'name') && isDupe('name', form.name))
+      errs.name = `${L('डुप्लिकेट','Duplicate')} ${title} ${L('नाम','Name')}`;
+    if (!errs.shortName && fields.some(f => f.key === 'shortName') && isDupe('shortName', form.shortName))
+      errs.shortName = L('डुप्लिकेट छोटो नाम','Duplicate Short Name');
     return errs;
   };
 
   const handleSave = () => {
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      if (errs.name && isDupe('name', form.name)) showToast(errs.name);
+      else if (errs.shortName && isDupe('shortName', form.shortName)) showToast(errs.shortName);
+      return;
+    }
     const finalForm = { ...form };
     // Auto short name (e.g. Department/Post: "Administration" -> "Admin") —
     // only fills in when the user left it blank, never overrides a manually
@@ -351,7 +376,19 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
       finalForm[autoShortName.to] = String(finalForm[autoShortName.from] || '').trim().slice(0, autoShortName.len || 5);
     }
     onSave(editId, finalForm);
-    setModal(false);
+    if (editId) {
+      // Editing an existing record — done, close as before.
+      setModal(false);
+    } else {
+      // Adding — stay on the same form, cleared, ready for the next entry
+      // instead of closing. Combined with Ctrl+N/Ctrl+S above, this makes
+      // adding several records in a row (e.g. a batch of Branches) never
+      // need to reopen the modal between each one.
+      setForm(buildEmpty());
+      setErrors({});
+      showToast(`${title} ${L('थपियो','added')}`, 'success');
+      setTimeout(focusFirstField, 0);
+    }
   };
 
   /* Ctrl+S saves the Add/Edit modal — same action as the Save button */
@@ -446,8 +483,9 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
-              {fields.map(f => (
-                <div key={f.key} className="form-group" style={{ marginBottom:14 }}>
+              {fields.map((f, i) => (
+                <div key={f.key} className="form-group" style={{ marginBottom:14 }}
+                  ref={i === 0 ? firstFieldRef : undefined}>
                   <label className="form-label">
                     {f.header}
                     {f.required && <span style={{ color:'#ef4444', marginLeft:2 }}>*</span>}
@@ -486,6 +524,12 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
           </div>
         </div>
       )}
+
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast-${toast.type}`}><span>{toast.type==='success'?'✅':'❌'}</span><span>{toast.msg}</span></div>
+        </div>
+      )}
     </div>
   );
 };
@@ -496,7 +540,7 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
 const defaultShiftForm = {
   name:'', nameEn:'', code:'',
   startTime:'09:00', endTime:'17:00', workHours:8,
-  gracePeriodStart:5, gracePeriodEnd:5,
+  gracePeriodStart:5, gracePeriodEnd:0,
   makeDefault:false, active:true,
   exceptionalDayEnabled:false, exceptionalDays:[],
   exceptionalStartTime:'09:00', exceptionalEndTime:'17:00', exceptionalWorkHours:8,
@@ -520,6 +564,7 @@ const ShiftInlineSection = () => {
   const [winterTemp,        setWinterTemp]        = useState({});
   const [toast,             setToast]             = useState(null);
   const [defaultConflict,   setDefaultConflict]   = useState(null); // existing default shift when trying to replace
+  const firstFieldRef = useRef(null);
 
   const showToast = (msg, type='success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2800); };
 
@@ -544,9 +589,16 @@ const ShiftInlineSection = () => {
     setErrors({}); setEditId(s.id); setModal(true);
   };
 
+  const isDupeShiftName = (name) => {
+    const v = String(name ?? '').trim().toLowerCase();
+    if (!v) return false;
+    return shifts.some(s => s.id !== editId && String(s.name ?? '').trim().toLowerCase() === v);
+  };
+
   const validate = () => {
     const e = {};
     if (!form.name.trim()) e.name = L('आवश्यक','Required');
+    else if (isDupeShiftName(form.name)) e.name = L('डुप्लिकेट सिफ्ट नाम','Duplicate Shift Name');
     if (!form.startTime)   e.startTime = L('आवश्यक','Required');
     if (!form.endTime)     e.endTime   = L('आवश्यक','Required');
     return e;
@@ -554,7 +606,11 @@ const ShiftInlineSection = () => {
 
   const handleSave = () => {
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      if (errs.name && isDupeShiftName(form.name)) showToast(errs.name, 'danger');
+      return;
+    }
 
     const savedForm = { ...form };
     if (!savedForm.code) {
@@ -572,7 +628,17 @@ const ShiftInlineSection = () => {
     } else {
       showToast(t('Record saved successfully'));
     }
-    setModal(false);
+
+    if (editId) {
+      // Editing an existing shift — done, close as before.
+      setModal(false);
+    } else {
+      // Adding — stay on the same form, cleared, ready for the next entry
+      // instead of closing (matches SetupSection's Ctrl+N/Ctrl+S behavior).
+      setForm({ ...defaultShiftForm });
+      setErrors({});
+      setTimeout(() => firstFieldRef.current?.focus(), 0);
+    }
   };
 
   /* Ctrl+S saves the Shift Add/Edit modal — same action as the Save button */
@@ -714,7 +780,7 @@ const ShiftInlineSection = () => {
                 <div className="form-row">
                   <div className="form-group">
                     <label className="form-label">नेपाली नाम *</label>
-                    <input type="text" className={`form-control ${errors.name?'error':''}`}
+                    <input type="text" ref={firstFieldRef} className={`form-control ${errors.name?'error':''}`}
                       placeholder="बिहान सिफ्ट" value={form.name}
                       onChange={e => hc('name', e.target.value)} />
                     {errors.name && <div className="form-error">{errors.name}</div>}
@@ -1172,16 +1238,28 @@ const LeaveTypeSection = () => {
   const [form,     setForm]     = useState({ ...defaultLeaveForm });
   const [errors,   setErrors]   = useState({});
   const [delId,    setDelId]    = useState(null);
+  const [toast,    setToast]    = useState(null);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const showToast = (msg, type='danger') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   const openAdd  = () => { setForm({ ...defaultLeaveForm }); setErrors({}); setEditId(null); setModal(true); };
   const openEdit = (item) => { setForm({ ...defaultLeaveForm, ...item }); setErrors({}); setEditId(item.id); setModal(true); };
 
+  const isDupeName      = (v) => data.some(d => d.id !== editId && d.name.trim().toLowerCase()      === v.trim().toLowerCase());
+  const isDupeShortName = (v) => data.some(d => d.id !== editId && d.shortName.trim().toLowerCase() === v.trim().toLowerCase());
+
   const validate = () => {
     const e = {};
     if (!form.name.trim())      e.name      = L('आवश्यक छ','Required');
+    else if (isDupeName(form.name)) e.name  = L('डुप्लिकेट बिदा नाम','Duplicate Leave Name');
     if (!form.shortName.trim()) e.shortName = L('आवश्यक छ','Required');
+    else if (isDupeShortName(form.shortName))
+      // Every leave-type picker in the app (Apply Leave, Manual Posting, OT Grant
+      // Leave) renders <option value={shortName}> — two types sharing a code make
+      // the browser's native <select> silently resolve to whichever one comes
+      // first, applying its balance/accrual rules to what the user actually picked.
+      e.shortName = L('डुप्लिकेट छोटो नाम','Duplicate Short Name');
     if (form.daysPerYear === '' || form.daysPerYear < 0) e.daysPerYear = L('आवश्यक छ','Required');
     if (form.carryForward && (form.maxAccumulateDays === '' || form.maxAccumulateDays < 0)) e.maxAccumulateDays = L('आवश्यक छ','Required');
     if (form.isServicePeriod && (form.timesPerService === '' || form.timesPerService < 1))  e.timesPerService  = L('आवश्यक छ','Required');
@@ -1190,13 +1268,25 @@ const LeaveTypeSection = () => {
 
   const handleSave = () => {
     const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
+    if (Object.keys(e).length) {
+      setErrors(e);
+      if (e.name && isDupeName(form.name)) showToast(e.name);
+      else if (e.shortName && isDupeShortName(form.shortName)) showToast(e.shortName);
+      return;
+    }
     const next = editId
       ? data.map(d => d.id === editId ? { ...d, ...form, id: editId } : d)
       : [...data, { ...form, id: Date.now() }];
     updateSetupList('leaveTypeConfigs', next);
-    setModal(false);
+    // Stay on the form (cleared, back to Add mode) instead of closing — lets
+    // someone entering several leave types in a row keep going without
+    // reopening the modal each time.
+    setForm({ ...defaultLeaveForm });
+    setErrors({});
+    setEditId(null);
+    showToast(L('सुरक्षित भयो','Saved'), 'success');
   };
+  useSaveShortcut(modal, handleSave);
 
   const handleDelete = (id) => {
     updateSetupList('leaveTypeConfigs', data.filter(d => d.id !== id));
@@ -1249,6 +1339,13 @@ const LeaveTypeSection = () => {
         onDeleteKey={row=>setDelId(row.id)}
         onDeleteSelected={ids=>updateSetupList('leaveTypeConfigs',data.filter(d=>!ids.includes(d.id)))}
         toolbar={<button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>}
+        contextMenu={[
+          { label: L('नयाँ थप्नुस','Add New'), icon:'➕', onClick: () => openAdd() },
+          'divider',
+          { label: L('सम्पादन','Edit'),        icon:'✏️', onClick: (row) => openEdit(row) },
+          'divider',
+          { label: L('मेटाउनुस','Delete'),      icon:'🗑', className:'danger', onClick: (row) => setDelId(row.id) },
+        ]}
       />
 
       {/* Add/Edit Modal */}
@@ -1355,7 +1452,7 @@ const LeaveTypeSection = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(false)}>{L('रद्द','Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 {L('सुरक्षित','Save')}</button>
+              <SaveButton onClick={handleSave} label={L('सुरक्षित','Save')} />
             </div>
           </div>
         </div>
@@ -1372,6 +1469,12 @@ const LeaveTypeSection = () => {
               <button className="btn btn-danger" onClick={() => handleDelete(delId)}>🗑 {L('मेटाउनुस','Delete')}</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast-${toast.type}`}><span>{toast.type==='success'?'✅':'❌'}</span><span>{toast.msg}</span></div>
         </div>
       )}
     </div>
@@ -1392,21 +1495,41 @@ const OfficeVisitTypeSection = () => {
   const [form,   setForm]   = useState({ name:'', shortName:'' });
   const [errors, setErrors] = useState({});
   const [delId,  setDelId]  = useState(null);
+  const [toast,  setToast]  = useState(null);
+
+  const showToast = (msg, type='danger') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   const openAdd  = () => { setForm({ name:'', shortName:'' }); setErrors({}); setEditId(null); setModal(true); };
   const openEdit = (item) => { setForm({ name:item.name, shortName:item.shortName }); setErrors({}); setEditId(item.id); setModal(true); };
 
+  const isDupeName      = (v) => data.some(d => d.id !== editId && d.name.trim().toLowerCase()      === v.trim().toLowerCase());
+  const isDupeShortName = (v) => data.some(d => d.id !== editId && d.shortName.trim().toLowerCase() === v.trim().toLowerCase());
+
   const handleSave = () => {
     const e = {};
     if (!form.name.trim())      e.name      = L('आवश्यक छ','Required');
+    else if (isDupeName(form.name)) e.name  = L('डुप्लिकेट भ्रमण नाम','Duplicate Office Visit Name');
     if (!form.shortName.trim()) e.shortName = L('आवश्यक छ','Required');
-    if (Object.keys(e).length)  { setErrors(e); return; }
+    else if (isDupeShortName(form.shortName)) e.shortName = L('डुप्लिकेट छोटो नाम','Duplicate Short Name');
+    if (Object.keys(e).length) {
+      setErrors(e);
+      if (e.name && isDupeName(form.name)) showToast(e.name);
+      else if (e.shortName && isDupeShortName(form.shortName)) showToast(e.shortName);
+      return;
+    }
     const next = editId
       ? data.map(d => d.id===editId ? { ...d, ...form } : d)
       : [...data, { ...form, id:Date.now() }];
     updateSetupList('officeVisitTypes', next);
-    setModal(false);
+    // Stay on the form (cleared, back to Add mode) instead of closing — lets
+    // someone entering several visit types in a row keep going without
+    // reopening the modal each time.
+    setForm({ name:'', shortName:'' });
+    setErrors({});
+    setEditId(null);
+    showToast(L('सुरक्षित भयो','Saved'), 'success');
   };
+  useSaveShortcut(modal, handleSave);
 
   const handleDelete = (id) => { updateSetupList('officeVisitTypes', data.filter(d => d.id!==id)); setDelId(null); };
 
@@ -1414,8 +1537,8 @@ const OfficeVisitTypeSection = () => {
     <div>
       <DataGrid
         columns={[
-          { field:'name',      header:L('भ्रमणको नाम','Office Visit Name'), width:220, render:v=><span style={{fontWeight:600}}>{v}</span> },
-          { field:'shortName', header:L('छोटो नाम','Short Name'),           width:110, render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
+          { field:'name',      header:L('भ्रमणको नाम','Office Visit Name'), render:v=><span style={{fontWeight:600}}>{v}</span> },
+          { field:'shortName', header:L('छोटो नाम','Short Name'),           render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
           { field:'actions', header:L('कार्य','Actions'), width:80, sortable:false, filterable:false, render:(_,row)=>(
             <div className="dg-actions">
               <button className="dg-action-btn edit"   onClick={e=>{e.stopPropagation();openEdit(row);}}>✏</button>
@@ -1427,11 +1550,17 @@ const OfficeVisitTypeSection = () => {
         defaultPageSize={10}
         showSearch={true}
         compact={true}
-        autoWidth={true}
         onRowDoubleClick={openEdit}
         onDeleteKey={row=>setDelId(row.id)}
         onDeleteSelected={ids=>updateSetupList('officeVisitTypes',data.filter(d=>!ids.includes(d.id)))}
         toolbar={<button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>}
+        contextMenu={[
+          { label: L('नयाँ थप्नुस','Add New'), icon:'➕', onClick: () => openAdd() },
+          'divider',
+          { label: L('सम्पादन','Edit'),        icon:'✏️', onClick: (row) => openEdit(row) },
+          'divider',
+          { label: L('मेटाउनुस','Delete'),      icon:'🗑', className:'danger', onClick: (row) => setDelId(row.id) },
+        ]}
       />
 
       {modal && (
@@ -1455,7 +1584,7 @@ const OfficeVisitTypeSection = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setModal(false)}>{L('रद्द','Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 {L('सुरक्षित','Save')}</button>
+              <SaveButton onClick={handleSave} label={L('सुरक्षित','Save')} />
             </div>
           </div>
         </div>
@@ -1471,6 +1600,12 @@ const OfficeVisitTypeSection = () => {
               <button className="btn btn-danger" onClick={()=>handleDelete(delId)}>🗑 {L('मेटाउनुस','Delete')}</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast-${toast.type}`}><span>{toast.type==='success'?'✅':'❌'}</span><span>{toast.msg}</span></div>
         </div>
       )}
     </div>
@@ -2035,6 +2170,7 @@ const EmailSetupTab = ({ showToast }) => {
           missingAttendance: true, manualPosting: true,
           lateEarlyNotification: true, absentNotification: true,
           leaveStatusUpdate: true, officeVisitStatusUpdate: true,
+          taskAssignedCompleted: true,
         },
       });
       setEmailLoaded(true);
@@ -2080,6 +2216,7 @@ const EmailSetupTab = ({ showToast }) => {
     { key: 'lateEarlyNotification',   label: L('ढिलो/चाँडो सूचना','Late In / Early Out Notification'),       desc: L('शिफ्ट सुरु भएको ३० मिनेट पछि (ढिलो) र शिफ्ट सकिएको १५ मिनेट पछि (चाँडो) — कर्मचारी, विभाग प्रमुख, शाखा प्रबन्धक र एडमिनलाई सूचित गर्छ','Checked per shift — Late In a set number of minutes after that shift starts, Early Out a set number of minutes after it ends — notifies the staff member, their Dept. Head, Branch Manager, and Admins') },
     { key: 'absentNotification',      label: L('अनुपस्थिति सूचना','Absent Notification'),                    desc: L('शिफ्ट सुरु भएको १ घण्टा पछि — कर्मचारी, विभाग प्रमुख र एडमिनलाई सूचित गर्छ','Checked a set number of minutes after each shift starts — notifies the staff member, their Dept. Head, and Admins') },
     { key: 'staffCreated',           label: L('कर्मचारी खाता सिर्जना','Staff Account Created'),             desc: L('जब नयाँ कर्मचारीको खाता सिर्जना गरिन्छ','When a new staff account is created — sends login credentials') },
+    { key: 'taskAssignedCompleted',  label: L('कार्य तोकिँदा/पूरा हुँदा','Task Assigned / Completed'),       desc: L('जब कार्य तोकिन्छ — तोकिएको कर्मचारीलाई; कार्य पूरा हुँदा — सिर्जनाकर्ता, एडमिन र विभाग प्रमुखलाई सूचित गर्छ','When a task is assigned — notifies the assignee; when marked completed — notifies the creator, Admins, and the Department Head') },
   ];
 
   const fieldStyle = { fontSize:13, borderRadius:6, border:'1px solid #d1d5db', padding:'7px 10px', width:'100%', boxSizing:'border-box', outline:'none' };
@@ -2200,6 +2337,124 @@ const EmailSetupTab = ({ showToast }) => {
 };
 
 /* ═══════════════════════════════════════════════════════════
+   SmsGatewayTab — real SMS via a phone running the "SMS Gateway for
+   Android" app (https://github.com/capcom6/android-sms-gateway) on the
+   same local network as this server. No cloud SMS provider involved —
+   the phone's own SIM sends the message, this server just POSTs to the
+   phone's local HTTP API (Local Server mode in that app).
+════════════════════════════════════════════════════════════ */
+const SmsGatewayTab = ({ showToast }) => {
+  const { language } = useLanguage();
+  const L = (np, en) => language === 'np' ? np : en;
+
+  const [cfg,     setCfg]     = useState(null);
+  const [loaded,  setLoaded]  = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [testTo,  setTestTo]  = useState('');
+  const [testLoading, setTestLoading] = useState(false);
+
+  useEffect(() => {
+    api.get('/sms-config').then(d => {
+      setCfg(d || { gatewayHost: '', gatewayPort: '8080', username: '', password: '', enabled: true });
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
+  const set = (field, val) => setCfg(c => ({ ...c, [field]: val }));
+
+  const saveConfig = async () => {
+    setSaving(true);
+    try {
+      await api.put('/sms-config', cfg);
+      showToast(L('SMS गेटवे सेटिङ सुरक्षित भयो', 'SMS Gateway settings saved'));
+    } catch (e) { showToast(e.message || 'Failed to save', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  useSaveShortcut(true, saveConfig);
+
+  const sendTest = async () => {
+    if (!testTo) return showToast(L('परीक्षण फोन नम्बर आवश्यक छ', 'Test recipient phone number is required'), 'error');
+    setTestLoading(true);
+    try {
+      await api.post('/sms-config/test', { config: cfg, testTo });
+      showToast(L(`परीक्षण SMS पठाइयो: ${testTo}`, `Test SMS sent to ${testTo}`));
+    } catch (e) { showToast(e.message || 'Failed to send test SMS', 'error'); }
+    finally { setTestLoading(false); }
+  };
+
+  if (!loaded) return <div style={{ padding:40, textAlign:'center', color:'#6b7280' }}>Loading…</div>;
+
+  const fieldStyle = { fontSize:13, borderRadius:6, border:'1px solid #d1d5db', padding:'7px 10px', width:'100%', boxSizing:'border-box', outline:'none' };
+  const labelStyle = { fontSize:11, fontWeight:600, color:'#6b7280', textTransform:'uppercase', marginBottom:4, display:'block' };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+      <div className="card" style={{ background:'#eff6ff', border:'1px solid #bfdbfe' }}>
+        <div className="card-body" style={{ fontSize:13, color:'#1e3a8a', lineHeight:1.6 }}>
+          <strong>{L('कसरी सेटअप गर्ने', 'How this works')}:</strong> {L(
+            'यो एन्ड्रोइड फोनको SIM बाट SMS पठाउँछ, कुनै क्लाउड SMS सेवा प्रयोग गर्दैन। फोनमा "SMS Gateway for Android" एप स्थापना गर्नुहोस्, "Local Server" मोड सक्षम गर्नुहोस्, र यहाँ त्यसको लोकल IP ठेगाना र पासवर्ड राख्नुहोस्। फोन र यो सर्भर चलिरहेको कम्प्युटर उही Wi-Fi/नेटवर्कमा हुनुपर्छ।',
+            'This sends real SMS from an Android phone\'s own SIM — no cloud SMS provider. Install "SMS Gateway for Android" on a phone, turn on its "Local Server" mode, and enter that phone\'s local IP address and the credentials it shows here. The phone and the computer running this server must be on the same Wi-Fi/local network.'
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header" style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <h3>📱 {L('SMS गेटवे कन्फिगरेसन', 'SMS Gateway Configuration')}</h3>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+            <input type="checkbox" checked={!!cfg.enabled} onChange={e => set('enabled', e.target.checked)} style={{ width:16, height:16, accentColor:'#1a56db' }} />
+            {L('SMS सक्रिय', 'Enable SMS')}
+          </label>
+        </div>
+        <div className="card-body">
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+            <div>
+              <label style={labelStyle}>{L('फोनको लोकल IP ठेगाना', "Phone's Local IP Address")}</label>
+              <input style={fieldStyle} placeholder="192.168.1.50" value={cfg.gatewayHost||''} onChange={e => set('gatewayHost', e.target.value)} />
+              <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('SMS Gateway एपको "Local Server" खण्डमा देखाइन्छ', 'Shown in the app\'s "Local Server" section')}</div>
+            </div>
+            <div>
+              <label style={labelStyle}>{L('पोर्ट', 'Port')}</label>
+              <input style={fieldStyle} placeholder="8080" value={cfg.gatewayPort||''} onChange={e => set('gatewayPort', e.target.value)} />
+            </div>
+            <div>
+              <label style={labelStyle}>{L('प्रयोगकर्ता नाम', 'Username')}</label>
+              <input style={fieldStyle} value={cfg.username||''} onChange={e => set('username', e.target.value)} />
+            </div>
+            <div>
+              <label style={labelStyle}>{L('पासवर्ड', 'Password')}</label>
+              <input style={fieldStyle} type="password" value={cfg.password||''} onChange={e => set('password', e.target.value)} />
+            </div>
+          </div>
+          <div style={{ marginTop:16, display:'flex', gap:10 }}>
+            <button className="btn btn-primary" onClick={saveConfig} disabled={saving} title="Ctrl+S">
+              {saving ? L('सुरक्षित हुँदैछ...','Saving...') : <>💾 {language === 'np' ? L('सेटिङ सुरक्षित','Save Settings') : <><u>S</u>ave Settings</>}</>}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header"><h3>🧪 {L('परीक्षण SMS', 'Test SMS')}</h3></div>
+        <div className="card-body">
+          <p style={{ fontSize:13, color:'#6b7280', marginTop:0 }}>{L('गेटवे सेटिङ काम गरिरहेको छ भनी जाँच गर्न परीक्षण SMS पठाउनुहोस्।', 'Send a test SMS to verify your gateway settings are working.')}</p>
+          <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
+            <div style={{ flex:1 }}>
+              <label style={labelStyle}>{L('परीक्षण फोन नम्बर', 'Test Recipient Phone Number')}</label>
+              <input style={fieldStyle} placeholder="+977XXXXXXXXXX" value={testTo} onChange={e => setTestTo(e.target.value)} />
+            </div>
+            <button className="btn btn-primary" onClick={sendTest} disabled={testLoading} style={{ height:36, whiteSpace:'nowrap' }}>
+              {testLoading ? L('पठाउँदैछ...','Sending...') : `📨 ${L('परीक्षण पठाउनुहोस्','Send Test')}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════
    Module enable/disable banner — shown above the Attendance Device /
    StandAlone Device tabs. Only admin/superAdmin gets the toggle; everyone
    else (who can even see the tab, per the role permission matrix) just
@@ -2230,7 +2485,7 @@ const ModuleToggleBanner = ({ enabled, isAdmin, onToggle, label, L }) => (
 ════════════════════════════════════════════════════════════ */
 const Settings = () => {
   const { currentUser, isAdmin, isSuperAdmin, canView } = useAuth();
-  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false });
+  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false, smsGatewayEnabled: false });
   const [moduleFlagsLoading, setModuleFlagsLoading] = useState(true);
 
   useEffect(() => {
@@ -2246,6 +2501,7 @@ const Settings = () => {
     module_attendance_device_enabled: 'attendanceDeviceEnabled',
     module_standalone_device_enabled: 'standaloneDeviceEnabled',
     module_email_setup_enabled:       'emailSetupEnabled',
+    module_sms_gateway_enabled:       'smsGatewayEnabled',
   };
 
   const toggleModule = async (flagKey) => {
@@ -2286,6 +2542,7 @@ const Settings = () => {
   const [cForm,        setCForm]        = useState({});
   const [weekendModal, setWeekendModal] = useState(false);
   const [weekendEditId, setWeekendEditId] = useState(null); // null=new, id=edit existing
+  const [weekendSaving, setWeekendSaving] = useState(false); // guards against double-submit (button click racing Ctrl+S)
   const twoMonthsAgo = (() => {
     const d = getNepalNow(); d.setMonth(d.getMonth() - 2);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2404,11 +2661,32 @@ const Settings = () => {
       companyLogo:      settings.companyLogo      || null,
       logoWidth:        settings.logoWidth        || null,
       logoHeight:       settings.logoHeight       || null,
+      officeLatitude:     settings.officeLatitude     ?? null,
+      officeLongitude:    settings.officeLongitude    ?? null,
+      officeLocationName: settings.officeLocationName || '',
       liveAttendanceNotifications: settings.liveAttendanceNotifications !== false,
       taskNotifications: settings.taskNotifications !== false,
     });
     setLogoError('');
+    setOfficeLocError('');
     setCompanyModal(true);
+  };
+
+  // Office Location — the one reference point Field Visit's distance/travel-time
+  // estimate (Staff > Field Visit) measures every client visit from. Captured
+  // via the same mandatory-GPS pattern as attendance/field-visit check-ins,
+  // rather than typed in, since a wrong coordinate here silently skews every
+  // estimate — standing at the office and tapping the button is the reliable way.
+  const [capturingOfficeLoc, setCapturingOfficeLoc] = useState(false);
+  const [officeLocError,     setOfficeLocError]     = useState('');
+  const captureOfficeLocation = async () => {
+    setCapturingOfficeLoc(true); setOfficeLocError('');
+    try {
+      const c = await getCurrentLocation();
+      sc('officeLatitude', c.latitude);
+      sc('officeLongitude', c.longitude);
+    } catch (e) { setOfficeLocError(e.message || 'Could not determine your location.'); }
+    finally { setCapturingOfficeLoc(false); }
   };
 
   const handleCompanySave = () => {
@@ -2451,8 +2729,10 @@ const Settings = () => {
   const handleSave = () => { updateSettings(local); showToast(t('Record saved successfully')); };
 
   const handleWeekendSave = async () => {
+    if (weekendSaving) return; // Ctrl+S racing the button click could otherwise fire this twice
     if (!wForm.weekends.length) { showToast('कम्तीमा एक दिन छान्नुस', 'danger'); return; }
     if (!wForm.effectiveDate)   { showToast('Effective Date required', 'danger'); return; }
+    setWeekendSaving(true);
     try {
       if (weekendEditId) {
         // Update existing history entry — writes through to the weekend_history
@@ -2462,6 +2742,7 @@ const Settings = () => {
         // every attendance report depends on this actually landing in the DB.
         await updateWeekendHistory(weekendEditId, {
           weekends: wForm.weekends, effectiveDate: wForm.effectiveDate, reason: wForm.reason || '—',
+          changedBy: currentUser?.fullName || 'Admin',
         });
         showToast(L('सप्ताहन्त अपडेट भयो','Weekend record updated'));
       } else {
@@ -2478,6 +2759,8 @@ const Settings = () => {
       // Save failed — leave the modal open so the user can retry, instead of
       // showing success for a change that never reached the database.
       showToast(L('साप्ताहिक बिदा सुरक्षित गर्न सकिएन: ', 'Failed to save weekend setting: ') + (e.message || ''), 'danger');
+    } finally {
+      setWeekendSaving(false);
     }
   };
 
@@ -2597,13 +2880,7 @@ const Settings = () => {
 
   const downloadJson = (data) => {
     const json = JSON.stringify(data);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `ehajiri-backup-v${data.meta?.appVersion}-${getNepalTodayISO()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([json], { type: 'application/json' }), `ehajiri-backup-v${data.meta?.appVersion}-${getNepalTodayISO()}.json`);
   };
 
   /* ── Backup handlers ── */
@@ -2897,6 +3174,7 @@ const Settings = () => {
     // Email Setup — Super Admin only, AND hidden until enabled from Role
     // Management (default OFF, migration 75).
     isSuperAdmin && moduleFlags.emailSetupEnabled && { key:'emailSetup', icon:'📧',  label:L('इमेल सेटअप','Email Setup')               },
+    isSuperAdmin && moduleFlags.smsGatewayEnabled && { key:'smsGateway', icon:'📱',  label:L('SMS गेटवे','SMS Gateway')               },
     { key:'database',      icon:'🗄️', label:L('डेटाबेस','Database')                     },
     isSuperAdmin && { key:'bugFinder', icon:'🐞',  label:L('बग फाइन्डर','Bug Finder')          },
   ].filter(Boolean);
@@ -3063,16 +3341,16 @@ const Settings = () => {
                 />
               </div>
 
-              {/* ── Calendar & Date Format card (compact dropdowns) ── */}
+              {/* ── Calendar, Date Format & Language card (compact dropdowns) ── */}
               <div className="card">
                 <div className="card-header">
                   <div>
-                    <h3>📅 {L('डिफल्ट क्यालेन्डर र मिति ढाँचा','Default Calendar & Date Format')}</h3>
+                    <h3>📅 {L('डिफल्ट क्यालेन्डर, मिति ढाँचा र भाषा सेटिङ','Default Calendar, Date Format & Language Setting')}</h3>
                     <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{L('सबै फारम, DataGrid र रिपोर्टमा लागू हुनेछ','Applied to all forms, DataGrids and reports')}</div>
                   </div>
                 </div>
                 <div className="card-body">
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16, alignItems:'start' }}>
 
                     {/* Calendar dropdown */}
                     <div className="form-group" style={{ marginBottom:0 }}>
@@ -3110,6 +3388,20 @@ const Settings = () => {
                       <div style={{ marginTop:8, display:'inline-flex', alignItems:'center', gap:8, background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'6px 14px', fontSize:13, fontWeight:700, color:'#1e40af' }}>
                         {livePreview(local.defaultDateFormat)}
                         <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>— {L('प्रिभ्यु','preview')}</span>
+                      </div>
+                    </div>
+
+                    {/* Default Language dropdown */}
+                    <div className="form-group" style={{ marginBottom:0 }}>
+                      <label className="form-label">{L('डिफल्ट भाषा','Default Language')}</label>
+                      <select className="form-control" value={local.defaultLanguage || 'en'}
+                        onChange={e => set('defaultLanguage', e.target.value)}>
+                        <option value="en">🌍 English</option>
+                        <option value="np">🇳🇵 Nepali</option>
+                      </select>
+                      <div style={{ fontSize:11, color:'#6b7280', marginTop:8, lineHeight:1.4 }}>
+                        {L('जुन ब्राउजरले पहिले कहिल्यै भाषा छानेको छैन, त्यहाँ लगइन गर्दा यो भाषा देखिनेछ। पहिले नै आफ्नो भाषा छानेका प्रयोगकर्ताको छनोट यथावत रहन्छ।',
+                          "Shown at login to anyone who hasn't picked a language before. Users who already chose their own stay on that choice.")}
                       </div>
                     </div>
                   </div>
@@ -3780,6 +4072,22 @@ const Settings = () => {
             </div>
           )}
 
+          {/* ══════════ SMS GATEWAY (Super Admin only, module flag default OFF) ══════════ */}
+          {activeTab === 'smsGateway' && isSuperAdmin && (
+            <div>
+              {!moduleFlagsLoading && (
+                <ModuleToggleBanner
+                  enabled={moduleFlags.smsGatewayEnabled}
+                  isAdmin={isSuperAdmin}
+                  onToggle={() => toggleModule('module_sms_gateway_enabled')}
+                  label={L('SMS गेटवे मोड्युल','SMS Gateway module')}
+                  L={L}
+                />
+              )}
+              {moduleFlags.smsGatewayEnabled && <SmsGatewayTab showToast={showToast} />}
+            </div>
+          )}
+
           {/* ══════════ DATABASE / BACKUP & RESTORE ══════════ */}
           {activeTab === 'database' && (
             <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
@@ -4164,9 +4472,9 @@ const Settings = () => {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => { setWeekendModal(false); setWeekendEditId(null); }}>{t('Cancel')}</button>
-              <SaveButton onClick={handleWeekendSave}
-                label={weekendEditId ? L('अपडेट गर्नुहोस','Update Record') : L('परिवर्तन सुरक्षित','Save Change')} />
+              <button className="btn btn-outline" disabled={weekendSaving} onClick={() => { setWeekendModal(false); setWeekendEditId(null); }}>{t('Cancel')}</button>
+              <SaveButton onClick={handleWeekendSave} disabled={weekendSaving}
+                label={weekendSaving ? `${L('सुरक्षित गर्दै','Saving')}…` : weekendEditId ? L('अपडेट गर्नुहोस','Update Record') : L('परिवर्तन सुरक्षित','Save Change')} />
             </div>
           </div>
         </div>
@@ -4251,6 +4559,32 @@ const Settings = () => {
                 <label className="form-label">{L('वेबसाइट','Website')}</label>
                 <input type="text" className="form-control" value={cForm.companyWebsite || ''}
                   onChange={e => sc('companyWebsite', e.target.value)} />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">📍 {L('कार्यालयको स्थान','Office Location')}</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5, color: cForm.officeLatitude != null ? '#374151' : '#9ca3af' }}>
+                    {cForm.officeLatitude != null ? `${cForm.officeLatitude.toFixed(5)}, ${cForm.officeLongitude.toFixed(5)}` : L('सेट गरिएको छैन','Not set')}
+                  </span>
+                  <button type="button" className="btn btn-sm btn-outline" disabled={capturingOfficeLoc} onClick={captureOfficeLocation}>
+                    {capturingOfficeLoc ? L('पत्ता लगाउँदै…','Locating…') : `📍 ${L('मेरो हालको स्थान प्रयोग गर्नुहोस्','Use My Current Location')}`}
+                  </button>
+                  {cForm.officeLatitude != null && (
+                    <button type="button" className="btn btn-sm" style={{ background:'#fee2e2', color:'#b91c1c', border:'1px solid #fca5a5' }}
+                      onClick={() => { sc('officeLatitude', null); sc('officeLongitude', null); }}>
+                      🗑 {t('Clear')}
+                    </button>
+                  )}
+                </div>
+                {officeLocError && <div style={{ fontSize: 11.5, color: '#dc2626', marginTop: 4 }}>{officeLocError}</div>}
+                <input type="text" className="form-control" value={cForm.officeLocationName || ''}
+                  onChange={e => sc('officeLocationName', e.target.value)}
+                  placeholder={L('जस्तै चक्रपथ, ललितपुर','e.g. Chakpuath, Lalitpur')}
+                  style={{ marginTop: 8 }} />
+                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                  {L('फिल्ड भ्रमण पृष्ठमा दूरी/समय अनुमान गर्न प्रयोग हुन्छ','Used to estimate travel distance/time on the Field Visit page — stand at the office and tap the button above. The name is just a label shown alongside it.')}
+                </div>
               </div>
 
               <div style={{ marginTop:16, padding:'12px 16px', background:'#f9fafb', borderRadius:10,

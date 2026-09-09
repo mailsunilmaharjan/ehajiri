@@ -4,6 +4,7 @@ import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import DataGrid         from '../DataGrid/DataGrid.jsx';
+import Avatar           from '../Common/Avatar.jsx';
 import api from '../../api/client.js';
 
 const StatusBadge = ({ status }) => {
@@ -31,6 +32,7 @@ const MissingAttendanceRequests = () => {
   const [busy,        setBusy]        = useState(false);
 
   const getEmpName = (id) => employees.find(e => String(e.id) === String(id))?.fullName || `#${id}`;
+  const getEmpPhoto = (id) => employees.find(e => String(e.id) === String(id))?.profilePhoto;
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -71,7 +73,14 @@ const MissingAttendanceRequests = () => {
   };
 
   const assignedColumns = [
-    { field: 'employeeName', header: 'Staff',      width: 160, render: (v, r) => v || getEmpName(r.employeeId) },
+    { field: 'employeeId', header: 'Staff ID', width: 80, sortable: false, render: (_, r) =>
+        employees.find(e => String(e.id) === String(r.employeeId))?.employeeId || '—' },
+    { field: 'employeeName', header: 'Staff',      width: 160, render: (v, r) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <Avatar photo={getEmpPhoto(r.employeeId)} name={v || getEmpName(r.employeeId)} size={20} />
+          {v || getEmpName(r.employeeId)}
+        </span>
+      ) },
     { field: 'date',         header: 'Date',       width: 110, render: v => fd(v) },
     { field: 'checkIn',      header: 'Check In',   width: 90 },
     { field: 'checkOut',     header: 'Check Out',  width: 90 },

@@ -7,6 +7,7 @@ import api             from '../../api/client.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -172,7 +173,7 @@ const HalfMonthlyReport = () => {
         const adDate = bsToAD(year, month, 15);
         if (adDate) { apiYear = adDate.getFullYear(); apiMonth = adDate.getMonth() + 1; }
       }
-      const query = `/attendance/half-monthly?year=${apiYear}&month=${apiMonth}&half=${half}${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
+      const query = `/attendance/half-monthly?year=${apiYear}&month=${apiMonth}&half=${half}&orgScope=1${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
       setData(await api.get(query));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
@@ -281,12 +282,7 @@ const HalfMonthlyReport = () => {
         </div>
       )}
 
-      {loading && (
-        <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af' }}>
-          <div style={{ fontSize:40,marginBottom:12 }}>🤖</div>
-          <div style={{ fontWeight:600,fontSize:15 }}>Analysing attendance data…</div>
-        </div>
-      )}
+      {loading && <LoadingIndicator label="Analysing attendance data…" />}
 
       {!loading && data && (
         <>

@@ -8,7 +8,14 @@ const DAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /** Appends the requester's org-scope condition to a WHERE clause targeting users u / duty_roster dr. */
 function scopeCondition(scope, params) {
-  if (scope.level === 'department') { params.push(scope.value); return `AND u.department = $${params.length}`; }
+  if (scope.level === 'department') {
+    params.push(scope.value);
+    let cond = `AND u.department = $${params.length}`;
+    // A Dept Head with a branch on their own profile is scoped to their own
+    // branch too — see orgScope.js's resolveOrgScope for why.
+    if (scope.branchValue) { params.push(scope.branchValue); cond += ` AND u.branch = $${params.length}`; }
+    return cond;
+  }
   if (scope.level === 'branch')     { params.push(scope.value); return `AND u.branch = $${params.length}`; }
   if (scope.level === 'self')       { params.push(scope.value); return `AND dr.employee_id = $${params.length}`; }
   return '';
@@ -18,6 +25,13 @@ function scopeCondition(scope, params) {
 async function isEmployeeInScope(scope, employeeId) {
   if (scope.level === 'all') return true;
   if (scope.level === 'self') return String(scope.value) === String(employeeId);
+  if (scope.level === 'department' && scope.branchValue) {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM users WHERE id=$1 AND department=$2 AND branch=$3`,
+      [employeeId, scope.value, scope.branchValue]
+    );
+    return rows.length > 0;
+  }
   const field = scope.level === 'department' ? 'department' : 'branch';
   const { rows } = await pool.query(`SELECT 1 FROM users WHERE id=$1 AND ${field}=$2`, [employeeId, scope.value]);
   return rows.length > 0;
@@ -51,7 +65,9 @@ router.get('/', async (req, res) => {
         s.end_time::text        AS "endTime",
         dr.date_from::text      AS "dateFrom",
         dr.date_to::text        AS "dateTo",
-        dr.off_days      AS "offDays",
+        dr.off_days       AS "offDays",
+        dr.day_off_days   AS "dayOffDays",
+        dr.night_off_days AS "nightOffDays",
         dr.created_by    AS "createdBy",
         dr.created_at    AS "createdAt"
       FROM duty_roster dr
@@ -69,7 +85,7 @@ router.get('/', async (req, res) => {
    range) or the legacy single shiftId — shift_id is always kept as shiftIds[0] so
    any older code path still reading the single column keeps working. */
 router.post('/', async (req, res) => {
-  const { employeeId, shiftId, shiftIds, dateFrom, dateTo, offDays, createdBy } = req.body;
+  const { employeeId, shiftId, shiftIds, dateFrom, dateTo, offDays, dayOffDays, nightOffDays, createdBy } = req.body;
   const ids = Array.isArray(shiftIds) && shiftIds.length ? shiftIds : (shiftId ? [shiftId] : []);
   try {
     const scope = resolveOrgScope(req);
@@ -77,19 +93,21 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to create a roster entry for this employee' });
     }
     const { rows } = await pool.query(`
-      INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, day_off_days, night_off_days, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING id, employee_id AS "employeeId", shift_id AS "shiftId", shift_ids AS "shiftIds",
                 date_from AS "dateFrom", date_to AS "dateTo",
-                off_days AS "offDays", created_by AS "createdBy", created_at AS "createdAt"
-    `, [employeeId, ids[0] || null, JSON.stringify(ids), dateFrom, dateTo, JSON.stringify(offDays || []), createdBy]);
+                off_days AS "offDays", day_off_days AS "dayOffDays", night_off_days AS "nightOffDays",
+                created_by AS "createdBy", created_at AS "createdAt"
+    `, [employeeId, ids[0] || null, JSON.stringify(ids), dateFrom, dateTo,
+        JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), createdBy]);
     res.status(201).json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /* ── PUT /api/duty-roster/:id  — update a roster entry (must be in-scope) ── */
 router.put('/:id', async (req, res) => {
-  const { shiftId, shiftIds, dateFrom, dateTo, offDays } = req.body;
+  const { shiftId, shiftIds, dateFrom, dateTo, offDays, dayOffDays, nightOffDays } = req.body;
   const ids = Array.isArray(shiftIds) && shiftIds.length ? shiftIds : (shiftId ? [shiftId] : []);
   try {
     const scope = resolveOrgScope(req);
@@ -100,10 +118,11 @@ router.put('/:id', async (req, res) => {
     }
     const { rows } = await pool.query(`
       UPDATE duty_roster
-      SET shift_id = $1, shift_ids = $2, date_from = $3, date_to = $4, off_days = $5
-      WHERE id = $6
+      SET shift_id = $1, shift_ids = $2, date_from = $3, date_to = $4, off_days = $5, day_off_days = $6, night_off_days = $7
+      WHERE id = $8
       RETURNING id
-    `, [ids[0] || null, JSON.stringify(ids), dateFrom, dateTo, JSON.stringify(offDays || []), req.params.id]);
+    `, [ids[0] || null, JSON.stringify(ids), dateFrom, dateTo,
+        JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -150,68 +169,58 @@ router.post('/bulk-days', async (req, res) => {
     defaultShiftId = defRows[0]?.id ?? null;
   }
   const client = await pool.connect();
-  let created = 0, updated = 0, deleted = 0;
+  let upserted = 0, deleted = 0;
   try {
     await client.query('BEGIN');
     for (const date of dates) {
-      const { rows: existing } = await client.query(
-        `SELECT id FROM duty_roster WHERE employee_id=$1 AND date_from=$2 AND date_to=$2`,
-        [employeeId, date]
-      );
+      // INSERT .. ON CONFLICT against idx_dr_single_day_uniq (migration 96)
+      // instead of a separate SELECT-then-INSERT/UPDATE — the previous
+      // two-step version could leave a second single-day row behind for the
+      // same employee+date (e.g. saving the same day again in a later Edit
+      // Shifts session) instead of updating the first one, and the read
+      // side's tie-break (highest id, not most-recently-written) could then
+      // keep showing that stale duplicate even though the "real" row had
+      // been correctly updated — the day appeared to silently ignore Clear
+      // or a shift change on Save.
       if (isOff) {
         const offDays = JSON.stringify([DAY_KEYS[new Date(date).getUTCDay()]]);
-        if (existing.length) {
-          await client.query(
-            `UPDATE duty_roster SET shift_id=NULL, shift_ids='[]', off_days=$1 WHERE id=$2`,
-            [offDays, existing[0].id]
-          );
-          updated++;
-        } else {
-          await client.query(
-            `INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, created_by)
-             VALUES ($1, NULL, '[]', $2, $2, $3, $4)`,
-            [employeeId, date, offDays, createdBy]
-          );
-          created++;
-        }
+        await client.query(`
+          INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, created_by)
+          VALUES ($1, NULL, '[]', $2, $2, $3, $4)
+          ON CONFLICT (employee_id, date_from) WHERE date_from = date_to
+          DO UPDATE SET shift_id = NULL, shift_ids = '[]', off_days = EXCLUDED.off_days
+        `, [employeeId, date, offDays, createdBy]);
+        upserted++;
       } else if (ids.length) {
-        if (existing.length) {
-          await client.query(
-            `UPDATE duty_roster SET shift_id=$1, shift_ids=$2, off_days='[]' WHERE id=$3`,
-            [ids[0], JSON.stringify(ids), existing[0].id]
-          );
-          updated++;
-        } else {
-          await client.query(
-            `INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, created_by)
-             VALUES ($1, $2, $3, $4, $4, '[]', $5)`,
-            [employeeId, ids[0], JSON.stringify(ids), date, createdBy]
-          );
-          created++;
-        }
+        await client.query(`
+          INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, created_by)
+          VALUES ($1, $2, $3, $4, $4, '[]', $5)
+          ON CONFLICT (employee_id, date_from) WHERE date_from = date_to
+          DO UPDATE SET shift_id = EXCLUDED.shift_id, shift_ids = EXCLUDED.shift_ids, off_days = '[]'
+        `, [employeeId, ids[0], JSON.stringify(ids), date, createdBy]);
+        upserted++;
       } else if (forceBlank) {
         const defIds = defaultShiftId ? [defaultShiftId] : [];
-        if (existing.length) {
-          await client.query(
-            `UPDATE duty_roster SET shift_id=$1, shift_ids=$2, off_days='[]' WHERE id=$3`,
-            [defaultShiftId, JSON.stringify(defIds), existing[0].id]
-          );
-          updated++;
-        } else {
-          await client.query(
-            `INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, created_by)
-             VALUES ($1, $2, $3, $4, $4, '[]', $5)`,
-            [employeeId, defaultShiftId, JSON.stringify(defIds), date, createdBy]
-          );
-          created++;
-        }
-      } else if (existing.length) {
-        await client.query(`DELETE FROM duty_roster WHERE id=$1`, [existing[0].id]);
-        deleted++;
+        await client.query(`
+          INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, created_by)
+          VALUES ($1, $2, $3, $4, $4, '[]', $5)
+          ON CONFLICT (employee_id, date_from) WHERE date_from = date_to
+          DO UPDATE SET shift_id = EXCLUDED.shift_id, shift_ids = EXCLUDED.shift_ids, off_days = '[]'
+        `, [employeeId, defaultShiftId, JSON.stringify(defIds), date, createdBy]);
+        upserted++;
+      } else {
+        // Plain clear, no forceBlank — delete any single-day row(s) for this
+        // date outright (no LIMIT, so this also mops up a pre-existing
+        // duplicate if one is still lingering from before migration 96).
+        const { rowCount } = await client.query(
+          `DELETE FROM duty_roster WHERE employee_id=$1 AND date_from=$2 AND date_to=$2`,
+          [employeeId, date]
+        );
+        deleted += rowCount;
       }
     }
     await client.query('COMMIT');
-    res.json({ success: true, created, updated, deleted });
+    res.json({ success: true, upserted, deleted });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: e.message });
@@ -246,7 +255,10 @@ router.delete('/clear', async (req, res) => {
     }
 
     // Requester's org-scope always narrows the delete, regardless of the caller-supplied filters above.
-    if (scope.level === 'department') { params.push(scope.value); conds.push(`u.department = $${params.length}`); }
+    if (scope.level === 'department') {
+      params.push(scope.value); conds.push(`u.department = $${params.length}`);
+      if (scope.branchValue) { params.push(scope.branchValue); conds.push(`u.branch = $${params.length}`); }
+    }
     if (scope.level === 'branch')     { params.push(scope.value); conds.push(`u.branch = $${params.length}`); }
 
     const { rowCount } = await pool.query(
@@ -275,7 +287,10 @@ router.delete('/clear', async (req, res) => {
         staffParams.push(mode);
         staffConds.push(`u.mode = $${staffParams.length}`);
       }
-      if (scope.level === 'department') { staffParams.push(scope.value); staffConds.push(`u.department = $${staffParams.length}`); }
+      if (scope.level === 'department') {
+        staffParams.push(scope.value); staffConds.push(`u.department = $${staffParams.length}`);
+        if (scope.branchValue) { staffParams.push(scope.branchValue); staffConds.push(`u.branch = $${staffParams.length}`); }
+      }
       if (scope.level === 'branch')     { staffParams.push(scope.value); staffConds.push(`u.branch = $${staffParams.length}`); }
 
       staffParams.push(dateFrom);

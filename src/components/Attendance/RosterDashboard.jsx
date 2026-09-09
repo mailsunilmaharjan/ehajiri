@@ -4,6 +4,8 @@ import api from '../../api/client.js';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { getNepalNow } from '../../utils/dateUtils.js';
+import DataGrid         from '../DataGrid/DataGrid.jsx';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -31,10 +33,16 @@ function analyzeRosters(rosters, employees) {
   active.forEach(r => { if (r.department) deptMap[r.department] = (deptMap[r.department] || 0) + 1; });
   const depts = Object.entries(deptMap).sort((a, b) => b[1] - a[1]);
 
-  /* off-day counts */
+  /* off-day counts — Weekend/Day Off/Night Off are three independent
+     day-of-week sets (see DutyRoster.jsx's OFF_DAY_TYPES); a day counts as
+     off if it falls in any of them, not just the original weekend-only
+     offDays column. */
   const dayCount = {};
   DAYS.forEach(d => { dayCount[d] = 0; });
-  active.forEach(r => (r.offDays || []).forEach(d => { if (d in dayCount) dayCount[d]++; }));
+  active.forEach(r => {
+    const days = new Set([...(r.offDays || []), ...(r.dayOffDays || []), ...(r.nightOffDays || [])]);
+    days.forEach(d => { if (d in dayCount) dayCount[d]++; });
+  });
 
   /* staff without roster */
   const assigned = new Set(active.map(r => String(r.employeeId || r.staffId || r.employeeName)));
@@ -142,6 +150,166 @@ const RosterMenuBtn = ({ active, onSelect }) => {
   );
 };
 
+/* ── Gear menu (top-right) ── */
+const GEAR_SUB_MENU = [
+  { key: 'shortNames', icon: '🏷️', label: 'Create Shortname for Roster' },
+];
+
+const GearMenuBtn = ({ onSelect }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(p => !p)} title="Roster settings"
+        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 36, height: 36, background: open ? '#eff6ff' : '#f8fafc',
+          border: `1px solid ${open ? '#93c5fd' : '#d1d5db'}`, color: '#374151',
+          borderRadius: 8, cursor: 'pointer', fontSize: 16 }}>
+        ⚙️
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 500,
+          background: 'white', border: '1px solid #e5e7eb', borderRadius: 10,
+          boxShadow: '0 8px 28px rgba(0,0,0,.13)', overflow: 'hidden', minWidth: 240 }}>
+          {GEAR_SUB_MENU.map((item, i) => (
+            <button key={item.key} onClick={() => { onSelect(item.key); setOpen(false); }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+                padding: '9px 14px', border: 'none',
+                borderBottom: i < GEAR_SUB_MENU.length - 1 ? '1px solid #f0f0f0' : 'none',
+                textAlign: 'left', cursor: 'pointer', fontSize: 13,
+                background: 'white', color: '#374151', fontWeight: 500 }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f9fafb'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'white'; }}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ── "Create Shortname for Roster" popup ──
+   Lists every configured shift (name Nepali/English + times, all read-only
+   from Shift Settings) with one editable field: a short display code (max 4
+   chars) shown in the Duty Roster shift picker as "<code>- <startHr>-<endHr>". */
+const ShortNameModal = ({ shifts, onClose, onSaved }) => {
+  const [edits,   setEdits]   = useState(() => Object.fromEntries(shifts.map(s => [s.id, s.rosterShortName || ''])));
+  const [saving,  setSaving]  = useState(false);
+  const [error,   setError]   = useState('');
+
+  // Same field shape / compact sizing as the Staff Detail grid (UserManagement.jsx)
+  // so this popup's table reads as one system with the rest of the app.
+  const columns = [
+    { field: 'name',     header: 'Shift Name (Nepali)',  width: 150,
+      render: v => v || <span style={{ color:'#d1d5db' }}>—</span> },
+    { field: 'nameEn',   header: 'Shift Name (English)', width: 150,
+      render: v => v || <span style={{ color:'#d1d5db' }}>—</span> },
+    { field: 'startTime', header: 'Start Time', width: 90,
+      render: v => v ? v.slice(0, 5) : <span style={{ color:'#d1d5db' }}>—</span> },
+    { field: 'endTime',   header: 'End Time',   width: 90,
+      render: v => v ? v.slice(0, 5) : <span style={{ color:'#d1d5db' }}>—</span> },
+    { field: 'rosterShortName', header: 'Roster Short Name', width: 130,
+      render: (v, row) => (
+        <input type="text" maxLength={4} value={edits[row.id] || ''}
+          onChange={e => setEdits(p => ({ ...p, [row.id]: e.target.value }))}
+          onClick={e => e.stopPropagation()}
+          placeholder="e.g. C"
+          style={{ width: 70, border: '1.5px solid #d1d5db', borderRadius: 6, padding: '4px 8px',
+            fontSize: 12.5, textAlign: 'center', outline: 'none' }}
+          onFocus={e => e.target.style.borderColor = '#1a56db'}
+          onBlur={e => e.target.style.borderColor = '#d1d5db'} />
+      ) },
+  ];
+
+  const save = async () => {
+    setSaving(true); setError('');
+    try {
+      const changed = shifts.filter(s => (edits[s.id] || '') !== (s.rosterShortName || ''));
+      await Promise.all(changed.map(s =>
+        api.put(`/shifts/${s.id}`, { ...s, rosterShortName: edits[s.id] || null })));
+      onSaved(shifts.map(s => ({ ...s, rosterShortName: edits[s.id] || null })));
+      onClose();
+    } catch (e) {
+      setError(e.message || 'Failed to save short names.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'white', borderRadius: 14, boxShadow: '0 25px 60px rgba(0,0,0,.3)',
+          width: 'min(820px, 94vw)', maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '16px 22px', borderBottom: '1px solid #e5e7eb',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#111827' }}>🏷️ Create Shortname for Roster</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              Set a short code (max 4 characters) shown in the Duty Roster shift picker instead of the full shift name.
+            </div>
+          </div>
+          <button onClick={onClose}
+            style={{ width: 28, height: 28, border: 'none', borderRadius: '50%', background: '#f3f4f6',
+              color: '#6b7280', fontSize: 14, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+            ✕
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ background: '#fee2e2', padding: '8px 22px', color: '#991b1b', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 22px' }}>
+          {shifts.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>
+              No shifts configured yet — add shifts in Settings → Shift Management first.
+            </div>
+          ) : (
+            <DataGrid
+              columns={columns}
+              data={shifts}
+              rowKey="id"
+              compact={true}
+              showSearch={false}
+              showCheckbox={false}
+              showFilterButton={false}
+              showFooter={false}
+              defaultPageSize={shifts.length}
+            />
+          )}
+        </div>
+
+        <div style={{ padding: '14px 22px', borderTop: '1px solid #e5e7eb', display: 'flex',
+          justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
+          <button onClick={onClose}
+            style={{ height: 34, padding: '0 16px', fontSize: 13, fontWeight: 600,
+              background: 'white', border: '1px solid #d1d5db', color: '#374151', borderRadius: 7, cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={save} disabled={saving || shifts.length === 0}
+            style={{ height: 34, padding: '0 18px', fontSize: 13, fontWeight: 700,
+              background: saving ? '#a7f3d0' : '#059669', color: 'white', border: 'none',
+              borderRadius: 7, cursor: saving ? 'not-allowed' : 'pointer' }}>
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ── Bar row ── */
 const BarRow = ({ label, value, total, color, max }) => {
   const pct = max ? Math.round((value / max) * 100) : 0;
@@ -179,6 +347,9 @@ const RosterDashboard = () => {
   const [error,     setError]     = useState(null);
   const [lastRefresh, setLastRefresh] = useState(new Date());
 
+  const [shiftsList,       setShiftsList]       = useState([]);
+  const [showShortNameModal, setShowShortNameModal] = useState(false);
+
   const load = useCallback(() => {
     setLoading(true); setError(null);
     api.get('/duty-roster')
@@ -188,6 +359,7 @@ const RosterDashboard = () => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.get('/shifts').then(setShiftsList).catch(() => {}); }, []);
 
   const data = useMemo(() =>
     rosters.length || employees.length ? analyzeRosters(rosters, employees) : null,
@@ -223,6 +395,7 @@ const RosterDashboard = () => {
               borderRadius: 8 }}>
             🔄 Refresh
           </button>
+          <GearMenuBtn onSelect={key => { if (key === 'shortNames') setShowShortNameModal(true); }} />
           <RosterMenuBtn active="dashboard" onSelect={key => {
             if (key === 'staff')           navigate('/attendance/duty-roster');
             else if (key === 'department') navigate('/attendance/duty-roster/dept');
@@ -231,13 +404,16 @@ const RosterDashboard = () => {
         </div>
       </div>
 
+      {showShortNameModal && (
+        <ShortNameModal
+          shifts={shiftsList}
+          onClose={() => setShowShortNameModal(false)}
+          onSaved={updated => setShiftsList(updated)}
+        />
+      )}
+
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '80px 20px' }}>
-          <div style={{ width: 44, height: 44, border: '4px solid #e5e7eb', borderTopColor: '#1a56db',
-            borderRadius: '50%', animation: 'spin .8s linear infinite', margin: '0 auto 16px' }} />
-          <div style={{ fontSize: 14, color: '#9ca3af', fontWeight: 600 }}>Loading roster data…</div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
+        <LoadingIndicator label="Loading roster data…" />
       ) : error ? (
         <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 10,
           padding: '16px 20px', color: '#991b1b', fontWeight: 600 }}>❌ {error}</div>

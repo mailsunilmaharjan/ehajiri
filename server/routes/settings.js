@@ -56,8 +56,35 @@ router.get('/', async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Every module toggle in Role & Permission Management → Module Controls is
+// Super-Admin-only to flip — enforced here too, not just hidden client-side,
+// so a plain Admin can't bypass it with a raw API call. Deliberately NOT
+// license-gated: license.payload.features stays pure display (see
+// server/utils/licenseFeatures.js) — a tenant's license record living in
+// LicenseAdmin's central registry and the copy actually active on that
+// tenant's own server can drift out of sync (editing a license there doesn't
+// push it to the tenant), which made "Enable" dead-end with a confusing
+// "not in your license" error even right after a license was updated. A
+// straightforward Super-Admin on/off switch has no such failure mode.
+const SUPER_ADMIN_ONLY_FLAGS = [
+  FLAG_KEYS.onlineAttendance,
+  FLAG_KEYS.dutyRoster,
+  FLAG_KEYS.chat,
+  FLAG_KEYS.task,
+  FLAG_KEYS.guestRegistration,
+  FLAG_KEYS.standaloneDevice,
+  FLAG_KEYS.smsGateway,
+];
+
 router.put('/', canManageSettings, async (req, res) => {
   const settings = req.body; // { key: value, ... }
+
+  for (const flagKey of SUPER_ADMIN_ONLY_FLAGS) {
+    if (flagKey in settings && req.user.role !== 'superAdmin') {
+      return res.status(403).json({ error: 'Only a Super Admin can change this module.' });
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -83,6 +110,11 @@ router.put('/', canManageSettings, async (req, res) => {
         stopStandaloneBridge();
       }
     } else if (FLAG_KEYS.attendanceDevice in settings) {
+      invalidateModuleFlagsCache();
+    } else if (
+      FLAG_KEYS.onlineAttendance in settings || FLAG_KEYS.dutyRoster in settings ||
+      FLAG_KEYS.chat in settings || FLAG_KEYS.task in settings || FLAG_KEYS.guestRegistration in settings
+    ) {
       invalidateModuleFlagsCache();
     }
 
@@ -141,6 +173,12 @@ router.put('/:list/:id', canManageSettings, async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE ${cfg.table} SET ${sets} WHERE id=$${vals.length} RETURNING *`, vals
     );
+    // No row matched — an id that no longer exists (e.g. already deleted, or
+    // a stale id lingering in client state). Without this check, rows[0] is
+    // undefined and res.json(undefined) sends a 200 with a completely empty
+    // body, which the client's fetch wrapper then fails to parse as JSON —
+    // a real failure disguised as a crash instead of a clear error.
+    if (!rows[0]) return res.status(404).json({ error: 'Record not found — it may have already been deleted.' });
     res.json(snakeToCamel(rows[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

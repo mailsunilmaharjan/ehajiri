@@ -43,6 +43,18 @@ export const LanguageProvider = ({ children }) => {
     localStorage.setItem('app_language', lang);
   };
 
+  /* Tenant-wide default (Settings → Company Setting → Default Calendar,
+     Date Format & Language Setting). Only takes effect for a browser that
+     has never made its own explicit choice via changeLanguage() above —
+     deliberately does NOT write to localStorage, so it keeps deferring to
+     whatever the admin currently has configured (rather than freezing in
+     whichever value happened to be set the first time a given browser
+     loaded the app) right up until the user picks a language themselves. */
+  const applyTenantDefault = useCallback((defaultLang) => {
+    if (!defaultLang || localStorage.getItem('app_language')) return;
+    setLanguage(defaultLang);
+  }, []);
+
   const toggleAutoTranslate = (val) => {
     setAutoTranslate(val);
     localStorage.setItem('auto_translate', val);
@@ -83,7 +95,7 @@ export const LanguageProvider = ({ children }) => {
 
   return (
     <LanguageContext.Provider value={{
-      language, t, changeLanguage,
+      language, t, changeLanguage, applyTenantDefault,
       autoTranslate, toggleAutoTranslate,
       updateTranslation, addTranslation, deleteCustomTranslation,
       getAllTranslations, getBaseTranslations, getCustomTranslations,

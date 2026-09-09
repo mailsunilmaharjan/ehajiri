@@ -15,6 +15,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
   employee: {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: false, edit: false, delete: false },
+    recoApprovalConfig:    { view: false, edit: false, delete: false },
     myNotes:               { view: true,  edit: true,  delete: true  },
     task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: false },
@@ -22,6 +23,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     leaveApply:            { view: true,  edit: true,  delete: false },
     officeVisitApply:      { view: true,  edit: true,  delete: false },
     manualPostingApply:    { view: true,  edit: true,  delete: false },
+    missingAttendanceApply: { view: true, edit: true,  delete: false },
     leaveApproval:         { view: false, edit: false, delete: false },
     officeVisitApproval:   { view: false, edit: false, delete: false },
     leaveCalculation:      { view: true,  edit: false, delete: false },
@@ -33,14 +35,21 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     attendanceMonthly:     { view: true,  edit: false, delete: false },
     attendanceYearly:      { view: true,  edit: false, delete: false },
     dutyRoster:            { view: true,  edit: false, delete: false },
+    overtime:              { view: true,  edit: false, delete: false },
+    onlineAttendance:      { view: false, edit: false, delete: false },
+    manualPostings:        { view: false, edit: false, delete: false },
+    missingAttendanceRequests: { view: false, edit: false, delete: false },
     shift:                 { view: false, edit: false, delete: false },
     settings:              { view: false, edit: false, delete: false },
     attendanceDevice:      { view: false, edit: false, delete: false },
     standaloneDevice:      { view: false, edit: false, delete: false },
+    eventVisitorRegistration: { view: false, edit: true, delete: false },
+    staffAnalytics:        { view: false, edit: false, delete: false },
   },
   departmentHead: {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: false, edit: false, delete: false },
+    recoApprovalConfig:    { view: true,  edit: true,  delete: false },
     myNotes:               { view: true,  edit: true,  delete: true  },
     task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: false },
@@ -48,6 +57,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     leaveApply:            { view: true,  edit: true,  delete: false },
     officeVisitApply:      { view: true,  edit: true,  delete: false },
     manualPostingApply:    { view: true,  edit: true,  delete: false },
+    missingAttendanceApply: { view: true, edit: true,  delete: false },
     leaveApproval:         { view: true,  edit: true,  delete: false },
     officeVisitApproval:   { view: true,  edit: true,  delete: false },
     leaveCalculation:      { view: true,  edit: false, delete: false },
@@ -59,14 +69,21 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     attendanceMonthly:     { view: true,  edit: false, delete: false },
     attendanceYearly:      { view: true,  edit: false, delete: false },
     dutyRoster:            { view: true,  edit: true,  delete: true  },
+    overtime:              { view: true,  edit: true,  delete: false },
+    onlineAttendance:      { view: false, edit: false, delete: false },
+    manualPostings:        { view: false, edit: false, delete: false },
+    missingAttendanceRequests: { view: true, edit: true, delete: false },
     shift:                 { view: false, edit: false, delete: false },
     settings:              { view: false, edit: false, delete: false },
     attendanceDevice:      { view: false, edit: false, delete: false },
     standaloneDevice:      { view: false, edit: false, delete: false },
+    eventVisitorRegistration: { view: false, edit: true, delete: false },
+    staffAnalytics:        { view: false, edit: false, delete: false },
   },
   branchManager: {
     dashboard:             { view: true,  edit: false, delete: false },
     staffDetail:           { view: true,  edit: true,  delete: true  },
+    recoApprovalConfig:    { view: true,  edit: true,  delete: false },
     myNotes:               { view: true,  edit: true,  delete: true  },
     task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: false },
@@ -74,6 +91,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     leaveApply:            { view: true,  edit: true,  delete: false },
     officeVisitApply:      { view: true,  edit: true,  delete: false },
     manualPostingApply:    { view: true,  edit: true,  delete: false },
+    missingAttendanceApply: { view: true, edit: true,  delete: false },
     leaveApproval:         { view: true,  edit: true,  delete: false },
     officeVisitApproval:   { view: true,  edit: true,  delete: false },
     leaveCalculation:      { view: true,  edit: true,  delete: false },
@@ -85,14 +103,21 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     attendanceMonthly:     { view: true,  edit: false, delete: false },
     attendanceYearly:      { view: true,  edit: false, delete: false },
     dutyRoster:            { view: true,  edit: true,  delete: true  },
+    overtime:              { view: true,  edit: true,  delete: false },
+    onlineAttendance:      { view: true,  edit: true,  delete: false },
+    manualPostings:        { view: true,  edit: true,  delete: false },
+    missingAttendanceRequests: { view: true, edit: true, delete: false },
     shift:                 { view: false, edit: false, delete: false },
     settings:              { view: false, edit: false, delete: false },
     attendanceDevice:      { view: false, edit: false, delete: false },
     standaloneDevice:      { view: false, edit: false, delete: false },
+    eventVisitorRegistration: { view: false, edit: true, delete: false },
+    staffAnalytics:        { view: false, edit: false, delete: false },
   },
   admin: {
     dashboard:             { view: true,  edit: true,  delete: true  },
     staffDetail:           { view: true,  edit: true,  delete: true  },
+    recoApprovalConfig:    { view: true,  edit: true,  delete: true  },
     myNotes:               { view: true,  edit: true,  delete: true  },
     task:                  { view: true,  edit: true,  delete: true  },
     staffContact:          { view: true,  edit: true,  delete: true  },
@@ -100,6 +125,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     leaveApply:            { view: true,  edit: true,  delete: true  },
     officeVisitApply:      { view: true,  edit: true,  delete: true  },
     manualPostingApply:    { view: true,  edit: true,  delete: true  },
+    missingAttendanceApply: { view: true, edit: true,  delete: true  },
     leaveApproval:         { view: true,  edit: true,  delete: true  },
     officeVisitApproval:   { view: true,  edit: true,  delete: true  },
     leaveCalculation:      { view: true,  edit: false, delete: false },
@@ -111,10 +137,16 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     attendanceMonthly:     { view: true,  edit: true,  delete: true  },
     attendanceYearly:      { view: true,  edit: true,  delete: true  },
     dutyRoster:            { view: true,  edit: true,  delete: true  },
+    overtime:              { view: true,  edit: true,  delete: true  },
+    onlineAttendance:      { view: true,  edit: true,  delete: true  },
+    manualPostings:        { view: true,  edit: true,  delete: true  },
+    missingAttendanceRequests: { view: true, edit: true, delete: true },
     shift:                 { view: true,  edit: true,  delete: true  },
     settings:              { view: true,  edit: true,  delete: true  },
     attendanceDevice:      { view: true,  edit: true,  delete: true  },
     standaloneDevice:      { view: true,  edit: true,  delete: true  },
+    eventVisitorRegistration: { view: true,  edit: true,  delete: true  },
+    staffAnalytics:        { view: true,  edit: true,  delete: true  },
   },
 };
 
@@ -312,8 +344,8 @@ export const AuthProvider = ({ children }) => {
      Resolution order: staff override → role setting → default
   ── */
   const getPagePerm = useCallback((pageKey) => {
-    if (!currentUser) return { view: false, edit: false };
-    if (isAdmin) return { view: true, edit: true };
+    if (!currentUser) return { view: false, edit: false, delete: false };
+    if (isAdmin) return { view: true, edit: true, delete: true };
     // Contact directory is shared, low-risk info (names/phone numbers) — always
     // fully open for every role regardless of any Role Management override.
     if (pageKey === 'staffContact') return { view: true, edit: true, delete: false };
@@ -350,8 +382,16 @@ export const AuthProvider = ({ children }) => {
       return empList.filter(e => (e.branch || '').toLowerCase().trim() === myBranch);
     }
     if (isDeptHead) {
-      const myDept = (currentUser.department || '').toLowerCase().trim();
-      return empList.filter(e => (e.department || '').toLowerCase().trim() === myDept);
+      const myDept   = (currentUser.department || '').toLowerCase().trim();
+      const myBranch = (currentUser.branch || '').toLowerCase().trim();
+      // A Dept Head is scoped to their own branch too, not the whole
+      // department company-wide — mirrors orgScope.js's resolveOrgScope on
+      // the server (see its comment for why: a multi-branch department
+      // otherwise leaks every other branch's staff into their view).
+      return empList.filter(e =>
+        (e.department || '').toLowerCase().trim() === myDept &&
+        (!myBranch || (e.branch || '').toLowerCase().trim() === myBranch)
+      );
     }
     // Employee: own record only
     return empList.filter(e => String(e.id) === String(currentUser.id));

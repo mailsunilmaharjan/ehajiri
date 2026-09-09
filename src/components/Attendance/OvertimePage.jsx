@@ -7,8 +7,11 @@ import { useData }     from '../../context/DataContext.jsx';
 import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import SearchableSelect from '../Common/SearchableSelect.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
 
 const pad2   = (n) => String(Math.round(Math.abs(n))).padStart(2, '0');
@@ -89,23 +92,45 @@ const OTTooltip = ({ text, children }) => {
 };
 
 const OvertimePage = () => {
-  const { currentUser, isManager, canApprove } = useAuth();
-  const { language }  = useLanguage();
+  const { currentUser, isManager, canApprove, isAdmin } = useAuth();
+  const { language, t } = useLanguage();
   const { settings, updateSettings } = useSettings();
-  const { getEmployeeName } = useData();
+  const { getEmployeeName, getEmployeeById, employees: allEmployees } = useData();
   const fd = useDateFormat();
 
   /* Recommender/Approver configured per staff member (Staff → Reco/Approval
      setup) — same source + same "0 configured / exactly 1 / pick from a
      dropdown when there's more than 1" pattern LeaveApplyModal/LeaveVisitPage
      already use for the normal Leave flow, reused here for consistency. */
-  const recoConfig = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-  }, []);
+  const { getRecoIds: getOtRecoIds, getApprovalIds: getOtApprovalIds, refresh: refreshOtRecoApproval } = useRecoApproval();
   const getRecoApprovalIds = (empId) => {
-    const cfg = recoConfig[String(empId)] || {};
-    const toIds = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map(String);
-    return { reco: toIds(cfg.reco), approval: toIds(cfg.approval) };
+    return { reco: getOtRecoIds(empId), approval: getOtApprovalIds(empId) };
+  };
+
+  /* ── Recommend → Approve two-stage gating (same rules as Leave/Office
+     Visit Approval): a row's Approve requires the same-row-configured
+     approver, and — while Recommendation Compulsory is on — the record must
+     already be recommended, and the configured recommender can never also
+     be the one to approve (separation of duties), mirrored server-side in
+     authorizeRecoAction. admin/superAdmin bypass the assignment checks
+     (same PRIVILEGED_ROLES bypass authorizeRecoAction grants server-side). ── */
+  const isRecoCompulsory = settings.recoApprovalCompulsory || false;
+  const isRecommenderFor = (empId) => isAdmin || getOtRecoIds(empId).includes(String(currentUser.id));
+  const isApproverFor    = (empId) => isAdmin || getOtApprovalIds(empId).includes(String(currentUser.id));
+  // Whether this employee has ANY recommender configured — if not,
+  // Recommendation Compulsory is unsatisfiable for them (nobody exists who
+  // could ever recommend it), so it must not block their approver. Mirrors
+  // authorizeRecoAction's server-side check.
+  const hasRecommenderFor = (empId) => getOtRecoIds(empId).length > 0;
+  const canApproveRow    = (row) => !isRecoCompulsory || !!row.recommendedBy || !hasRecommenderFor(row.employeeId);
+  /* Full eligibility to approve a specific row — used both for the row's
+     own Approve button and to keep bulk selection/"Approve All" from
+     silently doing what the row-level button itself refuses to do. */
+  const canActOnRowApprove = (row) => {
+    if (!isApproverFor(row.employeeId)) return false;
+    // dual-role block — only meaningful when a recommender is configured
+    if (!isAdmin && isRecoCompulsory && hasRecommenderFor(row.employeeId) && isRecommenderFor(row.employeeId)) return false;
+    return canApproveRow(row);
   };
   const L  = (np, en) => language === 'np' ? np : en;
   const useNP = settings.defaultCalendar === 'np';
@@ -133,6 +158,11 @@ const OvertimePage = () => {
      (time in/out, calculated OT, recommender/approver) is already shown,
      and submit directly — no separate staged/confirm step. */
   const [leaveModal,  setLeaveModal]  = useState(null); // { rec } while the Grant Leave modal is open
+  // useRecoApproval only fetches once, when this hook first mounts — this page
+  // stays mounted for the whole session, so without this, opening Grant Leave
+  // any time after a staff member's Recommendator/Approval config was set (or
+  // changed) elsewhere would show "Not configured" even though it genuinely is.
+  useEffect(() => { if (leaveModal) refreshOtRecoApproval(); }, [leaveModal]); // eslint-disable-line react-hooks/exhaustive-deps
   const [leaveFormType, setLeaveFormType] = useState('');
   const [leaveFormDays, setLeaveFormDays] = useState('1');
   const [leaveComment,  setLeaveComment]  = useState('');
@@ -438,6 +468,23 @@ const OvertimePage = () => {
     setActionModal({ rec: row, type: 'approve' });
   };
 
+  /* ── Recommend a single record — same insert-or-update-by-(employee,date)
+     shape as approve-inline handles below, since a calculated record has no
+     DB row (and no approvalId) until someone first acts on it. ── */
+  const handleRecommendClick = async (row) => {
+    try {
+      if (row.approvalId) {
+        await api.patch(`/overtime/${row.approvalId}/recommend`, {});
+      } else {
+        await api.post('/overtime/recommend-inline', {
+          employeeId: row.employeeId, date: row.date, otMinutes: getApprovedOT(row),
+        });
+      }
+      showToast('OT recommended');
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+
   /* ── Approve / Reject single record (non-leave-mode rows only — a
      leave-mode row's Approve goes straight to openLeaveModal instead) ── */
   const handleAction = async (type) => {
@@ -447,13 +494,12 @@ const OvertimePage = () => {
       const approvedMins = getApprovedOT(rec);
       if (rec.approvalId) {
         await api.patch(`/overtime/${rec.approvalId}/${type}`, {
-          approvedBy: currentUser.id, comment, approvedOTMins: approvedMins,
+          comment, approvedOTMins: approvedMins,
         });
       } else {
         await api.post('/overtime/approve-inline', {
           employeeId: rec.employeeId, date: rec.date,
-          otMinutes: approvedMins, action: type,
-          approvedBy: currentUser.id, comment,
+          otMinutes: approvedMins, action: type, comment,
         });
       }
       showToast(`OT ${type === 'approve' ? 'Approved' : 'Rejected'} — ${toHHMM(approvedMins)} recorded`);
@@ -462,10 +508,18 @@ const OvertimePage = () => {
     } catch (e) { showToast(e.message, 'error'); }
   };
 
+  /* Reject doesn't need the recommend-first/dual-role checks approve does —
+     just the same configured-approver requirement the row's own Reject
+     button already uses. Used as the (safe, superset) eligibility for bulk
+     selection below; approve narrows further via canActOnRowApprove. */
+  const canActOnRowReject = (row) => isApproverFor(row.employeeId);
+
   /* ── Bulk approve / reject ── */
   const handleBulk = async (type) => {
     if (!selected.size) return;
-    const recs = visibleRecords.filter(r => selected.has(`${r.employeeId}-${r.date}`));
+    let recs = visibleRecords.filter(r => selected.has(`${r.employeeId}-${r.date}`));
+    if (type === 'approve') recs = recs.filter(canActOnRowApprove);
+    if (!recs.length) { showToast('No eligible OT records to ' + type, 'error'); return; }
     try {
       await api.post('/overtime/bulk-approve', {
         records   : recs.map(r => ({ employeeId: r.employeeId, date: r.date, otMinutes: getApprovedOT(r) })),
@@ -480,12 +534,61 @@ const OvertimePage = () => {
   };
 
   const toggleSelectAll = () => {
-    const pendingKeys = visibleRecords.filter(r => r.status === 'pending').map(r => `${r.employeeId}-${r.date}`);
+    const pendingKeys = visibleRecords.filter(r => r.status === 'pending' && canActOnRowReject(r)).map(r => `${r.employeeId}-${r.date}`);
     if (pendingKeys.every(k => selected.has(k))) {
       setSelected(prev => { const n = new Set(prev); pendingKeys.forEach(k => n.delete(k)); return n; });
     } else {
       setSelected(prev => { const n = new Set(prev); pendingKeys.forEach(k => n.add(k)); return n; });
     }
+  };
+
+  /* ── "Approve All" (all pending / Weekend / Public Holiday) — unlike the
+     checkbox-based Approve Selected above, these act on every pending record
+     matching the chosen scope in one go, and first ask who recommended and
+     approved the batch (with dates) rather than silently stamping the
+     current admin + today, since the person clicking this may just be
+     recording a decision that recommender/approver already made elsewhere. */
+  const [bulkApproveModal, setBulkApproveModal] = useState(null); // { scope, label, recs }
+  const [bulkRecoBy,     setBulkRecoBy]     = useState('');
+  const [bulkRecoDate,   setBulkRecoDate]   = useState(today);
+  const [bulkApprovedBy, setBulkApprovedBy] = useState('');
+  const [bulkApprovedDate, setBulkApprovedDate] = useState(today);
+
+  const openBulkApprove = (scope, label) => {
+    // Non-admin: only records they're actually eligible to approve — the
+    // server now enforces this too (skips anything else), so this just
+    // keeps the modal from showing rows that would silently do nothing.
+    const recs = visibleRecords.filter(r =>
+      r.status === 'pending' && (scope === 'all' || r._dayType === scope) && (isAdmin || canActOnRowApprove(r))
+    );
+    if (!recs.length) { showToast('No pending OT records to approve', 'error'); return; }
+    setBulkRecoBy(''); setBulkRecoDate(today);
+    setBulkApprovedBy(String(currentUser.id)); setBulkApprovedDate(today);
+    setBulkApproveModal({ scope, label, recs });
+  };
+
+  const confirmBulkApprove = async () => {
+    if (!bulkApproveModal) return;
+    const { recs } = bulkApproveModal;
+    try {
+      const res = await api.post('/overtime/bulk-approve', {
+        records        : recs.map(r => ({ employeeId: r.employeeId, date: r.date, otMinutes: getApprovedOT(r) })),
+        action         : 'approve',
+        // Recording someone else as approver/recommender only actually
+        // applies for admin/superAdmin — the server records everyone else
+        // as themselves regardless of what's picked here.
+        approvedBy     : bulkApprovedBy ? Number(bulkApprovedBy) : currentUser.id,
+        approvedDate   : bulkApprovedDate || null,
+        recommendedBy  : bulkRecoBy ? Number(bulkRecoBy) : null,
+        recommendedDate: bulkRecoBy ? (bulkRecoDate || null) : null,
+        comment        : '',
+      });
+      const count = res?.count ?? recs.length;
+      const skipped = res?.skipped || 0;
+      showToast(`${count} OT record${count!==1?'s':''} approved` + (skipped ? ` — ${skipped} skipped (not your assigned approval)` : ''));
+      setBulkApproveModal(null);
+      load();
+    } catch (e) { showToast(e.message, 'error'); }
   };
 
   const DateInput = ({ value, onChange }) => {
@@ -506,7 +609,10 @@ const OvertimePage = () => {
       field: 'fullName', header: L('नाम','Staff'), width: 170,
       render: (v, row) => (
         <div>
-          <div style={{ color:'#111827' }}>{v}</div>
+          <div style={{ color:'#111827', display:'flex', alignItems:'center', gap:6 }}>
+            <Avatar photo={getEmployeeById(row.employeeId)?.profilePhoto} name={v} size={20} />
+            {v}
+          </div>
           <div style={{ fontSize:10, color:'#9ca3af', marginTop:2,
             display:'flex', gap:4, flexWrap:'nowrap',
             overflow:'hidden', maxWidth:'100%' }}>
@@ -675,7 +781,14 @@ const OvertimePage = () => {
       field: 'status', header: L('स्थिति','Status'), width: 100,
       render: (v, row) => (
         <OTTooltip text={row.comment ? `💬 ${row.comment}` : null}>
-          <StatusBadge status={v} />
+          <div>
+            <StatusBadge status={v} />
+            {isRecoCompulsory && v === 'pending' && hasRecommenderFor(row.employeeId) && (
+              row.recommendedBy
+                ? <div style={{ fontSize:10, color:'#059669', marginTop:2, fontWeight:600 }}>✓ {row.recommendedByName || getEmployeeName(row.recommendedBy)}</div>
+                : <div style={{ fontSize:10, color:'#92400e', marginTop:2, fontWeight:600 }}>⏳ Awaiting Reco</div>
+            )}
+          </div>
         </OTTooltip>
       ),
     },
@@ -697,34 +810,52 @@ const OvertimePage = () => {
 
     /* Actions */
     canAct ? {
-      field: 'actions', header: L('कार्य','Actions'), width: 110, filterable:false, sortable:false,
+      field: 'actions', header: L('कार्य','Actions'), width: 130, filterable:false, sortable:false,
       render: (_, row) => {
-        if (row.status === 'approved') return (
+        const amReco       = isRecommenderFor(row.employeeId);
+        const canReject     = canActOnRowReject(row);
+        const canApproveNow = canActOnRowApprove(row);
+
+        if (row.status === 'approved') return canReject ? (
           <button onClick={() => setActionModal({ rec:row, type:'reject' })}
             style={{ background:'none', border:'1px solid #fca5a5', color:'#dc2626',
               borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:600 }}>
             ✗ Reject
           </button>
-        );
-        if (row.status === 'rejected') return (
+        ) : <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>;
+
+        if (row.status === 'rejected') return canApproveNow ? (
           <button onClick={() => handleApproveClick(row)}
             style={{ background:'none', border:'1px solid #6ee7b7', color:'#059669',
               borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:600 }}>
             ✓ Approve
           </button>
-        );
+        ) : <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>;
+
+        if (!amReco && !canReject) return <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>;
         return (
-          <div style={{ display:'flex', gap:6 }}>
-            <button onClick={() => handleApproveClick(row)}
-              style={{ background:'#d1fae5', border:'none', color:'#065f46',
-                borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
-              ✓
-            </button>
-            <button onClick={() => setActionModal({ rec:row, type:'reject' })}
-              style={{ background:'#fee2e2', border:'none', color:'#dc2626',
-                borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
-              ✗
-            </button>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+            {amReco && !row.recommendedBy && (
+              <button onClick={() => handleRecommendClick(row)} title="Recommend"
+                style={{ background:'#059669', border:'none', color:'#fff',
+                  borderRadius:6, padding:'3px 8px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
+                👍
+              </button>
+            )}
+            {canApproveNow && (
+              <button onClick={() => handleApproveClick(row)}
+                style={{ background:'#d1fae5', border:'none', color:'#065f46',
+                  borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
+                ✓
+              </button>
+            )}
+            {canReject && (
+              <button onClick={() => setActionModal({ rec:row, type:'reject' })}
+                style={{ background:'#fee2e2', border:'none', color:'#dc2626',
+                  borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
+                ✗
+              </button>
+            )}
           </div>
         );
       },
@@ -902,23 +1033,51 @@ const OvertimePage = () => {
               showSearch
               searchPlaceholder={L('खोज्नुहोस्…','Search staff…')}
               toolbar={
-                <button onClick={() => setShowAdvSearchModal(true)}
-                  style={{ display:'flex', alignItems:'center', gap:6, height:34,
-                    padding:'0 14px', background: activeFilterCount>0 ? '#eff6ff' : '#f9fafb',
-                    border:`1.5px solid ${activeFilterCount>0 ? '#1a56db' : '#d1d5db'}`,
-                    borderRadius:7, fontSize:13, fontWeight:600,
-                    color: activeFilterCount>0 ? '#1a56db' : '#374151', cursor:'pointer' }}>
-                  <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
-                    <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
-                  </svg>
-                  Advanced Search
-                  {activeFilterCount > 0 && (
-                    <span style={{ background:'#1a56db', color:'#fff', borderRadius:10,
-                      fontSize:10, fontWeight:700, padding:'1px 7px', marginLeft:2 }}>
-                      {activeFilterCount}
-                    </span>
+                <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                  {canAct && counts.pending > 0 && (
+                    <>
+                      <button onClick={() => openBulkApprove('all', 'All Pending OT')}
+                        style={{ display:'flex', alignItems:'center', gap:6, height:34,
+                          padding:'0 14px', background:'#059669', border:'none',
+                          borderRadius:7, fontSize:13, fontWeight:700, color:'#fff', cursor:'pointer' }}>
+                        ✅ All Approve
+                      </button>
+                      {weekendCount > 0 && (
+                        <button onClick={() => openBulkApprove('weekend', 'Weekend OT')}
+                          style={{ display:'flex', alignItems:'center', gap:6, height:34,
+                            padding:'0 14px', background:'#f59e0b', border:'none',
+                            borderRadius:7, fontSize:13, fontWeight:700, color:'#fff', cursor:'pointer' }}>
+                          🏖 All Approve (Weekend)
+                        </button>
+                      )}
+                      {holidayCount > 0 && (
+                        <button onClick={() => openBulkApprove('holiday', 'Public Holiday OT')}
+                          style={{ display:'flex', alignItems:'center', gap:6, height:34,
+                            padding:'0 14px', background:'#10b981', border:'none',
+                            borderRadius:7, fontSize:13, fontWeight:700, color:'#fff', cursor:'pointer' }}>
+                          🎉 All Approve (Public Holiday)
+                        </button>
+                      )}
+                    </>
                   )}
-                </button>
+                  <button onClick={() => setShowAdvSearchModal(true)}
+                    style={{ display:'flex', alignItems:'center', gap:6, height:34,
+                      padding:'0 14px', background: activeFilterCount>0 ? '#eff6ff' : '#f9fafb',
+                      border:`1.5px solid ${activeFilterCount>0 ? '#1a56db' : '#d1d5db'}`,
+                      borderRadius:7, fontSize:13, fontWeight:600,
+                      color: activeFilterCount>0 ? '#1a56db' : '#374151', cursor:'pointer' }}>
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
+                      <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
+                    </svg>
+                    {t('Advanced Search')}
+                    {activeFilterCount > 0 && (
+                      <span style={{ background:'#1a56db', color:'#fff', borderRadius:10,
+                        fontSize:10, fontWeight:700, padding:'1px 7px', marginLeft:2 }}>
+                        {activeFilterCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
               }
             />
       }
@@ -1048,16 +1207,16 @@ const OvertimePage = () => {
             )}
             {ids.length === 1 && (
               <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:8, padding:'7px 10px' }}>
-                <span style={{ background:chipBg, color:chipColor, borderRadius:10, padding:'2px 10px', fontSize:12.5, fontWeight:600 }}>
+                <span style={{ background:chipBg, color:chipColor, borderRadius:10, padding:'2px 10px 2px 5px', fontSize:12.5, fontWeight:600, display:'flex', alignItems:'center', gap:6, width:'fit-content' }}>
+                  <Avatar photo={getEmployeeById(ids[0])?.profilePhoto} name={getEmployeeName(ids[0])} size={18} />
                   {getEmployeeName(ids[0])}
                 </span>
               </div>
             )}
             {ids.length > 1 && (
-              <select className="form-control" value={value} onChange={e => onChange(e.target.value)} style={{ fontSize:12.5 }}>
-                <option value="">— Select {label} —</option>
-                {ids.map(id => <option key={id} value={id}>{getEmployeeName(id)}</option>)}
-              </select>
+              <SearchableSelect className="form-control" value={value} onChange={onChange}
+                options={ids.map(id => ({ value: String(id), label: getEmployeeName(id), photo: getEmployeeById(id)?.profilePhoto }))}
+                placeholder={`— Select ${label} —`} showAvatar />
             )}
           </div>
         );
@@ -1149,6 +1308,79 @@ const OvertimePage = () => {
           </div>
         );
       })()}
+
+      {/* ── Approve All (all pending / Weekend / Public Holiday) — asks who
+           recommended and approved this batch, with dates, before actually
+           bulk-approving every matching pending record. ── */}
+      {bulkApproveModal && (
+        <div className="modal-overlay" onClick={() => setBulkApproveModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth:480, width:'94vw' }}>
+            <div className="modal-header">
+              <h2>✅ Approve All — {bulkApproveModal.label}</h2>
+              <button className="modal-close" onClick={() => setBulkApproveModal(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8,
+                padding:'8px 12px', marginBottom:14, fontSize:13, color:'#065f46', fontWeight:600 }}>
+                {bulkApproveModal.recs.length} pending OT record{bulkApproveModal.recs.length!==1?'s':''} will be approved.
+              </div>
+
+              {isAdmin ? (
+                <>
+                  <div style={{ display:'flex', gap:12, marginBottom:12 }}>
+                    <div className="form-group" style={{ flex:1 }}>
+                      <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>
+                        Recommended By
+                      </label>
+                      <SearchableSelect value={bulkRecoBy} onChange={setBulkRecoBy}
+                        options={(allEmployees||[]).map(e => ({ value:String(e.id), label:e.fullName, photo:e.profilePhoto }))}
+                        placeholder="— None —" showAvatar />
+                    </div>
+                    <div className="form-group" style={{ flex:1 }}>
+                      <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>
+                        Recommended Date
+                      </label>
+                      <DateInput value={bulkRecoDate} onChange={setBulkRecoDate} />
+                    </div>
+                  </div>
+
+                  <div style={{ display:'flex', gap:12 }}>
+                    <div className="form-group" style={{ flex:1 }}>
+                      <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>
+                        Approved By
+                      </label>
+                      <SearchableSelect value={bulkApprovedBy} onChange={setBulkApprovedBy}
+                        options={(allEmployees||[]).map(e => ({ value:String(e.id), label:e.fullName, photo:e.profilePhoto }))}
+                        placeholder="— Select —" showAvatar />
+                    </div>
+                    <div className="form-group" style={{ flex:1 }}>
+                      <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>
+                        Approved Date
+                      </label>
+                      <DateInput value={bulkApprovedDate} onChange={setBulkApprovedDate} />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // Non-admin can't record someone else's decision (server
+                // ignores it regardless) — every record here is one they're
+                // personally the configured approver for, recorded as
+                // themselves, today.
+                <div style={{ fontSize:12.5, color:'#6b7280', background:'#f9fafb', border:'1px solid #e5e7eb',
+                  borderRadius:8, padding:'8px 12px' }}>
+                  You'll be recorded as the approver, dated today.
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setBulkApproveModal(null)}>Cancel</button>
+              <button className="btn btn-success" onClick={confirmBulkApprove} disabled={!bulkApprovedBy}>
+                ✅ Approve All ({bulkApproveModal.recs.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── OT Settings Modal ── */}
       {showOTSettings && (
@@ -1409,7 +1641,7 @@ const OvertimePage = () => {
                   <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" style={{ color:'#1a56db' }}>
                     <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
                   </svg>
-                  <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>Advanced Search</span>
+                  <span style={{ fontSize:17, fontWeight:800, color:'#111827' }}>{t('Advanced Search')}</span>
                   {activeFilterCount > 0 && (
                     <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:12, fontWeight:700, padding:'2px 10px' }}>
                       {activeFilterCount} filter{activeFilterCount>1?'s':''} active

@@ -6,12 +6,11 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useLeaveApply } from '../../context/LeaveApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import SearchableSelect from '../Common/SearchableSelect.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
-
-/* ── load saved reco/approval ── */
-const loadRecoApproval = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
+import useRecoApproval from '../../hooks/useRecoApproval.js';
+import useLeaveOpening from '../../hooks/useLeaveOpening.js';
 
 /* ── Date input that respects calendar setting ── */
 const LeaveDateInput = ({ value, onChange, error, settings }) => {
@@ -46,12 +45,21 @@ const LeaveApplyModal = () => {
   const navigate          = useNavigate();
   const { t }             = useLanguage();
   const { settings, refreshSettings } = useSettings();
+  const { getRecoIds: getMyRecoIds, getApprovalIds: getMyApprovalIds, assignments: recoAssignments, refresh: refreshRecoApproval } = useRecoApproval();
+  const { opening: leaveOpening, refresh: refreshLeaveOpening } = useLeaveOpening();
+
+  // This modal stays mounted for the whole session — refetch the opening
+  // figures each time it opens so a value an admin just saved in Leave
+  // Calculation shows up immediately instead of only after next login
+  // (same reasoning as the settings/leaveBalances refetches below).
+  useEffect(() => { if (isOpen) refreshLeaveOpening(); }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // This modal stays mounted for the whole session (see Layout.jsx), so a
   // long-open tab would otherwise keep enforcing whatever
   // leaveBackdateEnabled was when it first logged in — refetch right as it
   // opens so a Super Admin flipping the toggle takes effect immediately for
-  // everyone, not just after their next full page reload.
+  // everyone, not just after their next full page reload. (Reco/approval
+  // assignments get the same treatment below, via initForm.)
   useEffect(() => { if (isOpen) refreshSettings(); }, [isOpen]);
   const {
     filteredLeaves: leaves, addLeave,
@@ -104,12 +112,11 @@ const LeaveApplyModal = () => {
     return s;
   }, [settings.publicHolidays]);
 
-  /* ── Balance from Leave Calculation (ls_leaveOpening) for current fiscal year ──
+  /* ── Balance from Leave Calculation's saved opening figures, for current fiscal year ──
      prevYear + currYear - usedDays for each leave type config.
      Falls back to the old leaveBalances system if opening data is unavailable.        */
   const balance = useMemo(() => {
     try {
-      const opening  = JSON.parse(localStorage.getItem('ls_leaveOpening') || '{}');
       const defaultFY = (settings.fiscalYears || []).find(f => f.isDefault) || (settings.fiscalYears || [])[0];
       if (!defaultFY || !currentUser?.id) return getLeaveBalance(currentUser?.id);
 
@@ -119,8 +126,8 @@ const LeaveApplyModal = () => {
 
       const result = {};
       ltConfigs.forEach(lt => {
-        const prevYear = Number(opening[prevKey]?.[empId]?.[lt.shortName] ?? 0);
-        const currYear = Number(opening[fyId]?.[empId]?.[lt.shortName]    ?? 0);
+        const prevYear = Number(leaveOpening[prevKey]?.[empId]?.[lt.shortName] ?? 0);
+        const currYear = Number(leaveOpening[fyId]?.[empId]?.[lt.shortName]    ?? 0);
         const used     = (leaves || [])
           .filter(l => String(l.employeeId) === empId
                     && l.leaveTypeCode === lt.shortName
@@ -136,23 +143,19 @@ const LeaveApplyModal = () => {
     } catch {
       return getLeaveBalance(activeUser?.id);
     }
-  }, [settings.fiscalYears, activeUser?.id, ltConfigs, leaves, getLeaveBalance]);
+  }, [settings.fiscalYears, activeUser?.id, ltConfigs, leaves, getLeaveBalance, leaveOpening]);
 
-  /* ── Reco/Approval from localStorage ── */
-  const getMyRecoApproval = useCallback(() => {
-    const saved = loadRecoApproval();
-    const r = saved[activeUser?.id]?.reco;
-    const a = saved[activeUser?.id]?.approval;
-    return {
-      reco:     Array.isArray(r) ? r : (r ? [r] : []),
-      approval: Array.isArray(a) ? a : (a ? [a] : []),
-    };
-  }, [activeUser?.id]);
+  /* ── Reco/Approval, live from the API (useRecoApproval above) ── */
+  const getMyRecoApproval = useCallback(() => ({
+    reco:     getMyRecoIds(activeUser?.id),
+    approval: getMyApprovalIds(activeUser?.id),
+  }), [activeUser?.id, getMyRecoIds, getMyApprovalIds]);
 
   /* use full employees list so reco/approval from any branch/dept resolves correctly */
-  const getEmpName = useCallback((id) =>
-    (allEmployees || []).find(e => String(e.id) === String(id))?.fullName || `#${id}`,
+  const getEmp = useCallback((id) =>
+    (allEmployees || []).find(e => String(e.id) === String(id)),
   [allEmployees]);
+  const getEmpName = useCallback((id) => getEmp(id)?.fullName || `#${id}`, [getEmp]);
 
   /* ── Day calculator ── */
   const calcDays = useCallback(() => {
@@ -266,8 +269,11 @@ const LeaveApplyModal = () => {
     setSelectedApproval('');
   };
 
-  /* ── Open: load fresh reco/approval ── */
-  const initForm = () => {
+  /* ── Open: reset the form, then kick off a reco/approval refetch ──
+     (this modal stays mounted for the whole session, so useRecoApproval's
+     own mount-time fetch could be well out of date by the time it's opened). */
+  useEffect(() => {
+    if (!isOpen) return;
     const { reco, approval } = getMyRecoApproval();
     const fromDate = prefillDates?.fromDate || today;
     const toDate   = prefillDates?.toDate   || fromDate;
@@ -275,12 +281,29 @@ const LeaveApplyModal = () => {
     setSelectedReco(reco.length === 1 ? String(reco[0]) : '');
     setSelectedApproval(approval.length === 1 ? String(approval[0]) : '');
     setErrors({}); setSuccess(false);
-  };
+    refreshRecoApproval();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
-  /* Initialise form whenever modal opens */
-  const [prevOpen, setPrevOpen] = useState(false);
-  if (isOpen && !prevOpen) { setPrevOpen(true); initForm(); }
-  if (!isOpen && prevOpen)  { setPrevOpen(false); }
+  /* Once that refetch actually resolves — i.e. recoAssignments itself
+     changes, not just some unstable function reference — re-sync only the
+     reco/approval fields, without clobbering anything else the user may
+     have already typed while it was loading. Depending on the getter
+     functions instead (as this used to) doesn't work: they're plain
+     closures recreated every render by useRecoApproval, not memoized, so an
+     effect depending on them (or on a callback built from them) re-fires
+     every render — the previous code instead called the *pre-refetch*
+     initForm closure via `.then(initForm)`, which never picked up the new
+     data at all. */
+  useEffect(() => {
+    if (!isOpen) return;
+    const reco     = getMyRecoIds(activeUser?.id);
+    const approval = getMyApprovalIds(activeUser?.id);
+    setForm(p => ({ ...p, reco, approval }));
+    setSelectedReco(prev => prev || (reco.length === 1 ? String(reco[0]) : ''));
+    setSelectedApproval(prev => prev || (approval.length === 1 ? String(approval[0]) : ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoAssignments, isOpen]);
 
   if (!isOpen || !activeUser) return null;
 
@@ -536,21 +559,20 @@ const LeaveApplyModal = () => {
                 )}
                 {form.reco.length === 1 && (
                   <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                    <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                    <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px 2px 6px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                      <Avatar photo={getEmp(form.reco[0])?.profilePhoto} name={getEmpName(form.reco[0])} size={20} />
                       {getEmpName(form.reco[0])}
                     </span>
                   </div>
                 )}
                 {form.reco.length > 1 && (
                   <>
-                    <select value={selectedReco} onChange={e => setSelectedReco(e.target.value)}
+                    <SearchableSelect value={selectedReco} onChange={setSelectedReco}
                       className={`form-control ${errors.selectedReco ? 'error' : ''}`}
-                      style={{ fontSize:13, minHeight:42 }}>
-                      <option value="">— Select Recommendator —</option>
-                      {form.reco.map(id => (
-                        <option key={id} value={String(id)}>{getEmpName(id)}</option>
-                      ))}
-                    </select>
+                      options={form.reco.map(id => ({ value: String(id), label: getEmpName(id), sub: [getEmp(id)?.employeeId, getEmp(id)?.position].filter(Boolean).join(' - '), photo: getEmp(id)?.profilePhoto }))}
+                      placeholder="— Select Recommendator —"
+                      showAvatar
+                    />
                     {errors.selectedReco && <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{errors.selectedReco}</div>}
                   </>
                 )}
@@ -566,21 +588,20 @@ const LeaveApplyModal = () => {
                 )}
                 {form.approval.length === 1 && (
                   <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
-                    <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
+                    <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 12px 2px 6px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                      <Avatar photo={getEmp(form.approval[0])?.profilePhoto} name={getEmpName(form.approval[0])} size={20} />
                       {getEmpName(form.approval[0])}
                     </span>
                   </div>
                 )}
                 {form.approval.length > 1 && (
                   <>
-                    <select value={selectedApproval} onChange={e => setSelectedApproval(e.target.value)}
+                    <SearchableSelect value={selectedApproval} onChange={setSelectedApproval}
                       className={`form-control ${errors.selectedApproval ? 'error' : ''}`}
-                      style={{ fontSize:13, minHeight:42 }}>
-                      <option value="">— Select Approval Authority —</option>
-                      {form.approval.map(id => (
-                        <option key={id} value={String(id)}>{getEmpName(id)}</option>
-                      ))}
-                    </select>
+                      options={form.approval.map(id => ({ value: String(id), label: getEmpName(id), sub: [getEmp(id)?.employeeId, getEmp(id)?.position].filter(Boolean).join(' - '), photo: getEmp(id)?.profilePhoto }))}
+                      placeholder="— Select Approval Authority —"
+                      showAvatar
+                    />
                     {errors.selectedApproval && <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{errors.selectedApproval}</div>}
                   </>
                 )}

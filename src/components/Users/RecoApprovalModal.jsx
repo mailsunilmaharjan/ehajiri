@@ -1,175 +1,9 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
-
-const STORAGE_KEY = 'ehajiri_reco_approval';
-const loadSaved  = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } };
-const persistAll = (data) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-
-/* ─────────────────────────────────────────────────────────
-   Multi-select employee dropdown with checkboxes
-   value: string[] of employee IDs
-   onChange: (string[]) => void
-───────────────────────────────────────────────────────── */
-const EmpMultiSelect = ({ value = [], onChange, employees, postMap, placeholder = '— Select —' }) => {
-  const [open,   setOpen]   = useState(false);
-  const [search, setSearch] = useState('');
-  const [rect,   setRect]   = useState(null);
-  const trigRef = useRef(null);
-  const inpRef  = useRef(null);
-  const dropRef = useRef(null);
-
-  const selected = Array.isArray(value) ? value.map(String) : (value ? [String(value)] : []);
-
-  const options = useMemo(() => employees.map(e => {
-    const short = postMap[e.position] || '';
-    const dev   = e.deviceId ? ` [${e.deviceId}]` : '';
-    return { id: String(e.id), label: `${e.fullName}${short ? ' '+short : ''}${dev}`, name: e.fullName };
-  }), [employees, postMap]);
-
-  const filtered  = search ? options.filter(o => o.label.toLowerCase().includes(search.toLowerCase())) : options;
-  const selLabels = options.filter(o => selected.includes(o.id)).map(o => o.name);
-
-  const displayText = selLabels.length === 0 ? placeholder
-    : selLabels.length === 1 ? selLabels[0]
-    : `${selLabels.length} selected`;
-
-  const openDrop = () => {
-    if (!trigRef.current) return;
-    const r = trigRef.current.getBoundingClientRect();
-    setRect({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 240) });
-    setOpen(o => !o);
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e) => {
-      if (trigRef.current?.contains(e.target) || dropRef.current?.contains(e.target)) return;
-      setOpen(false); setSearch('');
-    };
-    // Only close on scroll if the scroll target is NOT inside the dropdown itself
-    const scroll = (e) => {
-      if (dropRef.current?.contains(e.target)) return;
-      setOpen(false); setSearch('');
-    };
-    document.addEventListener('mousedown', close);
-    window.addEventListener('scroll', scroll, true);
-    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', scroll, true); };
-  }, [open]);
-
-  useEffect(() => { if (open) setTimeout(() => inpRef.current?.focus(), 20); }, [open]);
-
-  const toggle = (id) => {
-    const next = selected.includes(id) ? selected.filter(v => v !== id) : [...selected, id];
-    onChange(next);
-  };
-
-  return (
-    <div style={{ position:'relative' }}>
-      <button ref={trigRef} type="button" onClick={openDrop} style={{
-        width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
-        padding:'9px 10px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
-        borderRadius:6, background: selected.length > 0 ? '#f0f9ff' : '#fff',
-        cursor:'pointer', fontSize:12, color: selected.length > 0 ? '#1f2937' : '#9ca3af',
-        fontFamily:'inherit', boxShadow: open ? '0 0 0 2px rgba(26,86,219,.1)' : 'none',
-        minHeight:38,
-      }}>
-        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, textAlign:'left' }}>
-          {displayText}
-        </span>
-        <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:4 }}>
-          {selected.length > 0 && (
-            <span style={{ background:'#1a56db', color:'#fff', borderRadius:10,
-              fontSize:10, fontWeight:700, padding:'1px 6px', minWidth:18, textAlign:'center' }}>
-              {selected.length}
-            </span>
-          )}
-          {selected.length > 0 && (
-            <span onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onChange([]); }}
-              style={{ color:'#9ca3af', fontSize:15, lineHeight:1, cursor:'pointer', padding:'0 2px' }}
-              onMouseEnter={e => e.currentTarget.style.color='#ef4444'}
-              onMouseLeave={e => e.currentTarget.style.color='#9ca3af'}>×</span>
-          )}
-          <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12"
-            style={{ color:'#9ca3af', transform: open ? 'rotate(180deg)' : 'none', transition:'transform .15s' }}>
-            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd"/>
-          </svg>
-        </div>
-      </button>
-
-      {open && rect && createPortal(
-        <div ref={dropRef} style={{
-          position:'fixed', zIndex:999999,
-          top:rect.top, left:rect.left, width:rect.width,
-          background:'#fff', border:'1.5px solid #1a56db', borderRadius:8,
-          boxShadow:'0 8px 24px rgba(0,0,0,.2)', maxHeight:260, display:'flex', flexDirection:'column',
-        }}>
-          {/* search */}
-          <div style={{ padding:'6px 7px', borderBottom:'1px solid #f1f5f9', flexShrink:0 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:5, background:'#f8fafc',
-              border:'1px solid #e2e8f0', borderRadius:5, padding:'4px 7px' }}>
-              <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12" style={{ color:'#9ca3af', flexShrink:0 }}>
-                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
-              </svg>
-              <input ref={inpRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search staff..." style={{ border:'none', outline:'none', background:'transparent',
-                  fontSize:12, color:'#374151', width:'100%', fontFamily:'inherit' }} />
-              {search && <button type="button" onMouseDown={e => { e.preventDefault(); setSearch(''); }}
-                style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:14, padding:0 }}>×</button>}
-            </div>
-          </div>
-
-          {/* list */}
-          <div style={{ overflowY:'auto', flex:1 }} onWheel={e => e.stopPropagation()}>
-            {filtered.length === 0
-              ? <div style={{ padding:'8px 10px', fontSize:11, color:'#9ca3af', textAlign:'center' }}>No results</div>
-              : filtered.map(o => {
-                  const checked = selected.includes(o.id);
-                  return (
-                    <div key={o.id} onMouseDown={e => { e.preventDefault(); toggle(o.id); }}
-                      style={{ padding:'7px 10px', display:'flex', alignItems:'center', gap:8,
-                        cursor:'pointer', fontSize:12,
-                        background: checked ? '#eff6ff' : 'transparent',
-                        borderLeft: checked ? '3px solid #1a56db' : '3px solid transparent' }}
-                      onMouseEnter={e => { if (!checked) e.currentTarget.style.background='#f8fafc'; }}
-                      onMouseLeave={e => { if (!checked) e.currentTarget.style.background=checked?'#eff6ff':'transparent'; }}>
-                      {/* checkbox */}
-                      <span style={{
-                        width:14, height:14, borderRadius:3, flexShrink:0,
-                        border:`2px solid ${checked ? '#1a56db' : '#d1d5db'}`,
-                        background: checked ? '#1a56db' : '#fff',
-                        display:'flex', alignItems:'center', justifyContent:'center',
-                      }}>
-                        {checked && (
-                          <svg viewBox="0 0 12 12" fill="none" width="9" height="9">
-                            <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        )}
-                      </span>
-                      <span style={{ color: checked ? '#1a56db' : '#374151', fontWeight: checked ? 600 : 400 }}>
-                        {o.label}
-                      </span>
-                    </div>
-                  );
-                })
-            }
-          </div>
-
-          {/* footer */}
-          <div style={{ padding:'6px 10px', borderTop:'1px solid #f1f5f9', display:'flex',
-            justifyContent:'space-between', alignItems:'center', flexShrink:0, background:'#fafafa' }}>
-            <span style={{ fontSize:11, color:'#6b7280' }}>{selected.length} selected</span>
-            <button type="button" onMouseDown={e => { e.preventDefault(); setOpen(false); setSearch(''); }}
-              style={{ padding:'3px 12px', background:'#1a56db', color:'#fff', border:'none',
-                borderRadius:5, fontSize:12, fontWeight:600, cursor:'pointer' }}>Done</button>
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-};
+import api from '../../api/client.js';
+import EmpMultiSelect from '../Common/EmpMultiSelect.jsx';
 
 /* ── table helpers ── */
 const TH = ({ children, wide }) => (
@@ -189,76 +23,26 @@ const TD = ({ children, style: s }) => (
   </td>
 );
 
+/* Name alone — deliberately omits the [deviceId] tag EmpMultiSelect shows by
+   default elsewhere (e.g. Task assignment): on this screen, picking a
+   recommender/approver by their internal device PIN was more noise than
+   help. Staff ID and Post move to the smaller sub-line below (staffSubLabel)
+   instead, mainly to tell apart staff who share the same name. */
+const staffLabel = (e) => e.fullName;
+const staffSubLabel = (e, postMap) => {
+  const post = postMap[e.position] || e.position || '';
+  return [e.employeeId, post].filter(Boolean).join(' - ');
+};
+
 /* ── department group ── */
 const DeptGroup = ({ deptName, branchName, members, assignments, onChange, employees, postMap, showBranch }) => {
-  const [applyReco,     setApplyReco]     = useState(false);
-  const [applyApproval, setApplyApproval] = useState(false);
-  const [deptRecos,     setDeptRecos]     = useState([]);
-  const [deptApprovals, setDeptApprovals] = useState([]);
-
-  const applyAllReco = useCallback((ids) => {
-    const patch = {};
-    members.forEach(m => { patch[m.id] = { ...assignments[m.id], reco: ids }; });
-    onChange(patch);
-  }, [members, assignments, onChange]);
-
-  const applyAllApproval = useCallback((ids) => {
-    const patch = {};
-    members.forEach(m => { patch[m.id] = { ...assignments[m.id], approval: ids }; });
-    onChange(patch);
-  }, [members, assignments, onChange]);
-
   const getNames = (ids) => {
     if (!ids || ids.length === 0) return null;
     return employees.filter(e => (ids).includes(String(e.id))).map(e => e.fullName).join(', ');
   };
 
-  const rowBase = { padding:'7px 10px', background:'#f0f5ff', borderBottom:'1px solid #e0eaff',
-    borderRight:'1px solid #e5e7eb', verticalAlign:'top', fontSize:11 };
-
   return (
     <>
-      {/* dept apply-all row */}
-      <tr>
-        {showBranch && (
-          <TD style={{ fontWeight:700, color:'#111827', background:'#faf5ff', verticalAlign:'top', paddingTop:10, width:110 }}>
-            {branchName || '—'}
-          </TD>
-        )}
-        <TD style={{ fontWeight:700, color:'#111827', background:'#f8fafc', verticalAlign:'top', paddingTop:10, width:130 }}>
-          {deptName || '—'}
-        </TD>
-        <td style={{ ...rowBase, color:'#111827', fontWeight:600 }}>
-          Apply for all in <em>{deptName}</em>
-        </td>
-        <td style={rowBase}>
-          <label style={{ display:'flex', alignItems:'center', gap:5, marginBottom:4, cursor:'pointer' }}>
-            <input type="checkbox" checked={applyReco}
-              onChange={e => { setApplyReco(e.target.checked); if (!e.target.checked) setDeptRecos([]); }}
-              style={{ accentColor:'#1a56db', width:12, height:12 }} />
-            <span style={{ fontSize:11, color:'#6b7280' }}>Apply Recommendator to all</span>
-          </label>
-          {applyReco && (
-            <EmpMultiSelect value={deptRecos} employees={employees} postMap={postMap}
-              placeholder="Select Recommendators"
-              onChange={v => { setDeptRecos(v); applyAllReco(v); }} />
-          )}
-        </td>
-        <td style={rowBase}>
-          <label style={{ display:'flex', alignItems:'center', gap:5, marginBottom:4, cursor:'pointer' }}>
-            <input type="checkbox" checked={applyApproval}
-              onChange={e => { setApplyApproval(e.target.checked); if (!e.target.checked) setDeptApprovals([]); }}
-              style={{ accentColor:'#1a56db', width:12, height:12 }} />
-            <span style={{ fontSize:11, color:'#6b7280' }}>Apply Approval to all</span>
-          </label>
-          {applyApproval && (
-            <EmpMultiSelect value={deptApprovals} employees={employees} postMap={postMap}
-              placeholder="Select Approvers"
-              onChange={v => { setDeptApprovals(v); applyAllApproval(v); }} />
-          )}
-        </td>
-      </tr>
-
       {/* staff rows */}
       {members.map((emp, mi) => {
         const asgn      = assignments[emp.id] || {};
@@ -268,25 +52,35 @@ const DeptGroup = ({ deptName, branchName, members, assignments, onChange, emplo
         const apprNames = getNames(apprIds);
         return (
           <tr key={emp.id} style={{ background: mi % 2 === 0 ? '#fff' : '#fafafa' }}>
-            {showBranch && <TD style={{ background:'transparent' }} />}
-            <TD style={{ background:'transparent' }} />
+            {showBranch && (
+              <TD style={{ background:'transparent', color:'#6b7280', fontSize:12 }}>
+                {mi === 0 ? (branchName || '—') : ''}
+              </TD>
+            )}
+            <TD style={{ background:'transparent', color:'#6b7280', fontSize:12 }}>
+              {mi === 0 ? (deptName || '—') : ''}
+            </TD>
             <TD>
               <div style={{ fontWeight:600, color:'#111827', fontSize:13 }}>
                 {emp.fullName}
-                {(emp.position || emp.deviceId) && (
+                {emp.position && (
                   <span style={{ fontWeight:400, color:'#374151', fontSize:12 }}>
-                    {emp.position ? ` — ${emp.position}` : ''}{emp.deviceId ? ` [${emp.deviceId}]` : ''}
+                    {` — ${emp.position}`}
                   </span>
                 )}
               </div>
             </TD>
             <TD style={{ minWidth:210 }}>
-              <EmpMultiSelect value={recoIds} employees={employees} postMap={postMap}
+              <EmpMultiSelect value={recoIds} employees={employees} postMap={postMap} showAvatars
+                formatLabel={staffLabel}
+                subLabel={e => staffSubLabel(e, postMap)}
                 onChange={v => onChange({ [emp.id]: { ...asgn, reco: v } })} />
               {recoNames && <div style={{ fontSize:10, color:'#059669', marginTop:2 }}>✓ {recoNames}</div>}
             </TD>
             <TD style={{ minWidth:210 }}>
-              <EmpMultiSelect value={apprIds} employees={employees} postMap={postMap}
+              <EmpMultiSelect value={apprIds} employees={employees} postMap={postMap} showAvatars
+                formatLabel={staffLabel}
+                subLabel={e => staffSubLabel(e, postMap)}
                 onChange={v => onChange({ [emp.id]: { ...asgn, approval: v } })} />
               {apprNames && <div style={{ fontSize:10, color:'#1a56db', marginTop:2 }}>✓ {apprNames}</div>}
             </TD>
@@ -300,17 +94,66 @@ const DeptGroup = ({ deptName, branchName, members, assignments, onChange, emplo
 /* ═══════════════════════════════════════════════════
    MAIN MODAL
 ═══════════════════════════════════════════════════ */
-const loadIsRecoCompulsory = () => {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')._settings?.isRecoCompulsory || false; } catch { return false; }
-};
-
 const RecoApprovalModal = ({ employees, onClose }) => {
-  const { settings } = useSettings();
+  const { canEdit } = useAuth();
+  const canSave = canEdit('recoApprovalConfig');
+  const { settings, updateSettings } = useSettings();
 
-  const [assignments,      setAssignments]      = useState(loadSaved);
-  const [isRecoCompulsory, setIsRecoCompulsory] = useState(loadIsRecoCompulsory);
+  const [assignments,      setAssignments]      = useState({});
+  const [isRecoCompulsory, setIsRecoCompulsory] = useState(!!settings.recoApprovalCompulsory);
+  const [loading,          setLoading]          = useState(true);
+  const [loadError,        setLoadError]        = useState('');
+  const [saving,           setSaving]           = useState(false);
+  const [saveError,        setSaveError]        = useState('');
   const [saved,            setSaved]            = useState(false);
   const [activeSection,    setActiveSection]    = useState('company');
+  const [applyAllReco,     setApplyAllReco]     = useState(false);
+  const [applyAllApproval, setApplyAllApproval] = useState(false);
+  const [globalRecoIds,     setGlobalRecoIds]     = useState([]);
+  const [globalApprovalIds, setGlobalApprovalIds] = useState([]);
+
+  const [searchOpen,   setSearchOpen]   = useState(false);
+  const [filterName,   setFilterName]   = useState('');
+  const [filterBranch, setFilterBranch] = useState('');
+  const [filterDept,   setFilterDept]   = useState('');
+  const [draftFilter,  setDraftFilter]  = useState({ name:'', branch:'', dept:'' });
+  const filtersActive = !!(filterName || filterBranch || filterDept);
+  const searchBoxRef = useRef(null);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const close = (e) => { if (!searchBoxRef.current?.contains(e.target)) setSearchOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [searchOpen]);
+
+  /* DB is the source of truth — always load fresh on open, never trust
+     whatever's cached in this browser's localStorage (that was the whole
+     bug: a purely per-browser save that looked successful but never
+     actually persisted anywhere shared). */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.get('/reco-approval');
+        if (!cancelled) setAssignments(data || {});
+      } catch (e) {
+        if (!cancelled) setLoadError(e.message || 'Failed to load saved configuration.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Escape closes the whole modal — but only once nothing narrower already
+  // consumed it; each EmpMultiSelect's own Escape handler closes just its
+  // open list first and calls stopPropagation so it never reaches here.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const activeEmps = employees.filter(e => e.active !== false);
   const companyHQ  = settings.companyNameEn || '';
@@ -328,14 +171,36 @@ const RecoApprovalModal = ({ employees, onClose }) => {
         : !e.branch
     ), [activeEmps, companyHQ, settings.branches]);
 
+  /* Search — narrows which staff rows are DISPLAYED in the active tab, AND
+     narrows the header "apply for all" target to just those matching rows
+     (previously always applied org-wide regardless of an active filter —
+     e.g. filtering to one branch and using "apply for all" there still
+     silently overwrote every OTHER branch's assignments too). The picker's
+     own choices (employees={activeEmps} below) intentionally stay
+     unfiltered — you may still want to pick someone from another branch as
+     this filtered group's recommender/approver. */
+  const branchOptions = useMemo(() =>
+    [...new Set(activeEmps.map(e => e.branch).filter(Boolean))].sort(), [activeEmps]);
+  const deptOptions = useMemo(() =>
+    [...new Set(activeEmps.map(e => e.department).filter(Boolean))].sort(), [activeEmps]);
+
+  const matchesFilter = useCallback((e) => {
+    if (filterBranch && e.branch !== filterBranch) return false;
+    if (filterDept && e.department !== filterDept) return false;
+    if (filterName && !e.fullName?.toLowerCase().includes(filterName.toLowerCase())) return false;
+    return true;
+  }, [filterName, filterBranch, filterDept]);
+
+  const filteredActiveEmps = useMemo(() => activeEmps.filter(matchesFilter), [activeEmps, matchesFilter]);
+
   const companyGroups = useMemo(() => {
     const map = {};
-    hqEmps.forEach(e => { const d = e.department || '(No Department)'; if (!map[d]) map[d] = []; map[d].push(e); });
+    hqEmps.filter(matchesFilter).forEach(e => { const d = e.department || '(No Department)'; if (!map[d]) map[d] = []; map[d].push(e); });
     return Object.entries(map).sort(([a],[b]) => a.localeCompare(b)).map(([dept, members]) => ({ dept, members }));
-  }, [hqEmps]);
+  }, [hqEmps, matchesFilter]);
 
   const branchGroups = useMemo(() => {
-    const branchEmps = activeEmps.filter(e => e.branch && e.branch !== companyHQ);
+    const branchEmps = activeEmps.filter(e => e.branch && e.branch !== companyHQ).filter(matchesFilter);
     const map = {};
     branchEmps.forEach(e => {
       const k = `${e.branch}||${e.department || '(No Department)'}`;
@@ -343,7 +208,18 @@ const RecoApprovalModal = ({ employees, onClose }) => {
       map[k].members.push(e);
     });
     return Object.values(map).sort((a,b) => a.branch.localeCompare(b.branch) || a.dept.localeCompare(b.dept));
-  }, [activeEmps, companyHQ]);
+  }, [activeEmps, companyHQ, matchesFilter]);
+
+  const openSearch = () => { setDraftFilter({ name:filterName, branch:filterBranch, dept:filterDept }); setSearchOpen(true); };
+  const applySearch = () => {
+    setFilterName(draftFilter.name); setFilterBranch(draftFilter.branch); setFilterDept(draftFilter.dept);
+    setSearchOpen(false);
+  };
+  const resetSearch = () => {
+    setDraftFilter({ name:'', branch:'', dept:'' });
+    setFilterName(''); setFilterBranch(''); setFilterDept('');
+    setSearchOpen(false);
+  };
 
   const handleChange = useCallback((patch) => {
     setAssignments(prev => {
@@ -353,15 +229,50 @@ const RecoApprovalModal = ({ employees, onClose }) => {
     });
   }, []);
 
-  const handleSave = () => {
-    const data = { ...assignments, _settings: { isRecoCompulsory } };
-    persistAll(data);
-    setSaved(true);
-    setTimeout(() => { setSaved(false); onClose(); }, 1200);
+  /* Header-level "apply for all" — broadcasts to every staff member shown
+     across BOTH Company HQ and Branch Wise sections (not just the active
+     tab), but only within whatever the current search filter matches —
+     see filteredActiveEmps above. */
+  const applyGlobalReco = useCallback((ids) => {
+    const patch = {};
+    filteredActiveEmps.forEach(m => { patch[m.id] = { reco: ids }; });
+    handleChange(patch);
+  }, [filteredActiveEmps, handleChange]);
+
+  const applyGlobalApproval = useCallback((ids) => {
+    const patch = {};
+    filteredActiveEmps.forEach(m => { patch[m.id] = { approval: ids }; });
+    handleChange(patch);
+  }, [filteredActiveEmps, handleChange]);
+
+  /* "Clear all" (in either header picker's footer) wipes every staff
+     member's Recommendator AND Approval assignment — client-side only
+     until Save Configuration is clicked, same as every other edit here. */
+  const clearAllAssignments = useCallback(() => {
+    if (!window.confirm('Clear Recommendator and Approval for every staff member?\n\nYou still need to click Save Configuration afterward to make this permanent.')) return;
+    setAssignments({});
+    setApplyAllReco(false); setGlobalRecoIds([]);
+    setApplyAllApproval(false); setGlobalApprovalIds([]);
+  }, []);
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await api.put('/reco-approval', assignments);
+      await updateSettings({ recoApprovalCompulsory: isRecoCompulsory });
+      setSaved(true);
+      setTimeout(() => { setSaved(false); onClose(); }, 1200);
+    } catch (e) {
+      setSaveError(e.message || 'Save failed — please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   /* Ctrl+S saves — this component only exists while its modal is open */
-  useSaveShortcut(true, handleSave);
+  useSaveShortcut(canSave, handleSave);
 
   const configured = Object.values(assignments).filter(a => {
     const r = Array.isArray(a?.reco)     ? a.reco.length     : (a?.reco     ? 1 : 0);
@@ -422,7 +333,8 @@ const RecoApprovalModal = ({ employees, onClose }) => {
         </div>
 
         {/* Tabs */}
-        <div style={{ padding:'0 24px', borderBottom:'1px solid #e5e7eb', background:'#f8fafc', flexShrink:0 }}>
+        <div style={{ padding:'0 24px', borderBottom:'1px solid #e5e7eb', background:'#f8fafc', flexShrink:0,
+          display:'flex', alignItems:'center', justifyContent:'space-between', position:'relative' }}>
           <div style={{ display:'inline-flex', paddingTop:8 }}>
             {[
               { key:'company', label:`🏢 Company HQ${companyHQ ? ' — '+companyHQ : ''}` },
@@ -438,13 +350,88 @@ const RecoApprovalModal = ({ employees, onClose }) => {
               }}>{s.label}</button>
             ))}
           </div>
+
+          <div ref={searchBoxRef} style={{ position:'relative' }}>
+            <button onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())} style={{
+              display:'inline-flex', alignItems:'center', gap:6, padding:'6px 14px',
+              border:`1.5px solid ${filtersActive ? '#1a56db' : '#d1d5db'}`, borderRadius:7,
+              background: filtersActive ? '#eff6ff' : '#fff', color: filtersActive ? '#1e40af' : '#374151',
+              fontSize:12.5, fontWeight:600, cursor:'pointer' }}>
+              🔍 Search
+              {filtersActive && (
+                <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700,
+                  padding:'1px 6px', minWidth:16, textAlign:'center' }}>
+                  {[filterName, filterBranch, filterDept].filter(Boolean).length}
+                </span>
+              )}
+            </button>
+
+            {searchOpen && (
+              <div
+                onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setSearchOpen(false); } }}
+                style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:50, width:300,
+                  background:'#fff', border:'1px solid #d1d5db', borderRadius:10,
+                  boxShadow:'0 10px 28px rgba(0,0,0,.16)', padding:16 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:'#111827', marginBottom:12 }}>Search Staff</div>
+
+                <div style={{ marginBottom:10 }}>
+                  <label style={{ fontSize:11.5, fontWeight:600, color:'#6b7280', display:'block', marginBottom:4 }}>Staff Name</label>
+                  <input type="text" value={draftFilter.name} autoFocus
+                    onChange={e => setDraftFilter(f => ({ ...f, name:e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') applySearch(); }}
+                    placeholder="Search by name…"
+                    style={{ width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1px solid #d1d5db',
+                      borderRadius:6, fontSize:13, outline:'none' }} />
+                </div>
+
+                <div style={{ marginBottom:10 }}>
+                  <label style={{ fontSize:11.5, fontWeight:600, color:'#6b7280', display:'block', marginBottom:4 }}>Branch</label>
+                  <select value={draftFilter.branch} onChange={e => setDraftFilter(f => ({ ...f, branch:e.target.value }))}
+                    style={{ width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1px solid #d1d5db',
+                      borderRadius:6, fontSize:13, outline:'none', background:'#fff' }}>
+                    <option value="">All Branches</option>
+                    {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ marginBottom:14 }}>
+                  <label style={{ fontSize:11.5, fontWeight:600, color:'#6b7280', display:'block', marginBottom:4 }}>Department</label>
+                  <select value={draftFilter.dept} onChange={e => setDraftFilter(f => ({ ...f, dept:e.target.value }))}
+                    style={{ width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1px solid #d1d5db',
+                      borderRadius:6, fontSize:13, outline:'none', background:'#fff' }}>
+                    <option value="">All Depts</option>
+                    {deptOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+                  <button onClick={resetSearch} style={{ padding:'6px 14px', border:'1px solid #d1d5db',
+                    borderRadius:6, background:'#fff', color:'#374151', fontSize:12.5, fontWeight:600, cursor:'pointer' }}>
+                    Reset
+                  </button>
+                  <button onClick={applySearch} style={{ padding:'6px 16px', border:'none',
+                    borderRadius:6, background:'#1a56db', color:'#fff', fontSize:12.5, fontWeight:700, cursor:'pointer' }}>
+                    Search
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Table — single overflow:auto container fixes nested-scroll issue */}
-        <div style={{ flex:1, minHeight:0, overflow:'auto', padding:'14px 24px' }}>
-          {(activeSection==='company' ? companyGroups : branchGroups).length === 0 ? (
+        <div style={{ flex:1, minHeight:0, overflow:'auto', padding:'0 24px 14px' }}>
+          {loading ? (
             <div style={{ textAlign:'center', padding:40, color:'#9ca3af', fontSize:13 }}>
-              No staff found for this section.
+              Loading saved configuration…
+            </div>
+          ) : loadError ? (
+            <div style={{ textAlign:'center', padding:40, color:'#dc2626', fontSize:13 }}>
+              Failed to load saved configuration: {loadError}
+            </div>
+          ) : (activeSection==='company' ? companyGroups : branchGroups).length === 0 ? (
+            <div style={{ textAlign:'center', padding:40, color:'#9ca3af', fontSize:13 }}>
+              {filtersActive ? 'No staff match your search.' : 'No staff found for this section.'}
             </div>
           ) : (
             <table style={{ width:'100%', minWidth:620, borderCollapse:'collapse', border:'1px solid #dedede' }}>
@@ -453,8 +440,50 @@ const RecoApprovalModal = ({ employees, onClose }) => {
                   {activeSection==='branch' && <TH>Branch</TH>}
                   <TH>Department</TH>
                   <TH>Staff Name</TH>
-                  <TH wide>Recommendator</TH>
-                  <TH wide>Approval</TH>
+                  <TH wide>
+                    <div style={{ whiteSpace:'normal' }}>
+                      <div>Recommendator</div>
+                      <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:10,
+                        fontWeight:400, color:'#6b7280', cursor:'pointer', marginTop:3 }}>
+                        <input type="checkbox" checked={applyAllReco}
+                          onChange={e => { setApplyAllReco(e.target.checked); if (!e.target.checked) setGlobalRecoIds([]); }}
+                          style={{ width:11, height:11, accentColor:'#1a56db', cursor:'pointer' }} />
+                        {filtersActive ? 'apply to shown' : 'apply for all'}
+                      </label>
+                      {applyAllReco && (
+                        <div style={{ marginTop:4, minWidth:200 }}>
+                          <EmpMultiSelect value={globalRecoIds} employees={activeEmps} postMap={postMap} showAvatars
+                            formatLabel={staffLabel}
+                            subLabel={e => staffSubLabel(e, postMap)}
+                            placeholder="Select Recommendators"
+                            onChange={v => { setGlobalRecoIds(v); applyGlobalReco(v); }}
+                            onClearAll={clearAllAssignments} />
+                        </div>
+                      )}
+                    </div>
+                  </TH>
+                  <TH wide>
+                    <div style={{ whiteSpace:'normal' }}>
+                      <div>Approval</div>
+                      <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:10,
+                        fontWeight:400, color:'#6b7280', cursor:'pointer', marginTop:3 }}>
+                        <input type="checkbox" checked={applyAllApproval}
+                          onChange={e => { setApplyAllApproval(e.target.checked); if (!e.target.checked) setGlobalApprovalIds([]); }}
+                          style={{ width:11, height:11, accentColor:'#1a56db', cursor:'pointer' }} />
+                        {filtersActive ? 'apply to shown' : 'apply for all'}
+                      </label>
+                      {applyAllApproval && (
+                        <div style={{ marginTop:4, minWidth:200 }}>
+                          <EmpMultiSelect value={globalApprovalIds} employees={activeEmps} postMap={postMap} showAvatars
+                            formatLabel={staffLabel}
+                            subLabel={e => staffSubLabel(e, postMap)}
+                            placeholder="Select Approvers"
+                            onChange={v => { setGlobalApprovalIds(v); applyGlobalApproval(v); }}
+                            onClearAll={clearAllAssignments} />
+                        </div>
+                      )}
+                    </div>
+                  </TH>
                 </tr>
               </thead>
               <tbody>
@@ -479,19 +508,23 @@ const RecoApprovalModal = ({ employees, onClose }) => {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
           padding:'11px 24px', borderTop:'1px solid #e5e7eb', background:'#f9fafb',
           borderRadius:'0 0 14px 14px', flexShrink:0 }}>
-          <div style={{ fontSize:12, color:'#6b7280' }}>
-            {activeEmps.length} total staff · {configured} configured
+          <div style={{ fontSize:12, color: saveError ? '#dc2626' : '#6b7280' }}>
+            {saveError ? `⚠ ${saveError}`
+              : !canSave ? `👁 View only · ${activeEmps.length} total staff · ${configured} configured`
+              : `${activeEmps.length} total staff · ${configured} configured`}
           </div>
           <div style={{ display:'flex', gap:10 }}>
             <button onClick={onClose} style={{ padding:'8px 20px', border:'1.5px solid #d1d5db',
               borderRadius:8, background:'#fff', fontSize:13, fontWeight:600, color:'#374151', cursor:'pointer' }}>
               Cancel
             </button>
-            <button onClick={handleSave} title="Ctrl+S" style={{ padding:'8px 24px', border:'none', borderRadius:8,
-              background: saved ? '#059669' : '#1a56db', color:'#fff',
-              fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
-              {saved ? '✅ Saved!' : <>💾 <u>S</u>ave Configuration</>}
-            </button>
+            {canSave && (
+              <button onClick={handleSave} disabled={saving || loading} title="Ctrl+S" style={{ padding:'8px 24px', border:'none', borderRadius:8,
+                background: saved ? '#059669' : '#1a56db', color:'#fff', opacity: (saving || loading) ? 0.7 : 1,
+                fontSize:13, fontWeight:700, cursor: (saving || loading) ? 'default' : 'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+                {saved ? '✅ Saved!' : saving ? 'Saving…' : <>💾 <u>S</u>ave Configuration</>}
+              </button>
+            )}
           </div>
         </div>
       </div>

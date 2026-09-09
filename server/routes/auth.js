@@ -435,6 +435,7 @@ function camelUser(r) {
     active      : r.active,
     profilePhoto: r.profile_photo,
     eligibleForOt: r.eligible_for_ot,
+    onlineAttendanceEnabled: r.online_attendance_enabled,
   };
 }
 

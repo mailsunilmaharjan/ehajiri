@@ -6,6 +6,8 @@ import { useData }     from '../../context/DataContext.jsx';
 import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewYearlyBtn from './ViewYearlyBtn.jsx';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 
@@ -28,15 +30,30 @@ const abbrev = (name) => {
 /* ── Status colors ── */
 const STATUS = {
   P  : { bg:'#d1fae5', color:'#065f46', label:'P',  title:'Present' },
-  PP : { bg:'#fef08a', color:'#713f12', label:'P',  title:'Present on Holiday' },
+  PP : { bg:'#fef08a', color:'#713f12', label:'P',  title:'Present on Public Holiday' },
   AB : { bg:'#fee2e2', color:'#991b1b', label:'AB', title:'Absent' },
   H  : { bg:'#f3f4f6', color:'#9ca3af', label:'W',  title:'Weekend' },
+  DO : { bg:'#f3f4f6', color:'#6b7280', label:'DO', title:'Day Off' },
+  NO : { bg:'#eef2ff', color:'#4338ca', label:'NO', title:'Night Off' },
   L  : { bg:'#ede9fe', color:'#5b21b6', label:'L',  title:'Leave' },
   OV : { bg:'#dbeafe', color:'#1e40af', label:'OV', title:'Office Visit' },
   PH : { bg:'#fef3c7', color:'#92400e', label:'PH', title:'Public Holiday' },
 };
 
-const StatusCell = ({ st, dayKey }) => {
+// STATUS's own `title` is display-only English (a hover tooltip + the legend
+// text below) — the on-screen `label` short codes (P/AB/W/L/OV/PH/DO/NO)
+// stay as universal abbreviations regardless of language, same convention as
+// every other attendance report.
+const STATUS_TITLE_NP = {
+  P: 'उपस्थित', PP: 'सार्वजनिक बिदामा उपस्थित', AB: 'अनुपस्थित', H: 'विकेन्ड',
+  DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा',
+};
+const statusTitle = (st, language) => {
+  const s = STATUS[st] || STATUS.AB;
+  return language === 'np' ? (STATUS_TITLE_NP[st] || s.title) : s.title;
+};
+
+const StatusCell = ({ st, dayKey, language }) => {
   if (!st) return <span style={{ color:'#e5e7eb', fontSize:9 }}>·</span>;
   const s = STATUS[st] || STATUS.AB;
   return (
@@ -46,7 +63,7 @@ const StatusCell = ({ st, dayKey }) => {
         border: `1px solid ${s.color}33`,
         borderRadius:4, padding:'2px 5px', fontSize:12,
         fontWeight:800, textAlign:'center', minWidth:26,
-      }} title={s.title}>
+      }} title={statusTitle(st, language)}>
         {s.label}
       </div>
       {dayKey && (
@@ -91,11 +108,14 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
           border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer',
           boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none', transition:'all .15s' }}>
-        <span style={{ fontSize:13, color:selected?'#1f2937':'#9ca3af',
-          fontWeight:selected?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-          {selected
-            ? `${selected.fullName}${selected.position ? ` • ${abbrev(selected.position)}` : ''}${selected.deviceId ? ` [${selected.deviceId}]` : ''}`
-            : `— ${L('कर्मचारी छान्नुस','Select Staff Member')} —`}
+        <span style={{ display:'flex', alignItems:'center', gap:6, overflow:'hidden', flex:1 }}>
+          {selected && <Avatar photo={selected.profilePhoto} name={selected.fullName} size={22} style={{ flexShrink:0 }} />}
+          <span style={{ fontSize:13, color:selected?'#1f2937':'#9ca3af',
+            fontWeight:selected?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {selected
+              ? `${selected.fullName}${selected.position ? ` • ${abbrev(selected.position)}` : ''}`
+              : `— ${L('कर्मचारी छान्नुस','Select Staff Member')} —`}
+          </span>
         </span>
         <svg viewBox="0 0 20 20" fill={open?'#1a56db':'#9ca3af'} width="13" height="13"
           style={{ flexShrink:0, marginLeft:6, transform:open?'rotate(180deg)':'none', transition:'transform .2s' }}>
@@ -131,29 +151,26 @@ const StaffSelect = ({ employees, value, onChange, L }) => {
               <div style={{ padding:'12px',textAlign:'center',color:'#9ca3af',fontSize:12 }}>No staff found</div>
             )}
             {filtered.map((e, idx) => {
-              const active = String(e.id) === String(value);
+              const active   = String(e.id) === String(value);
+              const stripeBg = idx % 2 === 0 ? '#fff' : '#fafafa';
+              const sub      = [e.employeeId, e.position].filter(Boolean).join(' - ');
               return (
                 <div key={e.id}
                   onMouseDown={ev=>{ ev.preventDefault(); onChange(String(e.id)); setOpen(false); setSearch(''); }}
-                  style={{ display:'flex',alignItems:'center',gap:10,padding:'8px 14px',
-                    cursor:'pointer',background:active?'#eff6ff':'white',
-                    borderBottom:'1px solid #f3f4f6',transition:'background .1s' }}
+                  style={{ display:'flex',alignItems:'center',gap:10,padding:'6px 14px',
+                    cursor:'pointer',background:active?'#eff6ff':stripeBg,
+                    borderBottom:'1px solid #eef0f3',transition:'background .1s' }}
                   onMouseEnter={ev=>{ if(!active) ev.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':'white'; }}>
-                  {/* Rank badge */}
-                  <div style={{ width:22,height:22,borderRadius:'50%',background:active?'#1a56db':'#f3f4f6',
-                    color:active?'white':'#9ca3af',fontSize:10,fontWeight:700,flexShrink:0,
-                    display:'flex',alignItems:'center',justifyContent:'center' }}>{idx+1}</div>
+                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':stripeBg; }}>
+                  <Avatar photo={e.profilePhoto} name={e.fullName} size={26} style={{ flexShrink:0 }} />
                   <div style={{ flex:1,minWidth:0 }}>
                     <div style={{ fontSize:13,fontWeight:active?700:600,color:active?'#1e40af':'#1f2937',
                       overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>
                       {e.fullName}
                     </div>
-                    <div style={{ fontSize:11,color:'#9ca3af',display:'flex',gap:8 }}>
-                      {e.position && <span style={{ color:'#0369a1',fontWeight:600 }}>{abbrev(e.position)}</span>}
-                      {e.deviceId && <span style={{ fontFamily:'monospace' }}>[{e.deviceId}]</span>}
-                      {e.employeeId && <span>{e.employeeId}</span>}
-                    </div>
+                    {sub && (
+                      <div style={{ fontSize:10.5,color:'#9ca3af',fontWeight:400 }}>{sub}</div>
+                    )}
                   </div>
                   {active && (
                     <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14" style={{ flexShrink:0 }}>
@@ -223,11 +240,14 @@ const YearlyPresentAbsentReport = () => {
       }
       if (!startDate) { startDate = `${year}-01-01`; endDate = `${year}-12-31`; }
 
-      // Parallel: present-absent + half-monthly (late/early) + leave data
+      // Parallel: present-absent + half-monthly (late/early) + leave data.
+      // employeeId narrows both endpoints down to just this one staff member
+      // server-side instead of computing/returning the whole company's
+      // day-by-day matrix for a full year just to read one row of it here.
       const activeParam = staffStatus === 'notworking' ? 'false' : 'true';
       const [paRes, hmRes, leavesRes, balRes, ltRes] = await Promise.allSettled([
-        api.get(`/attendance/present-absent?startDate=${startDate}&endDate=${endDate}&active=${activeParam}`),
-        api.get(`/attendance/half-monthly?startDate=${startDate}&endDate=${endDate}&half=1&active=${activeParam}`),
+        api.get(`/attendance/present-absent?startDate=${startDate}&endDate=${endDate}&active=${activeParam}&employeeId=${selectedId}`),
+        api.get(`/attendance/half-monthly?startDate=${startDate}&endDate=${endDate}&half=1&active=${activeParam}&employeeId=${selectedId}`),
         api.get('/leave'),
         api.get('/leave/balances'),
         api.get('/leave/types'),
@@ -403,11 +423,11 @@ const YearlyPresentAbsentReport = () => {
 
               // Summary text
               const sumItems = [
-                ['Total Days',yearSummary.total,'#374151'],['Present',yearSummary.present,'#065f46'],
-                ['Absent',yearSummary.absent,'#991b1b'],['Leave',yearSummary.leave,'#5b21b6'],
-                ['Office Visit',yearSummary.ov,'#1e40af'],['Holiday',yearSummary.ph,'#92400e'],
-                ['Weekend',yearSummary.weekend,'#6b7280'],['Late In',yearSummary.lateIn,'#dc2626'],
-                ['Early Out',yearSummary.earlyOut,'#d97706'],
+                [L('कुल दिन','Total Days'),yearSummary.total,'#374151'],[L('उपस्थित','Present'),yearSummary.present,'#065f46'],
+                [L('अनुपस्थित','Absent'),yearSummary.absent,'#991b1b'],[L('बिदा','Leave'),yearSummary.leave,'#5b21b6'],
+                [L('कार्यालय भ्रमण','Office Visit'),yearSummary.ov,'#1e40af'],[L('सार्वजनिक बिदा','Holiday'),yearSummary.ph,'#92400e'],
+                [L('विकेन्ड','Weekend'),yearSummary.weekend,'#6b7280'],[L('ढिलो आएको','Late In'),yearSummary.lateIn,'#dc2626'],
+                [L('चाँडो गएको','Early Out'),yearSummary.earlyOut,'#d97706'],
               ].map(([l,v,c])=>`<span>${l}: <strong style="color:${c}">${v}</strong></span>`).join(' &nbsp;·&nbsp; ');
 
               // Leave Details — transposed (rows = Opening/Current Year/Taken/Available, cols = leave types)
@@ -628,10 +648,10 @@ ${footerHtml}
             <span style={{ fontSize:12,color:'#6b7280',fontWeight:500 }}>{selectedEmp.employeeId}</span>
           )}
           {[
-            { label:'Post',       value: selectedEmp.position,   color:'#0369a1' },
-            { label:'Department', value: selectedEmp.department,  color:'#059669' },
-            { label:'Mode',       value: selectedEmp.mode,        color:'#374151' },
-            { label:'Grade',      value: selectedEmp.grade,       color:'#374151' },
+            { label:L('पद','Post'),       value: selectedEmp.position,   color:'#0369a1' },
+            { label:L('विभाग','Department'), value: selectedEmp.department,  color:'#059669' },
+            { label:L('मोड','Mode'),       value: selectedEmp.mode,        color:'#374151' },
+            { label:L('ग्रेड','Grade'),      value: selectedEmp.grade,       color:'#374151' },
           ].filter(f => f.value).map(f => (
             <span key={f.label} style={{ fontSize:12 }}>
               <span style={{ color:'#9ca3af', fontWeight:500 }}>{f.label}: </span>
@@ -650,12 +670,7 @@ ${footerHtml}
         </div>
       )}
 
-      {loading && (
-        <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af' }}>
-          <div style={{ fontSize:36,marginBottom:8 }}>⏳</div>
-          <div style={{ fontWeight:600,fontSize:14 }}>Loading…</div>
-        </div>
-      )}
+      {loading && <LoadingIndicator />}
 
       {/* ── Detail Matrix ── */}
       {!loading && matrix.length > 0 && (
@@ -738,19 +753,19 @@ ${footerHtml}
             flexWrap:'wrap', padding:'8px 12px', background:'#f9fafb',
             borderRadius:8, border:'1px solid #e5e7eb' }}>
             <span style={{ fontSize:13, fontWeight:800, color:'#374151', flexShrink:0 }}>
-              Detail
+              {L('विवरण','Detail')}
             </span>
             <span style={{ color:'#d1d5db', flexShrink:0 }}>|</span>
             {[
-              { label:'Total Days',   value:yearSummary.total,    color:'#374151'  },
-              { label:'Present',      value:yearSummary.present,  color:'#065f46'  },
-              { label:'Absent',       value:yearSummary.absent,   color:'#991b1b'  },
-              { label:'Leave',        value:yearSummary.leave,    color:'#5b21b6'  },
-              { label:'Office Visit', value:yearSummary.ov,       color:'#1e40af'  },
-              { label:'Holiday',      value:yearSummary.ph,       color:'#92400e'  },
-              { label:'Weekend',      value:yearSummary.weekend,  color:'#6b7280'  },
-              { label:'Late In',      value:yearSummary.lateIn,   color:'#dc2626'  },
-              { label:'Early Out',    value:yearSummary.earlyOut, color:'#d97706'  },
+              { label:L('कुल दिन','Total Days'),      value:yearSummary.total,    color:'#374151'  },
+              { label:L('उपस्थित','Present'),         value:yearSummary.present,  color:'#065f46'  },
+              { label:L('अनुपस्थित','Absent'),        value:yearSummary.absent,   color:'#991b1b'  },
+              { label:L('बिदा','Leave'),              value:yearSummary.leave,    color:'#5b21b6'  },
+              { label:L('कार्यालय भ्रमण','Office Visit'), value:yearSummary.ov,   color:'#1e40af'  },
+              { label:L('सार्वजनिक बिदा','Holiday'),  value:yearSummary.ph,       color:'#92400e'  },
+              { label:L('विकेन्ड','Weekend'),         value:yearSummary.weekend,  color:'#6b7280'  },
+              { label:L('ढिलो आएको','Late In'),       value:yearSummary.lateIn,   color:'#dc2626'  },
+              { label:L('चाँडो गएको','Early Out'),    value:yearSummary.earlyOut, color:'#d97706'  },
             ].map((s, i, arr) => (
               <React.Fragment key={s.label}>
                 <span style={{ fontSize:12, whiteSpace:'nowrap' }}>
@@ -806,7 +821,7 @@ ${footerHtml}
                         <td key={i} style={{ ...TD, padding:'3px 2px', width:36, minWidth:36 }}
                           title={dayData?.dateStr ? fd(dayData.dateStr) : ''}>
                           {dayData
-                            ? <StatusCell st={dayData.st} dayKey={dayData.dayKey} />
+                            ? <StatusCell st={dayData.st} dayKey={dayData.dayKey} language={language} />
                             : <span style={{ color:'#f0f0f0', fontSize:9 }}>·</span>
                           }
                         </td>
@@ -916,7 +931,7 @@ ${footerHtml}
               <span key={k} style={{ display:'inline-flex',alignItems:'center',gap:4 }}>
                 <span style={{ background:s.bg,color:s.color,border:`1px solid ${s.color}44`,
                   borderRadius:3,padding:'1px 5px',fontSize:10,fontWeight:800 }}>{s.label}</span>
-                <span>= {s.title}</span>
+                <span>= {statusTitle(k, language)}</span>
               </span>
             ))}
           </div>

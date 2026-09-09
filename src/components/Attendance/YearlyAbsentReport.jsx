@@ -6,9 +6,11 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import ViewYearlyBtn from './ViewYearlyBtn.jsx';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 
@@ -177,7 +179,7 @@ const YearlyAbsentReport = () => {
   const navigate        = useNavigate();
   const { language }    = useLanguage();
   const { settings }    = useSettings();
-  const { filteredEmployees: allEmployees, shifts } = useData();
+  const { filteredEmployees: allEmployees, shifts, getEmployeeById } = useData();
   const { isEmployee, currentUser } = useAuth();
   const myEmpId = isEmployee ? String(currentUser?.id || '') : '';
   const fd              = useDateFormat();
@@ -217,7 +219,7 @@ const YearlyAbsentReport = () => {
     try {
       const { s, e } = getYearRange();
       const activeParam = staffStatus === 'notworking' ? 'false' : 'true';
-      const result = await api.get(`/attendance/present-absent?startDate=${s}&endDate=${e}&active=${activeParam}`);
+      const result = await api.get(`/attendance/present-absent?startDate=${s}&endDate=${e}&active=${activeParam}&orgScope=1`);
       setData(result);
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
@@ -281,8 +283,17 @@ const YearlyAbsentReport = () => {
   /* ── DataGrid columns ── */
   const columns = [
     {
+      field:'id', header:L('स्टाफ आईडी','Staff ID'), sortable:false,
+      render: (v) => <span style={{ color:'#374151' }}>{getEmployeeById(v)?.employeeId || '—'}</span>,
+    },
+    {
       field:'fullName', header:L('नाम','Name'), sortable:true,
-      render: v => <span style={{ color:'#1f2937' }}>{v}</span>,
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
+          <Avatar photo={getEmployeeById(row.id)?.profilePhoto} name={v} size={22} />
+          {v}
+        </span>
+      ),
     },
     {
       field:'postShort', header:L('पद','Post'),
@@ -485,12 +496,7 @@ const YearlyAbsentReport = () => {
       )}
 
       {loading && (
-        <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af' }}>
-          <div style={{ fontSize:36,marginBottom:8 }}>⏳</div>
-          <div style={{ fontWeight:600,fontSize:14 }}>
-            {L('वार्षिक अनुपस्थित डेटा लोड हुँदैछ...','Loading yearly absent data...')}
-          </div>
-        </div>
+        <LoadingIndicator label={L('वार्षिक अनुपस्थित डेटा लोड हुँदैछ...','Loading yearly absent data...')} />
       )}
 
       {!loading && data && allRecords.length === 0 && (

@@ -1,9 +1,12 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
+import { ModuleFlagsProvider, useModuleFlags } from './context/ModuleFlagsContext.jsx';
+import useRecoApproval from './hooks/useRecoApproval.js';
 import Layout from './components/Layout/Layout.jsx';
 import Login         from './components/Auth/Login.jsx';
 import SsoLogin      from './components/Auth/SsoLogin.jsx';
+import GuestCheckin  from './components/Public/GuestCheckin.jsx';
 import ResetPassword from './components/Auth/ResetPassword.jsx';
 import LicenseWarningModal from './components/Auth/LicenseWarningModal.jsx';
 import Dashboard from './components/Dashboard/Dashboard.jsx';
@@ -19,8 +22,12 @@ import ShiftManagement        from './components/Shift/ShiftManagement.jsx';
 import UserManagement         from './components/Users/UserManagement.jsx';
 import StaffNotes             from './components/Staff/StaffNotes.jsx';
 import StaffContact           from './components/Staff/StaffContact.jsx';
+import EventVisitorRegistration from './components/Staff/EventVisitorRegistration.jsx';
+import StaffAnalyticsReport   from './components/Staff/StaffAnalyticsReport.jsx';
 import TaskList               from './components/Staff/TaskList.jsx';
 import TaskLookupPage         from './components/Staff/TaskLookupPage.jsx';
+import TaskDashboard          from './components/Staff/TaskDashboard.jsx';
+import TaskSettings           from './components/Staff/TaskSettings.jsx';
 import StaffMessage           from './components/Staff/StaffMessage.jsx';
 import ChatPage                from './components/Chat/ChatPage.jsx';
 import Settings               from './components/Settings/Settings.jsx';
@@ -52,30 +59,96 @@ import RosterDashboard                from './components/Attendance/RosterDashbo
 import RosterReport                   from './components/Attendance/RosterReport.jsx';
 import ManualPostings                 from './components/Attendance/ManualPostings.jsx';
 import MissingAttendanceRequests      from './components/Attendance/MissingAttendanceRequests.jsx';
+import OnlineAttendanceApproval       from './components/Attendance/OnlineAttendanceApproval.jsx';
 import ProfilePage                    from './components/Profile/ProfilePage.jsx';
+import RecoApprovalPage               from './components/Users/RecoApprovalPage.jsx';
+
+// Wraps a requireManager page when the plain branchManager/admin role check
+// already failed — admits a user who is nonetheless individually configured
+// as SOMEONE's recommender/approver via "Set Recommendator & Approval" (a
+// per-person assignment, independent of holding the manager role). Without
+// this, a Staff-role user configured as e.g. a Workshop Incharge's approver
+// for their team could act on those applications right from the Dashboard
+// but got bounced straight back to it the moment they tried to open the
+// actual approval page (via "View All" or direct link) — the role gate and
+// the per-person assignment are two unrelated systems, and only the role
+// gate was being checked here. Mirrors Dashboard.jsx's canSeePendingApprovals.
+// A separate component (not inline in Protected) so the reco-approval fetch
+// only happens for the requireManager routes that actually opt into this
+// fallback, and only once the role check has already failed — every other
+// protected route pays no extra cost.
+const RecoApproverGate = ({ children }) => {
+  const { currentUser } = useAuth();
+  const { assignments, loaded } = useRecoApproval();
+  if (!loaded) return <Layout><div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div></Layout>;
+  const isConfiguredRecoOrApprover = Object.entries(assignments || {}).some(([key, cfg]) => {
+    if (key === '_settings') return false;
+    const reco     = Array.isArray(cfg?.reco)     ? cfg.reco     : (cfg?.reco     != null ? [cfg.reco]     : []);
+    const approval = Array.isArray(cfg?.approval) ? cfg.approval : (cfg?.approval != null ? [cfg.approval] : []);
+    return reco.map(String).includes(String(currentUser.id)) || approval.map(String).includes(String(currentUser.id));
+  });
+  return isConfiguredRecoOrApprover ? children : <Navigate to="/dashboard" replace />;
+};
 
 /*
   Role access matrix
   ──────────────────────────────────────────────────────────────────
-  requireAdmin   → admin only
-  requireManager → admin + branchManager
-  requireReports → admin + branchManager + departmentHead
-  pageKey        → checked via canView(pageKey) (page-permission system)
-  (no flag)      → any authenticated user
+  requireAdmin      → admin only
+  requireManager    → admin + branchManager
+  allowRecoApprover → (with requireManager) also admits a non-manager who is
+                       individually configured as some employee's
+                       recommender/approver — see RecoApproverGate above.
+                       Only use on pages that are themselves scoped to that
+                       assignment (Leave/Office Visit/Manual Postings
+                       approval) — never on pages like User Management that
+                       must stay manager-role-only regardless.
+  requireReports    → admin + branchManager + departmentHead
+  pageKey           → checked via canView(pageKey) (page-permission system)
+  moduleKey         → checked via useModuleFlags() (tenant-wide on/off switch,
+                       Settings → Role & Permission → Module Controls) — an
+                       ADDITIONAL gate layered in front of pageKey/role checks,
+                       not a replacement for them (e.g. Duty Roster: the module
+                       must be on AND the viewer's role/pageKey checks must pass)
+  (no flag)         → any authenticated user
 */
 const Protected = ({
   children,
-  requireAdmin   = false,
-  requireManager = false,
-  requireReports = false,
-  pageKey        = null,
+  requireAdmin      = false,
+  requireManager    = false,
+  allowRecoApprover = false,
+  requireReports    = false,
+  pageKey           = null,
+  moduleKey         = null,
 }) => {
   const { currentUser, isAdmin, isManager, canViewReports, canView } = useAuth();
+  const { flags: moduleFlags, loading: moduleFlagsLoading } = useModuleFlags();
   if (!currentUser) return <Navigate to="/login" replace />;
   if (requireAdmin   && !isAdmin)        return <Navigate to="/dashboard" replace />;
-  if (requireManager && !isManager)      return <Navigate to="/dashboard" replace />;
+  if (requireManager && !isManager) {
+    if (allowRecoApprover) return <RecoApproverGate>{children}</RecoApproverGate>;
+    return <Navigate to="/dashboard" replace />;
+  }
   if (requireReports && !canViewReports) return <Navigate to="/dashboard" replace />;
   if (pageKey && !canView(pageKey))      return <Navigate to="/dashboard" replace />;
+  if (moduleKey) {
+    if (moduleFlagsLoading) return <Layout><div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div></Layout>;
+    if (!moduleFlags[`${moduleKey}Enabled`]) {
+      return (
+        <Layout>
+          <div className="page-container">
+            <div style={{ maxWidth: 480, margin: '60px auto', textAlign: 'center', background: '#fff7ed',
+              border: '1px solid #fed7aa', borderRadius: 12, padding: '32px 28px' }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>🗓️</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#111827' }}>This module is disabled</div>
+              <div style={{ fontSize: 13, color: '#9a3412', marginTop: 8, lineHeight: 1.5 }}>
+                Ask a Super Admin to enable it in Settings → Role & Permission Management.
+              </div>
+            </div>
+          </div>
+        </Layout>
+      );
+    }
+  }
   return <Layout>{children}</Layout>;
 };
 
@@ -83,7 +156,7 @@ const App = () => {
   const { currentUser } = useAuth();
 
   return (
-    <>
+    <ModuleFlagsProvider>
     <LicenseWarningModal />
     <Routes>
       <Route path="/login" element={
@@ -95,6 +168,8 @@ const App = () => {
           bouncing straight to whoever's already logged in. */}
       <Route path="/sso-login" element={<SsoLogin />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      {/* Public — scanned from a "Scan to Check In" QR, no eHajiri login */}
+      <Route path="/checkin/:token" element={<GuestCheckin />} />
 
       <Route path="/dashboard" element={
         <Protected><Dashboard /></Protected>
@@ -113,7 +188,7 @@ const App = () => {
         <Protected><LeaveApplication /></Protected>
       } />
       <Route path="/leave/approval" element={
-        <Protected requireManager><LeaveApproval /></Protected>
+        <Protected requireManager allowRecoApprover><LeaveApproval /></Protected>
       } />
 
       <Route path="/leave/calculation" element={
@@ -129,7 +204,7 @@ const App = () => {
         <Protected pageKey="officeVisitApply"><OfficeVisitApplication /></Protected>
       } />
       <Route path="/office-visit/approval" element={
-        <Protected requireManager><OfficeVisitApproval /></Protected>
+        <Protected requireManager allowRecoApprover><OfficeVisitApproval /></Protected>
       } />
 
 
@@ -207,26 +282,29 @@ const App = () => {
       } />
 
       <Route path="/attendance/overtime" element={
-        <Protected pageKey="attendanceDaily"><OvertimePage /></Protected>
+        <Protected pageKey="overtime"><OvertimePage /></Protected>
       } />
 
       <Route path="/attendance/roster-dashboard" element={
-        <Protected pageKey="dutyRoster"><RosterDashboard /></Protected>
+        <Protected pageKey="dutyRoster" moduleKey="dutyRoster"><RosterDashboard /></Protected>
       } />
       <Route path="/attendance/roster-report" element={
-        <Protected pageKey="dutyRoster"><RosterReport /></Protected>
+        <Protected pageKey="dutyRoster" moduleKey="dutyRoster"><RosterReport /></Protected>
       } />
       <Route path="/attendance/duty-roster" element={
-        <Protected pageKey="dutyRoster"><DutyRoster /></Protected>
+        <Protected pageKey="dutyRoster" moduleKey="dutyRoster"><DutyRoster /></Protected>
       } />
       <Route path="/attendance/duty-roster/dept" element={
-        <Protected pageKey="dutyRoster"><DutyRosterDeptWise /></Protected>
+        <Protected pageKey="dutyRoster" moduleKey="dutyRoster"><DutyRosterDeptWise /></Protected>
       } />
       <Route path="/attendance/manual-postings" element={
-        <Protected requireAdmin><ManualPostings /></Protected>
+        <Protected requireManager allowRecoApprover pageKey="manualPostings"><ManualPostings /></Protected>
       } />
       <Route path="/attendance/missing-requests" element={
         <Protected><MissingAttendanceRequests /></Protected>
+      } />
+      <Route path="/attendance/online/approval" element={
+        <Protected requireManager pageKey="onlineAttendance"><OnlineAttendanceApproval /></Protected>
       } />
       <Route path="/profile" element={
         <Protected><ProfilePage /></Protected>
@@ -238,26 +316,47 @@ const App = () => {
       <Route path="/users" element={
         <Protected requireManager><UserManagement /></Protected>
       } />
+      {/* Dedicated entry point for departmentHead/branchManager (or anyone
+          granted the recoApprovalConfig permission) who shouldn't get the
+          full requireManager-gated /users page just for this one feature. */}
+      <Route path="/staff/reco-approval" element={
+        <Protected pageKey="recoApprovalConfig"><RecoApprovalPage /></Protected>
+      } />
       <Route path="/staff/notes" element={
         <Protected pageKey="myNotes"><StaffNotes /></Protected>
       } />
+      <Route path="/staff/task/dashboard" element={
+        <Protected pageKey="task" moduleKey="task"><TaskDashboard /></Protected>
+      } />
       <Route path="/staff/task" element={
-        <Protected pageKey="task"><TaskList /></Protected>
+        <Protected pageKey="task" moduleKey="task"><TaskList /></Protected>
+      } />
+      <Route path="/staff/field-visit" element={
+        <Protected pageKey="task" moduleKey="task"><TaskList fieldVisitOnly /></Protected>
+      } />
+      <Route path="/staff/task/settings" element={
+        <Protected pageKey="task" moduleKey="task"><TaskSettings /></Protected>
       } />
       <Route path="/staff/task/categories" element={
-        <Protected pageKey="task"><TaskLookupPage title="Task Category" endpoint="taskCategories" /></Protected>
+        <Protected pageKey="task" moduleKey="task"><TaskLookupPage title="Task Category" endpoint="taskCategories" /></Protected>
       } />
       <Route path="/staff/task/priorities" element={
-        <Protected pageKey="task"><TaskLookupPage title="Task Priority" endpoint="taskPriorities" withColor /></Protected>
+        <Protected pageKey="task" moduleKey="task"><TaskLookupPage title="Task Priority" endpoint="taskPriorities" withColor /></Protected>
       } />
       <Route path="/staff/contact" element={
         <Protected pageKey="staffContact"><StaffContact /></Protected>
+      } />
+      <Route path="/staff/events" element={
+        <Protected pageKey="eventVisitorRegistration" moduleKey="guestRegistration"><EventVisitorRegistration /></Protected>
+      } />
+      <Route path="/staff/analysis" element={
+        <Protected pageKey="staffAnalytics"><StaffAnalyticsReport /></Protected>
       } />
       <Route path="/staff/message" element={
         <Protected><StaffMessage /></Protected>
       } />
       <Route path="/chat" element={
-        <Protected><ChatPage /></Protected>
+        <Protected moduleKey="chat"><ChatPage /></Protected>
       } />
       <Route path="/settings" element={
         <Protected requireAdmin><Settings /></Protected>
@@ -272,7 +371,7 @@ const App = () => {
       <Route path="/" element={<Navigate to={currentUser ? "/dashboard" : "/login"} replace />} />
       <Route path="*" element={<Navigate to={currentUser ? "/dashboard" : "/login"} replace />} />
     </Routes>
-    </>
+    </ModuleFlagsProvider>
   );
 };
 

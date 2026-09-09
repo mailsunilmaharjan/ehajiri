@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import Avatar from './Avatar.jsx';
 
 /**
  * Searchable select with optional multi-select + checkboxes.
@@ -9,14 +10,26 @@ import { createPortal } from 'react-dom';
  * Props:
  *   value        — string (single) | string[] (multiple)
  *   onChange     — (value) => void
- *   options      — [{ value, label }]
+ *   options      — [{ value, label, sub?, photo? }] — `photo` (a data-URL or
+ *                  null) only matters when showAvatar is true; `sub` (e.g.
+ *                  "Staff ID - Post") renders as a small gray line under the
+ *                  label in the open dropdown rows when present.
  *   multiple     — bool (default false) — enables checkbox multi-select
  *   placeholder  — string
  *   renderOption — optional (option) => JSX, for a richer open-dropdown row
  *                  (e.g. a bold name plus a smaller secondary line). `label`
  *                  is still what's shown in the closed trigger and what
  *                  search filters against — this only replaces the row
- *                  content while the dropdown is open.
+ *                  content while the dropdown is open. Takes priority over
+ *                  showAvatar's own default row rendering.
+ *   showAvatar   — bool (default false) — when options represent staff,
+ *                  shows each person's small profile-photo circle (falling
+ *                  back to an initial) next to their name, both in the
+ *                  closed trigger and the open rows.
+ *   autoOpen     — bool (default false) — opens the dropdown itself on
+ *                  mount, e.g. a picker that's the obvious first thing to
+ *                  fill in a freshly-opened modal (see StaffDropdown's own
+ *                  autoOpen for the same pattern).
  *   className, style, disabled
  */
 const SearchableSelect = ({
@@ -29,6 +42,8 @@ const SearchableSelect = ({
   style       = {},
   disabled    = false,
   renderOption = null,
+  showAvatar   = false,
+  autoOpen     = false,
 }) => {
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
@@ -61,6 +76,8 @@ const SearchableSelect = ({
   );
   itemRefs.current = [];
 
+  const AVATAR_STACK_MAX = 4;
+
   /* close — and by default return focus to the trigger so Tab/Shift+Tab
      continues to the next field instead of resetting to document.body
      (which happens once the portal holding the focused search input unmounts) */
@@ -84,6 +101,18 @@ const SearchableSelect = ({
     setActiveIndex(idx >= 0 ? idx : (filtered.length ? 0 : -1));
     setOpen(true);
   };
+
+  // Modals slide into place via a 0.2s CSS animation (see .modal in
+  // index.css) — measuring the trigger's position before that settles
+  // anchors the portaled dropdown to a still-animating (too-low) rect,
+  // leaving a visible gap once the modal finishes sliding up into its
+  // resting position. Deferring past the animation fixes it for every
+  // autoOpen consumer, not just ones inside a freshly-opened modal.
+  useEffect(() => {
+    if (!autoOpen) return;
+    const t = setTimeout(openDrop, 220);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* close on outside click / scroll (but NOT when scrolling inside the dropdown) */
   useEffect(() => {
@@ -170,9 +199,34 @@ const SearchableSelect = ({
           border: '1px solid #d1d5db', borderRadius: 6, outline: 'none', boxSizing: 'border-box',
           ...(open ? { borderColor: '#1a56db', boxShadow: '0 0 0 2px rgba(26,86,219,.1)' } : {}),
         }}>
-        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-          {displayLabel}
-        </span>
+        {showAvatar && selectedOptions.length > 0 ? (
+          <div style={{ display:'flex', alignItems:'center', flex:1, overflow:'hidden' }}>
+            {multiple ? selectedOptions.slice(0, AVATAR_STACK_MAX).map((o, i) => (
+              <span key={o.value} style={{ display:'flex', alignItems:'center', flexShrink:0,
+                marginRight: i < Math.min(selectedOptions.length, AVATAR_STACK_MAX) - 1 ? 10 : 0 }}>
+                <Avatar photo={o.photo} name={o.label} size={20} style={{ marginRight:5 }} />
+                <span style={{ whiteSpace:'nowrap' }}>
+                  {selectedOptions.length > 1 ? o.label.split(' ')[0] : o.label}
+                  {i < Math.min(selectedOptions.length, AVATAR_STACK_MAX) - 1 ? ',' : ''}
+                </span>
+              </span>
+            )) : (
+              <span style={{ display:'flex', alignItems:'center', overflow:'hidden' }}>
+                <Avatar photo={selectedOptions[0].photo} name={selectedOptions[0].label} size={20} style={{ marginRight:6, flexShrink:0 }} />
+                <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{displayLabel}</span>
+              </span>
+            )}
+            {multiple && selectedOptions.length > AVATAR_STACK_MAX && (
+              <span style={{ marginLeft:8, fontSize:11, color:'#6b7280', flexShrink:0 }}>
+                +{selectedOptions.length - AVATAR_STACK_MAX} more
+              </span>
+            )}
+          </div>
+        ) : (
+          <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
+            {displayLabel}
+          </span>
+        )}
         <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
           {/* clear button */}
           {(multiple ? selectedArr.length > 0 : value) && (
@@ -225,17 +279,19 @@ const SearchableSelect = ({
               : filtered.map((opt, i) => {
                   const active      = isSelected(opt.value);
                   const highlighted = i === activeIndex;
+                  const stripeBg    = i % 2 === 0 ? '#fff' : '#fafafa';
                   return (
                     <div key={opt.value}
                       ref={el => itemRefs.current[i] = el}
                       onMouseEnter={() => setActiveIndex(i)}
                       onMouseDown={e => { e.preventDefault(); handleSelect(opt.value); }}
                       style={{
-                        padding: '8px 10px', fontSize:13, cursor:'pointer',
+                        padding: '6px 10px', fontSize:13, cursor:'pointer',
                         display:'flex', alignItems:'center', gap:8,
-                        background: highlighted ? '#eff6ff' : (active ? '#f8fafc' : 'transparent'),
-                        color:      active ? '#1a56db' : '#374151',
+                        background: highlighted ? '#eff6ff' : (active ? '#f8fafc' : stripeBg),
+                        color:      active ? '#1a56db' : '#1f2937',
                         borderLeft: active ? '3px solid #1a56db' : (highlighted ? '3px solid #93c5fd' : '3px solid transparent'),
+                        borderBottom: '1px solid #eef0f3',
                       }}>
                       {/* checkbox for multiple mode */}
                       {multiple && (
@@ -255,7 +311,15 @@ const SearchableSelect = ({
                       {renderOption ? (
                         <span style={{ flex: 1, minWidth: 0 }}>{renderOption(opt)}</span>
                       ) : (
-                        <span style={{ fontWeight: active ? 600 : 400 }}>{opt.label}</span>
+                        <>
+                          {showAvatar && <Avatar photo={opt.photo} name={opt.label} size={26} style={{ flexShrink:0 }} />}
+                          <span style={{ display:'flex', flexDirection:'column', minWidth:0 }}>
+                            <span style={{ fontWeight: active ? 600 : 400 }}>{opt.label}</span>
+                            {opt.sub && (
+                              <span style={{ fontSize:10.5, color:'#9ca3af', fontWeight:400 }}>{opt.sub}</span>
+                            )}
+                          </span>
+                        </>
                       )}
                     </div>
                   );

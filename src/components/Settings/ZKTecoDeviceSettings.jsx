@@ -2928,7 +2928,7 @@ const ZKTecoDeviceSettings = () => {
 
         return (
           <div className="modal-overlay">
-            <div className="modal" style={{ width:'min(940px,97%)' }} onClick={e=>e.stopPropagation()}>
+            <div className="modal" style={{ width:'min(1040px,97%)' }} onClick={e=>e.stopPropagation()}>
               <div className="modal-header">
                 <h2>{isDelete ? '🗑️➡️ Delete & Transfer Samples' : '📤 Copy / Transfer Samples'}</h2>
                 <button className="modal-close" onClick={()=>setTransferModal(null)}>✕</button>
@@ -2939,7 +2939,7 @@ const ZKTecoDeviceSettings = () => {
                     ⚠️ Each staff member checked below is copied to the target device, then <strong>deleted from the source device</strong> only once their own copy succeeds.
                   </div>
                 )}
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                <div style={{ display:'grid', gridTemplateColumns:'1.3fr 1fr', gap:16 }}>
                   {/* Transfer From */}
                   <div>
                     <label className="form-label">Transfer From</label>
@@ -2957,17 +2957,19 @@ const ZKTecoDeviceSettings = () => {
                             No staff with fingerprint/face samples on this device
                           </div>
                         ) : (
-                          <DataGrid
-                            columns={staffColumns}
-                            data={sourceStaff}
-                            rowKey="pin"
-                            defaultPageSize={8}
-                            compact={true}
-                            showCheckbox={true}
-                            showFilterButton={false}
-                            initialSelected={checkedPins}
-                            onSelectionChange={ids => setTransferModal(p => ({ ...p, checkedPins: ids }))}
-                          />
+                          <div className="dg-fixed-height" style={{ height: 360 }}>
+                            <DataGrid
+                              columns={staffColumns}
+                              data={sourceStaff}
+                              rowKey="pin"
+                              defaultPageSize={8}
+                              compact={true}
+                              showCheckbox={true}
+                              showFilterButton={false}
+                              initialSelected={checkedPins}
+                              onSelectionChange={ids => setTransferModal(p => ({ ...p, checkedPins: ids }))}
+                            />
+                          </div>
                         )}
                       </div>
                     )}
@@ -2980,16 +2982,24 @@ const ZKTecoDeviceSettings = () => {
                         No other devices available
                       </div>
                     ) : (
-                      <DataGrid
-                        columns={targetColumns}
-                        data={targetDevices}
-                        rowKey="id"
-                        defaultPageSize={8}
-                        compact={true}
-                        showCheckbox={false}
-                        showFilterButton={false}
-                        onRowClick={row => setTransferModal(p => ({ ...p, targetId: String(row.id) }))}
-                      />
+                      <div className="dg-fixed-height" style={{ height: 360 }}>
+                        <DataGrid
+                          columns={targetColumns}
+                          data={targetDevices}
+                          rowKey="id"
+                          // Footer/search hidden — this list is a handful of devices to
+                          // pick one from, not something worth paginating/searching. A
+                          // generous page size keeps every device reachable even with the
+                          // footer (and its page-forward control) hidden.
+                          defaultPageSize={500}
+                          compact={true}
+                          showCheckbox={false}
+                          showFilterButton={false}
+                          showSearch={false}
+                          showFooter={false}
+                          onRowClick={row => setTransferModal(p => ({ ...p, targetId: String(row.id) }))}
+                        />
+                      </div>
                     )}
                   </div>
                 </div>

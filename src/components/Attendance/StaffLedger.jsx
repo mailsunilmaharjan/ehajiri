@@ -9,6 +9,7 @@ import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
 import { useMissingAttendanceApply } from '../../context/MissingAttendanceApplyContext.jsx';
 import api             from '../../api/client.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
+import Avatar          from '../Common/Avatar.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import ViewMonthlyBtn    from './ViewMonthlyBtn.jsx';
@@ -24,11 +25,23 @@ const STATUS_STYLE = {
   Present          : { bg:'#f0fdf4', color:'#065f46', border:'#bbf7d0' },
   Absent           : { bg:'#fff5f5', color:'#991b1b', border:'#fecaca' },
   Weekend          : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
+  'Day Off'        : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
+  'Night Off'      : { bg:'#eef2ff', color:'#4338ca', border:'#c7d2fe' },
   Leave            : { bg:'#ede9fe', color:'#5b21b6', border:'#c4b5fd' },
   'Public Holiday' : { bg:'#fef3c7', color:'#92400e', border:'#fcd34d' },
   'Office Visit'   : { bg:'#dbeafe', color:'#1e40af', border:'#93c5fd' },
 };
 const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
+
+// Backend always sends the status as one of these fixed English strings —
+// translate for display when Nepali is active (module-level so it can't call
+// the component's own L(), which needs `language` from context).
+const STATUS_LABEL_NP = {
+  Present: 'उपस्थित', Absent: 'अनुपस्थित', Weekend: 'विकेन्ड',
+  'Day Off': 'डे अफ', 'Night Off': 'नाइट अफ', Leave: 'बिदा',
+  'Public Holiday': 'सार्वजनिक बिदा', 'Office Visit': 'कार्यालय भ्रमण',
+};
+const statusLabel = (s, language) => (language === 'np' ? (STATUS_LABEL_NP[s] || s) : s);
 
 const fmtTime = (iso) => {
   if (!iso) return '—';
@@ -71,11 +84,12 @@ const StaffSelect = ({ employees, value, onChange }) => {
           height:36, padding:'0 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer',
           boxShadow:open?'0 0 0 2px rgba(26,86,219,.1)':'none', transition:'all .15s' }}>
-        <span style={{ fontSize:13, color:selected?'#1f2937':'#9ca3af',
-          fontWeight:selected?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-          {selected
-            ? `${selected.fullName}${selected.deviceId ? ` (${selected.deviceId})` : ''}`
-            : '— Select Staff Member —'}
+        <span style={{ display:'flex', alignItems:'center', gap:6, overflow:'hidden', flex:1 }}>
+          {selected && <Avatar photo={selected.profilePhoto} name={selected.fullName} size={22} style={{ flexShrink:0 }} />}
+          <span style={{ fontSize:13, color:selected?'#1f2937':'#9ca3af',
+            fontWeight:selected?600:400, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {selected ? selected.fullName : '— Select Staff Member —'}
+          </span>
         </span>
         <svg viewBox="0 0 20 20" fill={open?'#1a56db':'#9ca3af'} width="13" height="13"
           style={{ flexShrink:0, marginLeft:6, transform:open?'rotate(180deg)':'none', transition:'transform .2s' }}>
@@ -110,30 +124,26 @@ const StaffSelect = ({ employees, value, onChange }) => {
               <div style={{ padding:'12px',textAlign:'center',color:'#9ca3af',fontSize:12 }}>No staff found</div>
             )}
             {filtered.map((e, idx) => {
-              const active = String(e.id) === String(value);
+              const active   = String(e.id) === String(value);
+              const stripeBg = idx % 2 === 0 ? '#fff' : '#fafafa';
+              const sub      = [e.employeeId, e.position].filter(Boolean).join(' - ');
               return (
                 <div key={e.id}
                   onMouseDown={ev=>{ ev.preventDefault(); onChange(String(e.id)); setOpen(false); setSearch(''); }}
                   style={{ display:'flex', alignItems:'center', gap:10, padding:'5px 14px',
-                    cursor:'pointer', background:active?'#eff6ff':'white',
-                    borderBottom:'1px solid #d1d5db', transition:'background .1s' }}
+                    cursor:'pointer', background:active?'#eff6ff':stripeBg,
+                    borderBottom:'1px solid #eef0f3', transition:'background .1s' }}
                   onMouseEnter={ev=>{ if(!active) ev.currentTarget.style.background='#f5f8ff'; }}
-                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':'white'; }}>
-                  {/* Rank badge */}
-                  <div style={{ width:22, height:22, borderRadius:'50%', background:active?'#1a56db':'#f3f4f6',
-                    color:active?'white':'#9ca3af', fontSize:10, fontWeight:700, flexShrink:0,
-                    display:'flex', alignItems:'center', justifyContent:'center' }}>
-                    {idx+1}
-                  </div>
+                  onMouseLeave={ev=>{ ev.currentTarget.style.background=active?'#eff6ff':stripeBg; }}>
+                  <Avatar photo={e.profilePhoto} name={e.fullName} size={26} style={{ flexShrink:0 }} />
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:active?700:600, color:active?'#1e40af':'#1f2937',
                       overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                       {e.fullName}
                     </div>
-                    <div style={{ fontSize:11, color:'#9ca3af' }}>
-                      {e.deviceId  && <span style={{ marginRight:6, fontFamily:'monospace' }}>{e.deviceId}</span>}
-                      {e.position  && <span>{e.position}</span>}
-                    </div>
+                    {sub && (
+                      <div style={{ fontSize:10.5, color:'#9ca3af', fontWeight:400 }}>{sub}</div>
+                    )}
                   </div>
                   {active && (
                     <svg viewBox="0 0 20 20" fill="#1a56db" width="14" height="14" style={{ flexShrink:0 }}>
@@ -286,7 +296,7 @@ const StaffLedger = () => {
   /* overlay approved leaves on each day row */
   const days    = (data?.days || []).map(r => {
     const leave = getApprovedLeaveForDate(emp?.id, r.dateStr);
-    if (!leave || r.status === 'Weekend' || r.status === 'Holiday') return r;
+    if (!leave || r.status === 'Weekend' || r.status === 'Public Holiday') return r;
     if (r.status === 'Absent') {
       return {
         ...r,
@@ -297,6 +307,7 @@ const StaffLedger = () => {
           reason:        leave.reason || '',
           recommendedBy: leave.recommendedBy ? getEmployeeName(leave.recommendedBy) : null,
           approvedBy:    leave.approvedBy    ? getEmployeeName(leave.approvedBy)    : null,
+          halfDay:       !!leave.halfDay,
         },
       };
     }
@@ -306,6 +317,7 @@ const StaffLedger = () => {
       leaveInfo: {
         typeName:  getLeaveTypeName(leave.leaveTypeCode) || leave.leaveTypeCode,
         reason:    leave.reason || '',
+        halfDay:   !!leave.halfDay,
       },
     };
   });
@@ -343,11 +355,16 @@ const StaffLedger = () => {
     },
     {
       field:'_shift', header:L('सिफ्ट','Shift'), sortable:false,
-      render:(_,row)=>(
-        <span style={{ fontSize:13,color:'#1f2937' }}>
-          {!row.isWeekend ? (row.shiftName||'—') : '—'}
-        </span>
-      ),
+      render:(_,row)=>{
+        // A plain company weekend hides the shift name (it's just whatever
+        // default happens to resolve, not a real assignment) — but Day
+        // Off/Night Off IS the real roster assignment for this day, so show
+        // it here too instead of a blank dash that contradicts the Status
+        // column right next to it.
+        const isRosterOff = row.status === 'Day Off' || row.status === 'Night Off';
+        const show = isRosterOff ? row.shiftName : (!row.isWeekend ? row.shiftName : null);
+        return <span style={{ fontSize:13,color:'#1f2937' }}>{show || '—'}</span>;
+      },
     },
     {
       field:'timeIn', header:L('आउने','Time In'), align:'center',
@@ -366,7 +383,19 @@ const StaffLedger = () => {
     {
       field:'timeOut', header:L('جاने','Time Out'), align:'center',
       render:(v,row)=>{
-        if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
+        if(!v){
+          if(row.timeIn){
+            return (
+              <span
+                onClick={e => { e.stopPropagation(); openMissingAttendance(emp?.id, row.dateStr); }}
+                title={L('टाइम आउट रेकर्ड भएन — अनुरोध पठाउन क्लिक गर्नुस्','Missing time out — click to request')}
+                style={{ color:'#dc2626', fontSize:13, fontWeight:700, cursor:'pointer', textDecoration:'underline', textDecorationStyle:'dotted', textUnderlineOffset:3 }}>
+                —
+              </span>
+            );
+          }
+          return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
+        }
         const warn=row.punches===1;
         const onTime=row.earlyFormatted==='On Time';
         return(
@@ -412,19 +441,26 @@ const StaffLedger = () => {
       render:(v,row)=>{
         if (v === 'On Leave') {
           /* Badge only — no leave name below */
-          return <Pill bg="#eff6ff" color="#1e40af" border="#bfdbfe">{L('बिदामा','On Leave')}</Pill>;
+          const half = row.leaveInfo?.halfDay;
+          return (
+            <Pill bg="#eff6ff" color="#1e40af" border="#bfdbfe">
+              {half ? `${L('आधा बिदा','½ Half Day')}` : L('बिदामा','On Leave')}
+            </Pill>
+          );
         }
         const s=statusStyle(v);
-        return <Pill bg={s.bg} color={s.color} border={s.border}>{v}</Pill>;
+        return <Pill bg={s.bg} color={s.color} border={s.border}>{statusLabel(v, language)}</Pill>;
       },
     },
     {
-      field:'remarks', header:L('कैफियत','Remarks'), sortable:false, wrap:true,
+      field:'remarks', header:L('कैफियत','Remarks'), sortable:false, wrap:true, fill:true,
       render:(v,row)=>{
         if (row.leaveInfo) {
           const parts = [];
           if (row.leaveInfo.typeName) parts.push(
-            <span key="type" style={{ fontWeight:700, color:'#1e40af' }}>{row.leaveInfo.typeName}</span>
+            <span key="type" style={{ fontWeight:700, color:'#1e40af' }}>
+              {row.leaveInfo.typeName}{row.leaveInfo.halfDay ? ' (½ Half Day)' : ''}
+            </span>
           );
           if (row.leaveInfo.reason) parts.push(
             <span key="reason" style={{ color:'#374151' }}>{row.leaveInfo.reason}</span>
@@ -752,6 +788,9 @@ const StaffLedger = () => {
             <div style={{ display:'flex', gap:0, flexWrap:'wrap', fontSize:12,
               border:'1px solid #e2e8f0', borderRadius:8, overflow:'hidden', width:'fit-content' }}>
               {[
+                { show: !!emp.empCode,
+                  icon:'🆔', label:L('स्टाफ आईडी','Staff ID'),
+                  value: emp.empCode },
                 { show: emp.position && emp.position !== '—',
                   icon:'🎖️', label:L('पद','Post'),
                   value: (settings.posts||[]).find(p=>p.name===emp.position)?.shortName || (emp.postShort !== '—' ? emp.postShort : null) || emp.position },
@@ -787,16 +826,16 @@ const StaffLedger = () => {
           {summary.totalWorkingDays>0&&(
             <div style={{ display:'flex', gap:6, marginTop:8, flexWrap:'wrap' }}>
               {[
-                { label:L('Present','Present'),        value:summary.presentCount,           c:'#d1fae5', tc:'#065f46' },
-                { label:L('Absent','Absent'),           value:summary.absentCount,            c:'#fee2e2', tc:'#991b1b' },
-                { label:L('Leave','Leave'),             value:summary.leaveCount,             c:'#ede9fe', tc:'#5b21b6' },
-                { label:L('Late','Late'),               value:summary.lateCount,              c:'#fef3c7', tc:'#92400e' },
-                { label:L('Early Out','OUT Issues'),    value:summary.earlyCount,             c:'#fef3c7', tc:'#92400e' },
-                { label:L('Att. Rate','Att. Rate'),    value:`${summary.attendanceRate}%`,    c:'#eff6ff', tc:'#1a56db' },
-                { label:L('P in Holiday','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
-                { label:L('P in Weekend','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
+                { label:L('उपस्थित','Present'),        value:summary.presentCount,           c:'#d1fae5', tc:'#065f46' },
+                { label:L('अनुपस्थित','Absent'),        value:summary.absentCount,            c:'#fee2e2', tc:'#991b1b' },
+                { label:L('बिदा','Leave'),              value:summary.leaveCount,             c:'#ede9fe', tc:'#5b21b6' },
+                { label:L('ढिलो','Late'),                value:summary.lateCount,              c:'#fef3c7', tc:'#92400e' },
+                { label:L('चाँडो गएको','OUT Issues'),   value:summary.earlyCount,             c:'#fef3c7', tc:'#92400e' },
+                { label:L('उपस्थिति दर','Att. Rate'),   value:`${summary.attendanceRate}%`,    c:'#eff6ff', tc:'#1a56db' },
+                { label:L('बिदामा उपस्थित','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
+                { label:L('विकेन्डमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
                 ...(emp?.eligibleForOt ? [
-                  { label:L('Total OT','Total OT'), value:summary.otApprovedFormatted || '0:00', c:'#d1fae5', tc:'#059669' },
+                  { label:L('जम्मा ओटी','Total OT'), value:summary.otApprovedFormatted || '0:00', c:'#d1fae5', tc:'#059669' },
                 ] : []),
               ].map(s=>(
                 <div key={s.label} style={{ background:s.c, border:`1px solid ${s.tc}22`,
@@ -869,6 +908,16 @@ const StaffLedger = () => {
           showFilterButton={false}
           contextMenu={!emp ? null : isStaffLogin ? [
             {
+              label: 'Leave Posting',
+              icon: '🌴',
+              onClick: () => openLeave(emp.id),
+            },
+            {
+              label: 'Office Visit Posting',
+              icon: '🚗',
+              onClick: () => openOfficeVisit(emp.id),
+            },
+            {
               label: 'Request for Missing Attendance',
               icon: '📩',
               onClick: (row) => openMissingAttendance(emp.id, row.dateStr),
@@ -890,6 +939,11 @@ const StaffLedger = () => {
               icon: '🚗',
               onClick: () => openOfficeVisit(emp.id),
             },
+            {
+              label: 'Request for Missing Attendance',
+              icon: '📩',
+              onClick: (row) => openMissingAttendance(emp.id, row.dateStr),
+            },
           ]}
           toolbarLeft={
             <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
@@ -901,6 +955,8 @@ const StaffLedger = () => {
                 { value:'Present',        label:L('उपस्थित','Present'),          color:'#065f46' },
                 { value:'Absent',         label:L('अनुपस्थित','Absent'),         color:'#991b1b' },
                 { value:'Weekend',        label:L('विकेन्ड','Weekend'),           color:'#6b7280' },
+                { value:'Day Off',        label:L('डे अफ','Day Off'),             color:'#6b7280' },
+                { value:'Night Off',      label:L('नाइट अफ','Night Off'),         color:'#4338ca' },
                 { value:'Leave',          label:L('बिदा','Leave'),                color:'#5b21b6' },
                 { value:'Public Holiday', label:L('सार्व. बिदा','P. Holiday'),   color:'#92400e' },
                 { value:'_late',          label:L('ढिला','Late In'),              color:'#dc2626' },

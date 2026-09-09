@@ -2,18 +2,34 @@
  * Overtime Approval Routes
  * GET  /api/overtime?startDate=&endDate=   — list OT records (calculated + approval status)
  * POST /api/overtime/generate              — upsert pending OT records from attendance logs
+ * PATCH /api/overtime/:id/recommend        — recommend one record (has a DB row already)
+ * POST  /api/overtime/recommend-inline     — recommend by empId+date (no DB row yet)
  * PATCH /api/overtime/:id/approve          — approve one record
  * PATCH /api/overtime/:id/reject           — reject one record
+ * POST  /api/overtime/approve-inline       — approve/reject by empId+date (no DB row yet)
  * POST  /api/overtime/bulk-approve         — approve multiple by ids
  * DELETE /api/overtime/:id                 — delete (reset) one record
+ *
+ * Every route that sets status/approved_by/recommended_by — including
+ * bulk-approve and approve-leave — runs through authorizeRecoAction (same
+ * guard Leave/Office Visit use) for any non-privileged caller: the acting
+ * user must be the employee's configured approver/recommender and can never
+ * act on their own application, and while Recommendation Compulsory is on,
+ * approval requires an existing recommendation and the configured
+ * recommender can never also approve. Only admin/superAdmin may record
+ * someone ELSE as the approver/recommender (bulk-approve/approve-leave's
+ * "record a decision someone else already made" pickers) — everyone else is
+ * always recorded as themselves.
  */
 import { Router } from 'express';
 import pool       from '../db.js';
 import { logError } from '../utils/logError.js';
 import { resolveOrgScope } from './orgScope.js';
-import { loadRosterMap, getEffectiveRoster, isRosterWeekend, bucketPunchesByShiftDay } from './attendance.js';
+import { loadRosterMap, getEffectiveRoster, isRosterWeekend, bucketPunchesByShiftDay, resolveWinterShift } from './attendance.js';
+import { authorizeRecoAction } from '../services/recoApprovalGuard.js';
 
 const router  = Router();
+const PRIVILEGED_ROLES = ['admin', 'superAdmin'];
 const pad2    = (n) => String(Math.round(n)).padStart(2, '0');
 const toHHMM  = (m) => `${pad2(Math.floor(Math.abs(m)/60))}:${pad2(Math.abs(m)%60)}`;
 const toDateS = (v) => {
@@ -49,9 +65,23 @@ router.get('/', async (req, res) => {
   const scope = resolveOrgScope(req);
   const scopeParams = [];
   let scopeCond = '';
-  if (scope.level === 'department') { scopeParams.push(scope.value); scopeCond = `AND u.department = $${scopeParams.length + 3}`; }
-  else if (scope.level === 'branch') { scopeParams.push(scope.value); scopeCond = `AND u.branch = $${scopeParams.length + 3}`; }
-  else if (scope.level === 'self')   { scopeParams.push(scope.value); scopeCond = `AND u.id = $${scopeParams.length + 3}`; }
+  // Placeholder numbers must line up with the actual params array passed
+  // below, `[shiftName, ...scopeParams]` — shiftName is always $1, so the
+  // (single, if/else-if) scope param is $2. This previously used +3, a
+  // leftover from a different query shape — since scopeParams never has
+  // more than one entry, that always produced $4, a placeholder that never
+  // appears anywhere the query text actually uses $2/$3, either. Postgres
+  // can't infer a type for a placeholder it never sees referenced, so this
+  // failed with "could not determine data type of parameter $2" whenever a
+  // department/branch/self-scoped (non-admin) request hit this endpoint.
+  if (scope.level === 'department') {
+    scopeParams.push(scope.value);
+    scopeCond = `AND u.department = $${scopeParams.length + 1}`;
+    // Dept Head with a branch on their own profile — see orgScope.js.
+    if (scope.branchValue) { scopeParams.push(scope.branchValue); scopeCond += ` AND u.branch = $${scopeParams.length + 1}`; }
+  }
+  else if (scope.level === 'branch') { scopeParams.push(scope.value); scopeCond = `AND u.branch = $${scopeParams.length + 1}`; }
+  else if (scope.level === 'self')   { scopeParams.push(scope.value); scopeCond = `AND u.id = $${scopeParams.length + 1}`; }
 
   try {
     // 1. Load default shift (start, end, grace, name)
@@ -62,11 +92,6 @@ router.get('/', async (req, res) => {
     const shiftName  = defShift?.name_en || defShift?.name || 'Standard';
     const graceSt    = defShift?.grace_period_start || 0;
     const graceEd    = defShift?.grace_period_end   || 0;
-
-    const [sh, sm] = shiftStart.split(':').map(Number);
-    const [eh, em] = shiftEnd.split(':').map(Number);
-    const shiftStartMins = sh * 60 + sm;
-    const shiftEndMins   = eh * 60 + em;
 
     // 1b. Weekend days + public holidays — needed below to stop the
     // shift-relative "nothing to show" filter from silently dropping
@@ -114,7 +139,13 @@ router.get('/', async (req, res) => {
         u.timing_type                    AS "timingType",
         u.ranking_order                  AS staff_rank,
         br.ranking_order                 AS branch_rank,
-        u.eligible_for_ot                AS eligible_for_ot
+        u.eligible_for_ot                AS eligible_for_ot,
+        s.start_time                     AS shift_start,
+        s.end_time                       AS shift_end,
+        s.grace_period_start             AS grace_st,
+        s.grace_period_end               AS grace_ed,
+        s.winter_policy_enabled          AS shift_winter_enabled,
+        s.winter_policy                  AS shift_winter_policy
       FROM users u
       LEFT JOIN shifts      s  ON s.code = u.shift
       LEFT JOIN branches    br ON br.name = u.branch
@@ -164,9 +195,10 @@ router.get('/', async (req, res) => {
 
     // 3. Existing approval records
     const { rows: approvals } = await pool.query(`
-      SELECT oa.*, u.full_name AS approved_by_name
+      SELECT oa.*, u.full_name AS approved_by_name, ru.full_name AS recommended_by_name
       FROM overtime_approvals oa
-      LEFT JOIN users u ON u.id = oa.approved_by
+      LEFT JOIN users u  ON u.id  = oa.approved_by
+      LEFT JOIN users ru ON ru.id = oa.recommended_by
       WHERE oa.date BETWEEN $1 AND $2
     `, [startDate, endDate]);
     const approvalMap = new Map();
@@ -199,22 +231,44 @@ router.get('/', async (req, res) => {
       const holidayName   = getHolidayName(ds);
       const isSpecialDay  = isWeekendDay || !!holidayName;
 
+      // Effective shift for THIS employee on THIS date: roster override (a
+      // shift assigned/changed via Duty Roster) > the employee's own shift >
+      // the company default — same precedence every other attendance report
+      // already uses. Previously this route always used the company default
+      // shift's start/end for every employee's OT math, so a roster-assigned
+      // or individually-assigned shift never changed what OT Approval showed.
+      const empShiftStart = r.shift_start?.toString().substring(0,5) || shiftStart;
+      const empShiftEnd   = r.shift_end?.toString().substring(0,5)   || shiftEnd;
+      const empGraceSt    = r.grace_st ?? graceSt;
+      const empGraceEd    = r.grace_ed ?? graceEd;
+      const empWinterEnabled = r.shift_start ? r.shift_winter_enabled : defShift?.winter_policy_enabled;
+      const empWinterPolicy  = r.shift_start ? r.shift_winter_policy  : defShift?.winter_policy;
+      const fallbackShift = resolveWinterShift(ds, empShiftStart, empShiftEnd, empGraceSt, empGraceEd, empWinterEnabled, empWinterPolicy);
+      const effShiftStart = roster?.shiftStart || fallbackShift.shiftStart;
+      const effShiftEnd   = roster?.shiftEnd   || fallbackShift.shiftEnd;
+      const effGraceSt    = roster?.graceSt    != null ? roster.graceSt : fallbackShift.graceStart;
+      const effGraceEd    = roster?.graceEd    != null ? roster.graceEd : fallbackShift.graceEnd;
+      const [effSh, effSm] = effShiftStart.split(':').map(Number);
+      const [effEh, effEm] = effShiftEnd.split(':').map(Number);
+      const effShiftStartMins = effSh * 60 + effSm;
+      const effShiftEndMins   = effEh * 60 + effEm;
+
       // Actual times in minutes (using local time components)
       const actualInMins  = inDt.getHours() * 60 + inDt.getMinutes();
       const actualOutMins = outDt.getHours() * 60 + outDt.getMinutes();
 
       // OT in IN: positive = came early (extra before shift), negative = came late
-      const rawOTinIN  = shiftStartMins - actualInMins;  // +early / -late
+      const rawOTinIN  = effShiftStartMins - actualInMins;  // +early / -late
       // Apply grace: within grace window → treat as 0
       const otInINMins = rawOTinIN > 0
-        ? rawOTinIN                                          // early arrival
-        : (Math.abs(rawOTinIN) > graceSt ? rawOTinIN : 0);  // late beyond grace
+        ? rawOTinIN                                             // early arrival
+        : (Math.abs(rawOTinIN) > effGraceSt ? rawOTinIN : 0);  // late beyond grace
 
       // OT in OUT: positive = stayed late, negative = left early
-      const rawOTinOUT  = actualOutMins - shiftEndMins;  // +late / -early
+      const rawOTinOUT  = actualOutMins - effShiftEndMins;  // +late / -early
       const otInOUTMins = rawOTinOUT > 0
-        ? rawOTinOUT                                           // late departure
-        : (Math.abs(rawOTinOUT) > graceEd ? rawOTinOUT : 0); // early beyond grace
+        ? rawOTinOUT                                              // late departure
+        : (Math.abs(rawOTinOUT) > effGraceEd ? rawOTinOUT : 0); // early beyond grace
 
       // Net calculated OT — OT IN and OT OUT are independent signals (an
       // early arrival and a late departure are each their own overtime
@@ -260,13 +314,13 @@ router.get('/', async (req, res) => {
         branchShort    : r.branch_short   || '—',
         staffRank      : r.staff_rank,
         branchRank     : r.branch_rank,
-        shiftName      : r.emp_shift_name || shiftName,
+        shiftName      : roster?.shiftName || r.emp_shift_name || shiftName,
         grade      : r.grade      || '—',
         gender     : r.gender     || '—',
         mode       : r.mode       || '—',
         timingType : r.timingType || '—',
-        shiftStart,
-        shiftEnd,
+        shiftStart : effShiftStart,
+        shiftEnd   : effShiftEnd,
         date           : ds,
         day            : dayOfWeek,
         rosterOffType,
@@ -287,6 +341,9 @@ router.get('/', async (req, res) => {
         approvedBy     : appr?.approved_by    || null,
         approvedByName : appr?.approved_by_name || null,
         approvedDate   : toDateS(appr?.approved_date),
+        recommendedBy    : appr?.recommended_by      || null,
+        recommendedByName: appr?.recommended_by_name || null,
+        recommendedDate  : toDateS(appr?.recommended_date),
         comment        : appr?.comment || '',
         // "Provide Next Day Leave" conversion (set only via /approve-leave)
         leaveTypeCode  : appr?.leave_type_code || null,
@@ -365,17 +422,65 @@ router.post('/generate', async (req, res) => {
   }
 });
 
+/* ── PATCH /api/overtime/:id/recommend ───────────────────────────────────────── */
+router.patch('/:id/recommend', async (req, res) => {
+  try {
+    const { rows: existingRows } = await pool.query('SELECT employee_id FROM overtime_approvals WHERE id=$1', [req.params.id]);
+    if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
+    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'recommend');
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
+    const { rows } = await pool.query(
+      `UPDATE overtime_approvals SET recommended_by=$1, recommended_date=CURRENT_DATE WHERE id=$2 RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'OT record not found' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── POST /api/overtime/recommend-inline — recommend by empId+date (no DB row yet) ─
+   A calculated OT record only gets a row in overtime_approvals once someone acts
+   on it (see approvalId: appr?.id || null in the GET above), so recommending one
+   that's never been touched needs the same insert-or-update-by-(employee,date)
+   shape as approve-inline below, rather than requiring a PATCH :id first. */
+router.post('/recommend-inline', async (req, res) => {
+  const { employeeId, date, otMinutes } = req.body;
+  if (!employeeId || !date) return res.status(400).json({ error: 'employeeId and date required' });
+  try {
+    const authError = await authorizeRecoAction(req, employeeId, 'recommend');
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
+    const { rows } = await pool.query(`
+      INSERT INTO overtime_approvals (employee_id, date, ot_minutes, status, recommended_by, recommended_date)
+      VALUES ($1, $2, $3, 'pending', $4, CURRENT_DATE)
+      ON CONFLICT (employee_id, date) DO UPDATE
+        SET recommended_by=$4, recommended_date=CURRENT_DATE
+      RETURNING *
+    `, [employeeId, date, otMinutes || 0, req.user.id]);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ── PATCH /api/overtime/:id/approve ─────────────────────────────────────────── */
 router.patch('/:id/approve', async (req, res) => {
-  const { approvedBy, comment, approvedOTMins } = req.body;
+  const { comment, approvedOTMins } = req.body;
   try {
+    const { rows: existingRows } = await pool.query(
+      'SELECT employee_id, recommended_by FROM overtime_approvals WHERE id=$1', [req.params.id]
+    );
+    if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
+    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'approve',
+      { alreadyRecommended: !!existingRows[0].recommended_by });
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
     const { rows } = await pool.query(`
       UPDATE overtime_approvals
          SET status='approved', approved_by=$1, approved_date=CURRENT_DATE, comment=$2,
              ot_minutes=COALESCE($3, ot_minutes)
        WHERE id=$4
        RETURNING *
-    `, [approvedBy || null, comment || '', approvedOTMins ?? null, req.params.id]);
+    `, [req.user.id, comment || '', approvedOTMins ?? null, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'OT record not found' });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -383,7 +488,14 @@ router.patch('/:id/approve', async (req, res) => {
 
 /* ── PATCH /api/overtime/:id/reject ──────────────────────────────────────────── */
 router.patch('/:id/reject', async (req, res) => {
-  const { approvedBy, comment } = req.body;
+  const { comment } = req.body;
+  const { rows: existingRows } = await pool.query(
+    'SELECT employee_id FROM overtime_approvals WHERE id=$1', [req.params.id]
+  );
+  if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
+  const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'reject');
+  if (authError) return res.status(authError.status).json({ error: authError.error });
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -396,7 +508,7 @@ router.patch('/:id/reject', async (req, res) => {
              leave_type_code=NULL, leave_days=NULL
        WHERE id=$3
        RETURNING *
-    `, [approvedBy || null, comment || '', req.params.id]);
+    `, [req.user.id, comment || '', req.params.id]);
     if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'OT record not found' }); }
     await client.query('COMMIT');
     res.json(rows[0]);
@@ -410,18 +522,25 @@ router.patch('/:id/reject', async (req, res) => {
 
 /* ── POST /api/overtime/approve-inline — approve/reject by empId+date (no DB id yet) ─ */
 router.post('/approve-inline', async (req, res) => {
-  const { employeeId, date, otMinutes, action, approvedBy, comment } = req.body;
+  const { employeeId, date, otMinutes, action, comment } = req.body;
   if (!employeeId || !date || !action) return res.status(400).json({ error: 'employeeId, date, action required' });
 
   const status = action === 'approve' ? 'approved' : 'rejected';
   try {
+    const { rows: existingRows } = await pool.query(
+      'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
+    );
+    const authError = await authorizeRecoAction(req, employeeId, action,
+      { alreadyRecommended: !!existingRows[0]?.recommended_by });
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+
     const { rows } = await pool.query(`
       INSERT INTO overtime_approvals (employee_id, date, ot_minutes, status, approved_by, approved_date, comment)
       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6)
       ON CONFLICT (employee_id, date) DO UPDATE
         SET ot_minutes=$3, status=$4, approved_by=$5, approved_date=CURRENT_DATE, comment=$6
       RETURNING *
-    `, [employeeId, date, otMinutes || 0, status, approvedBy || null, comment || '']);
+    `, [employeeId, date, otMinutes || 0, status, req.user.id, comment || '']);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -441,6 +560,25 @@ router.post('/approve-leave', async (req, res) => {
   if (!(days > 0) || days > 2 || !Number.isInteger(days * 2)) {
     return res.status(400).json({ error: 'Leave days must be greater than 0, at most 2, in half-day steps (e.g. 0.5, 1, 1.5, 2)' });
   }
+
+  // This is an 'approve' action (it sets status='approved' and credits a
+  // leave balance) — must go through the same guard as every other approve
+  // endpoint. Previously this route trusted employeeId/approvedBy straight
+  // from the body with no check at all, so any authenticated user could
+  // credit themselves (or anyone) leave in lieu of OT.
+  const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
+  if (!isPrivileged) {
+    const { rows: existingApprRows } = await pool.query(
+      'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
+    );
+    const authError = await authorizeRecoAction(req, employeeId, 'approve',
+      { alreadyRecommended: !!existingApprRows[0]?.recommended_by });
+    if (authError) return res.status(authError.status).json({ error: authError.error });
+  }
+  // Only a privileged user may record someone ELSE as the approver (proxy
+  // entry for a decision made outside the app) — everyone else is always
+  // recorded as themselves, matching the authorizeRecoAction check above.
+  const finalApprovedBy = isPrivileged ? (approvedBy || req.user.id) : req.user.id;
 
   const client = await pool.connect();
   try {
@@ -483,7 +621,7 @@ router.post('/approve-leave', async (req, res) => {
          SET ot_minutes=0, status='approved', approved_by=$3, approved_date=CURRENT_DATE,
              comment=$4, leave_type_code=$5, leave_days=$6
        RETURNING *`,
-      [employeeId, date, approvedBy || null, finalComment, leaveTypeCode, days]
+      [employeeId, date, finalApprovedBy, finalComment, leaveTypeCode, days]
     );
 
     const { rows: balRows } = await client.query(
@@ -504,22 +642,40 @@ router.post('/approve-leave', async (req, res) => {
 
 /* ── POST /api/overtime/bulk-approve ─────────────────────────────────────────── */
 router.post('/bulk-approve', async (req, res) => {
-  const { records, action, approvedBy, comment } = req.body; // records: [{employeeId, date, otMinutes}]
+  const { records, action, approvedBy, approvedDate, comment,
+          recommendedBy, recommendedDate } = req.body; // records: [{employeeId, date, otMinutes}]
   if (!records?.length) return res.status(400).json({ error: 'No records provided' });
 
   const status = action === 'approve' ? 'approved' : 'rejected';
+  const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
+  // Only a privileged user may record someone ELSE as approver/recommender
+  // (proxy entry for a decision made outside the app, e.g. "Approve All") —
+  // everyone else is always recorded as themselves and can never self-act.
+  const finalApprovedBy    = isPrivileged ? (approvedBy || req.user.id) : req.user.id;
+  const finalRecommendedBy = isPrivileged ? (recommendedBy || null)     : null;
   try {
-    let count = 0;
+    let count = 0, skipped = 0;
     for (const r of records) {
+      if (!isPrivileged) {
+        const { rows: existingRows } = await pool.query(
+          'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [r.employeeId, r.date]
+        );
+        const authError = await authorizeRecoAction(req, r.employeeId, action,
+          { alreadyRecommended: !!existingRows[0]?.recommended_by });
+        if (authError) { skipped++; continue; }
+      }
       await pool.query(`
-        INSERT INTO overtime_approvals (employee_id, date, ot_minutes, status, approved_by, approved_date, comment)
-        VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6)
+        INSERT INTO overtime_approvals
+          (employee_id, date, ot_minutes, status, approved_by, approved_date, comment, recommended_by, recommended_date)
+        VALUES ($1, $2, $3, $4, $5, COALESCE($7, CURRENT_DATE), $6, $8, $9)
         ON CONFLICT (employee_id, date) DO UPDATE
-          SET ot_minutes=$3, status=$4, approved_by=$5, approved_date=CURRENT_DATE, comment=$6
-      `, [r.employeeId, r.date, r.otMinutes || 0, status, approvedBy || null, comment || '']);
+          SET ot_minutes=$3, status=$4, approved_by=$5, approved_date=COALESCE($7, CURRENT_DATE), comment=$6,
+              recommended_by=$8, recommended_date=$9
+      `, [r.employeeId, r.date, r.otMinutes || 0, status, finalApprovedBy, comment || '',
+          approvedDate || null, finalRecommendedBy, recommendedDate || null]);
       count++;
     }
-    res.json({ success: true, count });
+    res.json({ success: true, count, skipped });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useNavigate }  from 'react-router-dom';
 import { useAuth }      from '../../context/AuthContext.jsx';
 import { useLanguage }  from '../../context/LanguageContext.jsx';
@@ -6,10 +6,9 @@ import { useData }      from '../../context/DataContext.jsx';
 import { useSettings }  from '../../context/SettingsContext.jsx';
 import { makeDateFormatter } from '../../utils/dateUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
-
-const loadRecoConfig = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
+import Avatar from '../Common/Avatar.jsx';
+import RecordPreviewModal from '../Common/RecordPreviewModal.jsx';
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 const StatusBadge = ({ status }) => {
   const map = {
@@ -27,7 +26,7 @@ const OfficeVisitManagement = () => {
   const { t } = useLanguage();
   const { settings } = useSettings();
   const fd = makeDateFormatter(settings);
-  const { officeVisits, deleteVisit, recommendVisit, getEmployeeName } = useData();
+  const { officeVisits, deleteVisit, recommendVisit, getEmployeeName, getEmployeeById } = useData();
   const navigate = useNavigate();
   const [filterStatus,   setFilterStatus]   = useState('all');
   const [viewVisit,      setViewVisit]      = useState(null);
@@ -35,7 +34,7 @@ const OfficeVisitManagement = () => {
   const [recoConfirm,    setRecoConfirm]    = useState(null); // { id, visit }
   const [recoComment,    setRecoComment]    = useState('');
 
-  const recoConfig = useMemo(() => loadRecoConfig(), []);
+  const { assignments: recoConfig } = useRecoApproval();
   const isRecommenderFor = (empId) => {
     const r = recoConfig[String(empId)]?.reco;
     const ids = Array.isArray(r) ? r : (r ? [r] : []);
@@ -49,7 +48,13 @@ const OfficeVisitManagement = () => {
   });
 
   const columns = [
-    { field: 'employeeId', header: t('Name'), width: 150, render: v => <span style={{ fontWeight: 500 }}>{getEmployeeName(v)}</span> },
+    { field: 'employeeId', header: t('Staff ID'), width: 80, sortable: false, render: v => getEmployeeById(v)?.employeeId || '—' },
+    { field: 'employeeId', header: t('Name'), width: 150, render: v => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight: 500 }}>
+          <Avatar photo={getEmployeeById(v)?.profilePhoto} name={getEmployeeName(v)} size={22} />
+          {getEmployeeName(v)}
+        </span>
+      ) },
     { field: 'purpose', header: t('Purpose'), width: 150 },
     { field: 'location', header: t('Location'), width: 120 },
     { field: 'fromDate',    header: t('From Date'),    width: 120, render: v => fd(v) },
@@ -123,48 +128,25 @@ const OfficeVisitManagement = () => {
 
       {/* View Modal */}
       {viewVisit && (
-        <div className="modal-overlay">
-          <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>🏢 {t('Office Visit Application')} #{viewVisit.id}</h2>
-              <button className="modal-close" onClick={() => setViewVisit(null)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                {[
-                  [t('Name'), getEmployeeName(viewVisit.employeeId)],
-                  [t('Purpose'), viewVisit.purpose],
-                  [t('Location'), viewVisit.location],
-                  [t('From Date'), `${viewVisit.fromDate} ${viewVisit.fromTime}`],
-                  [t('To Date'), `${viewVisit.toDate} ${viewVisit.toTime}`],
-                  [t('Status'), <StatusBadge status={viewVisit.status} />],
-                  [t('Applied Date'), viewVisit.appliedDate],
-                  [t('Approved By'), getEmployeeName(viewVisit.approvedBy) || '—'],
-                ].map(([label, val], i) => (
-                  <div key={i}>
-                    <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{val}</div>
-                  </div>
-                ))}
-              </div>
-              {viewVisit.description && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>{t('Description')}</div>
-                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10, fontSize: 13 }}>{viewVisit.description}</div>
-                </div>
-              )}
-              {viewVisit.comment && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>{t('Comment')}</div>
-                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10, fontSize: 13 }}>{viewVisit.comment}</div>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setViewVisit(null)}>{t('Close')}</button>
-            </div>
-          </div>
-        </div>
+        <RecordPreviewModal
+          icon="🏢" title={t('Office Visit Application')} id={viewVisit.id}
+          onClose={() => setViewVisit(null)} closeLabel={t('Close')}
+          avatarPhoto={getEmployeeById(viewVisit.employeeId)?.profilePhoto}
+          avatarName={getEmployeeName(viewVisit.employeeId)}
+          subtitle={viewVisit.purpose}
+          statusBadge={<StatusBadge status={viewVisit.status} />}
+          fields={[
+            { icon:'📍', label:t('Location'),     value:viewVisit.location },
+            { icon:'📆', label:t('From Date'),    value:`${viewVisit.fromDate} ${viewVisit.fromTime}` },
+            { icon:'📆', label:t('To Date'),       value:`${viewVisit.toDate} ${viewVisit.toTime}` },
+            { icon:'🗓️', label:t('Applied Date'),  value:viewVisit.appliedDate },
+            { icon:'✅', label:t('Approved By'),   value:getEmployeeName(viewVisit.approvedBy) || '—' },
+          ]}
+          sections={[
+            { label:t('Description'), value:viewVisit.description },
+            { label:t('Comment'),     value:viewVisit.comment },
+          ]}
+        />
       )}
 
       {/* Delete confirm */}

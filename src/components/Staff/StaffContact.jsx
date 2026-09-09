@@ -57,36 +57,53 @@ const shareContactOnWhatsApp = async (contact) => {
 // ── Badges ────────────────────────────────────────────────────────────────────
 
 const TypeBadge = ({ type }) => (
-  <span style={{
-    display:'inline-block', padding:'1px 7px', borderRadius:10, fontSize:9.5, fontWeight:700, whiteSpace:'nowrap',
+  <span title={type==='private' ? 'Private' : 'Public'} style={{
+    display:'inline-block', padding:'1px 6px', borderRadius:8, fontSize:9, fontWeight:700, whiteSpace:'nowrap',
     background: type==='private' ? '#fde8ef' : '#d1fae5',
     color:      type==='private' ? '#be185d'  : '#065f46',
   }}>
-    {type==='private' ? '🔒 Private' : '🌐 Public'}
+    {type==='private' ? '🔒 Priv' : '🌐 Pub'}
   </span>
 );
 
 const InfoBadge = ({ info }) => (
-  <span style={{
-    display:'inline-block', padding:'1px 7px', borderRadius:10, fontSize:9.5, fontWeight:700, whiteSpace:'nowrap',
+  <span title={info==='company' ? 'Company' : 'Personal'} style={{
+    display:'inline-block', padding:'1px 6px', borderRadius:8, fontSize:9, fontWeight:700, whiteSpace:'nowrap',
     background: info==='company' ? '#dbeafe' : '#ede9fe',
     color:      info==='company' ? '#1e40af'  : '#5b21b6',
   }}>
-    {info==='company' ? '🏢 Company' : '👤 Personal'}
+    {info==='company' ? '🏢 Co' : '👤 Pers'}
   </span>
 );
 
-const CategoryBadge = ({ category, type }) => {
+// Short labels for the Contact grid's single-row Type column — full name always in the tooltip.
+const CATEGORY_SHORT = {
+  'Suppliers'                  : 'Splr',
+  'Dealers Inside Valley'      : 'Deal-IV',
+  'Dealer Outside Valley'      : 'Deal-OV',
+  'Bank & Finance'             : 'Bank',
+  'Government'                 : 'Govt',
+  'Hotel & Restaurant, Travel' : 'Hotel',
+  'Factory & Industry'         : 'Factory',
+  'IT Company'                 : 'IT',
+  'INGO & NGO'                 : 'NGO',
+  'Health Club'                : 'Health',
+  'Hospitals & Clinic'         : 'Hosp',
+  'Manpower & Orientation'     : 'Manpower',
+  'Other'                      : 'Other',
+};
+
+const CategoryBadge = ({ category }) => {
   if (!category) return null;
-  const isSupplier = category === 'supplier';
+  const isSupplier = category === 'Suppliers';
   return (
-    <span style={{
-      display:'inline-flex', alignItems:'center', gap:4, whiteSpace:'nowrap',
-      padding:'1px 7px', borderRadius:10, fontSize:9.5, fontWeight:700,
+    <span title={category} style={{
+      display:'inline-flex', alignItems:'center', gap:3, whiteSpace:'nowrap',
+      padding:'1px 6px', borderRadius:8, fontSize:9, fontWeight:700,
       background: isSupplier ? '#fef3c7' : '#d1fae5',
       color:      isSupplier ? '#92400e'  : '#065f46',
     }}>
-      {isSupplier ? '📦 Supplier' : `🤝 Customer${type ? ` · ${type}` : ''}`}
+      {isSupplier ? '📦' : '🤝'} {CATEGORY_SHORT[category] || category}
     </span>
   );
 };
@@ -166,7 +183,7 @@ const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
           <InfoBadge info={contact.contactInfo} />
           <TypeBadge type={contact.contactType} />
           {contact.customerCategory && (
-            <CategoryBadge category={contact.customerCategory} type={contact.customerType} />
+            <CategoryBadge category={contact.customerCategory} />
           )}
         </div>
       </div>
@@ -188,6 +205,7 @@ const DetailPanel = ({ contact, onEdit, onDelete, onClose }) => {
             <DRow icon="📍" label="Address"        value={contact.companyAddress} />
           </>
         )}
+        <DRow icon="🗺️" label="District" value={contact.district} />
 
         {/* Multiple contact persons under a company contact */}
         {!isPersonal && persons.length > 0 && (
@@ -316,13 +334,13 @@ const StaffContact = () => {
       render:(_,row) => <span style={{ fontWeight:600, color:'#1f2937' }}>{displayName(row)}</span>,
     },
     {
-      field:'contactInfo', header:'Type', width:190,
+      field:'contactInfo', header:'Type', width:230,
       render:(_,row) => (
-        <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'nowrap' }}>
           <InfoBadge info={row.contactInfo} />
           <TypeBadge type={row.contactType} />
           {row.customerCategory && (
-            <CategoryBadge category={row.customerCategory} type={row.customerType} />
+            <CategoryBadge category={row.customerCategory} />
           )}
         </div>
       ),
@@ -383,7 +401,15 @@ const StaffContact = () => {
             onRowClick={(row) => setSelected(s => s?.id===row.id ? null : row)}
             onRowDoubleClick={(row) => setModal({ initial:row })}
             defaultPageSize={15} striped
-            extraSearchFields={['workScope', 'address', 'companyAddress']}
+            // None of the grid's own column `field`s (name/mobile1/email/address)
+            // exist as raw row properties — displayName/displayMob1/etc. above
+            // compute them on the fly from personName-vs-companyName and
+            // mobile1-vs-companyPhone depending on contactInfo. DataGrid's search
+            // only ever reads row[col.field] directly, so without listing every
+            // real underlying field here, searching by name/phone/email matched
+            // nothing at all (silently) for either contact type.
+            extraSearchFields={['personName', 'companyName', 'mobile1', 'mobile2', 'companyPhone',
+              'email', 'companyEmail', 'workScope', 'address', 'companyAddress']}
           />
         )}
       </div>

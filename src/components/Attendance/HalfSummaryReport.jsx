@@ -8,8 +8,11 @@ import api from '../../api/client.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
-import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
+import ExcelJS from 'exceljs';
+import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import { branchAbbr } from '../../utils/branchUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -59,7 +62,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
     .sort((a,b) => (a.fullName||'').localeCompare(b.fullName||''))
     .map(e => ({
       value: String(e.id),
-      label: `${e.fullName||`Staff ${e.id}`}${e.position ? ` • ${abbrev(e.position)}` : ''}${e.deviceId ? ` [${e.deviceId}]` : ''}`,
+      label: e.fullName || `Staff ${e.id}`,
+      sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+      photo: e.profilePhoto,
     }));
 
   const filteredEmps = employees.filter(e => (e.active !== false) === activeFlag);
@@ -87,7 +92,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
         <div style={{ padding:'18px 24px 14px', background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <span style={{ fontSize:17, fontWeight:700, color:'#1e40af' }}>
-            {L('एडभान्स खोज','Advance Search')}
+            {L('विस्तृत खोज','Advance Search')}
           </span>
           <button onClick={onClose}
             style={{ background:'none',border:'none',cursor:'pointer',color:'#6b7280',
@@ -119,7 +124,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           {/* Row 1: Staff | Branch | Department */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14 }}>
             <Field label={L('कर्मचारी','Staff')}>
-              <SearchableCheckSelect options={empOpts} value={local.staffId}
+              <SearchableCheckSelect options={empOpts} value={local.staffId} showAvatar
                 onChange={v=>set('staffId',v)} allLabel={L('All Staff','All Staff')} />
             </Field>
             <Field label={L('शाखा','Branch')}>
@@ -192,7 +197,7 @@ const HalfSummaryReport = () => {
   const [searchParams] = useSearchParams();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
-  const { filteredEmployees: employees, shifts } = useData();
+  const { filteredEmployees: employees, shifts, getEmployeeById } = useData();
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
@@ -224,6 +229,7 @@ const HalfSummaryReport = () => {
   const [error,       setError]       = useState(null);
   const [search,      setSearch]      = useState('');
   const [showSearch,  setShowSearch]  = useState(false);
+  const [exporting,   setExporting]   = useState(false);
   const [filters,     setFilters]     = useState({ ...EMPTY_FILTERS, staffId: myEmpId });
   const [staffStatus, setStaffStatus] = useState('working'); // 'working' | 'notworking'
 
@@ -242,7 +248,7 @@ const HalfSummaryReport = () => {
         }
       }
       if (!apiUrl) apiUrl = `/attendance/half-monthly?year=${year}&month=${month}&half=${half}`;
-      apiUrl += `&active=${staffStatus === 'notworking' ? 'false' : 'true'}`;
+      apiUrl += `&active=${staffStatus === 'notworking' ? 'false' : 'true'}&orgScope=1`;
       setData(await api.get(apiUrl));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
@@ -331,23 +337,112 @@ const HalfSummaryReport = () => {
     openPrintWindow(buildPrintDoc({ settings, language, reportTitle: rptTitle, reportSub: rptSub(), contentHtml, isLandscape: true }), true);
   };
 
-  const exportCSV = () => {
-    if (!rows.length) return;
-    const headers = ['SN','Staff','Post','Department','Branch','Total',
-      'Weekend Day','Weekend Present','Holiday Day','Holiday Present',
-      'Leave','Official Visit','Present','Absent',
-      'Worked Hr','Lack Hr','Late In','Early Out','Att. %','OT'];
-    const dataRows = rows.map((r, i) => [
-      i+1, r.fullName, r.position||'', r.department||'', r.branch||'', r.totalWorkingDays,
-      r.weekendDays||0, r.weekendPresent||0,
-      r.holidayDays||0, r.holidayPresent||0,
-      r.leaveDays, r.officialVisitDays||0,
-      r.presentDays, r.absentDays,
-      r.workedHrsFormatted||'0:00', r.lackHrsFormatted||'0:00',
-      r.lateCount, r.earlyCount, `${r.attendanceRate}%`, r.otFormatted||'',
-    ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-    downloadCSV(getExcelHeaderRows(settings, language, rptTitle, rptSub()) + headers.join(',') + '\n' + dataRows,
-      `HalfSummary_${period?.startDate||''}_${period?.endDate||''}.csv`);
+  // Real .xlsx via ExcelJS (not a CSV) — matches the on-screen table exactly,
+  // including the Staff ID column and the Weekend/Holiday 2-row grouped
+  // header, which the old CSV export never had.
+  const exportExcel = async () => {
+    if (!rows.length || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+    const companyName = language === 'np'
+      ? (settings.companyNameNp || settings.companyNameEn || '')
+      : (settings.companyNameEn || settings.companyNameNp || '');
+    const companyAddr = language === 'np'
+      ? (settings.companyAddressNp || settings.companyAddressEn || '')
+      : (settings.companyAddressEn || settings.companyAddressNp || '');
+    const companyPhone = settings.companyPhone ? `Tel: ${settings.companyPhone}` : '';
+    const lastCol = 21;
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Half Summary');
+
+    const thin  = { style: 'thin',   color: { argb: 'FFDEDEDE' } };
+    const heavy = { style: 'medium', color: { argb: 'FFC5CDD8' } };
+
+    if (settings.companyLogo) {
+      try {
+        const m = settings.companyLogo.match(/^data:image\/(\w+);base64,(.+)$/);
+        const ext = m?.[1] === 'jpg' ? 'jpeg' : m?.[1];
+        if (m && ['png', 'jpeg', 'gif'].includes(ext)) {
+          const imgId = wb.addImage({ base64: m[2], extension: ext });
+          ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 48, height: 48 } });
+        }
+      } catch { /* bad/unsupported logo data — skip it, the rest of the header still renders */ }
+    }
+    [companyName, [companyAddr, companyPhone].filter(Boolean).join('  |  '), rptTitle,
+      rptSub() + (period ? `   (${period.startDate} to ${period.endDate})` : ''), ''
+    ].forEach((text, i) => {
+      const row = ws.addRow([text]);
+      ws.mergeCells(row.number, 1, row.number, lastCol);
+      row.getCell(1).font = i === 0 ? { bold: true, size: 13 } : i === 2 ? { bold: true, size: 12 } : { size: 10, color: { argb: 'FF6B7280' } };
+      row.getCell(1).alignment = { horizontal: 'center' };
+      if (i === 0 && settings.companyLogo) row.height = 36;
+    });
+    // ws.rowCount, not a hardcoded row number — a logo shifts ExcelJS's row
+    // numbering by +1 (see MonthlyPresentAbsentReport.jsx's exportExcel).
+    const headerOffset = ws.rowCount;
+
+    const HDR1 = ['SN', 'Staff ID', 'Staff', 'Post', 'Dept', 'Branch', 'Total',
+      'Weekend', '', 'Holiday', '', 'Leave', 'Official Visit', 'Present', 'Absent',
+      'Worked Hr', 'Lack Hr', 'Late In', 'Early Out', 'Att. %', 'OT'];
+    const HDR2 = ['', '', '', '', '', '', '', 'Day', 'Present', 'Day', 'Present', '', '', '', '', '', '', '', '', '', ''];
+    const hdr1 = ws.addRow(HDR1);
+    const hdr2 = ws.addRow(HDR2);
+    [1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].forEach(c => {
+      ws.mergeCells(headerOffset + 1, c, headerOffset + 2, c);
+    });
+    ws.mergeCells(headerOffset + 1, 8, headerOffset + 1, 9);
+    ws.mergeCells(headerOffset + 1, 10, headerOffset + 1, 11);
+    [hdr1, hdr2].forEach((row, rowIdx) => {
+      row.eachCell({ includeEmpty: true }, (cell, colNum) => {
+        const isHoliday = colNum === 10 || colNum === 11;
+        const isOV = colNum === 13;
+        cell.font = { bold: true, size: 10.5, color: { argb: isHoliday ? 'FF92400E' : isOV ? 'FF1E40AF' : 'FF374151' } };
+        cell.fill = { type: 'pattern', pattern: 'solid',
+          fgColor: { argb: isHoliday ? 'FFFEF3C7' : isOV ? 'FFEFF6FF' : 'FFEFEFEF' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = { right: thin, bottom: rowIdx === 1 ? heavy : thin };
+      });
+    });
+    ws.getRow(headerOffset + 1).getCell(2).alignment = { horizontal: 'left', vertical: 'middle' };
+    ws.getRow(headerOffset + 1).getCell(3).alignment = { horizontal: 'left', vertical: 'middle' };
+
+    rows.forEach((r, i) => {
+      const post = (settings.posts||[]).find(p=>p.name===r.position)?.shortName || r.postShort || r.position || '—';
+      const dept = (settings.departments||[]).find(d=>d.name===r.department)?.shortName || r.deptShort || r.department || '—';
+      const row = ws.addRow([
+        i + 1, getEmployeeById(r.id)?.employeeId || '—', r.fullName, post, dept, branchAbbr(r.branch, settings),
+        r.totalWorkingDays, r.weekendDays || 0, r.weekendPresent || 0, r.holidayDays || 0, r.holidayPresent || 0,
+        r.leaveDays, r.officialVisitDays || 0, r.presentDays, r.absentDays,
+        r.workedHrsFormatted || '0:00', r.lackHrsFormatted || '0:00',
+        r.lateCount, r.earlyCount, `${r.attendanceRate}%`, r.otFormatted || '',
+      ]);
+      row.eachCell({ includeEmpty: true }, (cell, colNum) => {
+        cell.alignment = { horizontal: (colNum === 2 || colNum === 3) ? 'left' : 'center', vertical: 'middle' };
+        cell.border = { right: thin, bottom: { style: 'thin', color: { argb: 'FFF3F4F6' } } };
+      });
+      row.getCell(14).font = { bold: true, color: { argb: 'FF065F46' } };
+      row.getCell(15).font = { bold: true, color: { argb: r.absentDays > 0 ? 'FF991B1B' : 'FFD1D5DB' } };
+    });
+    ws.getRow(ws.rowCount).eachCell({ includeEmpty: true }, cell => { cell.border = { ...cell.border, bottom: heavy }; });
+
+    ws.columns = [
+      { width: 5 }, { width: 11 }, { width: 20 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 8 },
+      { width: 7 }, { width: 8 }, { width: 7 }, { width: 8 },
+      { width: 7 }, { width: 9 }, { width: 8 }, { width: 8 },
+      { width: 9 }, { width: 8 }, { width: 7 }, { width: 8 }, { width: 7 }, { width: 8 },
+    ];
+    ws.views = [{ state: 'frozen', ySplit: headerOffset + 2 }];
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    downloadBlob(blob, `HalfSummary_${period?.startDate || ''}_${period?.endDate || ''}.xlsx`);
+    } catch (err) {
+      setError(`Export failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -385,11 +480,12 @@ const HalfSummaryReport = () => {
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
           </button>
-          <button onClick={exportCSV}
+          <button onClick={exportExcel} disabled={exporting}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
               background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
-              borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
-            📥 Export
+              borderRadius:8,fontSize:13,fontWeight:600,
+              cursor: exporting ? 'default' : 'pointer', opacity: exporting ? .6 : 1 }}>
+            {exporting ? '⏳ Exporting…' : '📥 Export'}
           </button>
           <ViewHalfMonthlyBtn year={year} month={month} half={half} useNP={useNP}
             currentPath="/attendance/reports/half-monthly/summary" />
@@ -445,7 +541,7 @@ const HalfSummaryReport = () => {
           <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
             <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
           </svg>
-          {L('एडभान्स खोज','Advance Search')}
+          {L('विस्तृत खोज','Advance Search')}
           {activeFilterCount > 0 && (
             <span style={{ background:'#1a56db',color:'white',borderRadius:'50%',
               width:18,height:18,display:'inline-flex',alignItems:'center',justifyContent:'center',
@@ -478,12 +574,7 @@ const HalfSummaryReport = () => {
         </div>
       )}
 
-      {loading && (
-        <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af' }}>
-          <div style={{ fontSize:36,marginBottom:8 }}>⏳</div>
-          <div style={{ fontWeight:600,fontSize:14 }}>Loading…</div>
-        </div>
-      )}
+      {loading && <LoadingIndicator />}
 
       {/* ── Table ── */}
       {!loading && data && (
@@ -493,6 +584,9 @@ const HalfSummaryReport = () => {
             <thead>
               <tr>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede', minWidth:34 }}>SN</th>
+                <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede', textAlign:'left', minWidth:70 }}>
+                  {L('स्टाफ आईडी','Staff ID')}
+                </th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede', textAlign:'left', minWidth:150 }}>
                   {L('कर्मचारी','Staff')}
                 </th>
@@ -523,7 +617,7 @@ const HalfSummaryReport = () => {
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={21} style={{ textAlign:'center',padding:'40px',color:'#9ca3af',fontSize:13 }}>
+                  <td colSpan={22} style={{ textAlign:'center',padding:'40px',color:'#9ca3af',fontSize:13 }}>
                     {search || activeFilterCount > 0
                       ? L('कुनै कर्मचारी भेटिएन','No staff found matching the filters')
                       : L('डेटा छैन','No data')}
@@ -538,7 +632,15 @@ const HalfSummaryReport = () => {
                   <td style={{ ...TD_BASE, background:'#efefef', fontWeight:700, color:'#6b7280', borderRight:'1px solid #dedede' }}>
                     {idx+1}
                   </td>
-                  <td style={{ ...TD_BASE, textAlign:'left', color:'#1f2937' }}>{r.fullName}</td>
+                  <td style={{ ...TD_BASE, textAlign:'left', color:'#1f2937' }}>
+                    {getEmployeeById(r.id)?.employeeId || '—'}
+                  </td>
+                  <td style={{ ...TD_BASE, textAlign:'left', color:'#1f2937' }}>
+                    <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <Avatar photo={getEmployeeById(r.id)?.profilePhoto} name={r.fullName} size={20} />
+                      {r.fullName}
+                    </span>
+                  </td>
                   <td style={{ ...TD_BASE, color:'#1f2937' }} title={r.position}>
                     {(settings.posts||[]).find(p=>p.name===r.position)?.shortName || r.postShort || r.position || '—'}
                   </td>

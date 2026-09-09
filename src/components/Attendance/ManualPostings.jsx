@@ -5,31 +5,19 @@ import { useAuth }     from '../../context/AuthContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
+import Avatar          from '../Common/Avatar.jsx';
 import NepaliDatePicker  from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect  from '../Common/SearchableSelect.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import SaveButton        from '../Common/SaveButton.jsx';
+import LastSavedBy       from '../Common/LastSavedBy.jsx';
 import useSaveShortcut   from '../../hooks/useSaveShortcut.js';
+import useDateFormat     from '../../hooks/useDateFormat.js';
+import useRecoApproval    from '../../hooks/useRecoApproval.js';
+import { getDeviceInfo } from '../../utils/deviceInfo.js';
 
-const empty = { employeeId: '', date: '', checkIn: '', checkOut: '', remark: '', recommendedBy: '', approvedBy: '' };
-
-const loadRecoApproval = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
-
-const getRecoIds = (empId) => {
-  if (!empId) return [];
-  const saved = loadRecoApproval();
-  const r = saved[String(empId)]?.reco;
-  return Array.isArray(r) ? r.map(String) : (r ? [String(r)] : []);
-};
-
-const getApprovalIds = (empId) => {
-  if (!empId) return [];
-  const saved = loadRecoApproval();
-  const a = saved[String(empId)]?.approval;
-  return Array.isArray(a) ? a.map(String) : (a ? [String(a)] : []);
-};
+const empty = { employeeId: '', date: '', checkIn: '', checkOut: '', remark: '', recommendedBy: '', approvedBy: '',
+  updatedByName: '', updatedAt: null, updatedDevice: '' };
 
 const TimeInput = ({ value, onChange, placeholder }) => (
   <input
@@ -160,7 +148,45 @@ const ManualPostings = () => {
   const { canManageSystem, currentUser } = useAuth();
   const { filteredEmployees, employees: allEmployees, shifts } = useData();
   const { settings } = useSettings();
+  const fd = useDateFormat();
   const location = useLocation();
+  const { assignments: recoConfig, getRecoIds, getApprovalIds, refresh: refreshRecoApproval } = useRecoApproval();
+  const isRecoCompulsory = settings.recoApprovalCompulsory || false;
+
+  const isRecommenderFor = (empId) => {
+    const r = recoConfig[String(empId)]?.reco;
+    const ids = Array.isArray(r) ? r : (r ? [r] : []);
+    return ids.map(String).includes(String(currentUser?.id));
+  };
+  const isApproverFor = (empId) => {
+    const a = recoConfig[String(empId)]?.approval;
+    const ids = Array.isArray(a) ? a : (a ? [a] : []);
+    return ids.map(String).includes(String(currentUser?.id));
+  };
+  // Whether this employee has ANY recommender configured — if not,
+  // Recommendation Compulsory is unsatisfiable for them and must not block
+  // their approver. Mirrors authorizeRecoAction's server-side check.
+  const hasRecommenderFor = (empId) => {
+    const r = recoConfig[String(empId)]?.reco;
+    const ids = Array.isArray(r) ? r : (r ? [r] : []);
+    return ids.length > 0;
+  };
+  const canApproveRow = (row) => !isRecoCompulsory || !!row.recommendedById || !hasRecommenderFor(row.employeeId);
+
+  const empById = useMemo(
+    () => Object.fromEntries((allEmployees || []).map(e => [String(e.id), e])),
+    [allEmployees]
+  );
+
+  // Names of the employee's CONFIGURED recommender(s)/approver(s) (Staff
+  // Detail → "Set Recommendator & Approval") — distinct from the grid's own
+  // "Recommended By"/"Approved By" columns, which are who actually acted on
+  // this specific record.
+  const recoApprovalNames = (empId, type) => {
+    const v = recoConfig[String(empId)]?.[type];
+    const ids = Array.isArray(v) ? v : (v ? [v] : []);
+    return ids.length ? ids.map(id => empById[String(id)]?.fullName || `#${id}`).join(', ') : '—';
+  };
 
   const [records,       setRecords]       = useState([]);
   const [loading,       setLoading]       = useState(true);
@@ -192,6 +218,12 @@ const ManualPostings = () => {
   };
 
   useEffect(() => { load(); }, []);
+  // useRecoApproval only fetches once, when this hook first mounts — this
+  // page stays mounted for the whole session, so without this, opening the
+  // Add/Edit modal any time after a staff member's Recommendator/Approval
+  // config was set (or changed) elsewhere would show "No recommendator/
+  // approver configured" even though it genuinely is.
+  useEffect(() => { if (modal) refreshRecoApproval(); }, [modal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Auto-open add form if navigated from daily attendance with pre-filled data */
   useEffect(() => {
@@ -226,6 +258,9 @@ const ManualPostings = () => {
       remark        : row.remark || '',
       recommendedBy : row.recommendedById ? String(row.recommendedById) : '',
       approvedBy    : row.approvedById    ? String(row.approvedById)    : '',
+      updatedByName : row.updatedByName || '',
+      updatedAt     : row.updated_at || row.updatedAt || null,
+      updatedDevice : row.updatedDevice || '',
     });
     setErrors({});
     setModal(true);
@@ -251,6 +286,7 @@ const ManualPostings = () => {
         remark        : form.remark        || null,
         recommendedBy : form.recommendedBy ? Number(form.recommendedBy) : null,
         approvedBy    : form.approvedBy    ? Number(form.approvedBy)    : null,
+        deviceInfo    : getDeviceInfo(),
       };
       if (editId) {
         await api.put(`/attendance/manual-postings/${editId}`, payload);
@@ -282,13 +318,17 @@ const ManualPostings = () => {
     }
   };
 
-  // Approve/reject a staff self-service "Inform Late In/Early Out" request
-  // (status='pending') — once approved it becomes real attendance data, same
-  // as this page's own admin-entered rows always have been.
+  // Recommend/approve/reject a staff self-service "Inform Late In/Early Out"
+  // request (status='pending') — once approved it becomes real attendance
+  // data, same as this page's own admin-entered rows always have been. The
+  // backend independently re-checks who's actually the configured
+  // recommender/approver (and, for approve, whether recommendation already
+  // happened when compulsory) — these buttons are only shown/enabled to
+  // match that, not the source of truth for it.
   const decide = async (row, decision) => {
     try {
       await api.patch(`/attendance/manual-postings/${row.id}/${decision}`, { approvedBy: currentUser?.id || null });
-      showToast(decision === 'approve' ? 'Request approved' : 'Request rejected');
+      showToast(decision === 'approve' ? 'Request approved' : decision === 'reject' ? 'Request rejected' : 'Recommended');
       load();
     } catch (e) {
       showToast(e.message || 'Action failed', 'error');
@@ -307,6 +347,12 @@ const ManualPostings = () => {
     {
       field: 'fullName', header: 'Full Name',
       minWidth: 150,
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <Avatar photo={empById[String(row.employeeId)]?.profilePhoto} name={v} size={20} />
+          {v}
+        </span>
+      ),
     },
     {
       field: 'postShort', header: 'Post',
@@ -370,14 +416,14 @@ const ManualPostings = () => {
       },
     },
     {
-      field: 'recommendedByName', header: 'Recommended By',
-      width: 145,
-      render: (v) => <span style={{ fontSize: 12, color: '#6b7280' }}>{v || '—'}</span>,
+      field: 'recommendatorNames', header: 'Recommendator',
+      width: 150, sortable: false, filterable: false,
+      render: (_, row) => <span style={{ fontSize: 12, color: '#6b7280' }}>{recoApprovalNames(row.employeeId, 'reco')}</span>,
     },
     {
-      field: 'approvedByName', header: 'Approved By',
-      width: 130,
-      render: (v) => <span style={{ fontSize: 12, color: '#6b7280' }}>{v || '—'}</span>,
+      field: 'approvalNames', header: 'Approval',
+      width: 150, sortable: false, filterable: false,
+      render: (_, row) => <span style={{ fontSize: 12, color: '#6b7280' }}>{recoApprovalNames(row.employeeId, 'approval')}</span>,
     },
     {
       field: 'createdBy', header: 'Posted By',
@@ -394,30 +440,38 @@ const ManualPostings = () => {
     {
       field: 'actions', header: 'Actions',
       width: 90, align: 'center', sortable: false, filterable: false,
-      render: (_, row) => (
-        <div className="dg-actions">
-          {canManageSystem && row.status === 'pending' && (
-            <>
-              <button className="dg-action-btn" title="Approve" onClick={e => { e.stopPropagation(); decide(row, 'approve'); }}>✅</button>
-              <button className="dg-action-btn" title="Reject"  onClick={e => { e.stopPropagation(); decide(row, 'reject'); }}>❌</button>
-            </>
-          )}
-          {canManageSystem && (
-            <>
-              <button className="dg-action-btn edit"   title="Edit"   onClick={e => { e.stopPropagation(); openEdit(row); }}>✏️</button>
-              <button className="dg-action-btn delete" title="Delete" onClick={e => { e.stopPropagation(); setDeleteConfirm(row.id); }}>🗑</button>
-            </>
-          )}
-        </div>
-      ),
+      render: (_, row) => {
+        const amReco      = isRecommenderFor(row.employeeId);
+        const amApprover  = canManageSystem || isApproverFor(row.employeeId);
+        const canApprove  = canApproveRow(row);
+        const alreadyReco = !!row.recommendedById;
+        return (
+          <div className="dg-actions">
+            {row.status === 'pending' && amReco && !alreadyReco && (
+              <button className="dg-action-btn" title="Recommend" onClick={e => { e.stopPropagation(); decide(row, 'recommend'); }}>👍</button>
+            )}
+            {row.status === 'pending' && amApprover && (
+              <>
+                <button className="dg-action-btn" title={canApprove ? 'Approve' : 'Awaiting recommendation first'}
+                  disabled={!canApprove}
+                  style={{ opacity: canApprove ? 1 : 0.4, cursor: canApprove ? 'pointer' : 'not-allowed' }}
+                  onClick={e => { e.stopPropagation(); if (canApprove) decide(row, 'approve'); }}>✅</button>
+                <button className="dg-action-btn" title="Reject" onClick={e => { e.stopPropagation(); decide(row, 'reject'); }}>❌</button>
+              </>
+            )}
+            {canManageSystem && (
+              <>
+                <button className="dg-action-btn edit"   title="Edit"   onClick={e => { e.stopPropagation(); openEdit(row); }}>✏️</button>
+                <button className="dg-action-btn delete" title="Delete" onClick={e => { e.stopPropagation(); setDeleteConfirm(row.id); }}>🗑</button>
+              </>
+            )}
+          </div>
+        );
+      },
     },
-  ], [canManageSystem]);
+  ], [canManageSystem, empById, recoConfig, isRecoCompulsory, currentUser?.id]);
 
   /* Apply Advance Search filters to the loaded records */
-  const empById = useMemo(
-    () => Object.fromEntries((allEmployees || []).map(e => [String(e.id), e])),
-    [allEmployees]
-  );
   const filteredRecords = useMemo(() => records.filter(r => {
     const recDate = r.date ? String(r.date).split('T')[0] : '';
     if (filters.fiscalYear) {
@@ -442,10 +496,12 @@ const ManualPostings = () => {
   const f = (k) => (v) => setForm(p => ({ ...p, [k]: v }));
 
   // Employees allowed as Recommended By / Approved By for the selected employee
-  const recoIds     = useMemo(() => getRecoIds(form.employeeId),     [form.employeeId]);
-  const approvalIds = useMemo(() => getApprovalIds(form.employeeId), [form.employeeId]);
-  const recoOptions     = useMemo(() => filteredEmployees.filter(e => recoIds.includes(String(e.id))),     [filteredEmployees, recoIds]);
-  const approvalOptions = useMemo(() => filteredEmployees.filter(e => approvalIds.includes(String(e.id))), [filteredEmployees, approvalIds]);
+  // — recomputed fresh every render (cheap) so a just-loaded assignments
+  // fetch is picked up immediately, no stale-memo risk.
+  const recoIds     = getRecoIds(form.employeeId);
+  const approvalIds = getApprovalIds(form.employeeId);
+  const recoOptions     = filteredEmployees.filter(e => recoIds.includes(String(e.id)));
+  const approvalOptions = filteredEmployees.filter(e => approvalIds.includes(String(e.id)));
 
   const field = (label, required, err, children) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -528,8 +584,14 @@ const ManualPostings = () => {
                   <SearchableSelect
                     value={form.employeeId}
                     onChange={v => setForm(p => ({ ...p, employeeId: v, recommendedBy: '', approvedBy: '' }))}
-                    options={filteredEmployees.map(e => ({ value: String(e.id), label: `${e.fullName} (${e.employeeId})` }))}
+                    options={filteredEmployees.map(e => ({
+                      value: String(e.id),
+                      label: e.fullName,
+                      sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+                      photo: e.profilePhoto,
+                    }))}
                     placeholder="— Select Staff —"
+                    showAvatar
                   />
                 </div>
               )}
@@ -552,18 +614,30 @@ const ManualPostings = () => {
                   <SearchableSelect
                     value={form.recommendedBy}
                     onChange={v => setForm(p => ({ ...p, recommendedBy: v }))}
-                    options={recoOptions.map(e => ({ value: String(e.id), label: e.fullName }))}
+                    options={recoOptions.map(e => ({
+                      value: String(e.id),
+                      label: e.fullName,
+                      sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+                      photo: e.profilePhoto,
+                    }))}
                     placeholder={!form.employeeId ? '— Select staff first —' : recoOptions.length === 0 ? 'No recommendator configured' : '— Select —'}
                     disabled={!form.employeeId || recoOptions.length === 0}
+                    showAvatar
                   />
                 )}
                 {field('Approved By', false, null,
                   <SearchableSelect
                     value={form.approvedBy}
                     onChange={v => setForm(p => ({ ...p, approvedBy: v }))}
-                    options={approvalOptions.map(e => ({ value: String(e.id), label: e.fullName }))}
+                    options={approvalOptions.map(e => ({
+                      value: String(e.id),
+                      label: e.fullName,
+                      sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+                      photo: e.profilePhoto,
+                    }))}
                     placeholder={!form.employeeId ? '— Select staff first —' : approvalOptions.length === 0 ? 'No approver configured' : '— Select —'}
                     disabled={!form.employeeId || approvalOptions.length === 0}
+                    showAvatar
                   />
                 )}
               </div>
@@ -582,8 +656,11 @@ const ManualPostings = () => {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setModal(false)}>Cancel</button>
-              <SaveButton onClick={save} disabled={saving} icon={saving ? '⏳' : '💾'} label={saving ? 'Saving…' : 'Save'} />
+              <LastSavedBy updatedByName={form.updatedByName} updatedAt={form.updatedAt} updatedDevice={form.updatedDevice} fd={fd} />
+              <div style={{ display:'flex', gap:10, marginLeft:'auto' }}>
+                <button className="btn btn-outline" onClick={() => setModal(false)}>Cancel</button>
+                <SaveButton onClick={save} disabled={saving} icon={saving ? '⏳' : '💾'} label={saving ? 'Saving…' : 'Save'} />
+              </div>
             </div>
           </div>
         </div>

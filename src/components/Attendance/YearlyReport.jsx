@@ -6,6 +6,7 @@ import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import ViewYearlyBtn   from './ViewYearlyBtn.jsx';
 import { adToBS, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 
 const BS_MONTHS  = ['Bai','Jes','Asa','Shr','Bha','Ash','Kar','Man','Pou','Mag','Fal','Cha'];
 const AD_MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -134,7 +135,7 @@ const YearlyReport = () => {
       const params = useNP
         ? `bsYear=${year}`
         : `year=${year}`;
-      const res = await api.get(`/attendance/yearly-analytics?${params}`);
+      const res = await api.get(`/attendance/yearly-analytics?${params}&orgScope=1`);
       setData(res);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -190,12 +191,7 @@ const YearlyReport = () => {
           padding:'10px 16px', marginBottom:16, color:'#991b1b', fontWeight:600 }}>❌ {error}</div>
       )}
 
-      {loading && (
-        <div style={{ textAlign:'center', padding:'70px 0', color:'#9ca3af' }}>
-          <div style={{ fontSize:44, marginBottom:14 }}>📊</div>
-          <div style={{ fontWeight:600, fontSize:15 }}>Analysing {yearLabel} data…</div>
-        </div>
-      )}
+      {loading && <LoadingIndicator label={`Analysing ${yearLabel} data…`} />}
 
       {data && !loading && (
         <>

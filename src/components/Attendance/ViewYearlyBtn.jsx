@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ReportIcon from './ReportIcon.jsx';
 
 const YEARLY_REPORTS = [
-  { icon:'✅', label:'Present Absent Report',    path:'/attendance/reports/yearly/present-absent' },
-  { icon:'🔄', label:'IN & OUT Log Report',      path:'/attendance/reports/yearly/in-out' },
-  { icon:'📅', label:'Absent Report',             path:'/attendance/reports/yearly/absent' },
-  { icon:'⏰', label:'Late In Early Out Report',  path:'/attendance/reports/yearly/late-early' },
+  { icon:'checkCircle', label:'Present Absent Report',    path:'/attendance/reports/yearly/present-absent' },
+  { icon:'repeat',      label:'IN & OUT Log Report',      path:'/attendance/reports/yearly/in-out' },
+  { icon:'calendar',    label:'Absent Report',             path:'/attendance/reports/yearly/absent' },
+  { icon:'clock',       label:'Late In Early Out Report',  path:'/attendance/reports/yearly/late-early' },
 ];
 
 const ViewYearlyBtn = ({ year, useNP, currentPath = '' }) => {
@@ -59,7 +60,7 @@ const ViewYearlyBtn = ({ year, useNP, currentPath = '' }) => {
                   textAlign:'left',cursor:'pointer',fontSize:13,transition:'background .1s',
                   background:isActive?'#eff6ff':'white',color:isActive?'#1e40af':'#374151',
                   fontWeight:isActive?700:500 }}>
-                <span style={{ fontSize:18,flexShrink:0 }}>{r.icon}</span>
+                <ReportIcon name={r.icon} />
                 <span style={{ flex:1,whiteSpace:'nowrap' }}>{r.label}</span>
                 {isActive
                   ? <svg viewBox="0 0 20 20" fill="#1a56db" width="13" height="13"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>

@@ -41,6 +41,7 @@ import {
   enrollCard,
   checkDevice,
   pushBioPhotoToDevice,
+  recordPushedUserLocally,
 } from '../services/zktecoService.js';
 
 const router = express.Router();
@@ -336,6 +337,16 @@ async function pushOneUserToDevice(sourceSn, targetSn, pin) {
     facePushed = true;
   }
 
+  // The device applies these commands fine on its own (confirmed via its
+  // own CHECK-reported counts), but doesn't reliably echo a commanded write
+  // back as an OPERLOG report — without this, the target's local
+  // zkteco_users/zkteco_fingerprints rows never get created, so the
+  // Devices grid's Users/Finger/Face/Card columns stay stuck at their old
+  // counts forever even though the real biometric data landed correctly.
+  await recordPushedUserLocally(targetSn,
+    { pin: u.pin, name: u.name, privilege: u.privilege, cardNo: u.card_no, employeeId: u.employee_id, facePhoto: u.face_photo },
+    fps);
+
   console.log(`[ZK] pushOneUserToDevice: PIN=${pin} ${sourceSn} → ${targetSn} (${fps.length} fingerprint(s), face=${facePushed})`);
   return { fingerprintCount: fps.length, facePushed };
 }
@@ -354,6 +365,14 @@ async function pushUserToAreaDevices(areaId, pin, name, privilege, cardNo, exclu
     `SELECT * FROM zkteco_fingerprints WHERE pin=$1 AND template_data IS NOT NULL ORDER BY finger_id`,
     [pin]
   );
+  // For the local bookkeeping mirror below — employee_id/face_photo aren't
+  // among this function's own params, but the origin device's row (already
+  // written by the caller before this cascade runs) has them.
+  const { rows: originRows } = await pool.query(
+    'SELECT employee_id, face_photo FROM zkteco_users WHERE device_sn=$1 AND pin=$2',
+    [excludeSn, pin]
+  );
+  const origin = originRows[0] || {};
   let pushed = 0;
   for (const d of devices) {
     if (d.serial_number === excludeSn) continue; // skip the origin device (already done)
@@ -367,6 +386,12 @@ async function pushUserToAreaDevices(areaId, pin, name, privilege, cardNo, exclu
       const fpParams = `PIN=${fp.pin}\tFID=${fp.finger_id}\tSize=${fp.template_size}\tValid=${fp.valid||1}\tTMP=${fp.template_data}`;
       await queueCommand(d.serial_number, 'DATA UPDATE FINGERTMP', fpParams);
     }
+    // See recordPushedUserLocally's own comment — a commanded write isn't
+    // reliably echoed back, so this device's local rows never get created
+    // (and its Users/Finger/Face/Card columns stay stuck) without this.
+    await recordPushedUserLocally(d.serial_number,
+      { pin, name, privilege, cardNo, employeeId: origin.employee_id, facePhoto: origin.face_photo },
+      fps);
     pushed++;
   }
   console.log(`[ZK Area] pushUserToAreaDevices: PIN=${pin} pushed to ${pushed} area devices`);
@@ -1365,7 +1390,15 @@ router.post('/import-to-staff', async (req, res) => {
   const results=[];
   for (const du of dus) {
     const pin    = du.pin.trim();
-    const rawName = (du.name||'').trim();
+    // Some devices' own stored name already has the PIN appended (e.g. an
+    // earlier bulk name-upload to the device used it to disambiguate similar
+    // names) — strip that exact " [PIN]" suffix so it isn't imported as part
+    // of the staff member's actual name; every screen that shows Full Name
+    // (Staff Detail, Reports, Recommendator/Approval, Leave, OT, ...) reads
+    // this same field, so cleaning it once here keeps it clean everywhere.
+    let rawName = (du.name||'').trim();
+    const pinSuffix = ` [${pin}]`;
+    if (rawName.endsWith(pinSuffix)) rawName = rawName.slice(0, -pinSuffix.length).trim();
     const name   = rawName && rawName!==pin ? rawName : `Staff ${pin}`;
     const email  = `${pin}@${emailDomain}`;
     const avatar = name[0]?.toUpperCase()||'S';
@@ -1467,6 +1500,9 @@ router.get('/device-users', async (req, res) => {
              e.access_valid_from AS access_valid_from,
              e.access_valid_to   AS access_valid_to,
              e.access_valid_count AS access_valid_count,
+             zd.id              AS device_row_id,
+             zd.name            AS device_name,
+             zd.location        AS device_location,
              COALESCE(
                json_agg(
                  json_build_object(
@@ -1480,11 +1516,13 @@ router.get('/device-users', async (req, res) => {
              COUNT(f.id)::int AS fp_slots_count
       FROM   zkteco_users zu
       LEFT   JOIN users e ON e.id = zu.employee_id
+      LEFT   JOIN zkteco_devices zd ON zd.serial_number = zu.device_sn
       LEFT   JOIN zkteco_fingerprints f
                ON f.device_sn = zu.device_sn AND f.pin = zu.pin
       ${cond}
       GROUP  BY zu.id, e.full_name, e.employee_id, e.department, e.device_id,
-                e.access_expires, e.access_expiry_mode, e.access_valid_from, e.access_valid_to, e.access_valid_count
+                e.access_expires, e.access_expiry_mode, e.access_valid_from, e.access_valid_to, e.access_valid_count,
+                zd.id, zd.name, zd.location
       ORDER  BY zu.device_sn,
                 CASE WHEN zu.pin ~ '^[0-9]+$' THEN zu.pin::int ELSE 99999 END
     `, params);

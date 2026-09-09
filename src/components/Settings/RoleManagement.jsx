@@ -27,10 +27,13 @@ const MATRIX_GROUPS = [
   {
     group: 'Staff',
     pages: [
-      { key: 'staffDetail',  label: 'Staff Details', icon: '👥' },
+      { key: 'staffDetail',       label: 'Staff Details',                  icon: '👥' },
+      { key: 'recoApprovalConfig', label: 'Set Recommendator & Approval',  icon: '🧑‍🤝‍🧑' },
       { key: 'myNotes',      label: 'My Notes',      icon: '📝' },
       { key: 'task',         label: 'Task',          icon: '✅' },
       { key: 'staffContact', label: 'Contact',        icon: '📞', alwaysOn: true },
+      { key: 'eventVisitorRegistration', label: 'Guest Registration', icon: '🎪' },
+      { key: 'staffAnalytics', label: 'Analysis Staff Report', icon: '📈', adminOnly: true },
     ],
   },
   {
@@ -40,6 +43,7 @@ const MATRIX_GROUPS = [
       { key: 'leaveApply',          label: 'Apply for Leave',           icon: '📝' },
       { key: 'officeVisitApply',    label: 'Apply for Office Visit',    icon: '🚗' },
       { key: 'manualPostingApply',  label: 'Inform Late In/Early Out',  icon: '⏱️' },
+      { key: 'missingAttendanceApply', label: 'Request for Missing Attendance', icon: '❓' },
       { key: 'leaveApproval',       label: 'Leave Approval',            icon: '✅' },
       { key: 'officeVisitApproval', label: 'Office Visit Approval',     icon: '✅' },
       { key: 'leaveCalculation',    label: 'Leave Calculation',         icon: '🧮', noDelete: true },
@@ -56,6 +60,10 @@ const MATRIX_GROUPS = [
       { key: 'attendanceMonthly',     label: 'Monthly Reports',      icon: '📅' },
       { key: 'attendanceYearly',      label: 'Yearly Reports',       icon: '📋' },
       { key: 'dutyRoster',            label: 'Duty Roster',          icon: '🗓️' },
+      { key: 'overtime',                   label: 'Overtime',                       icon: '⏱️' },
+      { key: 'onlineAttendance',            label: 'Online Attendance',              icon: '📶' },
+      { key: 'manualPostings',              label: 'Manual Attendance (Admin)',      icon: '⏱️' },
+      { key: 'missingAttendanceRequests',   label: 'Missing Attendance Request',     icon: '❓' },
     ],
   },
   {
@@ -82,6 +90,7 @@ const OVERRIDE_GROUPS = [
     pages: [
       { key: 'dashboard',   label: 'Dashboard',    icon: '🏠' },
       { key: 'staffDetail', label: 'Staff Details', icon: '👥' },
+      { key: 'recoApprovalConfig', label: 'Set Recommendator & Approval', icon: '🧑‍🤝‍🧑' },
       { key: 'settings',    label: 'Settings',      icon: '⚙️' },
       { key: 'shift',       label: 'Shifts',        icon: '⏰' },
     ],
@@ -94,6 +103,7 @@ const OVERRIDE_GROUPS = [
       { key: 'myNotes',      label: 'My Notes', icon: '📝' },
       { key: 'task',         label: 'Task',     icon: '✅' },
       { key: 'staffContact', label: 'Contact',  icon: '📞', alwaysOn: true },
+      { key: 'eventVisitorRegistration', label: 'Guest Registration', icon: '🎪' },
     ],
   },
   {
@@ -105,9 +115,14 @@ const OVERRIDE_GROUPS = [
       { key: 'leaveApply',          label: 'Apply for Leave',      icon: '📝' },
       { key: 'officeVisitApply',    label: 'Apply Office Visit',   icon: '🚗' },
       { key: 'manualPostingApply',  label: 'Inform Late/Early',    icon: '⏱️' },
+      { key: 'missingAttendanceApply', label: 'Request for Missing Attendance', icon: '❓' },
       { key: 'leaveApproval',       label: 'Leave Approval',       icon: '✅' },
       { key: 'officeVisitApproval', label: 'OV Approval',          icon: '✅' },
       { key: 'leaveCalculation',    label: 'Leave Calculation',    icon: '🧮', noDelete: true },
+      { key: 'overtime',                 label: 'Overtime',                  icon: '⏱️' },
+      { key: 'onlineAttendance',          label: 'Online Attendance',         icon: '📶' },
+      { key: 'manualPostings',            label: 'Manual Attendance (Admin)', icon: '⏱️' },
+      { key: 'missingAttendanceRequests', label: 'Missing Attendance Request', icon: '❓' },
     ],
   },
   {
@@ -559,7 +574,7 @@ const StaffRoleAssignment = ({ employees, updateEmployee }) => {
    MAIN — RoleManagement
 ═══════════════════════════════════════════════════════════════════════════ */
 const RoleManagement = () => {
-  const { refreshPagePerms, isAdmin, isSuperAdmin } = useAuth();
+  const { refreshPagePerms, isSuperAdmin } = useAuth();
   const { employees, updateEmployee } = useData();
 
   const [activeTab, setActiveTab] = useState('matrix');
@@ -572,7 +587,7 @@ const RoleManagement = () => {
      the same admin/superAdmin rule as its own in-page toggle (Settings →
      StandAlone Device), duplicated here so it can be turned on before that
      page is even reachable (its tab is hidden until this flag is enabled). */
-  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false });
+  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false, guestRegistrationEnabled: false, onlineAttendanceEnabled: false, dutyRosterEnabled: false, chatEnabled: false, taskEnabled: false, smsGatewayEnabled: false });
   const [moduleFlagsLoading, setModuleFlagsLoading] = useState(true);
 
   useEffect(() => {
@@ -583,9 +598,15 @@ const RoleManagement = () => {
   }, []);
 
   const MODULE_FLAG_FIELD = {
-    module_attendance_device_enabled: 'attendanceDeviceEnabled',
-    module_standalone_device_enabled: 'standaloneDeviceEnabled',
-    module_email_setup_enabled:       'emailSetupEnabled',
+    module_attendance_device_enabled:   'attendanceDeviceEnabled',
+    module_standalone_device_enabled:   'standaloneDeviceEnabled',
+    module_email_setup_enabled:         'emailSetupEnabled',
+    module_guest_registration_enabled:  'guestRegistrationEnabled',
+    module_online_attendance_enabled:   'onlineAttendanceEnabled',
+    module_duty_roster_enabled:         'dutyRosterEnabled',
+    module_chat_enabled:                'chatEnabled',
+    module_task_enabled:                'taskEnabled',
+    module_sms_gateway_enabled:         'smsGatewayEnabled',
   };
 
   const toggleModuleFlag = async (flagKey) => {
@@ -650,8 +671,10 @@ const RoleManagement = () => {
     { key: 'matrix',     label: '📋 Permission Matrix'     },
     { key: 'overrides',  label: '🔧 Staff Page Overrides'  },
     { key: 'assignment', label: '🔄 Staff Role Assignment' },
-    { key: 'modules',    label: '🧩 Module Controls'       },
-  ];
+    // Module Controls is Super-Admin-only — a plain Admin shouldn't even see
+    // the tab, not just find its toggles disabled once inside.
+    isSuperAdmin && { key: 'modules', label: '🧩 Module Controls' },
+  ].filter(Boolean);
 
   return (
     <div className="page-container">
@@ -814,8 +837,9 @@ const RoleManagement = () => {
           <StaffRoleAssignment employees={employees} updateEmployee={updateEmployee} />
         )}
 
-        {/* ── MODULE CONTROLS TAB — global on/off flags, not per-role ── */}
-        {activeTab === 'modules' && (
+        {/* ── MODULE CONTROLS TAB — global on/off flags, not per-role,
+             Super-Admin-only (see TABS above) ── */}
+        {activeTab === 'modules' && isSuperAdmin && (
           <div>
             <p style={{ fontSize: 13, color: '#6b7280', marginTop: 0, marginBottom: 18 }}>
               These are global switches, not per-role permissions — each one hides its
@@ -850,7 +874,8 @@ const RoleManagement = () => {
                   )}
                 </div>
 
-                {/* StandAlone Device — admin/superAdmin */}
+                {/* StandAlone Device — Super Admin only, same as every other
+                    card here (Module Controls itself is Super-Admin-only). */}
                 <div style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
                   background: moduleFlags.standaloneDeviceEnabled ? '#f0fdf4' : '#fff7ed',
@@ -860,16 +885,156 @@ const RoleManagement = () => {
                   <div>
                     <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>🖥️ StandAlone Device</div>
                     <div style={{ fontSize: 12, color: moduleFlags.standaloneDeviceEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
-                      {moduleFlags.standaloneDeviceEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Admin/Super Admin'}
+                      {moduleFlags.standaloneDeviceEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
                     </div>
                   </div>
-                  {isAdmin ? (
+                  {isSuperAdmin ? (
                     <button className={`btn btn-sm ${moduleFlags.standaloneDeviceEnabled ? 'btn-outline' : 'btn-primary'}`}
                       onClick={() => toggleModuleFlag('module_standalone_device_enabled')}>
                       {moduleFlags.standaloneDeviceEnabled ? 'Disable' : 'Enable'}
                     </button>
                   ) : (
-                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Admin only</span>
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+
+                {/* Guest Registration (Visitor Registration) — Super Admin only. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.guestRegistrationEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.guestRegistrationEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>🎪 Visitor Registration</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.guestRegistrationEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.guestRegistrationEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.guestRegistrationEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_guest_registration_enabled')}>
+                      {moduleFlags.guestRegistrationEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+
+                {/* Online Attendance — Super Admin only. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.onlineAttendanceEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.onlineAttendanceEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>🌐 Online Attendance</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.onlineAttendanceEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.onlineAttendanceEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.onlineAttendanceEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_online_attendance_enabled')}>
+                      {moduleFlags.onlineAttendanceEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+
+                {/* Duty Roster — Super Admin only, hidden by default; the
+                    per-role permission matrix for dutyRoster still decides
+                    who sees it once this is on. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.dutyRosterEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.dutyRosterEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>🗓️ Duty Roster</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.dutyRosterEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.dutyRosterEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.dutyRosterEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_duty_roster_enabled')}>
+                      {moduleFlags.dutyRosterEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+
+                {/* Chat — Super Admin only. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.chatEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.chatEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>🗨️ Chat</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.chatEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.chatEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.chatEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_chat_enabled')}>
+                      {moduleFlags.chatEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+
+                {/* Task — Super Admin only. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.taskEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.taskEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>✅ Task</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.taskEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.taskEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.taskEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_task_enabled')}>
+                      {moduleFlags.taskEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+
+                {/* SMS Gateway — Super Admin only. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.smsGatewayEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.smsGatewayEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>📱 SMS Gateway</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.smsGatewayEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.smsGatewayEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.smsGatewayEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_sms_gateway_enabled')}>
+                      {moduleFlags.smsGatewayEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
                   )}
                 </div>
               </div>

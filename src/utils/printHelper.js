@@ -21,6 +21,7 @@ export function getPrintCSS(isLandscape = false) {
     .ph-space { grid-column:3; }
     .ph-info .co-name   { font-size:15px; font-weight:800; color:#1f2937; margin-bottom:2px; }
     .ph-info .co-sub    { font-size:10px; color:#6b7280; margin-bottom:4px; }
+    .ph-info .co-branch { font-size:11px; color:#1f2937; font-weight:700; margin-bottom:4px; }
     .ph-info .rpt-title { font-size:13px; font-weight:800; color:#1e40af; }
     .ph-info .rpt-sub   { font-size:11px; color:#374151; font-weight:600; margin:2px 0; }
 
@@ -43,7 +44,12 @@ export function getPrintCSS(isLandscape = false) {
 }
 
 /* ── Company header HTML ──────────────────────────────────────── */
-export function getHeaderHtml(settings, language, reportTitle, reportSub = '') {
+// `branch` (optional): { name, address, phone } — the printing user's own
+// branch. Only pass this when the report is inherently single-branch for
+// THIS viewer (a Branch Manager/Dept Head/employee printing their own
+// data) — admin/superAdmin can see every branch at once, so naming one in
+// the header would misrepresent a report that may span all of them.
+export function getHeaderHtml(settings, language, reportTitle, reportSub = '', branch = null) {
   const name = language === 'np'
     ? (settings.companyNameNp    || settings.companyNameEn    || '')
     : (settings.companyNameEn    || settings.companyNameNp    || '');
@@ -54,12 +60,16 @@ export function getHeaderHtml(settings, language, reportTitle, reportSub = '') {
   const logoTag = settings.companyLogo
     ? `<img src="${settings.companyLogo}" style="height:40px;object-fit:contain;" />`
     : '';
+  const branchLine = branch?.name
+    ? `<div class="co-branch">${branch.name}${[branch.address, branch.phone && `Tel: ${branch.phone}`].filter(Boolean).length ? ' — ' + [branch.address, branch.phone && `Tel: ${branch.phone}`].filter(Boolean).join('  |  ') : ''}</div>`
+    : '';
   return `
 <div class="print-header">
   <div class="ph-logo">${logoTag}</div>
   <div class="ph-info">
     <div class="co-name">${name}</div>
     <div class="co-sub">${addr}${phone}</div>
+    ${branchLine}
     <div class="rpt-title">${reportTitle}</div>
     ${reportSub ? `<div class="rpt-sub">${reportSub}</div>` : ''}
   </div>
@@ -78,15 +88,22 @@ export function getFooterHtml() {
 }
 
 /* ── Full print document builder ─────────────────────────────── */
+// `bordered` (opt-in, default false so every existing caller is unaffected):
+// wraps the header+content+footer in one bordered box, for single-record
+// letterhead-style prints (Leave Reports' printOneRecord, Leave
+// Management's printRecord) that should look like a bordered paper form.
 export function buildPrintDoc({ settings, language, reportTitle, reportSub = '',
-  contentHtml, isLandscape = false, extraStyle = '' }) {
+  contentHtml, isLandscape = false, extraStyle = '', skipFooter = false, branch = null, bordered = false }) {
+  const inner = `
+${getHeaderHtml(settings, language, reportTitle, reportSub, branch)}
+${contentHtml}
+${skipFooter ? '' : getFooterHtml()}`;
+  const body = bordered ? `<div style="border:1.5px solid #374151; padding:14px 16px;">${inner}</div>` : inner;
   return `<!DOCTYPE html><html><head>
 <meta charset="utf-8"><title>${reportTitle}</title>
 <style>${getPrintCSS(isLandscape)}${extraStyle}</style>
 </head><body>
-${getHeaderHtml(settings, language, reportTitle, reportSub)}
-${contentHtml}
-${getFooterHtml()}
+${body}
 <script>window.onload=function(){window.focus();window.print();setTimeout(()=>window.close(),1000);}</script>
 </body></html>`;
 }
@@ -118,12 +135,26 @@ export function getExcelHeaderRows(settings, language, reportTitle, reportSub = 
   return rows.filter(Boolean).join('\n') + '\n';
 }
 
+/* ── Trigger a file download from an in-memory Blob ─────────────
+   The anchor MUST be attached to the document before .click() — some
+   browsers/extensions (download managers, certain enterprise/DLP Chrome
+   policies) only recognize a download as user-initiated when the element
+   is actually part of the DOM; a never-attached <a> can silently no-op
+   with no console error, no dialog, nothing. This bit us for real: several
+   report pages built their own detached-anchor download inline and it
+   quietly failed in at least one live environment. ── */
+export function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 /* ── Trigger CSV download ────────────────────────────────────── */
 export function downloadCSV(csvContent, filename) {
   const BOM  = '﻿';
-  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
+  downloadBlob(new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' }), filename);
 }

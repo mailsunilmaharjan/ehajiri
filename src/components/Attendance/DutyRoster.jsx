@@ -6,12 +6,25 @@ import { useAuth }     from '../../context/AuthContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
+import Avatar          from '../Common/Avatar.jsx';
 import NepaliDatePicker, { adToISO } from '../Common/NepaliDatePicker.jsx';
 import StaffDropdown   from '../Common/StaffDropdown.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import { adToBS, bsToAD, getBSDays, getNepalNow, getNepalTodayISO, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// The date-range Create/Edit Roster forms submit a rotation (shiftIds) plus
+// separate day-of-week overrides (offDays/dayOffDays/nightOffDays) — there's
+// no single date for the 'OFF' sentinel to attach to the way there is in
+// Calendar View's per-day bulk-days call. Picking Weekend there (exclusive,
+// via MultiShiftDropdown) is treated as "every day in this range is
+// Weekend": strip the sentinel out of the rotation and union all 7 weekdays
+// into offDays instead of leaving 'OFF' to hit shift_id as an invalid value.
+const resolveWeekendPick = (shiftIds, offDays) => {
+  if (!shiftIds.includes('OFF')) return { shiftIds, offDays };
+  return { shiftIds: shiftIds.filter(id => id !== 'OFF'), offDays: [...new Set([...offDays, ...DAYS])] };
+};
 
 // Local-time YYYY-MM-DD (never UTC — avoids day-shift near midnight).
 const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -225,16 +238,46 @@ const MultiShiftDropdown = ({ shifts, value, onChange }) => {
 
   useEffect(() => { if (open && inpRef.current) setTimeout(() => inpRef.current?.focus(), 20); }, [open]);
 
+  // Weekend is a pure code-level pick (like DutyRosterDeptWise's ShiftCell) —
+  // no shift row backs it, just the 'OFF' sentinel already understood by
+  // POST /duty-roster/bulk-days. Modeled as a synthetic pseudo-shift so it
+  // rides along every existing shifts-array code path below (sorting,
+  // keyboard nav, exclusive-select) instead of needing its own parallel
+  // handling everywhere.
+  const WEEKEND_ITEM = { id: 'OFF', name: 'Weekend', isOff: true, isWeekend: true };
+  const findShift = (id) => id === 'OFF' ? WEEKEND_ITEM : shifts.find(s => s.id === id);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return shifts.filter(s => !q || s.name?.toLowerCase().includes(q) || s.code?.toLowerCase().includes(q));
+    const all = [WEEKEND_ITEM, ...shifts];
+    const matches = all.filter(s => !q || s.name?.toLowerCase().includes(q) || s.code?.toLowerCase().includes(q));
+    // Weekend / Day Off / Night Off pulled to the top, same treatment as the
+    // per-day picker (Department Wise) — easier to spot than buried
+    // alphabetically in the middle of the list with just a small "Off" badge.
+    // The default shift applies automatically to anyone with no specific
+    // roster entry — it's still shown (disabled — see the isDefault branch
+    // below) so it's clear which shift that is, but pushed to the very end
+    // since it's not a real pick from this list.
+    const isDefault = s => s.makeDefault || s.make_default;
+    return [
+      ...matches.filter(s => s.isOff),
+      ...matches.filter(s => !s.isOff && !isDefault(s)),
+      ...matches.filter(s => !s.isOff && isDefault(s)),
+    ];
   }, [shifts, search]);
+  const firstNonOffIdx = filtered.findIndex(s => !s.isOff);
   itemRefs.current = [];
 
-  const selectedShifts = value.map(id => shifts.find(s => s.id === id)).filter(Boolean);
+  const selectedShifts = value.map(findShift).filter(Boolean);
 
+  // Weekend / Day Off / Night Off are exclusive, whole-day picks — same
+  // spirit as ShiftCell's pickWeekend/pickOffShift — while regular shifts
+  // stay multi-selectable among each other (rotation order = order checked).
   const toggle = (id) => {
-    onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
+    const item = findShift(id);
+    if (item?.isOff) { onChange(value.includes(id) ? [] : [id]); return; }
+    const base = value.some(v => findShift(v)?.isOff) ? [] : value;
+    onChange(base.includes(id) ? base.filter(v => v !== id) : [...base, id]);
   };
 
   const shiftLabel = (s) => (s.isOff ? s.name : `${s.name} (${s.startTime} – ${s.endTime})`);
@@ -359,7 +402,8 @@ const MultiShiftDropdown = ({ shifts, value, onChange }) => {
                   onClick={() => { setDefMsg(true); setTimeout(() => setDefMsg(false), 3500); }}
                   style={{ padding: '8px 12px', cursor: 'not-allowed', fontSize: 12,
                     background: '#f9fafb', color: '#9ca3af',
-                    borderTop: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    borderTop: '2px solid #e5e7eb',
+                    display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontWeight: 600, color: '#9ca3af' }}>{s.name}</span>
                   <span style={{ color: '#9ca3af' }}>{s.startTime} – {s.endTime} · {s.workHours}h</span>
                   <span style={{ marginLeft: 'auto', background: '#f3f4f6', color: '#6b7280',
@@ -372,6 +416,9 @@ const MultiShiftDropdown = ({ shifts, value, onChange }) => {
               const checked = value.includes(s.id);
               const order   = checked ? value.indexOf(s.id) + 1 : null;
               const highlighted = idx === activeIndex;
+              // Divider between the Day Off/Night Off group and the regular
+              // shift list below it, only when both are actually present.
+              const isFirstNonOff = idx === firstNonOffIdx && firstNonOffIdx > 0;
               return (
                 <label key={s.id} ref={el => itemRefs.current[idx] = el}
                   onClick={e => e.stopPropagation()}
@@ -379,12 +426,14 @@ const MultiShiftDropdown = ({ shifts, value, onChange }) => {
                   style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12,
                     background: checked ? '#eff6ff' : (highlighted ? '#f9fafb' : 'white'),
                     color: checked ? '#1e40af' : '#374151',
-                    borderTop: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    borderTop: isFirstNonOff ? '2px solid #e5e7eb' : '1px solid #f3f4f6',
+                    display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input type="checkbox" checked={checked} onChange={() => toggle(s.id)}
                     style={{ width: 14, height: 14, cursor: 'pointer', accentColor: '#1a56db', flexShrink: 0 }} />
                   {order && <span style={{ background: '#1e40af', color: 'white', borderRadius: '50%',
                     width: 15, height: 15, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 9.5, fontWeight: 700, flexShrink: 0 }}>{order}</span>}
+                  {s.isOff && <span style={{ fontSize: 13 }}>{s.isWeekend ? '🏖️' : /night/i.test(s.name) ? '🌙' : '☀️'}</span>}
                   <span style={{ fontWeight: 600 }}>{s.name}</span>
                   {s.isOff ? (
                     <span style={{ background: '#f3f4f6', color: '#6b7280', border: '1px solid #e5e7eb',
@@ -418,6 +467,51 @@ const MultiShiftDropdown = ({ shifts, value, onChange }) => {
 const Label = ({ children }) => (
   <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 5 }}>{children}</div>
 );
+
+/* ── Weekend / Day Off / Night Off — three day-of-week checkbox rows,
+   mutually exclusive per day (checking a day under one clears it from the
+   other two). Whichever category a day-of-week is under is authoritative
+   across the entire date range, overriding the shift rotation on that day —
+   same as reports already treat Department Wise's per-day Day Off/Night Off
+   assignments. ── */
+const OFF_DAY_TYPES = [
+  { key: 'weekend',  label: 'Weekend',   color: '#1a56db' },
+  { key: 'dayOff',   label: 'Day Off',   color: '#d97706' },
+  { key: 'nightOff', label: 'Night Off', color: '#7c3aed' },
+];
+
+const OffDayTypeRows = ({ offDays, dayOffDays, nightOffDays, onChange }) => {
+  const sets = { weekend: offDays, dayOff: dayOffDays, nightOff: nightOffDays };
+  const toggle = (type, day) => {
+    const next = { weekend: [...offDays], dayOff: [...dayOffDays], nightOff: [...nightOffDays] };
+    const isOn = next[type].includes(day);
+    OFF_DAY_TYPES.forEach(({ key }) => { next[key] = next[key].filter(d => d !== day); });
+    if (!isOn) next[type].push(day);
+    onChange(next);
+  };
+  return (
+    <div>
+      <Label>Weekend / Day Off / Night Off</Label>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {OFF_DAY_TYPES.map(({ key, label, color }) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ width: 76, flexShrink: 0, fontSize: 12, fontWeight: 700, color }}>{label}</span>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              {DAYS.map(day => (
+                <label key={day} style={{ display: 'flex', alignItems: 'center', gap: 5,
+                  cursor: 'pointer', fontSize: 13, color: '#374151', userSelect: 'none' }}>
+                  <input type="checkbox" checked={sets[key].includes(day)} onChange={() => toggle(key, day)}
+                    style={{ width: 15, height: 15, cursor: 'pointer', accentColor: color }} />
+                  {day}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 /* ── Disabled read-only field style ── */
 const disStyle = {
@@ -472,14 +566,19 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
   const [shiftIds, setShiftIds] = useState([]); // order checked = rotation order
   const [dateFrom, setDateFrom] = useState(defaultRange.dateFrom);
   const [dateTo,   setDateTo]   = useState(defaultRange.dateTo);
-  const [offDays,  setOffDays]  = useState(settings.defaultWeekends || []);
+  const [offDays,      setOffDays]      = useState(settings.defaultWeekends || []);
+  const [dayOffDays,   setDayOffDays]   = useState([]);
+  const [nightOffDays, setNightOffDays] = useState([]);
   const [saving,   setSaving]   = useState(false);
   const [error,    setError]    = useState('');
 
   const emp = employees.find(e => e.id === empId) || null;
 
-  const toggleDay = (day) =>
-    setOffDays(p => p.includes(day) ? p.filter(d => d !== day) : [...p, day]);
+  const handleOffDayTypesChange = (next) => {
+    setOffDays(next.weekend);
+    setDayOffDays(next.dayOff);
+    setNightOffDays(next.nightOff);
+  };
 
   const resetForm = useCallback(() => {
     setEmpId(null);
@@ -488,6 +587,8 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
     setDateFrom(range.dateFrom);
     setDateTo(range.dateTo);
     setOffDays(settings.defaultWeekends || []);
+    setDayOffDays([]);
+    setNightOffDays([]);
     setError('');
   }, [settings]);
 
@@ -499,12 +600,15 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
     setError('');
     setSaving(true);
     try {
+      const resolved = resolveWeekendPick(shiftIds, offDays);
       await api.post('/duty-roster', {
         employeeId: empId,
-        shiftIds,
+        shiftIds: resolved.shiftIds,
         dateFrom,
         dateTo,
-        offDays,
+        offDays: resolved.offDays,
+        dayOffDays,
+        nightOffDays,
         createdBy: currentUser?.fullName || currentUser?.username || 'Admin',
       });
       onSaved();
@@ -555,12 +659,12 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
           </div>
 
           {/* Auto info (disabled) */}
-          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase',
-              letterSpacing: '.5px', marginBottom: 10 }}>
+          <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: '8px 12px' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase',
+              letterSpacing: '.5px', marginBottom: 6 }}>
               Staff Information (Auto-filled)
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {[
                 ['Staff Name', emp?.fullName],
                 ['Branch',     emp?.branch],
@@ -568,8 +672,8 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
                 ['Mobile',     emp?.phone],
               ].map(([label, val]) => (
                 <div key={label}>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 3 }}>{label}</div>
-                  <div style={disStyle}>{val || '—'}</div>
+                  <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 2 }}>{label}</div>
+                  <div style={{ ...disStyle, height: 26, fontSize: 12, padding: '0 8px', background: '#fff', border: '1px solid #e0e7ff' }}>{val || '—'}</div>
                 </div>
               ))}
             </div>
@@ -579,9 +683,6 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
           <div>
             <Label>Change Shift <span style={{ color: '#dc2626' }}>*</span></Label>
             <MultiShiftDropdown shifts={shifts} value={shiftIds} onChange={setShiftIds} />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>
-              Check more than one to rotate through them day-by-day across the date range. Day Off/Night Off count as a rotation slot too.
-            </div>
           </div>
 
           {/* Date Range */}
@@ -597,23 +698,8 @@ const CreateRosterModal = ({ employees, shifts, currentUser, onClose, onSaved })
           </div>
 
           {/* Off Days */}
-          <div>
-            <Label>Set OFF Day/Night on this Shift</Label>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '8px 0' }}>
-              {DAYS.map(day => {
-                const on = offDays.includes(day);
-                return (
-                  <label key={day}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6,
-                      cursor: 'pointer', fontSize: 13, color: '#374151', userSelect: 'none' }}>
-                    <input type="checkbox" checked={on} onChange={() => toggleDay(day)}
-                      style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#1a56db' }} />
-                    {day}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+          <OffDayTypeRows offDays={offDays} dayOffDays={dayOffDays} nightOffDays={nightOffDays}
+            onChange={handleOffDayTypesChange} />
 
           {/* Created By / Create Date */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -692,12 +778,17 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
   );
   const [dateFrom, setDateFrom] = useState(roster.dateFrom?.slice(0, 10) || '');
   const [dateTo,   setDateTo]   = useState(roster.dateTo?.slice(0, 10)   || '');
-  const [offDays,  setOffDays]  = useState(roster.offDays  || []);
+  const [offDays,      setOffDays]      = useState(roster.offDays      || []);
+  const [dayOffDays,   setDayOffDays]   = useState(roster.dayOffDays   || []);
+  const [nightOffDays, setNightOffDays] = useState(roster.nightOffDays || []);
   const [saving,   setSaving]   = useState(false);
   const [error,    setError]    = useState('');
 
-  const toggleDay = (day) =>
-    setOffDays(p => p.includes(day) ? p.filter(d => d !== day) : [...p, day]);
+  const handleOffDayTypesChange = (next) => {
+    setOffDays(next.weekend);
+    setDayOffDays(next.dayOff);
+    setNightOffDays(next.nightOff);
+  };
 
   const handleSubmit = async () => {
     if (!shiftIds.length) return setError('Please select at least one shift.');
@@ -706,7 +797,8 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
     setError('');
     setSaving(true);
     try {
-      await api.put(`/duty-roster/${roster.id}`, { shiftIds, dateFrom, dateTo, offDays });
+      const resolved = resolveWeekendPick(shiftIds, offDays);
+      await api.put(`/duty-roster/${roster.id}`, { shiftIds: resolved.shiftIds, dateFrom, dateTo, offDays: resolved.offDays, dayOffDays, nightOffDays });
       onSaved();
       onClose();
     } catch (e) {
@@ -766,9 +858,6 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
           <div>
             <Label>Change Shift <span style={{ color: '#dc2626' }}>*</span></Label>
             <MultiShiftDropdown shifts={shifts} value={shiftIds} onChange={setShiftIds} />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>
-              Check more than one to rotate through them day-by-day across the date range. Day Off/Night Off count as a rotation slot too.
-            </div>
           </div>
 
           {/* Date Range */}
@@ -784,23 +873,8 @@ const EditRosterModal = ({ roster, shifts, onClose, onSaved }) => {
           </div>
 
           {/* Off Days */}
-          <div>
-            <Label>Set OFF Day/Night on this Shift</Label>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '8px 0' }}>
-              {DAYS.map(day => {
-                const on = offDays.includes(day);
-                return (
-                  <label key={day}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6,
-                      cursor: 'pointer', fontSize: 13, color: '#374151', userSelect: 'none' }}>
-                    <input type="checkbox" checked={on} onChange={() => toggleDay(day)}
-                      style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#0e9f6e' }} />
-                    {day}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+          <OffDayTypeRows offDays={offDays} dayOffDays={dayOffDays} nightOffDays={nightOffDays}
+            onChange={handleOffDayTypesChange} />
 
           {error && (
             <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8,
@@ -948,7 +1022,10 @@ function analyzeRosters(rosters, employees) {
   /* ── 6. Off-day pattern ── */
   const dayCount = {};
   DAYS.forEach(d => { dayCount[d] = 0; });
-  active.forEach(r => (r.offDays || []).forEach(d => { if (dayCount[d] !== undefined) dayCount[d]++; }));
+  active.forEach(r => {
+    const days = new Set([...(r.offDays || []), ...(r.dayOffDays || []), ...(r.nightOffDays || [])]);
+    days.forEach(d => { if (dayCount[d] !== undefined) dayCount[d]++; });
+  });
   const maxDay = Math.max(...Object.values(dayCount));
   if (maxDay > 0) {
     insights.push({
@@ -1101,7 +1178,12 @@ const CalendarRosterModal = ({ employees, shifts, rosters, currentUser, initialS
     const r = pickMostSpecificRoster(covering);
     if (!r) return null;
     const dayName = DAYS[dayStart.getDay()];
-    const isOff = (r.offDays || []).includes(dayName);
+    // Weekend/Day Off/Night Off are three independent day-of-week sets (see
+    // OFF_DAY_TYPES) — a day counts as off if it falls in any of them, not
+    // just the original weekend-only offDays column.
+    const isOff = (r.offDays || []).includes(dayName)
+      || (r.dayOffDays || []).includes(dayName)
+      || (r.nightOffDays || []).includes(dayName);
     return { isOff, shiftName: r.shiftName, dateStr };
   }, [staff, staffRosters, getApprovedLeaveForDate, getLeaveTypeColor]);
 
@@ -1156,7 +1238,7 @@ const CalendarRosterModal = ({ employees, shifts, rosters, currentUser, initialS
   };
 
   const handleApply = () => {
-    if (!pendingChoiceIds.length) return setError('Pick at least one shift, Day Off, or Night Off.');
+    if (!pendingChoiceIds.length) return setError('Pick at least one shift, Weekend, Day Off, or Night Off.');
     applyToSelectedDates(pendingChoiceIds);
   };
   const handleClear = () => applyToSelectedDates([]);
@@ -1632,7 +1714,7 @@ const DutyRoster = () => {
   const canEditRoster   = canEdit('dutyRoster');
   const canDeleteRoster = canDelete('dutyRoster');
   const { settings }               = useSettings();
-  const { bumpRosterVersion, filteredEmployees: employees } = useData();
+  const { bumpRosterVersion, filteredEmployees: employees, getEmployeeById } = useData();
   const fd = useDateFormat();
 
   const [showModal,      setShowModal]      = useState(false);
@@ -1755,7 +1837,12 @@ const DutyRoster = () => {
         ? <span style={{ fontFamily:'monospace', fontSize:12, background:'#f3f4f6', padding:'2px 6px', borderRadius:4 }}>{v}</span>
         : <span style={{ color:'#d1d5db' }}>—</span> },
     { field: 'employeeName', header: 'Full Name',  width: 160,
-      render: v => <span style={{ fontWeight:500 }}>{v}</span> },
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight:500 }}>
+          <Avatar photo={getEmployeeById(row.employeeId)?.profilePhoto} name={v} size={20} />
+          {v}
+        </span>
+      ) },
     { field: 'deviceId',     header: 'Device ID',  width: 90,
       render: v => v
         ? <span style={{ fontFamily:'monospace', fontSize:12, color:'#0369a1' }}>{v}</span>
@@ -1786,15 +1873,25 @@ const DutyRoster = () => {
       render: v => v ? fd(v) : <span style={{ color:'#d1d5db' }}>—</span> },
     { field: 'dateTo',       header: 'To Date',    width: 118,
       render: v => v ? fd(v) : <span style={{ color:'#d1d5db' }}>—</span> },
-    { field: 'offDays',      header: 'Day Off',    width: 180, sortable: false,
-      render: v => v?.length > 0
-        ? <div style={{ display:'flex', gap:3, flexWrap:'wrap' }}>
-            {v.map(d => (
-              <span key={d} style={{ background:'#fee2e2', color:'#991b1b', borderRadius:4,
-                padding:'1px 6px', fontSize:11, fontWeight:700 }}>{d}</span>
-            ))}
-          </div>
-        : <span style={{ color:'#d1d5db' }}>—</span> },
+    { field: 'offDays',      header: 'Off Days',   width: 220, sortable: false,
+      // Weekend/Day Off/Night Off are three independent day-of-week sets
+      // (see OFF_DAY_TYPES) — all three used to be silently dropped here,
+      // only offDays (Weekend) ever showed.
+      render: (v, row) => {
+        const badges = [
+          ...(row.offDays      || []).map(d => ({ d, bg:'#eff6ff', color:'#1a56db' })),
+          ...(row.dayOffDays   || []).map(d => ({ d, bg:'#fef3c7', color:'#92400e' })),
+          ...(row.nightOffDays || []).map(d => ({ d, bg:'#f5f3ff', color:'#6d28d9' })),
+        ];
+        return badges.length > 0
+          ? <div style={{ display:'flex', gap:3, flexWrap:'wrap' }}>
+              {badges.map(({ d, bg, color }, i) => (
+                <span key={`${d}-${i}`} style={{ background:bg, color, borderRadius:4,
+                  padding:'1px 6px', fontSize:11, fontWeight:700 }}>{d}</span>
+              ))}
+            </div>
+          : <span style={{ color:'#d1d5db' }}>—</span>;
+      } },
     { field: '_actions', header: '', width: 155, sortable: false,
       render: (_, row) => (
         <div style={{ display:'flex', gap:5 }}>
@@ -1919,18 +2016,14 @@ const DutyRoster = () => {
       )}
 
       {/* ── DataGrid ── */}
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#9ca3af' }}>
-          <div style={{ fontSize: 36, marginBottom: 10 }}>🗓️</div>
-          <div style={{ fontWeight: 600 }}>Loading…</div>
-        </div>
-      ) : error ? (
+      {error ? (
         <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8,
           padding: '14px 18px', color: '#991b1b', fontWeight: 600 }}>❌ {error}</div>
       ) : (
         <DataGrid
           columns={columns}
           data={filteredRosters}
+          loading={loading}
           defaultPageSize={10}
           showSearch={true}
           searchPlaceholder="Search by name, shift, department…"

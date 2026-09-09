@@ -6,6 +6,7 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 /* ── Searchable single-select dropdown ── */
 const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
@@ -114,10 +115,6 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
   );
 };
 
-const loadRecoApproval = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
-
 const VisitDateInput = ({ value, onChange, error, settings }) => {
   const blockPast = settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
@@ -150,6 +147,7 @@ const OfficeVisitApplyModal = () => {
   const { t }             = useLanguage();
   const { settings, refreshSettings } = useSettings();
   const { addVisit, employees } = useData();
+  const { getRecoIds, getApprovalIds, refresh: refreshRecoApproval } = useRecoApproval();
 
   // This modal stays mounted for the whole session (see Layout.jsx) — refetch
   // right as it opens so a Super Admin toggling Leave/Visit backdating takes
@@ -168,15 +166,8 @@ const OfficeVisitApplyModal = () => {
     (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean),
   [settings.officeVisitTypes]);
 
-  const { reco: myReco, approval: myApproval } = useMemo(() => {
-    const saved = loadRecoApproval();
-    const r = saved[activeUser?.id]?.reco;
-    const a = saved[activeUser?.id]?.approval;
-    return {
-      reco:     Array.isArray(r) ? r : (r ? [r] : []),
-      approval: Array.isArray(a) ? a : (a ? [a] : []),
-    };
-  }, [activeUser?.id]);
+  const myReco     = getRecoIds(activeUser?.id);
+  const myApproval = getApprovalIds(activeUser?.id);
 
   const getEmpName = useCallback((id) =>
     (employees || []).find(e => String(e.id) === String(id))?.fullName || `#${id}`,
@@ -193,16 +184,22 @@ const OfficeVisitApplyModal = () => {
   const [success,    setSuccess]    = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  /* Reset form each time modal opens */
+  /* Reset form each time modal opens — then again once the reco/approval
+     refetch resolves, in case this first pass read stale/empty data (this
+     modal stays mounted for the whole session, so useRecoApproval's own
+     mount-time fetch could be well out of date by the time it's opened). */
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    const resetForm = () => {
       const fromDate = prefillDates?.fromDate || today;
       const toDate   = prefillDates?.toDate   || fromDate;
-      setForm({ ...emptyForm, fromDate, toDate, reco: myReco, approval: myApproval });
+      setForm({ ...emptyForm, fromDate, toDate, reco: getRecoIds(activeUser?.id), approval: getApprovalIds(activeUser?.id) });
       setErrors({});
       setSuccess(false);
       setSubmitting(false);
-    }
+    };
+    resetForm();
+    refreshRecoApproval().then(resetForm);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 

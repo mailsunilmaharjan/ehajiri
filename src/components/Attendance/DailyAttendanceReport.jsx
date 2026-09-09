@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
@@ -9,19 +9,14 @@ import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
 import { useMissingAttendanceApply } from '../../context/MissingAttendanceApplyContext.jsx';
 import api             from '../../api/client.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
+import Avatar          from '../Common/Avatar.jsx';
+import HoverCard        from '../Common/HoverCard.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
-
-/* ── abbreviate a post name: "General Manager"→"GM", "Accountant"→"Accou" ── */
-const abbrev = (name) => {
-  if (!name) return '';
-  const words = name.trim().split(/\s+/);
-  if (words.length > 1) return words.map(w => w[0].toUpperCase()).join('');
-  return name.slice(0, 5);
-};
+import { downloadBlob } from '../../utils/printHelper.js';
 
 /* ── constants ─────────────────────────────────────────────── */
 const DAY_EN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -31,11 +26,23 @@ const STATUS_STYLE = {
   Present          : { bg:'#f0fdf4', color:'#065f46', border:'#bbf7d0' },
   Absent           : { bg:'#fff5f5', color:'#991b1b', border:'#fecaca' },
   Weekend          : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
+  'Day Off'        : { bg:'#f3f4f6', color:'#6b7280', border:'#e5e7eb' },
+  'Night Off'      : { bg:'#eef2ff', color:'#4338ca', border:'#c7d2fe' },
   Leave            : { bg:'#ede9fe', color:'#5b21b6', border:'#c4b5fd' },
   'Public Holiday' : { bg:'#fef3c7', color:'#92400e', border:'#fcd34d' },
   'Office Visit'   : { bg:'#dbeafe', color:'#1e40af', border:'#93c5fd' },
 };
 const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
+
+// Backend always sends the status as one of these fixed English strings —
+// translate for display when Nepali is active (module-level so it can't call
+// the component's own L(), which needs `language` from context).
+const STATUS_LABEL_NP = {
+  Present: 'उपस्थित', Absent: 'अनुपस्थित', Weekend: 'विकेन्ड',
+  'Day Off': 'डे अफ', 'Night Off': 'नाइट अफ', Leave: 'बिदा',
+  'Public Holiday': 'सार्वजनिक बिदा', 'Office Visit': 'कार्यालय भ्रमण',
+};
+const statusLabel = (s, language) => (language === 'np' ? (STATUS_LABEL_NP[s] || s) : s);
 
 const Pill = ({ children, bg, color, border }) => (
   <span style={{ background:bg, color, border:`1px solid ${border}`, borderRadius:10,
@@ -72,10 +79,9 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
     .filter(e => e.active !== false)
     .sort((a,b) => (a.fullName||'').localeCompare(b.fullName||''))
     .map(e => {
-      const name  = e.fullName || `Staff ${e.id}`;
-      const post  = e.position  ? ` • ${abbrev(e.position)}`   : '';
-      const devId = e.deviceId  ? ` [${e.deviceId}]`           : '';
-      return { value: String(e.id), label: `${name}${post}${devId}` };
+      const name = e.fullName || `Staff ${e.id}`;
+      const sub  = [e.employeeId, e.position].filter(Boolean).join(' - ');
+      return { value: String(e.id), label: name, sub, photo: e.profilePhoto };
     });
 
   const shiftOpts = shifts.map(s => ({ value: s.code, label: s.name || s.code }));
@@ -84,6 +90,8 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
     { value:'Present',      label: L('उपस्थित','Present')       },
     { value:'Absent',       label: L('अनुपस्थित','Absent')      },
     { value:'Weekend',      label: L('विकेन्ड','Weekend')        },
+    { value:'Day Off',      label: L('डे अफ','Day Off')          },
+    { value:'Night Off',    label: L('नाइट अफ','Night Off')      },
     { value:'Leave',        label: L('बिदा','Leave')             },
     { value:'Office Visit', label: L('कार्यालय भ्रमण','Office Visit') },
   ];
@@ -114,7 +122,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
         <div style={{ padding:'20px 24px 16px', background:'#ffffff',borderBottom:'1px solid #f3f4f6',
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <span style={{ fontSize:18, fontWeight:700, color:'#1e40af', letterSpacing:'-.2px' }}>
-            {L('एडभान्स खोज','Advance Search')}
+            {L('विस्तृत खोज','Advance Search')}
           </span>
           <button onClick={onClose}
             style={{ background:'none', border:'none', cursor:'pointer', color:'#6b7280',
@@ -132,7 +140,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
           {/* Row 1: Staff | Branch — 2 equal columns */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
             <Field label={L('कर्मचारी','Staff')}>
-              <SearchableCheckSelect options={staffOpts} value={local.staffId}
+              <SearchableCheckSelect options={staffOpts} value={local.staffId} showAvatar
                 onChange={v=>set('staffId',v)} allLabel={L('All Staff','All Staff')} />
             </Field>
             <Field label={L('शाखा','Branch')}>
@@ -206,12 +214,13 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
 ═══════════════════════════════════════════════════════════ */
 const DailyAttendanceReport = () => {
   const navigate           = useNavigate();
+  const [searchParams]     = useSearchParams();
   const { open: openLeave }       = useLeaveApply();
   const { open: openOfficeVisit } = useOfficeVisitApply();
   const { open: openMissingAttendance } = useMissingAttendanceApply();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
-  const { filteredEmployees: employees, shifts, getApprovedLeaveForDate, getLeaveTypeName, getEmployeeName, leaveTypes, rosterVersion } = useData();
+  const { filteredEmployees: employees, shifts, getApprovedLeaveForDate, getLeaveTypeName, getEmployeeName, getEmployeeById, leaveTypes, rosterVersion } = useData();
 
   /* language-aware leave type name */
   const getLeaveLabel = (code) => {
@@ -231,15 +240,32 @@ const DailyAttendanceReport = () => {
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState(null);
   const [searchModal,  setSearchModal]  = useState(false);
+  // Ctrl+A opens Advance Search — same shortcut across every report/page
+  // that has one, skipped while typing in a text field so it doesn't hijack
+  // native "select all text" there.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.ctrlKey || e.key.toLowerCase() !== 'a') return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+      e.preventDefault();
+      setSearchModal(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [filters,      setFilters]      = useState({
     staffId: myEmpId, branch:'', dept:'', post:'', mode:'', grade:'', shift:'', status:'',
   });
-  const [quickFilter, setQuickFilter] = useState('');  // quick-filter chip selection
+  // Quick-filter chip selection — seeded from ?quick= so links elsewhere in
+  // the app (Dashboard's Absent/On Leave/On Office Visit/Late Arrivals stat
+  // cards) can land here already filtered to the matching list.
+  const [quickFilter, setQuickFilter] = useState(searchParams.get('quick') || '');
 
   /* ── load ── */
   const load = useCallback(async (d) => {
     setLoading(true); setError(null);
-    try { setData(await api.get(`/attendance/daily?date=${d}`)); }
+    try { setData(await api.get(`/attendance/daily?date=${d}&orgScope=1`)); }
     catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }, []);
@@ -327,8 +353,17 @@ const DailyAttendanceReport = () => {
   // No width specified — autoWidth=true lets the table auto-fit to content
   const columns = [
     {
+      field:'id', header:L('स्टाफ आईडी','Staff ID'), sortable:false,
+      render: (v) => <span style={{ color:'#374151' }}>{getEmployeeById(v)?.employeeId || '—'}</span>,
+    },
+    {
       field:'fullName', header:L('कर्मचारी','Staff'), sortable:true,
-      render: v => <span style={{ color:'#1f2937' }}>{v}</span>,
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
+          <Avatar photo={getEmployeeById(row.id)?.profilePhoto} name={v} size={22} />
+          {v}
+        </span>
+      ),
     },
     {
       field:'postShort', header:L('पद','Post'),
@@ -399,7 +434,19 @@ const DailyAttendanceReport = () => {
     {
       field:'timeOut', header:L('जाने','Time Out'), align:'center',
       render: (v, row) => {
-        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
+        if (!v) {
+          if (row.timeIn) {
+            return (
+              <span
+                onClick={e => { e.stopPropagation(); openMissingAttendance(row.id, date); }}
+                title={L('टाइम आउट रेकर्ड भएन — अनुरोध पठाउन क्लिक गर्नुस्','Missing time out — click to request')}
+                style={{ color:'#dc2626', fontWeight:700, cursor:'pointer', textDecoration:'underline', textDecorationStyle:'dotted', textUnderlineOffset:3 }}>
+                —
+              </span>
+            );
+          }
+          return <span style={{ color:'#d1d5db' }}>—</span>;
+        }
         const warn = row.punchCount === 1;
         const onTime = row.earlyOut === 'On Time';
         return (
@@ -448,11 +495,11 @@ const DailyAttendanceReport = () => {
           return <Pill bg="#eff6ff" color="#1e40af" border="#bfdbfe">🏖️ {L('बिदामा','On Leave')}</Pill>;
         }
         const s = statusStyle(v);
-        return <Pill bg={s.bg} color={s.color} border={s.border}>{v}</Pill>;
+        return <Pill bg={s.bg} color={s.color} border={s.border}>{statusLabel(v, language)}</Pill>;
       },
     },
     {
-      field:'remarks', header:L('कैफियत','Remarks'), sortable:false, wrap:true,
+      field:'remarks', header:L('कैफियत','Remarks'), sortable:false, wrap:true, fill:true,
       render: (v, row) => {
         if (row.status === 'On Leave') {
           const parts = [];
@@ -469,7 +516,7 @@ const DailyAttendanceReport = () => {
             </span>
           );
           return (
-            <div style={{ display:'flex', flexWrap:'wrap', gap:'0 8px', alignItems:'center' }}>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'0 8px', alignItems:'center', width:'100%' }}>
               {parts.map((p, i) => (
                 <React.Fragment key={i}>
                   {i > 0 && <span style={{ color:'#d1d5db', fontSize:10 }}>|</span>}
@@ -482,14 +529,24 @@ const DailyAttendanceReport = () => {
         if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         const segs = v.split(' | ').map(s => s.trim()).filter(Boolean);
         const isMeta = (s) => s.includes('Recom. by') || s.includes('App. by');
-        if (!segs.some(isMeta)) return <span style={{ color:'#374151', lineHeight:1.4 }}>{v}</span>;
+        const ellipsis = { overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' };
+        if (!segs.some(isMeta)) {
+          return (
+            <HoverCard arrow fill content={v} trigger={
+              <span style={{ color:'#374151', lineHeight:1.4, display:'block', width:'100%', ...ellipsis }}>{v}</span>
+            } />
+          );
+        }
+        const fullText = <div style={{ display:'flex', flexDirection:'column', gap:4 }}>{segs.map((s, i) => <div key={i}>{s}</div>)}</div>;
         return (
-          <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
-            {segs.map((seg, i) => isMeta(seg)
-              ? <span key={i} style={{ fontSize:11, color:'#9ca3af', lineHeight:1.3 }}>{seg}</span>
-              : <span key={i} style={{ color:'#374151', lineHeight:1.3 }}>{seg}</span>
-            )}
-          </div>
+          <HoverCard arrow fill content={fullText} trigger={
+            <div style={{ display:'flex', flexDirection:'column', gap:1, width:'100%', overflow:'hidden' }}>
+              {segs.map((seg, i) => isMeta(seg)
+                ? <span key={i} style={{ fontSize:11, color:'#9ca3af', lineHeight:1.3, ...ellipsis }}>{seg}</span>
+                : <span key={i} style={{ color:'#374151', lineHeight:1.3, ...ellipsis }}>{seg}</span>
+              )}
+            </div>
+          } />
         );
       },
     },
@@ -510,7 +567,7 @@ const DailyAttendanceReport = () => {
             {data?.isWeekend && (
               <span style={{ marginLeft:8, background:'#f3f4f6', color:'#6b7280',
                 borderRadius:6, padding:'1px 8px', fontSize:11, fontWeight:600 }}>
-                {L('साप्ताहिक विदा','Weekend')}
+                {L('विकेन्ड','Weekend')}
               </span>
             )}
           </h1>
@@ -547,10 +604,7 @@ const DailyAttendanceReport = () => {
                 ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
               });
               const blob = new Blob([BOM + csvRows.join('\n')], { type:'text/csv;charset=utf-8;' });
-              const a = document.createElement('a');
-              a.href = URL.createObjectURL(blob);
-              a.download = `DailyAttendance_${date}.csv`;
-              a.click();
+              downloadBlob(blob, `DailyAttendance_${date}.csv`);
             }}
             style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'6px 14px', height:34,
               background:'#f0fdf4', border:'1px solid #86efac', color:'#15803d',
@@ -571,14 +625,14 @@ const DailyAttendanceReport = () => {
               // Summary
               const s = summary || {};
               const sumLine = [
-                ['Total',        s.total,   '#374151'],
-                ['Present',      s.present, '#065f46'],
-                ['Absent',       s.absent,  '#991b1b'],
-                ['Leave',        s.leave,   '#5b21b6'],
-                ['Office Visit', s.visit,   '#1e40af'],
-                ['Weekend',      s.weekend, '#6b7280'],
-                ['Late In',      s.late,    '#dc2626'],
-                ['Early Out',    s.early,   '#d97706'],
+                [L('जम्मा','Total'),          s.total,   '#374151'],
+                [L('उपस्थित','Present'),      s.present, '#065f46'],
+                [L('अनुपस्थित','Absent'),     s.absent,  '#991b1b'],
+                [L('बिदा','Leave'),           s.leave,   '#5b21b6'],
+                [L('कार्यालय भ्रमण','Office Visit'), s.visit, '#1e40af'],
+                [L('विकेन्ड','Weekend'),      s.weekend, '#6b7280'],
+                [L('ढिलो आएको','Late In'),    s.late,    '#dc2626'],
+                [L('चाँडो गएको','Early Out'), s.early,   '#d97706'],
               ].map(([l,v,c])=>`<span>${l}: <strong style="color:${c}">${v}</strong></span>`).join(' &nbsp;·&nbsp; ');
 
               // Table rows
@@ -604,7 +658,7 @@ const DailyAttendanceReport = () => {
                   ${td(r.lateIn||'—',r.lateIn?.startsWith('Late')?'#dc2626':'#059669')}
                   ${td(r.earlyOut||'—',r.earlyOut?.startsWith('Early Out')?'#d97706':'#2563eb')}
                   <td style="padding:4px 5px;border:1px solid #e5e7eb;background:${bg};text-align:center;">
-                    <span style="background:${sb};color:${sc};border-radius:4px;padding:1px 5px;font-size:8px;font-weight:700;">${r.status}</span>
+                    <span style="background:${sb};color:${sc};border-radius:4px;padding:1px 5px;font-size:8px;font-weight:700;">${statusLabel(r.status, language)}</span>
                   </td>
                   ${td(r.remarks||'—','#374151')}
                 </tr>`;
@@ -737,14 +791,14 @@ const DailyAttendanceReport = () => {
             background:'white', border:'1px solid #e5e7eb', borderRadius:8,
             overflow:'hidden', flexShrink:0, boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
             {[
-              { key:'',        label:L('Total','Total'),               value:summary.total,   numColor:'#1f2937', bg:'white'   },
-              { key:'Present', label:L('Present','Present'),           value:summary.present, numColor:'#059669', bg:'#f0fdf4' },
-              { key:'Absent',  label:L('Absent','Absent'),             value:summary.absent,  numColor:'#dc2626', bg:'#fef2f2' },
-              { key:'Leave',   label:L('Leave','Leave'),               value:summary.leave,   numColor:'#7c3aed', bg:'#faf5ff' },
-              { key:'Visit',   label:L('Office Visit','Office Visit'), value:summary.visit,   numColor:'#0369a1', bg:'#f0f9ff' },
-              { key:'Weekend', label:L('Weekend','Weekend'),           value:summary.weekend, numColor:'#6b7280', bg:'white'   },
-              { key:'__late',  label:L('Late','Late'),                 value:summary.late,    numColor:'#d97706', bg:'#fffbeb' },
-              { key:'__early', label:L('Early','Early'),               value:summary.early,   numColor:'#b45309', bg:'#fef3c7' },
+              { key:'',        label:L('जम्मा','Total'),               value:summary.total,   numColor:'#1f2937', bg:'white'   },
+              { key:'Present', label:L('उपस्थित','Present'),           value:summary.present, numColor:'#059669', bg:'#f0fdf4' },
+              { key:'Absent',  label:L('अनुपस्थित','Absent'),          value:summary.absent,  numColor:'#dc2626', bg:'#fef2f2' },
+              { key:'Leave',   label:L('बिदा','Leave'),                value:summary.leave,   numColor:'#7c3aed', bg:'#faf5ff' },
+              { key:'Visit',   label:L('कार्यालय भ्रमण','Office Visit'), value:summary.visit,   numColor:'#0369a1', bg:'#f0f9ff' },
+              { key:'Weekend', label:L('विकेन्ड','Weekend'),           value:summary.weekend, numColor:'#6b7280', bg:'white'   },
+              { key:'__late',  label:L('ढिलो','Late'),                 value:summary.late,    numColor:'#d97706', bg:'#fffbeb' },
+              { key:'__early', label:L('चाँडो','Early'),               value:summary.early,   numColor:'#b45309', bg:'#fef3c7' },
             ].map((s, i, arr) => {
               const active = filters.status === s.key && s.key && !s.key.startsWith('__');
               return (
@@ -794,6 +848,16 @@ const DailyAttendanceReport = () => {
         loading={loading}
         contextMenu={isEmployee ? [
           {
+            label: 'Leave Posting',
+            icon: '🌴',
+            onClick: (row) => openLeave(row.id),
+          },
+          {
+            label: 'Office Visit Posting',
+            icon: '🚗',
+            onClick: (row) => openOfficeVisit(row.id),
+          },
+          {
             label: 'Request for Missing Attendance',
             icon: '📩',
             onClick: (row) => openMissingAttendance(row.id, date),
@@ -815,6 +879,11 @@ const DailyAttendanceReport = () => {
             icon: '🚗',
             onClick: (row) => openOfficeVisit(row.id),
           },
+          {
+            label: 'Request for Missing Attendance',
+            icon: '📩',
+            onClick: (row) => openMissingAttendance(row.id, date),
+          },
         ]}
         showCheckbox={false}
         autoWidth={true}
@@ -832,7 +901,7 @@ const DailyAttendanceReport = () => {
               <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
                 <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
               </svg>
-              {L('एडभान्स खोज','Advance Search')}
+              {L('विस्तृत खोज','Advance Search')}
               {activeCount > 0 && (
                 <span style={{ background:'#1a56db', color:'white', borderRadius:'50%',
                   width:17, height:17, fontSize:10, fontWeight:700,
@@ -849,11 +918,11 @@ const DailyAttendanceReport = () => {
             )}
             <div style={{ width:1, height:22, background:'#e5e7eb', margin:'0 2px' }} />
             {[
-              { key:'',           label:'All',               icon:'👥', count: rows.length,                                           color:'#374151', bg:'#f3f4f6',  border:'#e5e7eb'  },
-              { key:'absent',     label:'Absent',            icon:'📅', count: rows.filter(r=>r.status==='Absent').length,            color:'#991b1b', bg:'#fee2e2',  border:'#fca5a5'  },
-              { key:'late-early', label:'IN/OUT Issues',     icon:'⏰', count: rows.filter(r=>!!(r.lateIn||r.earlyOut)).length,       color:'#92400e', bg:'#fef3c7',  border:'#fcd34d'  },
-              { key:'leave',      label:'Leave',             icon:'🌴', count: rows.filter(r=>r.hasLeave).length,                     color:'#5b21b6', bg:'#ede9fe',  border:'#c4b5fd'  },
-              { key:'visit',      label:'Office Visit',      icon:'🚗', count: rows.filter(r=>r.hasVisit).length,                     color:'#0369a1', bg:'#e0f2fe',  border:'#bae6fd'  },
+              { key:'',           label:L('सबै','All'),                    icon:'👥', count: rows.length,                                           color:'#374151', bg:'#f3f4f6',  border:'#e5e7eb'  },
+              { key:'absent',     label:L('अनुपस्थित','Absent'),           icon:'📅', count: rows.filter(r=>r.status==='Absent').length,            color:'#991b1b', bg:'#fee2e2',  border:'#fca5a5'  },
+              { key:'late-early', label:L('आउने/जाने समस्या','IN/OUT Issues'), icon:'⏰', count: rows.filter(r=>!!(r.lateIn||r.earlyOut)).length,       color:'#92400e', bg:'#fef3c7',  border:'#fcd34d'  },
+              { key:'leave',      label:L('बिदा','Leave'),                 icon:'🌴', count: rows.filter(r=>r.hasLeave).length,                     color:'#5b21b6', bg:'#ede9fe',  border:'#c4b5fd'  },
+              { key:'visit',      label:L('कार्यालय भ्रमण','Office Visit'), icon:'🚗', count: rows.filter(r=>r.hasVisit).length,                     color:'#0369a1', bg:'#e0f2fe',  border:'#bae6fd'  },
             ].map(f => (
               <button
                 key={f.key}

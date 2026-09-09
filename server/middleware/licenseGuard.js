@@ -1,4 +1,5 @@
 import pool from '../db.js';
+import { logError } from '../utils/logError.js';
 
 /**
  * Blocks any request if no active, non-expired license exists.
@@ -48,35 +49,71 @@ export async function getLicenseWarning(days = LICENSE_WARNING_DAYS) {
   };
 }
 
+// licenseGuard runs in front of EVERY protected API call, so re-querying the
+// license row on every single request means a request-heavy flow (e.g. a
+// burst of Field Visit GPS check-in/out writes) can starve this tiny SELECT
+// of a pool connection right along with everything else, making a purely
+// transient DB hiccup masquerade as a license failure app-wide. The license
+// row essentially never changes between admin actions, so cache the last
+// good read for a short window and fall back to it on a transient error
+// instead of failing closed on every request.
+let cachedLicenseRow; // undefined = never fetched, null = no active license row
+let cachedAt = 0;
+const CACHE_TTL_MS = 60_000;
+
+async function fetchActiveLicenseRow() {
+  const { rows } = await pool.query(
+    `SELECT payload, distributor_name, distributor_contact_name, distributor_phone, distributor_email
+     FROM license WHERE is_active = TRUE LIMIT 1`
+  );
+  return rows[0] || null;
+}
+
 export async function licenseGuard(req, res, next) {
   try {
-    const { rows } = await pool.query(
-      `SELECT payload, distributor_name, distributor_contact_name, distributor_phone, distributor_email
-       FROM license WHERE is_active = TRUE LIMIT 1`
-    );
-    if (!rows.length) {
-      return res.status(403).json({
-        licenseError: true,
-        error: 'Subscription has been Expired, Contact to your Distributor',
-        ...await getDistributorContact(),
-      });
+    if (cachedLicenseRow === undefined || Date.now() - cachedAt > CACHE_TTL_MS) {
+      cachedLicenseRow = await fetchActiveLicenseRow();
+      cachedAt = Date.now();
     }
-    const payload = rows[0].payload;
-    if (new Date(payload.expires) < new Date()) {
-      return res.status(403).json({
-        licenseError: true,
-        error: 'Subscription has been Expired, Contact to your Distributor',
-        distributorName       : rows[0].distributor_name         || '',
-        distributorContactName: rows[0].distributor_contact_name || '',
-        distributorPhone      : rows[0].distributor_phone        || '',
-        distributorEmail      : rows[0].distributor_email        || '',
-      });
+    await respondFromRow(cachedLicenseRow, res, next);
+  } catch (err) {
+    // Transient failure (pool momentarily saturated, brief connection drop,
+    // etc.) — serve the last known-good license state instead of blocking
+    // every request in the app. Only a cache that's never been populated at
+    // all (or whose fallback itself fails, e.g. the DB is still down) falls
+    // through to the generic message below — but a response always goes out
+    // either way, never left hanging.
+    if (cachedLicenseRow !== undefined) {
+      try { await respondFromRow(cachedLicenseRow, res, next); return; } catch { /* fall through */ }
     }
-    next();
-  } catch {
-    return res.status(403).json({
+    logError('[licenseGuard]', err);
+    res.status(403).json({
       licenseError: true,
       error: 'License verification failed. Contact your distributor.',
     });
   }
+}
+
+async function respondFromRow(row, res, next) {
+  if (!row) {
+    const contact = await getDistributorContact();
+    res.status(403).json({
+      licenseError: true,
+      error: 'Subscription has been Expired, Contact to your Distributor',
+      ...contact,
+    });
+    return;
+  }
+  if (new Date(row.payload.expires) < new Date()) {
+    res.status(403).json({
+      licenseError: true,
+      error: 'Subscription has been Expired, Contact to your Distributor',
+      distributorName       : row.distributor_name         || '',
+      distributorContactName: row.distributor_contact_name || '',
+      distributorPhone      : row.distributor_phone        || '',
+      distributorEmail      : row.distributor_email        || '',
+    });
+    return;
+  }
+  next();
 }

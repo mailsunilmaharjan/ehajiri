@@ -1,20 +1,23 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { useNavigate }  from 'react-router-dom';
 import { useAuth }      from '../../context/AuthContext.jsx';
 import { useLanguage }  from '../../context/LanguageContext.jsx';
 import { useData }      from '../../context/DataContext.jsx';
 import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import { useSettings }  from '../../context/SettingsContext.jsx';
-import { makeDateFormatter, getNepalTodayISO } from '../../utils/dateUtils.js';
+import { makeDateFormatter, getNepalTodayISO, formatNepalDateTime } from '../../utils/dateUtils.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
-
-/* load saved reco/approval from localStorage */
-const loadRecoApproval = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
+import Avatar from '../Common/Avatar.jsx';
+import LastSavedBy from '../Common/LastSavedBy.jsx';
+import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
+import { getDeviceInfo } from '../../utils/deviceInfo.js';
+import useRecoApproval from '../../hooks/useRecoApproval.js';
+import useLeaveOpening from '../../hooks/useLeaveOpening.js';
+import LeaveApproval from './LeaveApproval.jsx';
+import OfficeVisitApproval from '../OfficeVisit/OfficeVisitApproval.jsx';
+import { LeaveAdvancedFilter, DEFAULT_ADV_FILTERS } from './LeaveCalculation.jsx';
 
 /* date picker that respects settings.defaultCalendar and settings.leaveBackdateEnabled —
    allowPast overrides the block regardless of that setting, for Admin Manual Posting
@@ -45,6 +48,136 @@ const StatusBadge = ({ status }) => {
   return <span className={`badge ${entry.cls}`}>{np ? entry.np : entry.en}</span>;
 };
 
+/* ─────────── shared right-side detail panel chrome (Leave + Office Visit) ───────────
+   Same fixed-overlay-drawer convention as the Contact page's DetailPanel — the
+   grid never shrinks or scrolls to make room for it. */
+export const DRow = ({ icon, label, value }) => {
+  if (!value) return null;
+  return (
+    <div style={{ display:'flex', gap:10, padding:'7px 0', borderBottom:'1px solid #f3f4f6' }}>
+      <span style={{ fontSize:15, width:20, flexShrink:0, textAlign:'center' }}>{icon}</span>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:10, fontWeight:700, color:'#9ca3af', textTransform:'uppercase',
+          letterSpacing:'.5px', marginBottom:1 }}>{label}</div>
+        <div style={{ fontSize:13, color:'#1f2937', wordBreak:'break-word' }}>{value}</div>
+      </div>
+    </div>
+  );
+};
+
+// From Date / To Date side by side, each in its own soft card.
+export const DRowPair = ({ left, right }) => (
+  <div style={{ display:'flex', gap:8, padding:'8px 0' }}>
+    {[left, right].map((c, i) => c?.value && (
+      <div key={i} style={{ flex:1, background:'#f8fafc', border:'1px solid #eef1f5', borderRadius:8, padding:'6px 10px' }}>
+        <div style={{ fontSize:10, fontWeight:700, color:'#9ca3af', textTransform:'uppercase',
+          letterSpacing:'.5px', marginBottom:2, display:'flex', alignItems:'center', gap:4 }}>
+          {c.icon} {c.label}
+        </div>
+        <div style={{ fontSize:13, fontWeight:600, color:'#1f2937' }}>{c.value}</div>
+      </div>
+    ))}
+  </div>
+);
+
+// Reason/Description/Comment — a fieldset-style card: the label sits directly
+// on the border (like a <legend>) instead of floating above it as a separate
+// heading, with a light background tint so the box still reads as a block.
+export const DRowBox = ({ icon, label, value, bg = '#fefcf5', border = '#eee2b3', color = '#92400e' }) => {
+  if (!value) return null;
+  return (
+    <fieldset style={{ margin:'12px 0 0', border:`1.5px solid ${border}`, borderRadius:10,
+      background:bg, padding:'2px 12px 12px' }}>
+      <legend style={{ padding:'0 6px', fontSize:11, fontWeight:700, color,
+        textTransform:'uppercase', letterSpacing:'.5px' }}>
+        {icon} {label}
+      </legend>
+      <div style={{ fontSize:13.5, color:'#1f2937', lineHeight:1.6, wordBreak:'break-word' }}>
+        {value}
+      </div>
+    </fieldset>
+  );
+};
+
+// Underlined section header — gives the panel visual structure (grouping
+// dates/attendance info vs notes vs the approval trail) instead of one long
+// undifferentiated list of rows. Short + light underline (not a full-width
+// bar) so it reads as an accent, not a divider.
+export const SectionLabel = ({ children, color = '#1a56db' }) => (
+  <div style={{ fontSize:11, fontWeight:700, color, textTransform:'uppercase', letterSpacing:'.5px',
+    marginBottom:6, paddingBottom:4, display:'inline-block', borderBottom:`1px solid ${color}66` }}>
+    {children}
+  </div>
+);
+
+// Staff ID / Post / Department / Branch under the name — a two-column block
+// (Staff ID over Department on the left, Post over Branch on the right)
+// split by a vertical divider, with a fixed label width in each column so
+// "Staff ID:"/"Department:" and "Post:"/"Branch:" line up vertically instead
+// of drifting with value length.
+export const InfoLine = ({ items }) => {
+  const left = [];
+  const right = [];
+  items.forEach((it, i) => { if (it.value) (i % 2 === 0 ? left : right).push(it); });
+  if (!left.length && !right.length) return null;
+  const col = (list, labelWidth) => (
+    <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+      {list.map(it => (
+        <div key={it.label} style={{ display:'flex', gap:6 }}>
+          <strong style={{ color:'#4b5563', flex:`0 0 ${labelWidth}px` }}>{it.label}:</strong>
+          <span>{it.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div style={{ display:'flex', marginTop:6, fontSize:11.5, color:'#6b7280' }}>
+      <div style={{ flex:1, paddingRight:14, borderRight: right.length ? '1px solid #d1d5db' : 'none' }}>
+        {col(left, 76)}
+      </div>
+      {right.length > 0 && <div style={{ flex:1, paddingLeft:14 }}>{col(right, 50)}</div>}
+    </div>
+  );
+};
+
+export const SidePanelShell = ({ icon, title, avatarPhoto, avatarName, infoLine, subtitle, statusBadge, onClose, children, footer }) => (
+  <div style={{
+    position:'fixed', top:60, right:0, bottom:0, width:440, zIndex:51,
+    background:'#fff', boxShadow:'-6px 0 24px rgba(0,0,0,.15)', borderLeft:'1px solid #dedede',
+    display:'flex', flexDirection:'column', overflow:'hidden',
+  }}>
+    <div style={{ background:'linear-gradient(135deg,#eff6ff,#f5f3ff)', flexShrink:0, padding:'16px 16px 14px', borderBottom:'1px solid #e5e7eb', position:'relative' }}>
+      <button onClick={onClose}
+        style={{ position:'absolute', top:10, right:10, background:'rgba(0,0,0,.06)',
+          border:'none', borderRadius:6, width:26, height:26, cursor:'pointer',
+          fontSize:14, color:'#6b7280', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        ✕
+      </button>
+      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+        <Avatar photo={avatarPhoto} name={avatarName} size={44} />
+        <div style={{ fontSize:15, fontWeight:700, color:'#111827', lineHeight:1.3 }}>
+          {avatarName}
+        </div>
+      </div>
+      {infoLine}
+      {subtitle && <div style={{ fontSize:12, color:'#6b7280', marginTop:6 }}>{subtitle}</div>}
+      <div style={{ display:'flex', gap:6, marginTop:8, flexWrap:'wrap' }}>{statusBadge}</div>
+    </div>
+    <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>{children}</div>
+    <div style={{ padding:'10px 16px', borderTop:'1px solid #f3f4f6', display:'flex', gap:6, flexWrap:'wrap', flexShrink:0 }}>
+      {footer}
+    </div>
+  </div>
+);
+
+export const panelBtnStyle = (variant) => ({
+  padding:'7px 10px', borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer',
+  display:'flex', alignItems:'center', justifyContent:'center', gap:5, flex:'1 1 auto',
+  border: variant==='danger' ? '1px solid #fecaca' : variant==='success' ? '1px solid #059669' : '1px solid #d1d5db',
+  background: variant==='danger' ? '#fff5f5' : variant==='success' ? '#059669' : '#fff',
+  color: variant==='danger' ? '#dc2626' : variant==='success' ? '#fff' : '#374151',
+});
+
 const PURPOSES = [
   'ग्राहक बैठक', 'आधिकारिक बैठक', 'स्थल भ्रमण', 'तालिम',
   'सम्मेलन', 'कार्यशाला', 'क्षेत्र भ्रमण', 'बजार अनुसन्धान', 'अन्य',
@@ -58,13 +191,55 @@ const LeavePanel = () => {
   const { t, language } = useLanguage();
   const { settings, refreshSettings } = useSettings();
   const fd = makeDateFormatter(settings);
-  const { filteredLeaves: leaves, deleteLeave, addLeave, updateLeave, approveLeave, rejectLeave, getEmployeeName, getLeaveTypeName, getLeaveTypeColor, leaveTypes, getLeaveBalance, refreshLeaveBalances, filteredEmployees: employees, employees: allEmployees } = useData();
-  const navigate = useNavigate();
+  const {
+    filteredLeaves: leaves,
+    // Raw, company-wide leaves — needed only for the "Pending for Approvals"
+    // toggle below: filteredLeaves is scoped by org hierarchy (branch/
+    // department/self), which has nothing to do with "Set Recommendator &
+    // Approval" — a recommender/approver can legitimately be assigned to
+    // someone outside their own branch/department, so that toggle must
+    // search the unscoped list, not filteredLeaves.
+    leaves: allLeaves,
+    deleteLeave, addLeave, updateLeave, approveLeave, rejectLeave, recommendLeave, getEmployeeName, getEmployeeById, getLeaveTypeName, getLeaveTypeColor, leaveTypes, getLeaveBalance, refreshLeaveBalances, filteredEmployees: employees, employees: allEmployees,
+  } = useData();
 
   const [filterStatus, setFilterStatus] = useState('all');
+  const [showForApprovalLeave, setShowForApprovalLeave] = useState(false);
+  const [selectedLeaveIds, setSelectedLeaveIds] = useState([]);
   const [filterTypes,  setFilterTypes]  = useState([]);
   const [filterAccum,  setFilterAccum]  = useState('all');
+  const [advFilters,   setAdvFilters]   = useState({ ...DEFAULT_ADV_FILTERS });
+  const [advTempF,     setAdvTempF]     = useState({ ...DEFAULT_ADV_FILTERS });
+  const [advFilterOpen, setAdvFilterOpen] = useState(false);
+  const setAdvTF = (key, val) => setAdvTempF(p => ({ ...p, [key]: val }));
+  const openAdvFilter  = () => { setAdvTempF({ ...advFilters }); setAdvFilterOpen(true); };
+  const applyAdvFilter = () => { setAdvFilters({ ...advTempF }); setAdvFilterOpen(false); };
+  const resetAdvFilter = () => setAdvTempF({ ...DEFAULT_ADV_FILTERS });
+  const advFilterCount = [advFilters.branches, advFilters.departments, advFilters.posts,
+    advFilters.grades, advFilters.modes, advFilters.statuses, advFilters.staffIds, advFilters.leaveTypes]
+    .filter(a => a.length > 0).length;
+  // Ctrl+A opens Advance Search — same shortcut across every report/page
+  // that has one, skipped while typing in a text field so it doesn't hijack
+  // native "select all text" there.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.ctrlKey || e.key.toLowerCase() !== 'a') return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+      e.preventDefault();
+      setAdvTempF({ ...advFilters });
+      setAdvFilterOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [advFilters]);
   const [viewLeave,    setViewLeave]    = useState(null);
+  useEffect(() => {
+    if (!viewLeave) return;
+    const onKeyDown = (e) => { if (e.key === 'Escape') setViewLeave(null); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [viewLeave]);
   const [editLeave,    setEditLeave]    = useState(null); // leave being edited
   const [editForm,     setEditForm]     = useState({});
   const [editErrors,   setEditErrors]   = useState({});
@@ -72,12 +247,54 @@ const LeavePanel = () => {
   /* Ctrl+S submits the Edit Leave form — same action as the Save Changes button */
   useSaveShortcut(!!editLeave, () => editFormRef.current?.requestSubmit());
   const manualFormRef = useRef(null);
+
+  // Raw-field editing — reachable via the "✏️ Edit" action inside the
+  // right-side detail panel (canManageStaff only) or a still-untouched
+  // owner editing their own pending application. Clicking a grid row opens
+  // that panel (see SidePanelShell usage below), with Edit as one of its
+  // actions.
+  const openEditFormLeave = (row) => {
+    const isOwnPending = String(row.employeeId) === String(currentUser.id)
+      && row.status === 'pending' && !row.recommendedBy;
+    if (!canManageStaff && !isOwnPending) return;
+    const toDateStr = (v) => v ? String(v).split('T')[0] : '';
+    setEditForm({
+      employeeId:      String(row.employeeId),
+      leaveTypeCode:   row.leaveTypeCode || '',
+      fromDate:        toDateStr(row.fromDate),
+      toDate:          toDateStr(row.toDate),
+      halfDay:         !!row.halfDay,
+      reason:          row.reason        || '',
+      status:          row.status        || 'pending',
+      recommendedBy:   String(row.recommendedBy  || ''),
+      recommendedDate: toDateStr(row.recommendedDate),
+      approvedBy:      String(row.approvedBy     || ''),
+      approvedDate:    toDateStr(row.approvedDate),
+    });
+    setEditErrors({});
+    setEditLeave(row);
+  };
   const [delConfirm,   setDelConfirm]   = useState(null);
   const [showApply,    setShowApply]    = useState(false);
+  // Full-width popup for the Leave Approval page — opened instead of
+  // navigating away, for managers with no personal reco/approval assignment
+  // (a configured recommender/approver gets the inline toggle below instead).
+  const [showLeaveApprovalModal, setShowLeaveApprovalModal] = useState(false);
+  const { getRecoIds: getLeaveRecoIds, getApprovalIds: getLeaveApprovalIds, assignments: leaveRecoAssignments, refresh: refreshRecoApproval } = useRecoApproval();
+  const { opening: leaveOpening, refresh: refreshLeaveOpening } = useLeaveOpening();
   // Refetch settings right as Apply opens — this page stays mounted for the
   // whole session, so a long-open tab would otherwise keep enforcing
-  // whatever leaveBackdateEnabled was when it first loaded.
-  useEffect(() => { if (showApply) refreshSettings(); }, [showApply]);
+  // whatever leaveBackdateEnabled was when it first loaded. Same reasoning
+  // for the reco/approval assignments (useRecoApproval fetches once on this
+  // page's initial mount, and this page never unmounts afterward) and the
+  // leave opening figures (an admin could save new ones in Leave Calculation
+  // while this tab is still open).
+  useEffect(() => { if (showApply) { refreshSettings(); refreshRecoApproval(); refreshLeaveOpening(); } }, [showApply]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Same reasoning, for the Edit Leave modal (double-click a row) — without
+  // this, editing an existing application could show "No recommendator/
+  // approver configured" for a staff member whose config was actually set
+  // (or changed) any time after this page was first loaded.
+  useEffect(() => { if (editLeave) refreshRecoApproval(); }, [editLeave]); // eslint-disable-line react-hooks/exhaustive-deps
   // Same reasoning — leaveBalances is normally fetched once at login, so a
   // credit granted elsewhere (e.g. an OT-to-leave grant on the Overtime
   // Approval page) wouldn't show up in "days remaining" here without this.
@@ -86,18 +303,25 @@ const LeavePanel = () => {
   const [manualForm,   setManualForm]   = useState({ employeeId:'', leaveTypeCode:'', fromDate:'', toDate:'', halfDay:false, reason:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualErrors, setManualErrors] = useState({});
   const [manualToast,  setManualToast]  = useState(null);
+  // Bumped after each Ctrl+S save to force the Staff picker to remount (and
+  // re-run its autoOpen) so back-to-back manual postings can be typed
+  // straight in without touching the mouse — see handleManualSubmit below.
+  const [manualResetKey, setManualResetKey] = useState(0);
+  // Confirmation of the most recent save — the form itself clears right
+  // after saving (see handleManualSubmit), so this is tracked separately
+  // rather than read off manualForm, and persists until the next save.
+  const [manualLastSaved, setManualLastSaved] = useState(null);
   /* Ctrl+S submits the Manual Entry form — same action as the Save button */
   useSaveShortcut(showManual, () => manualFormRef.current?.requestSubmit());
+  useEffect(() => { if (showManual) refreshRecoApproval(); }, [showManual]); // eslint-disable-line react-hooks/exhaustive-deps
   /* ── Inline approve/reject modal ── */
   const [actionModal, setActionModal]   = useState(null); // { id, type:'approve'|'reject', leave }
   const [comment,     setComment]       = useState('');
   const [actionToast, setActionToast]   = useState(null);
 
   /* ── Reco/approval config for inline approval logic ── */
-  const recoConfig = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-  }, []);
-  const isRecoCompulsoryLeave = recoConfig._settings?.isRecoCompulsory || false;
+  const recoConfig = leaveRecoAssignments;
+  const isRecoCompulsoryLeave = settings.recoApprovalCompulsory || false;
   const isApproverForLeave    = (empId) => {
     const a = recoConfig[String(empId)]?.approval;
     const ids = Array.isArray(a) ? a : (a ? [a] : []);
@@ -108,6 +332,70 @@ const LeavePanel = () => {
     const ids = Array.isArray(r) ? r : (r ? [r] : []);
     return ids.map(String).includes(String(currentUser.id));
   };
+  // Whether this employee has ANY recommender configured — if not,
+  // Recommendation Compulsory is unsatisfiable for them and must not block
+  // their approver. Mirrors authorizeRecoAction's server-side check.
+  const hasRecommenderForLeave = (empId) => {
+    const r = recoConfig[String(empId)]?.reco;
+    const ids = Array.isArray(r) ? r : (r ? [r] : []);
+    return ids.length > 0;
+  };
+  // Shared permission computation for one row — used by both the row-level
+  // action buttons and the view/action popup, so the two never disagree.
+  const getLeaveRowPerms = (row) => {
+    const amApprover     = isApproverForLeave(row.employeeId);
+    const amRecommender  = isRecommenderForLeave(row.employeeId);
+    const recoConfigured = hasRecommenderForLeave(row.employeeId);
+    // Separation of duties: while Recommendation Compulsory is on AND a
+    // recommender is actually configured, the configured recommender can
+    // never also approve — even if they're also configured as the approver.
+    // Mirrored server-side in authorizeRecoAction. With no recommender
+    // configured at all, compulsory can't apply — nobody exists who could
+    // ever satisfy it.
+    const dualRoleBlocked = isRecoCompulsoryLeave && recoConfigured && amRecommender;
+    const canApprove = amApprover && !dualRoleBlocked && (!isRecoCompulsoryLeave || !!row.recommendedBy || !recoConfigured);
+    return { amApprover, amRecommender, canApprove, dualRoleBlocked, alreadyReco: !!row.recommendedBy };
+  };
+  // Shared with the grid's actions column, right-click menu, and the
+  // toolbar Edit button — same rule openEditFormLeave itself enforces
+  // (canManageStaff, or the applicant editing their own still-untouched
+  // pending application), and the same Delete rule the view popup uses.
+  const canEditLeaveRow = (row) => {
+    const isOwnPending = String(row.employeeId) === String(currentUser.id)
+      && row.status === 'pending' && !row.recommendedBy;
+    return canManageStaff || isOwnPending;
+  };
+  const canDeleteLeaveRow = (row) => {
+    const isOwnPendingUntouched = String(row.employeeId) === String(currentUser.id)
+      && row.status === 'pending' && !row.recommendedBy;
+    return isManager || isOwnPendingUntouched;
+  };
+  // Names of the employee's CONFIGURED recommender(s)/approver(s) (Staff
+  // Detail → "Set Recommendator & Approval") for the grid's own columns —
+  // distinct from recommendedBy/approvedBy, which is who actually acted on
+  // this specific application (blank until someone has).
+  const recoApprovalNamesForLeave = (empId, type) => {
+    const v = recoConfig[String(empId)]?.[type];
+    const ids = Array.isArray(v) ? v : (v ? [v] : []);
+    return ids.length ? ids.map(id => getEmployeeName(id)).join(', ') : '—';
+  };
+
+  // Whether the current user is configured as recommender/approver for
+  // ANYONE at all — gates the "Pending for Approvals" link to Leave
+  // Approval below, alongside isManager. Without this, someone individually
+  // set up as a colleague's approver (but not holding the branchManager/
+  // admin role) never got any way to reach their pending approvals from
+  // this page — Leave Management only ever showed their own applications.
+  const hasAnyRecoAssignmentLeave = Object.entries(recoConfig).some(([key, cfg]) => {
+    if (key === '_settings') return false;
+    const reco     = Array.isArray(cfg?.reco)     ? cfg.reco     : (cfg?.reco     != null ? [cfg.reco]     : []);
+    const approval = Array.isArray(cfg?.approval) ? cfg.approval : (cfg?.approval != null ? [cfg.approval] : []);
+    return reco.map(String).includes(String(currentUser.id)) || approval.map(String).includes(String(currentUser.id));
+  });
+  const pendingForApprovalCountLeave = leaves.filter(l =>
+    l.status === 'pending' && String(l.employeeId) !== String(currentUser.id) &&
+    (isRecommenderForLeave(l.employeeId) || isApproverForLeave(l.employeeId))
+  ).length;
 
   /* ── Apply form state ── */
   const today = getNepalTodayISO();
@@ -125,10 +413,25 @@ const LeavePanel = () => {
   /* leave type config from settings */
   const ltConfigs = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
 
-  /* ── Balance from Leave Calculation (ls_leaveOpening) for current FY ── */
+  /* Advance Search dropdown option lists — same shape/source as the
+     Advanced Filter in Leave Calculation, so results agree across pages. */
+  const advBranchOpts = useMemo(() => (settings.branches||[]).map(b => ({ value:b.name, label:b.name })), [settings.branches]);
+  const advDeptOpts   = useMemo(() => (settings.departments||[]).map(d => ({ value:d.name, label:d.name })), [settings.departments]);
+  const advPostOpts   = useMemo(() => (settings.posts||[]).map(p => ({ value:p.name, label:p.name })), [settings.posts]);
+  const advGradeOpts  = useMemo(() => (settings.grades||[]).map(g => ({ value:g.name, label:g.name })), [settings.grades]);
+  const advModeOpts   = useMemo(() => (settings.modes||[]).map(m => ({ value:m.name, label:m.name })), [settings.modes]);
+  const advStatusOpts = useMemo(() => (settings.employeeStatuses||[]).map(s => ({ value:s.name, label:s.name })), [settings.employeeStatuses]);
+  const advStaffOpts  = useMemo(() => (allEmployees||[]).filter(e=>e.active).map(e => ({
+    value: String(e.id),
+    label: e.fullName,
+    sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+    photo: e.profilePhoto,
+  })), [allEmployees]);
+  const advLeaveTypeOpts = useMemo(() => ltConfigs.map(lt => ({ value:lt.shortName, label:`${lt.name} (${lt.shortName})` })), [ltConfigs]);
+
+  /* ── Balance from Leave Calculation's saved opening figures, for current FY ── */
   const balance = useMemo(() => {
     try {
-      const opening   = JSON.parse(localStorage.getItem('ls_leaveOpening') || '{}');
       const defaultFY = (settings.fiscalYears || []).find(f => f.isDefault) || (settings.fiscalYears || [])[0];
       if (!defaultFY) return getLeaveBalance(currentUser.id);
 
@@ -138,8 +441,8 @@ const LeavePanel = () => {
 
       const result = {};
       ltConfigs.forEach(lt => {
-        const prevYear = Number(opening[prevKey]?.[empId]?.[lt.shortName] ?? 0);
-        const currYear = Number(opening[fyId]?.[empId]?.[lt.shortName]    ?? 0);
+        const prevYear = Number(leaveOpening[prevKey]?.[empId]?.[lt.shortName] ?? 0);
+        const currYear = Number(leaveOpening[fyId]?.[empId]?.[lt.shortName]    ?? 0);
         const used     = (leaves || [])
           .filter(l => String(l.employeeId) === empId
                     && l.leaveTypeCode === lt.shortName
@@ -155,7 +458,7 @@ const LeavePanel = () => {
     } catch {
       return getLeaveBalance(currentUser.id);
     }
-  }, [settings.fiscalYears, currentUser.id, ltConfigs, leaves, getLeaveBalance]);
+  }, [settings.fiscalYears, currentUser.id, ltConfigs, leaves, getLeaveBalance, leaveOpening]);
   const selectedLtConfig = useMemo(() =>
     ltConfigs.find(lt => lt.shortName === applyForm.leaveTypeCode),
   [ltConfigs, applyForm.leaveTypeCode]);
@@ -174,16 +477,11 @@ const LeavePanel = () => {
     return s;
   }, [settings.publicHolidays]);
 
-  /* reco/approval — read fresh from localStorage each time modal opens */
-  const getMyRecoApproval = useCallback(() => {
-    const saved = loadRecoApproval();
-    const r = saved[currentUser.id]?.reco;
-    const a = saved[currentUser.id]?.approval;
-    return {
-      reco:     Array.isArray(r) ? r : (r ? [r] : []),
-      approval: Array.isArray(a) ? a : (a ? [a] : []),
-    };
-  }, [currentUser.id]);
+  /* reco/approval — live from the API (useRecoApproval above) */
+  const getMyRecoApproval = useCallback(() => ({
+    reco:     getLeaveRecoIds(currentUser.id),
+    approval: getLeaveApprovalIds(currentUser.id),
+  }), [currentUser.id, getLeaveRecoIds, getLeaveApprovalIds]);
 
   /* use all employees so reco/approval from any branch/dept can be resolved */
   const getEmpName = useCallback((id) =>
@@ -284,8 +582,24 @@ const LeavePanel = () => {
   };
 
   /* ── Grid data ── */
-  const displayLeaves = leaves.filter(l => {
-    if (!isManager && String(l.employeeId) !== String(currentUser.id)) return false;
+  // Newest first (by Applied Date, falling back to From Date for ties/
+  // missing values) — previously this was left in whatever order the API
+  // returned rows (insertion order), not date order.
+  const byAppliedDateDesc = (a, b) =>
+    new Date(b.appliedDate || b.fromDate) - new Date(a.appliedDate || a.fromDate);
+  // "Pending for Approvals" is a separate scope, not an org-hierarchy view —
+  // it needs the unscoped allLeaves so a cross-branch/department assignment
+  // (someone this user is configured as recommender/approver for, but who
+  // isn't in their own org-scope) still shows up. The normal "my/my team's
+  // applications" view keeps using the org-scoped `leaves` (filteredLeaves)
+  // exactly as before.
+  const displayLeaves = (showForApprovalLeave ? allLeaves : leaves).filter(l => {
+    if (showForApprovalLeave) {
+      if (String(l.employeeId) === String(currentUser.id)) return false;
+      if (!isRecommenderForLeave(l.employeeId) && !isApproverForLeave(l.employeeId)) return false;
+    } else if (!isManager && String(l.employeeId) !== String(currentUser.id)) {
+      return false;
+    }
     if (filterStatus !== 'all' && l.status !== filterStatus) return false;
     if (filterTypes.length > 0 && !filterTypes.includes(l.leaveTypeCode)) return false;
     if (filterAccum !== 'all') {
@@ -293,12 +607,28 @@ const LeavePanel = () => {
       if (filterAccum === 'accumulate'    && ltc && !ltc.carryForward)  return false;
       if (filterAccum === 'nonAccumulate' && ltc &&  ltc.carryForward)  return false;
     }
+    if (advFilterCount > 0) {
+      const emp = getEmployeeById(l.employeeId);
+      if (advFilters.branches.length     && !advFilters.branches.includes(emp?.branch))          return false;
+      if (advFilters.departments.length  && !advFilters.departments.includes(emp?.department))   return false;
+      if (advFilters.posts.length        && !advFilters.posts.includes(emp?.position))           return false;
+      if (advFilters.grades.length       && !advFilters.grades.includes(emp?.grade))             return false;
+      if (advFilters.modes.length        && !advFilters.modes.includes(emp?.mode))               return false;
+      if (advFilters.statuses.length     && !advFilters.statuses.includes(emp?.status))          return false;
+      if (advFilters.staffIds.length     && !advFilters.staffIds.includes(String(l.employeeId))) return false;
+      if (advFilters.leaveTypes.length   && !advFilters.leaveTypes.includes(l.leaveTypeCode))    return false;
+    }
     return true;
-  });
+  }).sort(byAppliedDateDesc);
 
-  const countByStatus = s => leaves.filter(l =>
-    (!isManager ? String(l.employeeId) === String(currentUser.id) : true) && (s === 'all' || l.status === s)
-  ).length;
+  const countByStatus = s => (showForApprovalLeave ? allLeaves : leaves).filter(l => {
+    if (showForApprovalLeave) {
+      return String(l.employeeId) !== String(currentUser.id)
+        && (isRecommenderForLeave(l.employeeId) || isApproverForLeave(l.employeeId))
+        && (s === 'all' || l.status === s);
+    }
+    return (!isManager ? String(l.employeeId) === String(currentUser.id) : true) && (s === 'all' || l.status === s);
+  }).length;
 
   /* language-aware leave type name lookup */
   const getLeaveLabel = (code) => {
@@ -309,8 +639,35 @@ const LeavePanel = () => {
     return language === 'np' ? (lt2.name || code) : (lt2.nameEn || lt2.name || code);
   };
 
+  /* ── Bulk actions (checkbox toolbar, near Search) — each just re-runs the
+     same single-item action per selected id; per-employee authorization is
+     still fully enforced server-side on every call, so a selection mixing
+     eligible and ineligible rows simply skips the ineligible ones instead of
+     failing the whole batch. ── */
+  const bulkApproveLeaves = async () => {
+    await Promise.allSettled(selectedLeaveIds.map(id => approveLeave(id, currentUser.id)));
+    setSelectedLeaveIds([]);
+  };
+  const bulkRejectLeaves = async () => {
+    await Promise.allSettled(selectedLeaveIds.map(id => rejectLeave(id, currentUser.id, 'Declined')));
+    setSelectedLeaveIds([]);
+  };
+  const bulkDeleteLeaves = async () => {
+    if (!confirm(t('Are you sure you want to delete this record?'))) return;
+    await Promise.allSettled(selectedLeaveIds.map(id => deleteLeave(id)));
+    setSelectedLeaveIds([]);
+  };
+
   const columns = [
-    { field: 'employeeId',    header: t('Name'),         width: 160, render: v => <span style={{ fontWeight:600, color:'#111827' }}>{getEmployeeName(v)}</span> },
+    { field: 'staffId',       header: 'Staff ID',        width: 90, render: (_, row) => (
+        <span style={{ color:'#6b7280' }}>{getEmployeeById(row.employeeId)?.employeeId || '—'}</span>
+      ) },
+    { field: 'employeeId',    header: t('Name'),         width: 160, render: v => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight:600, color:'#111827' }}>
+          <Avatar photo={getEmployeeById(v)?.profilePhoto} name={getEmployeeName(v)} size={22} />
+          {getEmployeeName(v)}
+        </span>
+      ) },
     { field: 'leaveTypeCode', header: t('Type'),         width: 150, render: v => (
       <span style={{ display:'flex', alignItems:'center', gap:6 }}>
         <span style={{ width:8, height:8, borderRadius:'50%', background:getLeaveTypeColor(v), display:'inline-block', flexShrink:0 }}></span>
@@ -318,9 +675,14 @@ const LeavePanel = () => {
       </span>
     )},
     { field: 'isManual', header: language==='np' ? 'प्रकार' : 'App. Type', width: 110,
-      render: (v, row) => {
-        /* isManual=true (explicit) OR heuristic: submitted for a different employee by a manager */
-        const isMan = v === true || String(row.employeeId) !== String(currentUser.id);
+      render: (v) => {
+        // Real, persisted flag — true only when actually submitted through
+        // the Manual Posting form; false for the normal self-service Apply
+        // flow, regardless of who's viewing this grid (previously this
+        // guessed "Manual" for every row that didn't belong to the current
+        // viewer, which marked nearly every application Manual for anyone
+        // but the applicant themselves).
+        const isMan = v === true;
         return (
           <span style={{ fontSize:12, fontWeight:600, padding:'2px 9px', borderRadius:10, whiteSpace:'nowrap',
             background: isMan ? '#fef3c7' : '#eff6ff',
@@ -335,45 +697,13 @@ const LeavePanel = () => {
     },
     { field: 'fromDate',      header: t('From Date'),    width: 110, render: v => fd(v) },
     { field: 'toDate',        header: t('To Date'),      width: 110, render: v => fd(v) },
-    { field: 'days',          header: t('Days'),         width: 60,  align:'center', render: v => <strong style={{ color:'#1a56db' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</strong> },
-    { field: 'reason',        header: t('Reason'),       width: 150, render: v => <span style={{ maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', display:'block', fontSize:14 }}>{v}</span> },
+    { field: 'days',          header: t('Days'),         width: 45, minWidth: 45, align:'center', render: v => <strong style={{ color:'#1a56db' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</strong> },
     { field: 'appliedDate',   header: t('Applied Date'), width: 110, render: v => fd(v) },
     { field: 'status',        header: t('Status'),       width: 110, render: v => <StatusBadge status={v} /> },
-    { field: 'actions', header: t('Actions'), width: 110, filterable:false, sortable:false, render: (_, row) => (
-      <div className="dg-actions">
-        <button className="dg-action-btn view"   title={t('View')}   onClick={e => { e.stopPropagation(); setViewLeave(row); }}>👁</button>
-        {(isManager || row.status === 'pending') && (
-          <button className="dg-action-btn delete" title={t('Delete')} onClick={e => { e.stopPropagation(); setDelConfirm(row.id); }}>🗑</button>
-        )}
-        {row.status === 'pending' && (() => {
-          const amApprover    = isApproverForLeave(row.employeeId);
-          const amRecommender = isRecommenderForLeave(row.employeeId);
-          const canApprove    = amApprover && (!isRecoCompulsoryLeave || !!row.recommendedBy);
-          const involved      = amApprover || amRecommender || isManager;
-          if (!involved) return null;
-          return (
-            <>
-              {/* Approve — visible to approvers/managers, disabled for reco-only */}
-              <button className="dg-action-btn approve"
-                title={!amApprover ? 'You are a recommendator only — approval not permitted'
-                       : !canApprove ? 'Awaiting recommendation first' : t('Approve')}
-                disabled={!amApprover || !canApprove}
-                style={{ opacity: (!amApprover || !canApprove) ? 0.4 : 1, cursor: (!amApprover || !canApprove) ? 'not-allowed' : 'pointer' }}
-                onClick={e => { e.stopPropagation(); if (amApprover && canApprove) { setActionModal({ id:row.id, type:'approve', leave:row }); setComment(''); } }}>
-                ✓
-              </button>
-              {/* Reject — only for approvers/managers */}
-              {(amApprover || isManager) && (
-                <button className="dg-action-btn reject" title={t('Reject')}
-                  onClick={e => { e.stopPropagation(); setActionModal({ id:row.id, type:'reject', leave:row }); setComment(''); }}>
-                  ✗
-                </button>
-              )}
-            </>
-          );
-        })()}
-      </div>
-    )},
+    { field: 'recommendatorNames', header: 'Recommendator', width: 150, sortable:false, filterable:false,
+      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForLeave(row.employeeId, 'reco')}</span> },
+    { field: 'approvalNames', header: 'Approval', width: 150, sortable:false, filterable:false,
+      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForLeave(row.employeeId, 'approval')}</span> },
   ];
 
   /* ── Rejection notifications ── */
@@ -613,13 +943,25 @@ const LeavePanel = () => {
 
             {/* Right: action buttons */}
             <div style={{ display:'flex', gap:8, flexShrink:0, flexWrap:'wrap' }}>
-              {isManager && (
-                <button className="btn btn-outline btn-sm" onClick={() => navigate('/leave/approval')}>
-                  ✅ {t('Leave Approval')}
+              {(isManager || hasAnyRecoAssignmentLeave) && (
+                <button className={`btn btn-sm ${showForApprovalLeave ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => {
+                    // A configured recommender/approver gets an inline toggle
+                    // right on this tab (below) instead of the separate
+                    // Leave Approval view — a manager with no personal
+                    // assignment gets that fuller oversight view (stats,
+                    // org-wide list, etc.) as a full-width popup here instead
+                    // of navigating away to its own page.
+                    if (hasAnyRecoAssignmentLeave) setShowForApprovalLeave(v => !v);
+                    else setShowLeaveApprovalModal(true);
+                  }}>
+                  ✅ {hasAnyRecoAssignmentLeave
+                    ? `Pending for Approvals${pendingForApprovalCountLeave ? ` (${pendingForApprovalCountLeave})` : ''}`
+                    : t('Leave Approval')}
                 </button>
               )}
               {canManageStaff && (
-                <button className="btn btn-sm" onClick={() => { setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today }); setManualErrors({}); setShowManual(true); }}
+                <button className="btn btn-sm" onClick={() => { setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today }); setManualErrors({}); setManualLastSaved(null); setShowManual(true); }}
                   style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
                   ✍️ Manual Posting
                 </button>
@@ -632,34 +974,69 @@ const LeavePanel = () => {
         );
       })()}
 
-      <DataGrid columns={columns} data={displayLeaves} defaultPageSize={10} showSearch searchPlaceholder={t('Search') + '...'}
-        onRowDoubleClick={row => {
-          const toDateStr = (v) => v ? String(v).split('T')[0] : '';
-          setEditForm({
-            employeeId:      String(row.employeeId),
-            leaveTypeCode:   row.leaveTypeCode || '',
-            fromDate:        toDateStr(row.fromDate),
-            toDate:          toDateStr(row.toDate),
-            halfDay:         !!row.halfDay,
-            reason:          row.reason        || '',
-            status:          row.status        || 'pending',
-            recommendedBy:   String(row.recommendedBy  || ''),
-            recommendedDate: toDateStr(row.recommendedDate),
-            approvedBy:      String(row.approvedBy     || ''),
-            approvedDate:    toDateStr(row.approvedDate),
-          });
-          setEditErrors({});
-          setEditLeave(row);
-        }}
+      <DataGrid columns={columns} data={displayLeaves} defaultPageSize={20} pageSizeOptions={[5, 10, 20, 50, 100]} showSearch searchPlaceholder={t('Search') + '...'}
+        showFilterButton={false}
+        toolbarRightInset={viewLeave ? 456 : 0}
+        onRowClick={row => setViewLeave(v => v?.id === row.id ? null : row)}
+        onFocusChange={row => setViewLeave(row)}
+        onSelectionChange={setSelectedLeaveIds}
+        contextMenu={[
+          { label: t('Add New'), icon:'➕', onClick: () => openApply() },
+          'divider',
+          { label: t('Edit'), icon:'✏️', onClick: (row) => { if (canEditLeaveRow(row)) openEditFormLeave(row); } },
+          'divider',
+          { label: t('Delete'), icon:'🗑', className:'danger', onClick: (row) => { if (canDeleteLeaveRow(row)) setDelConfirm(row.id); } },
+        ]}
+        toolbar={
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="dg-filter-btn" onClick={openAdvFilter}>
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
+              </svg>
+              {t('Advance Search')}{advFilterCount > 0 ? ` (${advFilterCount})` : ''}
+            </button>
+            {showForApprovalLeave && (
+              <>
+                <button className="btn btn-sm btn-success" disabled={!selectedLeaveIds.length} onClick={bulkApproveLeaves}
+                  style={{ opacity: selectedLeaveIds.length ? 1 : 0.45, cursor: selectedLeaveIds.length ? 'pointer' : 'not-allowed' }}>
+                  ✓ {t('Approve')} {selectedLeaveIds.length ? `(${selectedLeaveIds.length})` : ''}
+                </button>
+                <button className="btn btn-sm btn-danger" disabled={!selectedLeaveIds.length} onClick={bulkRejectLeaves}
+                  style={{ opacity: selectedLeaveIds.length ? 1 : 0.45, cursor: selectedLeaveIds.length ? 'pointer' : 'not-allowed' }}>
+                  ✗ {t('Reject')} {selectedLeaveIds.length ? `(${selectedLeaveIds.length})` : ''}
+                </button>
+              </>
+            )}
+            <button className="btn btn-sm btn-outline" disabled={selectedLeaveIds.length !== 1}
+              onClick={() => { const row = displayLeaves.find(l => l.id === selectedLeaveIds[0]); if (row) openEditFormLeave(row); }}
+              style={{ opacity: selectedLeaveIds.length === 1 ? 1 : 0.45, cursor: selectedLeaveIds.length === 1 ? 'pointer' : 'not-allowed' }}>
+              ✏️ {t('Edit')}
+            </button>
+            <button className="btn btn-sm btn-outline" disabled={!selectedLeaveIds.length} onClick={bulkDeleteLeaves}
+              style={{ opacity: selectedLeaveIds.length ? 1 : 0.45, cursor: selectedLeaveIds.length ? 'pointer' : 'not-allowed' }}>
+              🗑 {t('Delete')} {selectedLeaveIds.length ? `(${selectedLeaveIds.length})` : ''}
+            </button>
+          </div>
+        }
       />
 
-      {/* ── Inline Approve / Reject Modal ── */}
+      <LeaveAdvancedFilter
+        isOpen={advFilterOpen} onClose={() => setAdvFilterOpen(false)}
+        onApply={applyAdvFilter} onReset={resetAdvFilter}
+        tempF={advTempF} setTF={setAdvTF}
+        branchOpts={advBranchOpts} deptOpts={advDeptOpts} postOpts={advPostOpts}
+        gradeOpts={advGradeOpts}   modeOpts={advModeOpts}  statusOpts={advStatusOpts}
+        staffOpts={advStaffOpts}   leaveTypeOpts={advLeaveTypeOpts}
+        showFY={false} showAccum={false} L={(np, en) => language === 'np' ? np : en}
+      />
+
+      {/* ── Inline Recommend / Approve / Reject Modal ── */}
       {actionModal && (
         <div className="modal-overlay">
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>
-                {actionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`} — {t('Leave Application')}
+                {actionModal.type === 'recommend' ? `👍 ${t('Recommend')}` : actionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`} — {t('Leave Application')}
               </h2>
               <button className="modal-close" onClick={() => setActionModal(null)}>✕</button>
             </div>
@@ -693,18 +1070,23 @@ const LeavePanel = () => {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setActionModal(null)}>{t('Cancel')}</button>
               <button
-                className={`btn ${actionModal.type === 'approve' ? 'btn-success' : 'btn-danger'}`}
+                className={`btn ${actionModal.type === 'reject' ? 'btn-danger' : 'btn-success'}`}
                 onClick={() => {
-                  if (actionModal.type === 'approve') {
+                  if (actionModal.type === 'recommend') {
+                    recommendLeave(actionModal.id, currentUser.id, comment);
+                  } else if (actionModal.type === 'approve') {
                     approveLeave(actionModal.id, currentUser.id, comment);
                   } else {
                     rejectLeave(actionModal.id, currentUser.id, comment);
                   }
-                  setActionToast({ msg: actionModal.type === 'approve' ? t('Application approved') : t('Application rejected'), type: actionModal.type === 'approve' ? 'success' : 'danger' });
+                  setActionToast({
+                    msg: actionModal.type === 'recommend' ? t('Application recommended') : actionModal.type === 'approve' ? t('Application approved') : t('Application rejected'),
+                    type: actionModal.type === 'reject' ? 'danger' : 'success',
+                  });
                   setTimeout(() => setActionToast(null), 3000);
                   setActionModal(null); setComment('');
                 }}>
-                {actionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`}
+                {actionModal.type === 'recommend' ? `👍 ${t('Recommend')}` : actionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`}
               </button>
             </div>
           </div>
@@ -776,7 +1158,12 @@ const LeavePanel = () => {
           const apprIds = toIds(cfg.approval).map(String);
           const toOpts = (ids) => ids.map(id => {
             const e = activeEmps.find(x => String(x.id) === id);
-            return { value: id, label: e ? e.fullName : `#${id}` };
+            return {
+              value: id,
+              label: e ? e.fullName : `#${id}`,
+              sub: e ? [e.employeeId, e.position].filter(Boolean).join(' - ') : '',
+              photo: e?.profilePhoto,
+            };
           });
           return { recoOpts: toOpts(recoIds), apprOpts: toOpts(apprIds) };
         })();
@@ -848,11 +1235,17 @@ const LeavePanel = () => {
                       value={editForm.reason} onChange={e => setEF('reason', e.target.value)} style={{ fontSize:13 }} />
                   </div>
 
-                  {/* Status */}
+                  {/* Status — only admin/manager can change this here; a
+                      staff member editing their own still-pending leave
+                      can't set their own outcome (that's what Approve/
+                      Reject on the grid, done by the assigned approver, is
+                      for). */}
                   <div className="form-group">
                     <Lbl required>Status</Lbl>
                     <select value={editForm.status} onChange={e => setEF('status', e.target.value)}
-                      className="form-control" style={{ fontSize:13 }}>
+                      disabled={!canManageStaff}
+                      title={!canManageStaff ? 'Only an approver can change the status of your application' : undefined}
+                      className="form-control" style={{ fontSize:13, opacity: canManageStaff ? 1 : .65 }}>
                       <option value="pending">Pending</option>
                       <option value="approved">Approved</option>
                       <option value="rejected">Rejected</option>
@@ -867,7 +1260,7 @@ const LeavePanel = () => {
                         onChange={v => setEF('recommendedBy', v)}
                         options={editEmpRecoAppr.recoOpts}
                         placeholder={editEmpRecoAppr.recoOpts.length === 0 ? 'No recommendator configured' : '— Select Recommendator —'}
-                        disabled={editEmpRecoAppr.recoOpts.length === 0} />
+                        disabled={editEmpRecoAppr.recoOpts.length === 0} showAvatar />
                     </div>
                     <div className="form-group">
                       <Lbl>Recommended Date</Lbl>
@@ -884,7 +1277,7 @@ const LeavePanel = () => {
                         onChange={v => setEF('approvedBy', v)}
                         options={editEmpRecoAppr.apprOpts}
                         placeholder={editEmpRecoAppr.apprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
-                        disabled={editEmpRecoAppr.apprOpts.length === 0} />
+                        disabled={editEmpRecoAppr.apprOpts.length === 0} showAvatar />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
@@ -939,6 +1332,7 @@ const LeavePanel = () => {
               const d = Math.floor((to - from) / 86400000) + 1;
               return isNaN(d) || d < 1 ? 1 : d;
             })();
+          const savedDevice = getDeviceInfo();
           await addLeave({
             employeeId:       manualForm.employeeId,
             leaveTypeCode:    manualForm.leaveTypeCode,
@@ -954,8 +1348,18 @@ const LeavePanel = () => {
             recommendedDate:  manualForm.recommendedDate  || null,
             approvedBy:       manualForm.approvedBy       || null,
             approvedDate:     manualForm.approvedDate      || null,
+            deviceInfo:       savedDevice,
           });
-          setShowManual(false);
+          // Stay on the form for back-to-back manual postings instead of
+          // closing — clear the fields and reopen the Staff picker ready for
+          // the next entry.
+          setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today });
+          setManualErrors({});
+          setManualResetKey(k => k + 1);
+          // addLeave only returns the new id, not the saved row — build the
+          // confirmation from what we already know client-side rather than a
+          // second round-trip.
+          setManualLastSaved({ updatedByName: currentUser.fullName, updatedAt: new Date().toISOString(), updatedDevice: savedDevice });
           setManualToast({ msg:'Leave entry posted manually', type:'success' });
           setTimeout(() => setManualToast(null), 2500);
         };
@@ -971,7 +1375,9 @@ const LeavePanel = () => {
           .sort((a, b) => staffRankCompare(a, b, settings));
         const empOpts = activeEmps.map(e => ({
           value: String(e.id),
-          label: `${e.fullName}${e.employeeId ? ` [${e.employeeId}]` : ''}${e.department ? ` — ${e.department}` : ''}`,
+          label: e.fullName,
+          sub: [e.employeeId, e.position || e.department].filter(Boolean).join(' - '),
+          photo: e.profilePhoto,
         }));
         const ltOpts = ltConfigs.map(lt => ({ value: lt.shortName, label: lt.name }));
 
@@ -980,8 +1386,8 @@ const LeavePanel = () => {
         const toIds         = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map(String);
         const manualRecoIds = toIds(manualCfg.reco);
         const manualApprIds = toIds(manualCfg.approval);
-        const manualRecoOpts = activeEmps.filter(e => manualRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
-        const manualApprOpts = activeEmps.filter(e => manualApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
+        const manualRecoOpts = activeEmps.filter(e => manualRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
+        const manualApprOpts = activeEmps.filter(e => manualApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
 
         return (
           <div className="modal-overlay">
@@ -1001,9 +1407,9 @@ const LeavePanel = () => {
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
                     <div style={{ outline: manualErrors.employeeId ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
-                      <SearchableSelect value={manualForm.employeeId}
+                      <SearchableSelect key={manualResetKey} autoOpen={manualResetKey > 0} value={manualForm.employeeId}
                         onChange={v => setManualForm(p => ({ ...p, employeeId: v, recommendedBy: '', approvedBy: '' }))}
-                        options={empOpts} placeholder="— Search & Select Staff —" />
+                        options={empOpts} placeholder="— Search & Select Staff —" showAvatar />
                     </div>
                     <Err msg={manualErrors.employeeId} />
                   </div>
@@ -1070,7 +1476,7 @@ const LeavePanel = () => {
                       <SearchableSelect value={manualForm.recommendedBy} onChange={v => setMF('recommendedBy', v)}
                         options={manualRecoOpts}
                         placeholder={!manualForm.employeeId ? '— Select staff first —' : manualRecoOpts.length === 0 ? 'No recommendator configured' : '— Select Recommendator —'}
-                        disabled={!manualForm.employeeId || manualRecoOpts.length === 0} />
+                        disabled={!manualForm.employeeId || manualRecoOpts.length === 0} showAvatar />
                     </div>
                     <div className="form-group">
                       <Lbl>Recommended Date</Lbl>
@@ -1086,7 +1492,7 @@ const LeavePanel = () => {
                       <SearchableSelect value={manualForm.approvedBy} onChange={v => setMF('approvedBy', v)}
                         options={manualApprOpts}
                         placeholder={!manualForm.employeeId ? '— Select staff first —' : manualApprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
-                        disabled={!manualForm.employeeId || manualApprOpts.length === 0} />
+                        disabled={!manualForm.employeeId || manualApprOpts.length === 0} showAvatar />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
@@ -1095,11 +1501,14 @@ const LeavePanel = () => {
                     </div>
                   </div>
 
-                  <div className="modal-footer" style={{ padding:'14px 0 0', borderTop:'1px solid #e5e7eb', marginTop:4, display:'flex', justifyContent:'flex-end', gap:8 }}>
-                    <button type="button" className="btn btn-outline" onClick={() => setShowManual(false)}>Cancel</button>
-                    <button type="submit" className="btn btn-primary" title="Ctrl+S" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
-                      💾 <u>S</u>ave
-                    </button>
+                  <div className="modal-footer" style={{ padding:'14px 0 0', borderTop:'1px solid #e5e7eb', marginTop:4, display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8 }}>
+                    <LastSavedBy updatedByName={manualLastSaved?.updatedByName} updatedAt={manualLastSaved?.updatedAt} updatedDevice={manualLastSaved?.updatedDevice} fd={fd} />
+                    <div style={{ display:'flex', gap:8, marginLeft:'auto' }}>
+                      <button type="button" className="btn btn-outline" onClick={() => setShowManual(false)}>Cancel</button>
+                      <button type="submit" className="btn btn-primary" title="Ctrl+S" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
+                        💾 <u>S</u>ave
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>
@@ -1394,49 +1803,272 @@ const LeavePanel = () => {
         );
       })()}
 
-      {/* View Modal */}
-      {viewLeave && (
-        <div className="modal-overlay">
-          <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>📅 {t('Leave Application')} #{viewLeave.id}</h2>
-              <button className="modal-close" onClick={() => setViewLeave(null)}>✕</button>
+      {/* Right-side detail panel — also the click destination now, with
+          Add/Print always available, plus Recommend/Approve/Reject/Edit/
+          Delete actions when pending, and just Delete (if authorized) once
+          a decision's already been made. Same fixed-overlay convention as
+          the Contact page, so the grid never shrinks/scrolls for it. */}
+      {viewLeave && (() => {
+        const perms = getLeaveRowPerms(viewLeave);
+        const amReco = isRecommenderForLeave(viewLeave.employeeId);
+        const alreadyReco = !!viewLeave.recommendedBy;
+        const isOwnPendingUntouched = String(viewLeave.employeeId) === String(currentUser.id)
+          && viewLeave.status === 'pending' && !viewLeave.recommendedBy;
+        const canDelete = isManager || isOwnPendingUntouched;
+        const decided = viewLeave.status !== 'pending';
+
+        const printRecord = () => {
+          const box = (v) => `<div style="min-height:44px; white-space:pre-wrap;">${v || ''}</div>`;
+          const checkbox = (label) => `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:28px;">
+            <span style="display:inline-block;width:13px;height:13px;border:1.5px solid #374151;"></span>${label}</span>`;
+          const statusCell = viewLeave.status === 'pending'
+            ? `${checkbox('Approve')}${checkbox('Reject')}`
+            : `<strong>${(viewLeave.status || '').toUpperCase()}</strong>`;
+
+          const recoApprRow = (viewLeave.recommendedBy || viewLeave.approvedBy) ? ['Recommendator & Approval',
+            `<div style="display:flex; gap:28px; flex-wrap:wrap;">
+               <div><strong>Recommendator:</strong> ${viewLeave.recommendedBy ? getEmployeeName(viewLeave.recommendedBy) : '—'}</div>
+               <div><strong>${viewLeave.status === 'rejected' ? 'Rejected' : 'Approval'}:</strong> ${viewLeave.approvedBy ? getEmployeeName(viewLeave.approvedBy) : '—'}</div>
+             </div>`
+          ] : null;
+
+          const rows = [
+            ['Staff', getEmployeeName(viewLeave.employeeId)],
+            ['Leave Type', getLeaveLabel(viewLeave.leaveTypeCode)],
+            ['Days', viewLeave.days],
+            ['From Date', fd(viewLeave.fromDate)],
+            ['To Date', fd(viewLeave.toDate)],
+            ['Applied Date', fd(viewLeave.appliedDate)],
+            ['Reason', box(viewLeave.reason)],
+            ['Status', statusCell],
+            ['Status Remarks', box(viewLeave.comment)],
+            recoApprRow,
+          ].filter(Boolean);
+          const mainTable = `<table>${rows.map(([k, v]) => `<tr><th style="text-align:left;white-space:normal">${k}</th><td style="padding:5px 7px;border:1px solid #dedede">${v}</td></tr>`).join('')}</table>`;
+
+          // Staff signature block, right-aligned — replaces the generic
+          // Prepared/Recommend/Approved footer for this print (skipFooter
+          // below) since the admin section further down already carries
+          // its own, more specific signature lines.
+          const staffSignature = `
+            <div style="display:flex; justify-content:flex-end; margin-top:30px;">
+              <div style="width:220px; text-align:center;">
+                <div style="border-bottom:1.5px dotted #374151; height:28px; margin-bottom:6px;"></div>
+                <div style="font-size:11px; font-weight:700; color:#374151;">Staff Signature</div>
+                <div style="font-size:10px; color:#6b7280; margin-top:2px;">${leaveEmp?.position || ''}</div>
+                <div style="font-size:10px; color:#6b7280; margin-top:2px;">Date: ${fd(today)}</div>
+              </div>
+            </div>`;
+
+          // "For Administration Use Only" — English version of the standard
+          // paper leave-form's admin section, with every configured leave
+          // type's balance (not just this application's) so the approver can
+          // see the full picture at a glance. Same Transferred/Assigned/
+          // Taken/Balance math as LeaveCalculation.jsx's Leave Reports tab
+          // (summaryRowsAll) — iterated over `ltConfigs` (the tenant's real
+          // configured leave types; `leaveTypes` from the leave_types table
+          // is a separate, sometimes-empty list some tenants never populate)
+          // so the numbers here match what that report already shows.
+          const defaultFY  = (settings.fiscalYears || []).find(f => f.isDefault) || (settings.fiscalYears || [])[0];
+          const fyId       = defaultFY ? String(defaultFY.id) : null;
+          const prevFYKey  = fyId ? 'prev_' + fyId : null;
+          const empIdStr   = String(viewLeave.employeeId);
+          let sn = 0;
+          // Same Transferred/Assigned/Total/Taken/Balance math (and the same
+          // "hide an untouched leave type" rule) as LeaveCalculation.jsx's
+          // Leave Reports summary, so these numbers match that report
+          // exactly — plus an "Applied" column (this application's own days,
+          // shown only on its own leave-type row) that report doesn't need.
+          const balanceRows = ltConfigs.map(lt => {
+            const isThisType    = lt.shortName === viewLeave.leaveTypeCode;
+            const prevYear      = fyId ? Number(leaveOpening[prevFYKey]?.[empIdStr]?.[lt.shortName] ?? 0) : 0;
+            const currYear      = fyId ? Number(leaveOpening[fyId]?.[empIdStr]?.[lt.shortName] ?? 0) : 0;
+            const credited      = Number(getLeaveBalance(viewLeave.employeeId)?.[lt.shortName] || 0);
+            const usedApproved  = leaves
+              .filter(l => String(l.employeeId) === empIdStr && l.leaveTypeCode === lt.shortName && l.status === 'approved')
+              .reduce((s, l) => s + Number(l.days || 0), 0);
+            const total   = prevYear + currYear + credited;
+            const balance = total - usedApproved;
+            if (!isThisType && prevYear === 0 && currYear === 0 && usedApproved === 0 && balance === 0) return '';
+            sn++;
+            const cell = 'padding:6px 8px;border:1px solid #e2e8f0;';
+            const rowBg = isThisType ? '#eff6ff' : (sn % 2 === 0 ? '#f8fafc' : '#fff');
+            return `<tr style="background:${rowBg};">
+              <td style="${cell}">${sn}</td>
+              <td style="${cell}text-align:left;">${lt.name}</td>
+              <td style="${cell}">${prevYear}</td>
+              <td style="${cell}">${currYear}</td>
+              <td style="${cell}"><strong>${total}</strong></td>
+              <td style="${cell}">${usedApproved}</td>
+              <td style="${cell}"><strong>${balance}</strong></td>
+              <td style="${cell}${isThisType ? 'color:#1e40af;font-weight:700;' : ''}">${isThisType ? viewLeave.days : ''}</td>
+            </tr>`;
+          }).join('');
+
+          const sigLine = (label, person) => `
+            ${person ? `<div style="font-size:11px; color:#374151; margin-top:14px;">
+              <strong>Name:</strong> ${person.name}${person.level ? ` &nbsp;&nbsp;&nbsp; <strong>Level:</strong> ${person.level}` : ''}${person.post ? ` &nbsp;&nbsp;&nbsp; <strong>Post:</strong> ${person.post}` : ''}
+            </div>` : ''}
+            <div style="margin-top:${person ? 6 : 16}px; display:flex; align-items:flex-end; gap:10px;">
+              <div style="flex:1; border-bottom:1.5px dotted #9ca3af;">&nbsp;</div>
+              <div style="font-size:10px; color:#6b7280; white-space:nowrap;">Date: ${person?.date || '______________'}</div>
             </div>
-            <div className="modal-body">
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-                {[
-                  [t('Name'),        getEmployeeName(viewLeave.employeeId)],
-                  [t('Type'),        getLeaveTypeName(viewLeave.leaveTypeCode)],
-                  [t('From Date'),   fd(viewLeave.fromDate)],
-                  [t('To Date'),     fd(viewLeave.toDate)],
-                  [t('Days'),        viewLeave.days],
-                  [t('Applied Date'),fd(viewLeave.appliedDate)],
-                  [t('Status'),      <StatusBadge status={viewLeave.status} />],
-                  [t('Approved By'), getEmployeeName(viewLeave.approvedBy) || '—'],
-                ].map(([label, val], i) => (
-                  <div key={i}>
-                    <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:2 }}>{label}</div>
-                    <div style={{ fontSize:14, fontWeight:500 }}>{val}</div>
-                  </div>
-                ))}
+            <div style="font-size:11px; font-weight:700; color:#1e3a8a; margin-top:2px;">${label}</div>`;
+
+          // Once a decision's made, show the actual person + when they acted.
+          // Before that, fall back to whoever's configured (Settings → Set
+          // Recommendator & Approval) so a printed-and-carried pending form
+          // still tells the holder who it needs to reach, even unsigned.
+          const recoEmp = viewLeave.recommendedBy ? getEmployeeById(viewLeave.recommendedBy) : null;
+          const apprEmp = viewLeave.approvedBy    ? getEmployeeById(viewLeave.approvedBy)    : null;
+          const assignedReco = recoApprovalNamesForLeave(viewLeave.employeeId, 'reco');
+          const assignedAppr = recoApprovalNamesForLeave(viewLeave.employeeId, 'approval');
+          const recoPerson = recoEmp ? {
+            name: getEmployeeName(viewLeave.recommendedBy), level: recoEmp.grade, post: recoEmp.position,
+            date: viewLeave.recommendedAt ? formatNepalDateTime(viewLeave.recommendedAt, fd) : fd(viewLeave.recommendedDate),
+          } : (assignedReco !== '—' ? { name: assignedReco, level: '', post: '', date: null } : null);
+          const apprPerson = apprEmp ? {
+            name: getEmployeeName(viewLeave.approvedBy), level: apprEmp.grade, post: apprEmp.position,
+            date: viewLeave.approvedAt ? formatNepalDateTime(viewLeave.approvedAt, fd) : fd(viewLeave.approvedDate),
+          } : (assignedAppr !== '—' ? { name: assignedAppr, level: '', post: '', date: null } : null);
+
+          const leaveEndingDate = fd(viewLeave.toDate);
+
+          const adminSection = `
+            <div style="margin-top:26px; border:1.5px solid #cbd5e1; border-radius:10px; padding:16px 18px; background:#fcfdff;">
+              <div style="font-size:12.5px; font-weight:800; color:#1e40af; text-transform:uppercase;
+                letter-spacing:.5px; margin-bottom:12px; border-bottom:2px solid #1e40af; padding-bottom:7px;">
+                For Administration Use Only
               </div>
-              <div style={{ marginTop:14 }}>
-                <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{t('Reason')}</div>
-                <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:6, padding:10, fontSize:13 }}>{viewLeave.reason}</div>
-              </div>
-              {viewLeave.comment && (
-                <div style={{ marginTop:10 }}>
-                  <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{t('Comment')}</div>
-                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:6, padding:10, fontSize:13 }}>{viewLeave.comment}</div>
+              <table style="border-collapse:collapse;">
+                <tr>
+                  <th>SN</th>
+                  <th style="text-align:left;">Leave</th>
+                  <th style="text-align:left;">Transferred</th>
+                  <th style="text-align:left;">Assigned</th>
+                  <th style="text-align:left;">Total</th>
+                  <th style="text-align:left;">Taken</th>
+                  <th style="text-align:left;">Balance</th>
+                  <th style="text-align:left;">Applied</th>
+                </tr>
+                ${balanceRows}
+              </table>
+
+              ${sigLine("Employee's Signature (Employee Administration Branch)")}
+
+              <div style="margin-top:20px; padding-top:14px; border-top:1px dashed #cbd5e1;">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
+                  ${checkbox('Recommended')}${checkbox('Not Recommended')}
+                  <span style="font-size:10px; color:#6b7280;">Leave Ending Date: <strong style="color:#374151;">${leaveEndingDate}</strong></span>
                 </div>
+                <div style="margin-top:10px; font-size:10px; color:#374151;">Remarks, if any: ______________________________________________</div>
+                ${sigLine('Signature of Recommendator Officer', recoPerson)}
+              </div>
+
+              <div style="margin-top:20px; padding-top:14px; border-top:1px dashed #cbd5e1;">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
+                  ${checkbox('Approved')}${checkbox('Not Approved')}
+                  <span style="font-size:10px; color:#6b7280;">Leave Ending Date: <strong style="color:#374151;">${leaveEndingDate}</strong></span>
+                </div>
+                ${sigLine('Signature of Approving Officer', apprPerson)}
+                ${(apprPerson?.post || apprPerson?.level) ? '' : '<div style="margin-top:10px; font-size:10px; color:#374151;">Level / Post: ______________________________</div>'}
+              </div>
+            </div>`;
+
+          const contentHtml = mainTable + staffSignature + adminSection;
+          openPrintWindow(buildPrintDoc({ settings, language, reportTitle: 'Leave Application', contentHtml, skipFooter: true, bordered: true }));
+        };
+
+        const leaveEmp = getEmployeeById(viewLeave.employeeId);
+        const leaveBalanceVal = getLeaveBalance(viewLeave.employeeId)?.[viewLeave.leaveTypeCode];
+        return (
+          <SidePanelShell
+            icon="📅" avatarPhoto={leaveEmp?.profilePhoto}
+            avatarName={getEmployeeName(viewLeave.employeeId)}
+            infoLine={<InfoLine items={[
+              { label:'Staff ID',   value:leaveEmp?.employeeId },
+              { label:'Post',       value:leaveEmp?.position },
+              { label:'Department', value:leaveEmp?.department },
+              { label:'Branch',     value:leaveEmp?.branch },
+            ]} />}
+            subtitle={
+              <div style={{
+                display:'flex', alignItems:'center', flexWrap:'wrap', gap:'4px 14px',
+                background:'#eff6ff', border:'1.5px solid #bfdbfe', borderRadius:8,
+                padding:'8px 12px', marginTop:4,
+              }}>
+                <span style={{ fontSize:12, color:'#1e40af' }}>
+                  {t('Applied For')}: <strong style={{ fontSize:13.5 }}>{getLeaveLabel(viewLeave.leaveTypeCode)}</strong>
+                </span>
+                {leaveBalanceVal != null && (
+                  <span style={{ fontSize:12, color:'#1e40af' }}>
+                    {t('Leave Balance')}: <strong style={{ fontSize:13.5 }}>{leaveBalanceVal}</strong>
+                  </span>
+                )}
+              </div>
+            }
+            statusBadge={<StatusBadge status={viewLeave.status} />}
+            onClose={() => setViewLeave(null)}
+            footer={<>
+              <button style={panelBtnStyle()} onClick={() => { setViewLeave(null); openApply(); }}>➕ {t('Add New')}</button>
+              <button style={panelBtnStyle()} onClick={printRecord}>🖨️ Print</button>
+              {!decided && canManageStaff && (
+                <button style={panelBtnStyle()} onClick={() => { openEditFormLeave(viewLeave); setViewLeave(null); }}>✏️ {t('Edit')}</button>
               )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setViewLeave(null)}>{t('Close')}</button>
-            </div>
-          </div>
-        </div>
-      )}
+              {canDelete && (
+                <button style={panelBtnStyle('danger')} onClick={() => { setDelConfirm(viewLeave.id); setViewLeave(null); }}>🗑 {t('Delete')}</button>
+              )}
+              {!decided && amReco && !alreadyReco && (
+                <button style={panelBtnStyle('success')} onClick={() => { setActionModal({ id:viewLeave.id, type:'recommend', leave:viewLeave }); setComment(''); setViewLeave(null); }}>👍 {t('Recommend')}</button>
+              )}
+              {!decided && perms.amApprover && (
+                <button style={panelBtnStyle('success')} disabled={!perms.canApprove}
+                  title={perms.canApprove ? '' : (perms.dualRoleBlocked
+                    ? 'You are the configured recommender — a different approver must approve'
+                    : 'Awaiting recommendation first')}
+                  onClick={() => { if (perms.canApprove) { setActionModal({ id:viewLeave.id, type:'approve', leave:viewLeave }); setComment(''); setViewLeave(null); } }}>
+                  ✓ {t('Approve')}
+                </button>
+              )}
+              {!decided && perms.amApprover && (
+                <button style={panelBtnStyle('danger')}
+                  onClick={() => { setActionModal({ id:viewLeave.id, type:'reject', leave:viewLeave }); setComment(''); setViewLeave(null); }}>
+                  ✗ {t('Reject')}
+                </button>
+              )}
+            </>}
+          >
+            <SectionLabel>🗓️ {t('Application Details')}</SectionLabel>
+            <DRowPair
+              left={{ icon:'📆', label:t('From Date'), value:fd(viewLeave.fromDate) }}
+              right={{ icon:'📆', label:t('To Date'),   value:fd(viewLeave.toDate) }}
+            />
+            <DRow icon="🗓️" label={t('Applied Date')} value={fd(viewLeave.appliedDate)} />
+
+            <DRowBox icon="💬" label={t('Reason')} value={viewLeave.reason} />
+            {viewLeave.comment && (
+              <DRowBox icon="🗨️" label={t('Comment')} value={viewLeave.comment} bg="#f9fafb" border="#e5e7eb" color="#374151" />
+            )}
+
+            {(viewLeave.recommendedBy || viewLeave.approvedBy) && (
+              <div style={{ marginTop:16 }}>
+                <SectionLabel color="#059669">✅ {t('Recommendation & Approval Details')}</SectionLabel>
+                {viewLeave.recommendedBy && (
+                  <DRow icon="👍" label={t('Recommended By')}
+                    value={`${getEmployeeName(viewLeave.recommendedBy)} · ${viewLeave.recommendedAt ? formatNepalDateTime(viewLeave.recommendedAt, fd) : fd(viewLeave.recommendedDate)}`} />
+                )}
+                {viewLeave.recommendComment && (
+                  <DRowBox icon="💭" label={t('Recommend Comment')} value={viewLeave.recommendComment} bg="#f0fdf4" border="#bbf7d0" color="#059669" />
+                )}
+                {viewLeave.approvedBy && (
+                  <DRow icon="✅" label={viewLeave.status === 'rejected' ? t('Rejected By') : t('Approved By')}
+                    value={`${getEmployeeName(viewLeave.approvedBy)} · ${viewLeave.approvedAt ? formatNepalDateTime(viewLeave.approvedAt, fd) : fd(viewLeave.approvedDate)}`} />
+                )}
+              </div>
+            )}
+          </SidePanelShell>
+        );
+      })()}
 
       {/* Delete Confirm */}
       {delConfirm && (
@@ -1451,6 +2083,21 @@ const LeavePanel = () => {
           </div>
         </div>
       )}
+
+      {/* Leave Approval — full-width popup instead of navigating to its own page */}
+      {showLeaveApprovalModal && (
+        <div className="modal-overlay" onClick={() => setShowLeaveApprovalModal(false)}>
+          <div className="modal" style={{ width:'95vw', maxWidth:1400, maxHeight:'92vh' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>✅ {t('Leave Approval')}</h2>
+              <button className="modal-close" onClick={() => setShowLeaveApprovalModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <LeaveApproval embedded />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1460,35 +2107,140 @@ const LeavePanel = () => {
 ══════════════════════════════════════════════════ */
 const VisitPanel = () => {
   const { currentUser, isManager, canManageStaff, isAdmin } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { settings, refreshSettings } = useSettings();
   const fd = makeDateFormatter(settings);
-  const { filteredVisits: officeVisits, deleteVisit, addVisit, approveVisit, rejectVisit, getEmployeeName, filteredEmployees: employees, employees: allEmployees } = useData();
-  const navigate = useNavigate();
+  const {
+    filteredVisits: officeVisits,
+    // Raw, company-wide visits — needed only for the "Pending for Approvals"
+    // toggle below. See LeavePanel's identical comment on allLeaves.
+    officeVisits: allVisits,
+    deleteVisit, addVisit, updateVisit, approveVisit, rejectVisit, recommendVisit, getEmployeeName, getEmployeeById, filteredEmployees: employees, employees: allEmployees,
+  } = useData();
 
   const [filterStatus,   setFilterStatus]  = useState('all');
+  const [showForApprovalVisit, setShowForApprovalVisit] = useState(false);
+  const [selectedVisitIds, setSelectedVisitIds] = useState([]);
+  const [advFilters,   setAdvFilters]   = useState({ ...DEFAULT_ADV_FILTERS });
+  const [advTempF,     setAdvTempF]     = useState({ ...DEFAULT_ADV_FILTERS });
+  const [advFilterOpen, setAdvFilterOpen] = useState(false);
+  const setAdvTF = (key, val) => setAdvTempF(p => ({ ...p, [key]: val }));
+  const openAdvFilter  = () => { setAdvTempF({ ...advFilters }); setAdvFilterOpen(true); };
+  const applyAdvFilter = () => { setAdvFilters({ ...advTempF }); setAdvFilterOpen(false); };
+  const resetAdvFilter = () => setAdvTempF({ ...DEFAULT_ADV_FILTERS });
+  const advFilterCount = [advFilters.branches, advFilters.departments, advFilters.posts,
+    advFilters.grades, advFilters.modes, advFilters.statuses, advFilters.staffIds]
+    .filter(a => a.length > 0).length;
+  // Ctrl+A opens Advance Search — same shortcut across every report/page
+  // that has one, skipped while typing in a text field so it doesn't hijack
+  // native "select all text" there.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.ctrlKey || e.key.toLowerCase() !== 'a') return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+      e.preventDefault();
+      setAdvTempF({ ...advFilters });
+      setAdvFilterOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [advFilters]);
+  const advBranchOpts = useMemo(() => (settings.branches||[]).map(b => ({ value:b.name, label:b.name })), [settings.branches]);
+  const advDeptOpts   = useMemo(() => (settings.departments||[]).map(d => ({ value:d.name, label:d.name })), [settings.departments]);
+  const advPostOpts   = useMemo(() => (settings.posts||[]).map(p => ({ value:p.name, label:p.name })), [settings.posts]);
+  const advGradeOpts  = useMemo(() => (settings.grades||[]).map(g => ({ value:g.name, label:g.name })), [settings.grades]);
+  const advModeOpts   = useMemo(() => (settings.modes||[]).map(m => ({ value:m.name, label:m.name })), [settings.modes]);
+  const advStatusOpts = useMemo(() => (settings.employeeStatuses||[]).map(s => ({ value:s.name, label:s.name })), [settings.employeeStatuses]);
+  const advStaffOpts  = useMemo(() => (allEmployees||[]).filter(e=>e.active).map(e => ({
+    value: String(e.id),
+    label: e.fullName,
+    sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+    photo: e.profilePhoto,
+  })), [allEmployees]);
   const [viewVisit,      setViewVisit]     = useState(null);
+  useEffect(() => {
+    if (!viewVisit) return;
+    const onKeyDown = (e) => { if (e.key === 'Escape') setViewVisit(null); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [viewVisit]);
+  const [editVisit,      setEditVisit]     = useState(null); // visit being edited
+  const [editVisitForm,  setEditVisitForm] = useState({});
+  const [editVisitErrors,setEditVisitErrors] = useState({});
+  const editVisitFormRef = useRef(null);
+  /* Ctrl+S submits the Edit Visit form — same action as the Save Changes button */
+  useSaveShortcut(!!editVisit, () => editVisitFormRef.current?.requestSubmit());
+  // Raw-field editing — see LeavePanel's openEditFormLeave identical comment:
+  // canManageStaff, or the applicant editing their own still-untouched
+  // pending application.
+  const openEditFormVisit = (row) => {
+    const isOwnPending = String(row.employeeId) === String(currentUser.id)
+      && row.status === 'pending' && !row.recommendedBy;
+    if (!canManageStaff && !isOwnPending) return;
+    const toDateStr = (v) => v ? String(v).split('T')[0] : '';
+    setEditVisitForm({
+      employeeId:      String(row.employeeId),
+      officialVisit:   row.purpose || row.officialVisit || '',
+      address:         row.address || row.location || '',
+      description:     row.description || row.reason || '',
+      fromDate:        toDateStr(row.fromDate),
+      toDate:          toDateStr(row.toDate),
+      status:          row.status || 'pending',
+      recommendedBy:   String(row.recommendedBy || ''),
+      recommendedDate: toDateStr(row.recommendedDate),
+      approvedBy:      String(row.approvedBy || ''),
+      approvedDate:    toDateStr(row.approvedDate),
+    });
+    setEditVisitErrors({});
+    setEditVisit(row);
+  };
+  // Shared with the grid's actions column, right-click menu, and the
+  // toolbar Edit button — see LeavePanel's identical canEditLeaveRow/
+  // canDeleteLeaveRow comment above.
+  const canEditVisitRow = (row) => {
+    const isOwnPending = String(row.employeeId) === String(currentUser.id)
+      && row.status === 'pending' && !row.recommendedBy;
+    return canManageStaff || isOwnPending;
+  };
+  const canDeleteVisitRow = (row) => {
+    const isOwnPendingUntouched = String(row.employeeId) === String(currentUser.id)
+      && row.status === 'pending' && !row.recommendedBy;
+    return isManager || isOwnPendingUntouched;
+  };
   const [delConfirm,     setDelConfirm]    = useState(null);
+  const { getRecoIds: getVisitRecoIds, getApprovalIds: getVisitApprovalIds, assignments: visitRecoAssignments, refresh: refreshVisitRecoApproval } = useRecoApproval();
   const [showApply,      setShowApply]     = useState(false);
+  // Full-width popup for the Office Visit Approval page — same reasoning as
+  // LeavePanel's showLeaveApprovalModal above.
+  const [showVisitApprovalModal, setShowVisitApprovalModal] = useState(false);
   // Refetch settings right as Apply opens — see LeavePanel's identical effect above.
-  useEffect(() => { if (showApply) refreshSettings(); }, [showApply]);
+  useEffect(() => { if (showApply) { refreshSettings(); refreshVisitRecoApproval(); } }, [showApply]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Same reasoning, for the Edit Visit modal — see LeavePanel's identical effect above.
+  useEffect(() => { if (editVisit) refreshVisitRecoApproval(); }, [editVisit]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showManualV,    setShowManualV]   = useState(false);
   const [manualVForm,    setManualVForm]   = useState({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:'', toDate:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualVErrors,  setManualVErrors] = useState({});
   const [manualVToast,   setManualVToast]  = useState(null);
   const manualVFormRef = useRef(null);
+  // Bumped after each Ctrl+S save to force the Staff picker to remount (and
+  // re-run its autoOpen) so back-to-back manual postings can be typed
+  // straight in without touching the mouse — see handleMVSubmit below.
+  const [manualVResetKey, setManualVResetKey] = useState(0);
+  // Confirmation of the most recent save — see LeavePanel's identical
+  // manualLastSaved for why this is tracked separately from manualVForm.
+  const [manualVLastSaved, setManualVLastSaved] = useState(null);
   /* Ctrl+S submits the Manual Entry form — same action as the Save button */
   useSaveShortcut(showManualV, () => manualVFormRef.current?.requestSubmit());
+  useEffect(() => { if (showManualV) refreshVisitRecoApproval(); }, [showManualV]); // eslint-disable-line react-hooks/exhaustive-deps
   /* ── Inline approve/reject modal ── */
   const [visitActionModal, setVisitActionModal] = useState(null);
   const [visitComment,     setVisitComment]     = useState('');
   const [visitActionToast, setVisitActionToast] = useState(null);
 
   /* ── Reco/approval config ── */
-  const visitRecoConfig = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-  }, []);
-  const isRecoCompulsoryVisit = visitRecoConfig._settings?.isRecoCompulsory || false;
+  const visitRecoConfig = visitRecoAssignments;
+  const isRecoCompulsoryVisit = settings.recoApprovalCompulsory || false;
   const isApproverForVisit    = (empId) => {
     const a = visitRecoConfig[String(empId)]?.approval;
     const ids = Array.isArray(a) ? a : (a ? [a] : []);
@@ -1499,20 +2251,53 @@ const VisitPanel = () => {
     const ids = Array.isArray(r) ? r : (r ? [r] : []);
     return ids.map(String).includes(String(currentUser.id));
   };
+  // Whether this employee has ANY recommender configured — if not,
+  // Recommendation Compulsory is unsatisfiable for them and must not block
+  // their approver. Mirrors authorizeRecoAction's server-side check.
+  const hasRecommenderForVisit = (empId) => {
+    const r = visitRecoConfig[String(empId)]?.reco;
+    const ids = Array.isArray(r) ? r : (r ? [r] : []);
+    return ids.length > 0;
+  };
+  // Shared permission computation for one row — see getLeaveRowPerms's
+  // identical comment above.
+  const getVisitRowPerms = (row) => {
+    const amApprover     = isApproverForVisit(row.employeeId);
+    const amRecommender  = isRecommenderForVisit(row.employeeId);
+    const recoConfigured = hasRecommenderForVisit(row.employeeId);
+    const dualRoleBlocked = isRecoCompulsoryVisit && recoConfigured && amRecommender;
+    const canApprove = amApprover && !dualRoleBlocked && (!isRecoCompulsoryVisit || !!row.recommendedBy || !recoConfigured);
+    return { amApprover, amRecommender, canApprove, dualRoleBlocked, alreadyReco: !!row.recommendedBy };
+  };
+  // Names of the employee's CONFIGURED recommender(s)/approver(s) — see
+  // recoApprovalNamesForLeave's identical comment above.
+  const recoApprovalNamesForVisit = (empId, type) => {
+    const v = visitRecoConfig[String(empId)]?.[type];
+    const ids = Array.isArray(v) ? v : (v ? [v] : []);
+    return ids.length ? ids.map(id => getEmployeeName(id)).join(', ') : '—';
+  };
+
+  // Same "Pending for Approvals" visibility fix as the Leave section above —
+  // see hasAnyRecoAssignmentLeave's comment.
+  const hasAnyRecoAssignmentVisit = Object.entries(visitRecoConfig).some(([key, cfg]) => {
+    if (key === '_settings') return false;
+    const reco     = Array.isArray(cfg?.reco)     ? cfg.reco     : (cfg?.reco     != null ? [cfg.reco]     : []);
+    const approval = Array.isArray(cfg?.approval) ? cfg.approval : (cfg?.approval != null ? [cfg.approval] : []);
+    return reco.map(String).includes(String(currentUser.id)) || approval.map(String).includes(String(currentUser.id));
+  });
+  const pendingForApprovalCountVisit = officeVisits.filter(v =>
+    v.status === 'pending' && String(v.employeeId) !== String(currentUser.id) &&
+    (isRecommenderForVisit(v.employeeId) || isApproverForVisit(v.employeeId))
+  ).length;
 
   /* ── Apply form state ── */
   const today = getNepalTodayISO();
 
-  /* reco/approval from localStorage */
-  const getMyRecoApproval = useCallback(() => {
-    const saved = loadRecoApproval();
-    const r = saved[currentUser.id]?.reco;
-    const a = saved[currentUser.id]?.approval;
-    return {
-      reco:     Array.isArray(r) ? r : (r ? [r] : []),
-      approval: Array.isArray(a) ? a : (a ? [a] : []),
-    };
-  }, [currentUser.id]);
+  /* reco/approval — live from the API (useRecoApproval above) */
+  const getMyRecoApproval = useCallback(() => ({
+    reco:     getVisitRecoIds(currentUser.id),
+    approval: getVisitApprovalIds(currentUser.id),
+  }), [currentUser.id, getVisitRecoIds, getVisitApprovalIds]);
 
   const emptyForm = {
     officialVisit: '', visitType: 'National', country: '',
@@ -1585,65 +2370,75 @@ const VisitPanel = () => {
   };
 
   /* ── Grid data ── */
-  const displayVisits = officeVisits.filter(v => {
-    if (!isManager && String(v.employeeId) !== String(currentUser.id)) return false;
+  // Newest first (by Applied Date, falling back to From Date) — same as the
+  // Leave grid above.
+  // "Pending for Approvals" is a separate scope, not an org-hierarchy view —
+  // see LeavePanel's identical comment on allLeaves above.
+  const displayVisits = (showForApprovalVisit ? allVisits : officeVisits).filter(v => {
+    if (showForApprovalVisit) {
+      if (String(v.employeeId) === String(currentUser.id)) return false;
+      if (!isRecommenderForVisit(v.employeeId) && !isApproverForVisit(v.employeeId)) return false;
+    } else if (!isManager && String(v.employeeId) !== String(currentUser.id)) {
+      return false;
+    }
     if (filterStatus !== 'all' && v.status !== filterStatus) return false;
+    if (advFilterCount > 0) {
+      const emp = getEmployeeById(v.employeeId);
+      if (advFilters.branches.length     && !advFilters.branches.includes(emp?.branch))          return false;
+      if (advFilters.departments.length  && !advFilters.departments.includes(emp?.department))   return false;
+      if (advFilters.posts.length        && !advFilters.posts.includes(emp?.position))           return false;
+      if (advFilters.grades.length       && !advFilters.grades.includes(emp?.grade))             return false;
+      if (advFilters.modes.length        && !advFilters.modes.includes(emp?.mode))               return false;
+      if (advFilters.statuses.length     && !advFilters.statuses.includes(emp?.status))          return false;
+      if (advFilters.staffIds.length     && !advFilters.staffIds.includes(String(v.employeeId))) return false;
+    }
     return true;
-  });
+  }).sort((a, b) => new Date(b.appliedDate || b.fromDate) - new Date(a.appliedDate || a.fromDate));
 
-  const countByStatus = s => officeVisits.filter(v =>
-    (!isManager ? String(v.employeeId) === String(currentUser.id) : true) && (s === 'all' || v.status === s)
-  ).length;
+  const countByStatus = s => (showForApprovalVisit ? allVisits : officeVisits).filter(v => {
+    if (showForApprovalVisit) {
+      return String(v.employeeId) !== String(currentUser.id)
+        && (isRecommenderForVisit(v.employeeId) || isApproverForVisit(v.employeeId))
+        && (s === 'all' || v.status === s);
+    }
+    return (!isManager ? String(v.employeeId) === String(currentUser.id) : true) && (s === 'all' || v.status === s);
+  }).length;
+
+  /* ── Bulk actions (checkbox toolbar, near Search) — see LeavePanel's
+     identical comment above. ── */
+  const bulkApproveVisits = async () => {
+    await Promise.allSettled(selectedVisitIds.map(id => approveVisit(id, currentUser.id)));
+    setSelectedVisitIds([]);
+  };
+  const bulkRejectVisits = async () => {
+    await Promise.allSettled(selectedVisitIds.map(id => rejectVisit(id, currentUser.id, 'Declined')));
+    setSelectedVisitIds([]);
+  };
+  const bulkDeleteVisits = async () => {
+    if (!confirm(t('Are you sure you want to delete this record?'))) return;
+    await Promise.allSettled(selectedVisitIds.map(id => deleteVisit(id)));
+    setSelectedVisitIds([]);
+  };
 
   const columns = [
-    { field: 'employeeId',  header: t('Name'),          width: 150, render: v => <span style={{ fontWeight:600 }}>{getEmployeeName(v)}</span> },
+    { field: 'staffId',     header: 'Staff ID',         width: 90, render: (_, row) => (
+        <span style={{ color:'#6b7280' }}>{getEmployeeById(row.employeeId)?.employeeId || '—'}</span>
+      ) },
+    { field: 'employeeId',  header: t('Name'),          width: 150, render: v => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight:600 }}>
+          <Avatar photo={getEmployeeById(v)?.profilePhoto} name={getEmployeeName(v)} size={22} />
+          {getEmployeeName(v)}
+        </span>
+      ) },
     { field: 'purpose',     header: 'Official Visit',   width: 150 },
-    { field: 'visitType',   header: 'Visit Type',       width: 110, render: v => (
-      <span style={{ fontSize:12, fontWeight:600, padding:'2px 8px', borderRadius:8,
-        background: v==='International'?'#f5f3ff':'#f0fdf4',
-        color: v==='International'?'#7c3aed':'#059669' }}>
-        {v==='International'?'🌍':'🇳🇵'} {v||'National'}
-      </span>
-    )},
-    { field: 'country',     header: 'Country',          width: 100, render: v => v||'—' },
-    { field: 'address',     header: 'Address',          width: 140, render: v => v||'—' },
     { field: 'fromDate',    header: t('From Date'),     width: 110, render: v => fd(v) },
     { field: 'toDate',      header: t('To Date'),       width: 110, render: v => fd(v) },
     { field: 'appliedDate', header: t('Applied Date'),  width: 110, render: v => fd(v) },
     { field: 'status',      header: t('Status'),        width: 110, render: v => <StatusBadge status={v} /> },
-    { field: 'actions', header: t('Actions'), width: 110, filterable:false, sortable:false, render: (_, row) => (
-      <div className="dg-actions">
-        <button className="dg-action-btn view"   title={t('View')}   onClick={e => { e.stopPropagation(); setViewVisit(row); }}>👁</button>
-        {(isManager || row.status === 'pending') && (
-          <button className="dg-action-btn delete" title={t('Delete')} onClick={e => { e.stopPropagation(); setDelConfirm(row.id); }}>🗑</button>
-        )}
-        {row.status === 'pending' && (() => {
-          const amApprover    = isApproverForVisit(row.employeeId);
-          const amRecommender = isRecommenderForVisit(row.employeeId);
-          const canApprove    = amApprover && (!isRecoCompulsoryVisit || !!row.recommendedBy);
-          const involved      = amApprover || amRecommender || isManager;
-          if (!involved) return null;
-          return (
-            <>
-              <button className="dg-action-btn approve"
-                title={!amApprover ? 'You are a recommendator only — approval not permitted'
-                       : !canApprove ? 'Awaiting recommendation first' : t('Approve')}
-                disabled={!amApprover || !canApprove}
-                style={{ opacity: (!amApprover || !canApprove) ? 0.4 : 1, cursor: (!amApprover || !canApprove) ? 'not-allowed' : 'pointer' }}
-                onClick={e => { e.stopPropagation(); if (amApprover && canApprove) { setVisitActionModal({ id:row.id, type:'approve', visit:row }); setVisitComment(''); } }}>
-                ✓
-              </button>
-              {(amApprover || isManager) && (
-                <button className="dg-action-btn reject" title={t('Reject')}
-                  onClick={e => { e.stopPropagation(); setVisitActionModal({ id:row.id, type:'reject', visit:row }); setVisitComment(''); }}>
-                  ✗
-                </button>
-              )}
-            </>
-          );
-        })()}
-      </div>
-    )},
+    { field: 'recommendatorNames', header: 'Recommendator', width: 150, sortable:false, filterable:false,
+      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForVisit(row.employeeId, 'reco')}</span> },
+    { field: 'approvalNames', header: 'Approval', width: 150, sortable:false, filterable:false,
+      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForVisit(row.employeeId, 'approval')}</span> },
   ];
 
   /* ── OV rejection notifications ── */
@@ -1710,13 +2505,23 @@ const VisitPanel = () => {
           ))}
         </div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-          {isManager && (
-            <button className="btn btn-outline btn-sm" onClick={() => navigate('/office-visit/approval')}>
-              ✅ {t('Visit Approval')}
+          {(isManager || hasAnyRecoAssignmentVisit) && (
+            <button className={`btn btn-sm ${showForApprovalVisit ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => {
+                // Same as LeavePanel's identical button — a configured
+                // recommender/approver gets the inline toggle, everyone else
+                // gets the fuller oversight view as a full-width popup
+                // instead of navigating to its own page.
+                if (hasAnyRecoAssignmentVisit) setShowForApprovalVisit(v => !v);
+                else setShowVisitApprovalModal(true);
+              }}>
+              ✅ {hasAnyRecoAssignmentVisit
+                ? `Pending for Approvals${pendingForApprovalCountVisit ? ` (${pendingForApprovalCountVisit})` : ''}`
+                : t('Visit Approval')}
             </button>
           )}
           {canManageStaff && (
-            <button className="btn btn-sm" onClick={() => { setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' }); setManualVErrors({}); setShowManualV(true); }}
+            <button className="btn btn-sm" onClick={() => { setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' }); setManualVErrors({}); setManualVLastSaved(null); setShowManualV(true); }}
               style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
               ✍️ Manual Posting
             </button>
@@ -1727,7 +2532,61 @@ const VisitPanel = () => {
         </div>
       </div>
 
-      <DataGrid columns={columns} data={displayVisits} defaultPageSize={10} showSearch searchPlaceholder={t('Search') + '...'} />
+      <DataGrid columns={columns} data={displayVisits} defaultPageSize={20} pageSizeOptions={[5, 10, 20, 50, 100]} showSearch searchPlaceholder={t('Search') + '...'}
+        showFilterButton={false}
+        toolbarRightInset={viewVisit ? 456 : 0}
+        onRowClick={row => setViewVisit(v => v?.id === row.id ? null : row)}
+        onFocusChange={row => setViewVisit(row)}
+        onSelectionChange={setSelectedVisitIds}
+        contextMenu={[
+          { label: t('Add New'), icon:'➕', onClick: () => openApply() },
+          'divider',
+          { label: t('Edit'), icon:'✏️', onClick: (row) => { if (canEditVisitRow(row)) openEditFormVisit(row); } },
+          'divider',
+          { label: t('Delete'), icon:'🗑', className:'danger', onClick: (row) => { if (canDeleteVisitRow(row)) setDelConfirm(row.id); } },
+        ]}
+        toolbar={
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="dg-filter-btn" onClick={openAdvFilter}>
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+                <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
+              </svg>
+              {t('Advance Search')}{advFilterCount > 0 ? ` (${advFilterCount})` : ''}
+            </button>
+            {showForApprovalVisit && (
+              <>
+                <button className="btn btn-sm btn-success" disabled={!selectedVisitIds.length} onClick={bulkApproveVisits}
+                  style={{ opacity: selectedVisitIds.length ? 1 : 0.45, cursor: selectedVisitIds.length ? 'pointer' : 'not-allowed' }}>
+                  ✓ {t('Approve')} {selectedVisitIds.length ? `(${selectedVisitIds.length})` : ''}
+                </button>
+                <button className="btn btn-sm btn-danger" disabled={!selectedVisitIds.length} onClick={bulkRejectVisits}
+                  style={{ opacity: selectedVisitIds.length ? 1 : 0.45, cursor: selectedVisitIds.length ? 'pointer' : 'not-allowed' }}>
+                  ✗ {t('Reject')} {selectedVisitIds.length ? `(${selectedVisitIds.length})` : ''}
+                </button>
+              </>
+            )}
+            <button className="btn btn-sm btn-outline" disabled={selectedVisitIds.length !== 1}
+              onClick={() => { const row = displayVisits.find(v => v.id === selectedVisitIds[0]); if (row) openEditFormVisit(row); }}
+              style={{ opacity: selectedVisitIds.length === 1 ? 1 : 0.45, cursor: selectedVisitIds.length === 1 ? 'pointer' : 'not-allowed' }}>
+              ✏️ {t('Edit')}
+            </button>
+            <button className="btn btn-sm btn-outline" disabled={!selectedVisitIds.length} onClick={bulkDeleteVisits}
+              style={{ opacity: selectedVisitIds.length ? 1 : 0.45, cursor: selectedVisitIds.length ? 'pointer' : 'not-allowed' }}>
+              🗑 {t('Delete')} {selectedVisitIds.length ? `(${selectedVisitIds.length})` : ''}
+            </button>
+          </div>
+        }
+      />
+
+      <LeaveAdvancedFilter
+        isOpen={advFilterOpen} onClose={() => setAdvFilterOpen(false)}
+        onApply={applyAdvFilter} onReset={resetAdvFilter}
+        tempF={advTempF} setTF={setAdvTF}
+        branchOpts={advBranchOpts} deptOpts={advDeptOpts} postOpts={advPostOpts}
+        gradeOpts={advGradeOpts}   modeOpts={advModeOpts}  statusOpts={advStatusOpts}
+        staffOpts={advStaffOpts}
+        showFY={false} showAccum={false} showLeave={false} L={(np, en) => language === 'np' ? np : en}
+      />
 
       {/* ── Inline Approve / Reject Modal (Office Visit) ── */}
       {visitActionModal && (
@@ -1735,7 +2594,7 @@ const VisitPanel = () => {
           <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>
-                {visitActionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`} — {t('Office Visit Application')}
+                {visitActionModal.type === 'recommend' ? `👍 ${t('Recommend')}` : visitActionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`} — {t('Office Visit Application')}
               </h2>
               <button className="modal-close" onClick={() => setVisitActionModal(null)}>✕</button>
             </div>
@@ -1762,18 +2621,23 @@ const VisitPanel = () => {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setVisitActionModal(null)}>{t('Cancel')}</button>
               <button
-                className={`btn ${visitActionModal.type === 'approve' ? 'btn-success' : 'btn-danger'}`}
+                className={`btn ${visitActionModal.type === 'reject' ? 'btn-danger' : 'btn-success'}`}
                 onClick={() => {
-                  if (visitActionModal.type === 'approve') {
+                  if (visitActionModal.type === 'recommend') {
+                    recommendVisit(visitActionModal.id, currentUser.id, visitComment);
+                  } else if (visitActionModal.type === 'approve') {
                     approveVisit(visitActionModal.id, currentUser.id, visitComment);
                   } else {
                     rejectVisit(visitActionModal.id, currentUser.id, visitComment);
                   }
-                  setVisitActionToast({ msg: visitActionModal.type === 'approve' ? t('Application approved') : t('Application rejected'), type: visitActionModal.type === 'approve' ? 'success' : 'danger' });
+                  setVisitActionToast({
+                    msg: visitActionModal.type === 'recommend' ? t('Application recommended') : visitActionModal.type === 'approve' ? t('Application approved') : t('Application rejected'),
+                    type: visitActionModal.type === 'reject' ? 'danger' : 'success',
+                  });
                   setTimeout(() => setVisitActionToast(null), 3000);
                   setVisitActionModal(null); setVisitComment('');
                 }}>
-                {visitActionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`}
+                {visitActionModal.type === 'recommend' ? `👍 ${t('Recommend')}` : visitActionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`}
               </button>
             </div>
           </div>
@@ -1809,6 +2673,7 @@ const VisitPanel = () => {
           ev.preventDefault();
           const errs = validateMV();
           if (Object.keys(errs).length) { setManualVErrors(errs); return; }
+          const savedDevice = getDeviceInfo();
           await addVisit({
             employeeId:      manualVForm.employeeId,
             purpose:         manualVForm.officialVisit,
@@ -1828,8 +2693,15 @@ const VisitPanel = () => {
             recommendedDate: manualVForm.recommendedDate || null,
             approvedBy:      manualVForm.approvedBy      || null,
             approvedDate:    manualVForm.approvedDate     || null,
+            deviceInfo:      savedDevice,
           });
-          setShowManualV(false);
+          // Stay on the form for back-to-back manual postings instead of
+          // closing — clear the fields and reopen the Staff picker ready for
+          // the next entry.
+          setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
+          setManualVErrors({});
+          setManualVResetKey(k => k + 1);
+          setManualVLastSaved({ updatedByName: currentUser.fullName, updatedAt: new Date().toISOString(), updatedDevice: savedDevice });
           setManualVToast({ msg:'Office visit entry posted manually', type:'success' });
           setTimeout(() => setManualVToast(null), 2500);
         };
@@ -1843,14 +2715,19 @@ const VisitPanel = () => {
         const activeEmps = allEmployees.filter(e => e.active !== false)
           .sort((a, b) => staffRankCompare(a, b, settings));
         /* only staff configured (Staff Detail → Set Recommendator & Approval) for this employee */
-        const manualVCfg    = loadRecoApproval()[String(manualVForm.employeeId)] || {};
+        const manualVCfg    = visitRecoConfig[String(manualVForm.employeeId)] || {};
         const toIdsV         = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map(String);
         const manualVRecoIds = toIdsV(manualVCfg.reco);
         const manualVApprIds = toIdsV(manualVCfg.approval);
-        const manualVRecoOpts = activeEmps.filter(e => manualVRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
-        const manualVApprOpts = activeEmps.filter(e => manualVApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName }));
+        const manualVRecoOpts = activeEmps.filter(e => manualVRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
+        const manualVApprOpts = activeEmps.filter(e => manualVApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
         const visitTypeOpts = (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean);
-        const empOpts = activeEmps.map(e => ({ value: String(e.id), label: `${e.fullName}${e.employeeId ? ` [${e.employeeId}]` : ''}${e.department ? ` — ${e.department}` : ''}` }));
+        const empOpts = activeEmps.map(e => ({
+          value: String(e.id),
+          label: e.fullName,
+          sub: [e.employeeId, e.position || e.department].filter(Boolean).join(' - '),
+          photo: e.profilePhoto,
+        }));
 
         return (
           <div className="modal-overlay">
@@ -1869,9 +2746,9 @@ const VisitPanel = () => {
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
                     <div style={{ outline: manualVErrors.employeeId ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
-                      <SearchableSelect value={manualVForm.employeeId}
+                      <SearchableSelect key={manualVResetKey} autoOpen={manualVResetKey > 0} value={manualVForm.employeeId}
                         onChange={v => setManualVForm(p => ({ ...p, employeeId: v, recommendedBy: '', approvedBy: '' }))}
-                        options={empOpts} placeholder="— Search & Select Staff —" />
+                        options={empOpts} placeholder="— Search & Select Staff —" showAvatar />
                     </div>
                     <Err msg={manualVErrors.employeeId} />
                   </div>
@@ -1972,7 +2849,7 @@ const VisitPanel = () => {
                       <SearchableSelect value={manualVForm.recommendedBy} onChange={v => setMV('recommendedBy', v)}
                         options={manualVRecoOpts}
                         placeholder={!manualVForm.employeeId ? '— Select staff first —' : manualVRecoOpts.length === 0 ? 'No recommendator configured' : '— Select Recommendator —'}
-                        disabled={!manualVForm.employeeId || manualVRecoOpts.length === 0} />
+                        disabled={!manualVForm.employeeId || manualVRecoOpts.length === 0} showAvatar />
                     </div>
                     <div className="form-group">
                       <Lbl>Recommended Date</Lbl>
@@ -1988,7 +2865,7 @@ const VisitPanel = () => {
                       <SearchableSelect value={manualVForm.approvedBy} onChange={v => setMV('approvedBy', v)}
                         options={manualVApprOpts}
                         placeholder={!manualVForm.employeeId ? '— Select staff first —' : manualVApprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
-                        disabled={!manualVForm.employeeId || manualVApprOpts.length === 0} />
+                        disabled={!manualVForm.employeeId || manualVApprOpts.length === 0} showAvatar />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
@@ -1997,11 +2874,14 @@ const VisitPanel = () => {
                     </div>
                   </div>
 
-                  <div className="modal-footer" style={{ padding:'14px 0 0', borderTop:'1px solid #e5e7eb', marginTop:4, display:'flex', justifyContent:'flex-end', gap:8 }}>
-                    <button type="button" className="btn btn-outline" onClick={() => setShowManualV(false)}>Cancel</button>
-                    <button type="submit" className="btn btn-primary" title="Ctrl+S" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
-                      💾 <u>S</u>ave
-                    </button>
+                  <div className="modal-footer" style={{ padding:'14px 0 0', borderTop:'1px solid #e5e7eb', marginTop:4, display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8 }}>
+                    <LastSavedBy updatedByName={manualVLastSaved?.updatedByName} updatedAt={manualVLastSaved?.updatedAt} updatedDevice={manualVLastSaved?.updatedDevice} fd={fd} />
+                    <div style={{ display:'flex', gap:8, marginLeft:'auto' }}>
+                      <button type="button" className="btn btn-outline" onClick={() => setShowManualV(false)}>Cancel</button>
+                      <button type="submit" className="btn btn-primary" title="Ctrl+S" style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)' }}>
+                        💾 <u>S</u>ave
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>
@@ -2303,57 +3183,324 @@ const VisitPanel = () => {
         );
       })()}
 
-      {/* View Modal */}
-      {viewVisit && (
-        <div className="modal-overlay">
-          <div className="modal modal-md" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>🏢 {t('Office Visit Application')} #{viewVisit.id}</h2>
-              <button className="modal-close" onClick={() => setViewVisit(null)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-                {[
-                  [t('Name'),          getEmployeeName(viewVisit.employeeId)],
-                  ['Official Visit',   viewVisit.officialVisit || viewVisit.purpose || '—'],
-                  ['Visit Type',       <span style={{ fontSize:12, fontWeight:700, padding:'2px 8px', borderRadius:8,
-                    background: viewVisit.visitType==='International'?'#f5f3ff':'#f0fdf4',
-                    color: viewVisit.visitType==='International'?'#7c3aed':'#059669' }}>
-                    {viewVisit.visitType==='International'?'🌍':'🇳🇵'} {viewVisit.visitType||'National'}
-                  </span>],
-                  ['Country',          viewVisit.country || '—'],
-                  ['Address',          viewVisit.address || viewVisit.location || '—'],
-                  [t('From Date'),     fd(viewVisit.fromDate)],
-                  [t('To Date'),       fd(viewVisit.toDate)],
-                  [t('Applied Date'),  fd(viewVisit.appliedDate)],
-                  [t('Status'),        <StatusBadge status={viewVisit.status} />],
-                  [t('Approved By'),   getEmployeeName(viewVisit.approvedBy) || '—'],
-                ].map(([label, val], i) => (
-                  <div key={i}>
-                    <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:2 }}>{label}</div>
-                    <div style={{ fontSize:14, fontWeight:500 }}>{val}</div>
-                  </div>
-                ))}
+      {/* Right-side detail panel — also the click destination now, with
+          Add/Print always available, plus Recommend/Approve/Reject/Edit/
+          Delete actions when pending, and just Delete (if authorized) once
+          a decision's already been made. Same fixed-overlay convention as
+          the Contact page, so the grid never shrinks/scrolls for it. */}
+      {viewVisit && (() => {
+        const perms = getVisitRowPerms(viewVisit);
+        const amReco = isRecommenderForVisit(viewVisit.employeeId);
+        const alreadyReco = !!viewVisit.recommendedBy;
+        const isOwnPendingUntouched = String(viewVisit.employeeId) === String(currentUser.id)
+          && viewVisit.status === 'pending' && !viewVisit.recommendedBy;
+        const canDelete = isManager || isOwnPendingUntouched;
+        const decided = viewVisit.status !== 'pending';
+
+        const printRecord = () => {
+          const rows = [
+            ['Staff', getEmployeeName(viewVisit.employeeId)],
+            ['Staff ID', getEmployeeById(viewVisit.employeeId)?.employeeId || '—'],
+            ['Official Visit', viewVisit.officialVisit || viewVisit.purpose || '—'],
+            ['Visit Type', viewVisit.visitType || 'National'],
+            ['Country', viewVisit.visitType === 'International' ? (viewVisit.country || '—') : 'Nepal'],
+            ['Address', viewVisit.address || viewVisit.location || '—'],
+            ['From Date', fd(viewVisit.fromDate)],
+            ['To Date', fd(viewVisit.toDate)],
+            ['Applied Date', fd(viewVisit.appliedDate)],
+            ['Status', viewVisit.status],
+            ['Description', viewVisit.description || viewVisit.reason || '—'],
+            viewVisit.comment && ['Comment', viewVisit.comment],
+            viewVisit.recommendedBy && ['Recommended By', getEmployeeName(viewVisit.recommendedBy)],
+            viewVisit.approvedBy && [viewVisit.status === 'rejected' ? 'Rejected By' : 'Approved By', getEmployeeName(viewVisit.approvedBy)],
+          ].filter(Boolean);
+          const contentHtml = `<table>${rows.map(([k, v]) => `<tr><th style="text-align:left;white-space:normal">${k}</th><td style="padding:5px 7px;border:1px solid #dedede">${v}</td></tr>`).join('')}</table>`;
+          openPrintWindow(buildPrintDoc({ settings, language, reportTitle: 'Office Visit Application', contentHtml }));
+        };
+
+        const visitEmp = getEmployeeById(viewVisit.employeeId);
+        return (
+          <SidePanelShell
+            icon="🏢" avatarPhoto={visitEmp?.profilePhoto}
+            avatarName={getEmployeeName(viewVisit.employeeId)}
+            infoLine={<InfoLine items={[
+              { label:'Staff ID',   value:visitEmp?.employeeId },
+              { label:'Post',       value:visitEmp?.position },
+              { label:'Department', value:visitEmp?.department },
+              { label:'Branch',     value:visitEmp?.branch },
+            ]} />}
+            subtitle={
+              <div style={{
+                display:'flex', alignItems:'center', flexWrap:'wrap', gap:'4px 14px',
+                background:'#eff6ff', border:'1.5px solid #bfdbfe', borderRadius:8,
+                padding:'8px 12px', marginTop:4,
+              }}>
+                <span style={{ fontSize:12, color:'#1e40af' }}>
+                  {t('Official Visit')}: <strong style={{ fontSize:13.5 }}>{viewVisit.officialVisit || viewVisit.purpose || '—'}</strong>
+                </span>
               </div>
-              {(viewVisit.description || viewVisit.reason) && (
-                <div style={{ marginTop:14 }}>
-                  <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>Description</div>
-                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:6, padding:10, fontSize:13 }}>{viewVisit.description||viewVisit.reason}</div>
-                </div>
+            }
+            statusBadge={<StatusBadge status={viewVisit.status} />}
+            onClose={() => setViewVisit(null)}
+            footer={<>
+              <button style={panelBtnStyle()} onClick={() => { setViewVisit(null); openApply(); }}>➕ {t('Add New')}</button>
+              <button style={panelBtnStyle()} onClick={printRecord}>🖨️ Print</button>
+              {!decided && canManageStaff && (
+                <button style={panelBtnStyle()} onClick={() => { openEditFormVisit(viewVisit); setViewVisit(null); }}>✏️ {t('Edit')}</button>
               )}
-              {viewVisit.comment && (
-                <div style={{ marginTop:10 }}>
-                  <div style={{ fontSize:11, color:'#6b7280', fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>{t('Comment')}</div>
-                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:6, padding:10, fontSize:13 }}>{viewVisit.comment}</div>
-                </div>
+              {canDelete && (
+                <button style={panelBtnStyle('danger')} onClick={() => { setDelConfirm(viewVisit.id); setViewVisit(null); }}>🗑 {t('Delete')}</button>
               )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setViewVisit(null)}>{t('Close')}</button>
+              {!decided && amReco && !alreadyReco && (
+                <button style={panelBtnStyle('success')} onClick={() => { setVisitActionModal({ id:viewVisit.id, type:'recommend', visit:viewVisit }); setVisitComment(''); setViewVisit(null); }}>👍 {t('Recommend')}</button>
+              )}
+              {!decided && perms.amApprover && (
+                <button style={panelBtnStyle('success')} disabled={!perms.canApprove}
+                  title={perms.canApprove ? '' : (perms.dualRoleBlocked
+                    ? 'You are the configured recommender — a different approver must approve'
+                    : 'Awaiting recommendation first')}
+                  onClick={() => { if (perms.canApprove) { setVisitActionModal({ id:viewVisit.id, type:'approve', visit:viewVisit }); setVisitComment(''); setViewVisit(null); } }}>
+                  ✓ {t('Approve')}
+                </button>
+              )}
+              {!decided && perms.amApprover && (
+                <button style={panelBtnStyle('danger')}
+                  onClick={() => { setVisitActionModal({ id:viewVisit.id, type:'reject', visit:viewVisit }); setVisitComment(''); setViewVisit(null); }}>
+                  ✗ {t('Reject')}
+                </button>
+              )}
+            </>}
+          >
+            <SectionLabel>🗓️ {t('Application Details')}</SectionLabel>
+            <DRowPair
+              left={{ icon: viewVisit.visitType==='International'?'🌍':'🇳🇵', label:'Visit Type', value: viewVisit.visitType || 'National' }}
+              right={{ icon:'🌐', label:'Country', value: viewVisit.visitType === 'International' ? (viewVisit.country || '—') : 'Nepal' }}
+            />
+            <DRow icon="📍" label="Address" value={viewVisit.address || viewVisit.location} />
+            <DRowPair
+              left={{ icon:'📆', label:t('From Date'), value:fd(viewVisit.fromDate) }}
+              right={{ icon:'📆', label:t('To Date'),   value:fd(viewVisit.toDate) }}
+            />
+            <DRow icon="🗓️" label={t('Applied Date')} value={fd(viewVisit.appliedDate)} />
+
+            <DRowBox icon="📝" label="Description" value={viewVisit.description || viewVisit.reason} />
+            {viewVisit.comment && (
+              <DRowBox icon="🗨️" label={t('Comment')} value={viewVisit.comment} bg="#f9fafb" border="#e5e7eb" color="#374151" />
+            )}
+
+            {(viewVisit.recommendedBy || viewVisit.approvedBy) && (
+              <div style={{ marginTop:16 }}>
+                <SectionLabel color="#059669">✅ {t('Recommendation & Approval Details')}</SectionLabel>
+                {viewVisit.recommendedBy && (
+                  <DRow icon="👍" label={t('Recommended By')}
+                    value={`${getEmployeeName(viewVisit.recommendedBy)} · ${viewVisit.recommendedAt ? formatNepalDateTime(viewVisit.recommendedAt, fd) : fd(viewVisit.recommendedDate)}`} />
+                )}
+                {viewVisit.recommendComment && (
+                  <DRowBox icon="💭" label={t('Recommend Comment')} value={viewVisit.recommendComment} bg="#f0fdf4" border="#bbf7d0" color="#059669" />
+                )}
+                {viewVisit.approvedBy && (
+                  <DRow icon="✅" label={viewVisit.status === 'rejected' ? t('Rejected By') : t('Approved By')}
+                    value={`${getEmployeeName(viewVisit.approvedBy)} · ${viewVisit.approvedAt ? formatNepalDateTime(viewVisit.approvedAt, fd) : fd(viewVisit.approvedDate)}`} />
+                )}
+              </div>
+            )}
+          </SidePanelShell>
+        );
+      })()}
+
+      {/* ── Edit Office Visit Modal ── */}
+      {editVisit && (() => {
+        const setEVF = (f, v) => setEditVisitForm(p => ({ ...p, [f]: v }));
+        const validateEditVisit = () => {
+          const e = {};
+          if (!editVisitForm.officialVisit?.trim()) e.officialVisit = t('Required field');
+          if (!editVisitForm.address?.trim())       e.address       = t('Required field');
+          if (!editVisitForm.description?.trim())   e.description   = t('Required field');
+          if (!editVisitForm.fromDate)              e.fromDate      = t('Required field');
+          if (!editVisitForm.toDate)                e.toDate        = t('Required field');
+          if (editVisitForm.fromDate && editVisitForm.toDate && editVisitForm.toDate < editVisitForm.fromDate)
+            e.toDate = 'To Date must be on or after From Date';
+          return e;
+        };
+        const handleEditVisitSubmit = (ev) => {
+          ev.preventDefault();
+          const errs = validateEditVisit();
+          if (Object.keys(errs).length) { setEditVisitErrors(errs); return; }
+          updateVisit(editVisit.id, {
+            employeeId:      editVisitForm.employeeId,
+            purpose:         editVisitForm.officialVisit,
+            location:        editVisitForm.address,
+            description:     editVisitForm.description,
+            fromDate:        editVisitForm.fromDate,
+            toDate:          editVisitForm.toDate,
+            status:          editVisitForm.status,
+            recommendedBy:   editVisitForm.recommendedBy   || null,
+            recommendedDate: editVisitForm.recommendedDate || null,
+            approvedBy:      editVisitForm.approvedBy      || null,
+            approvedDate:    editVisitForm.approvedDate    || null,
+          });
+          setEditVisit(null);
+        };
+
+        const Lbl = ({ children, required }) => (
+          <div style={{ fontSize:12, fontWeight:600, color:'#374151', marginBottom:4 }}>
+            {children}{required && <span style={{ color:'#dc2626', marginLeft:2 }}>*</span>}
+          </div>
+        );
+        const Err = ({ msg }) => msg ? <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{msg}</div> : null;
+        const activeEmps = allEmployees.filter(e => e.active !== false);
+
+        /* get configured reco/approval for the selected employee */
+        const editEmpRecoAppr = (() => {
+          const cfg = visitRecoConfig[String(editVisitForm.employeeId)] || {};
+          const toIds = (v) => Array.isArray(v) ? v : (v ? [v] : []);
+          const recoIds = toIds(cfg.reco).map(String);
+          const apprIds = toIds(cfg.approval).map(String);
+          const toOpts = (ids) => ids.map(id => {
+            const e = activeEmps.find(x => String(x.id) === id);
+            return {
+              value: id,
+              label: e ? e.fullName : `#${id}`,
+              sub: e ? [e.employeeId, e.position].filter(Boolean).join(' - ') : '',
+              photo: e?.profilePhoto,
+            };
+          });
+          return { recoOpts: toOpts(recoIds), apprOpts: toOpts(apprIds) };
+        })();
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'90vh', overflowY:'auto' }}
+              onClick={e => e.stopPropagation()}>
+              <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
+                <h2>✏️ Edit Office Visit Application #{editVisit.id}</h2>
+                <button className="modal-close" onClick={() => setEditVisit(null)}>✕</button>
+              </div>
+              <div className="modal-body">
+                <form ref={editVisitFormRef} onSubmit={handleEditVisitSubmit}>
+                  {/* Staff */}
+                  <div className="form-group">
+                    <Lbl required>Staff</Lbl>
+                    <select value={editVisitForm.employeeId}
+                      onChange={e => setEditVisitForm(p => ({ ...p, employeeId: e.target.value, recommendedBy: '', approvedBy: '' }))}
+                      className="form-control" style={{ fontSize:13 }}>
+                      {activeEmps.map(e => (
+                        <option key={e.id} value={String(e.id)}>
+                          {e.fullName} {e.employeeId ? `[${e.employeeId}]` : ''} — {e.department || '—'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Official Visit */}
+                  <div className="form-group">
+                    <Lbl required>Official Visit</Lbl>
+                    <select value={editVisitForm.officialVisit} onChange={e => setEVF('officialVisit', e.target.value)}
+                      className={`form-control ${editVisitErrors.officialVisit ? 'error' : ''}`} style={{ fontSize:13 }}>
+                      <option value="">— Select Official Visit Type —</option>
+                      {visitTypeOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                    <Err msg={editVisitErrors.officialVisit} />
+                  </div>
+
+                  {/* Address */}
+                  <div className="form-group">
+                    <Lbl required>Address</Lbl>
+                    <input type="text" className={`form-control ${editVisitErrors.address ? 'error' : ''}`}
+                      placeholder="Enter visit address / location..." value={editVisitForm.address}
+                      onChange={e => setEVF('address', e.target.value)} style={{ fontSize:13 }} />
+                    <Err msg={editVisitErrors.address} />
+                  </div>
+
+                  {/* Description */}
+                  <div className="form-group">
+                    <Lbl required>Description</Lbl>
+                    <textarea className={`form-control ${editVisitErrors.description ? 'error' : ''}`}
+                      rows={2} placeholder="Enter description / purpose of the visit..."
+                      value={editVisitForm.description} onChange={e => setEVF('description', e.target.value)} style={{ fontSize:13 }} />
+                    <Err msg={editVisitErrors.description} />
+                  </div>
+
+                  {/* Dates */}
+                  <div className="form-row">
+                    <div className="form-group">
+                      <Lbl required>From Date</Lbl>
+                      <LeaveDateInput value={editVisitForm.fromDate} error={!!editVisitErrors.fromDate}
+                        settings={settings} onChange={v => setEVF('fromDate', v)} />
+                      <Err msg={editVisitErrors.fromDate} />
+                    </div>
+                    <div className="form-group">
+                      <Lbl required>To Date</Lbl>
+                      <LeaveDateInput value={editVisitForm.toDate} error={!!editVisitErrors.toDate}
+                        min={editVisitForm.fromDate} settings={settings} onChange={v => setEVF('toDate', v)} />
+                      <Err msg={editVisitErrors.toDate} />
+                    </div>
+                  </div>
+
+                  {/* Status — only admin/manager can change this here; see
+                      LeavePanel's identical comment on its own Status field. */}
+                  <div className="form-group">
+                    <Lbl required>Status</Lbl>
+                    <select value={editVisitForm.status} onChange={e => setEVF('status', e.target.value)}
+                      disabled={!canManageStaff}
+                      title={!canManageStaff ? 'Only an approver can change the status of your application' : undefined}
+                      className="form-control" style={{ fontSize:13, opacity: canManageStaff ? 1 : .65 }}>
+                      <option value="pending">Pending</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                  </div>
+
+                  {/* Recommended By + Date — only configured recommenders */}
+                  <div className="form-row">
+                    <div className="form-group">
+                      <Lbl>Recommended By</Lbl>
+                      <SearchableSelect value={editVisitForm.recommendedBy}
+                        onChange={v => setEVF('recommendedBy', v)}
+                        options={editEmpRecoAppr.recoOpts}
+                        placeholder={editEmpRecoAppr.recoOpts.length === 0 ? 'No recommendator configured' : '— Select Recommendator —'}
+                        disabled={editEmpRecoAppr.recoOpts.length === 0} showAvatar />
+                    </div>
+                    <div className="form-group">
+                      <Lbl>Recommended Date</Lbl>
+                      <LeaveDateInput value={editVisitForm.recommendedDate} settings={settings}
+                        onChange={v => setEVF('recommendedDate', v)} />
+                    </div>
+                  </div>
+
+                  {/* Approved By + Date — only configured approvers */}
+                  <div className="form-row">
+                    <div className="form-group">
+                      <Lbl>Approved By</Lbl>
+                      <SearchableSelect value={editVisitForm.approvedBy}
+                        onChange={v => setEVF('approvedBy', v)}
+                        options={editEmpRecoAppr.apprOpts}
+                        placeholder={editEmpRecoAppr.apprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
+                        disabled={editEmpRecoAppr.apprOpts.length === 0} showAvatar />
+                    </div>
+                    <div className="form-group">
+                      <Lbl>Approved Date</Lbl>
+                      <LeaveDateInput value={editVisitForm.approvedDate} settings={settings}
+                        onChange={v => setEVF('approvedDate', v)} />
+                    </div>
+                  </div>
+
+                  <div className="modal-footer" style={{ padding:'14px 0 0', borderTop:'1px solid #e5e7eb', marginTop:6, display:'flex', justifyContent:'space-between' }}>
+                    <button type="button" className="btn btn-outline" style={{ color:'#dc2626', borderColor:'#fca5a5' }}
+                      onClick={() => { setDelConfirm(editVisit.id); setEditVisit(null); }}>
+                      🗑️ Delete
+                    </button>
+                    <div style={{ display:'flex', gap:8 }}>
+                      <button type="button" className="btn btn-outline" onClick={() => setEditVisit(null)}>Cancel</button>
+                      <button type="submit" className="btn btn-primary" title="Ctrl+S">💾 <u>S</u>ave Changes</button>
+                    </div>
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Delete Confirm */}
       {delConfirm && (
@@ -2364,6 +3511,21 @@ const VisitPanel = () => {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setDelConfirm(null)}>{t('Cancel')}</button>
               <button className="btn btn-danger" onClick={() => { deleteVisit(delConfirm); setDelConfirm(null); }}>🗑 {t('Delete')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Office Visit Approval — full-width popup instead of navigating to its own page */}
+      {showVisitApprovalModal && (
+        <div className="modal-overlay" onClick={() => setShowVisitApprovalModal(false)}>
+          <div className="modal" style={{ width:'95vw', maxWidth:1400, maxHeight:'92vh' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>✅ {t('Visit Approval')}</h2>
+              <button className="modal-close" onClick={() => setShowVisitApprovalModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <OfficeVisitApproval embedded />
             </div>
           </div>
         </div>

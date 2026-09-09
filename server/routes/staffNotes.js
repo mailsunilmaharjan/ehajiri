@@ -3,12 +3,14 @@ import bcrypt from 'bcryptjs';
 import pool from '../db.js';
 
 const router = Router();
+const PRIVILEGED_ROLES = ['admin', 'superAdmin'];
 
 // visibility: 'private' (default — only the owner ever sees it, same as
-// before this existed) or 'public' (every staff member sees it, but only the
-// owner can still edit/delete it — enforced by the WHERE user_id=$N guard on
-// PUT/DELETE below, unchanged). ownerName/userId let the frontend show whose
-// public note it is and hide Edit/Delete for notes the viewer doesn't own.
+// before this existed) or 'public' (every staff member sees it). Only the
+// owner — or an admin/superAdmin — can edit/delete it, enforced by the
+// WHERE user_id=$N guard on PUT/DELETE below (skipped for admin/superAdmin).
+// ownerName/userId let the frontend show whose public note it is and hide
+// Edit/Delete for notes the viewer doesn't own and isn't privileged for.
 const SEL = `
   sn.id,
   sn.note_name      AS "noteName",
@@ -103,16 +105,18 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const { noteName, noteType, noteDetails, usernameTitle, username, password, securityType, totpSecret, gmailAccount, remarks, visibility } = req.body;
+  const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
   try {
     const { rows } = await pool.query(
       `UPDATE staff_notes SET
          note_name=$1, note_type=$2, note_details=$3, username_title=$4, username=$5,
          password=$6, security_type=$7, totp_secret=$8, gmail_account=$9, remarks=$10, visibility=$11, updated_at=NOW()
-       WHERE id=$12 AND user_id=$13
+       WHERE id=$12 AND ($13::int IS NULL OR user_id=$13)
        RETURNING id`,
       [noteName, noteType || 'normal', noteDetails || null, usernameTitle || null, username || null,
        password || null, securityType || 'normal', totpSecret || null, gmailAccount || null,
-       remarks || null, visibility === 'public' ? 'public' : 'private', req.params.id, req.user.id]
+       remarks || null, visibility === 'public' ? 'public' : 'private', req.params.id,
+       isPrivileged ? null : req.user.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Note not found' });
     const { rows: full } = await pool.query(`SELECT ${SEL} ${JOINS} WHERE sn.id = $1`, [rows[0].id]);
@@ -121,10 +125,11 @@ router.put('/:id', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
+  const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
   try {
     const { rowCount } = await pool.query(
-      'DELETE FROM staff_notes WHERE id=$1 AND user_id=$2',
-      [req.params.id, req.user.id]
+      'DELETE FROM staff_notes WHERE id=$1 AND ($2::int IS NULL OR user_id=$2)',
+      [req.params.id, isPrivileged ? null : req.user.id]
     );
     if (!rowCount) return res.status(404).json({ error: 'Note not found' });
     res.json({ ok: true });

@@ -212,6 +212,18 @@ html.lang-np .tm-dropdown-item { font-weight: 400; }
   50% { box-shadow: 0 1px 8px rgba(239,68,68,.7); }
 }
 
+/* Task/Field Visit nav-item badges — stays blinking for as long as any of
+   its notifications are unread, i.e. until that specific task is actually
+   opened (double-click) or followed up on (see markTaskRead in
+   TaskList.jsx), not just cleared by opening the list page. */
+@keyframes tm-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .25; }
+}
+.tm-nav-badge {
+  animation: tm-blink 1s ease-in-out infinite;
+}
+
 /* User dropdown position */
 .user-dd { left: auto; right: 0; min-width: 230px; }
 
@@ -228,11 +240,19 @@ html.lang-np .tm-dropdown-item { font-weight: 400; }
   transition: all .15s;
   color: #4b5563;
 }
-.tm-bell:hover {
+/* The wiggle only makes sense on the closed bell — with the dropdown open,
+   .notif-dd is a child of .tm-bell, so rotating/scaling the bell would drag
+   the whole open panel along with it. */
+.tm-bell:hover:not(.open) {
   background: #eff6ff;
   color: #1a56db;
   transform: rotate(-10deg) scale(1.1);
 }
+.tm-bell.open {
+  background: #eff6ff;
+  color: #1a56db;
+}
+.notif-dd { left: auto; right: 0; min-width: 260px; }
 .tm-bell-badge {
   position: absolute; top: 3px; right: 3px;
   background: #ef4444; color: white; border-radius: 10px;

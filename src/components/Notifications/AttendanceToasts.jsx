@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useBeepAlert } from '../../hooks/useBeepAlert.js';
-import { apiUrl } from '../../api/client.js';
+import api, { apiUrl } from '../../api/client.js';
 
 /* ── Notification Context ──────────────────────────────────── */
-const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {}, taskCount: 0, clearTaskCount: () => {} });
+const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {}, taskCount: 0, clearTaskCount: () => {}, fieldVisitTaskCount: 0, clearFieldVisitTaskCount: () => {}, refreshTaskCounts: () => {} });
 export const useNotifications = () => useContext(NotiCtx);
 
 /* ── Attendance Toast Card ─────────────────────────────────── */
@@ -110,25 +110,40 @@ const MessageToast = ({ noti, onClose }) => (
   </div>
 );
 
-/* ── Task Toast Card — task assigned to you, or one you created was completed ── */
+/* ── Task Toast Card — a task was assigned, completed, or its status/
+   description changed. Goes to whoever's actually on the task (creator,
+   every assignee), plus Admin/superAdmin and the Department Head of any
+   assignee's department (see resolveTaskAudience in server/routes/tasks.js)
+   — so the header text stays audience-neutral rather than "...to You". ── */
+const TASK_EVENT_META = {
+  assigned:            { icon: '📋', label: 'Task Assigned',       verb: 'Assigned',  color: '#1d4ed8', accent: '#1a56db', bg: '#eff6ff', border: '#dbeafe' },
+  completed:           { icon: '✅', label: 'Task Completed',      verb: 'Completed', color: '#16a34a', accent: '#16a34a', bg: '#f0fdf4', border: '#dcfce7' },
+  status_changed:      { icon: '🔄', label: 'Task Status Updated', verb: 'Updated',   color: '#b45309', accent: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+  description_changed: { icon: '📝', label: 'Task Updated',        verb: 'Updated',   color: '#6d28d9', accent: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
+  followup_added:      { icon: '📞', label: 'New Followup',        verb: 'Logged',    color: '#0e7490', accent: '#0891b2', bg: '#ecfeff', border: '#cffafe' },
+};
+
 const TaskToast = ({ noti, onClose }) => {
   const navigate = useNavigate();
-  const isCompleted = noti.event === 'completed';
+  const meta = TASK_EVENT_META[noti.event] || TASK_EVENT_META.assigned;
+  const detail = noti.event === 'status_changed' && noti.status
+    ? `Marked ${noti.status.replace('_', ' ')} by `
+    : `${meta.verb} by `;
   return (
     <div style={{
       width: 320, background: 'white',
       borderRadius: 12, overflow: 'hidden',
       boxShadow: '0 8px 32px rgba(0,0,0,.20)',
       border: '1px solid #e5e7eb',
-      borderLeft: `4px solid ${isCompleted ? '#16a34a' : '#1a56db'}`,
+      borderLeft: `4px solid ${meta.accent}`,
       animation: 'slideIn .25s ease-out',
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:8,
-        padding:'8px 10px 6px', background: isCompleted ? '#f0fdf4' : '#eff6ff',
-        borderBottom: `1px solid ${isCompleted ? '#dcfce7' : '#dbeafe'}` }}>
-        <span style={{ fontSize:14 }}>{isCompleted ? '✅' : '📋'}</span>
-        <span style={{ fontSize:11, fontWeight:700, color: isCompleted ? '#16a34a' : '#1d4ed8', flex:1 }}>
-          {isCompleted ? 'Task Completed' : 'Task Assigned to You'}
+        padding:'8px 10px 6px', background: meta.bg,
+        borderBottom: `1px solid ${meta.border}` }}>
+        <span style={{ fontSize:14 }}>{meta.icon}</span>
+        <span style={{ fontSize:11, fontWeight:700, color: meta.color, flex:1 }}>
+          {meta.label}
         </span>
         <button onClick={() => onClose(noti.id)}
           style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 4px',
@@ -137,7 +152,7 @@ const TaskToast = ({ noti, onClose }) => {
       <div style={{ padding:'12px 14px 14px' }}>
         <div style={{ fontSize:14, fontWeight:700, color:'#1f2937', marginBottom:4 }}>{noti.title}</div>
         <div style={{ fontSize:12, color:'#6b7280' }}>
-          {isCompleted ? 'Completed by ' : 'Assigned by '}<strong style={{ color:'#374151' }}>{noti.by}</strong>
+          {detail}<strong style={{ color:'#374151' }}>{noti.by}</strong>
         </div>
       </div>
       <div style={{ padding:'0 14px 12px', display:'flex', gap:8 }}>
@@ -146,9 +161,17 @@ const TaskToast = ({ noti, onClose }) => {
             borderRadius:7, background:'white', color:'#374151', fontSize:12, fontWeight:600, cursor:'pointer' }}>
           Dismiss
         </button>
-        <button onClick={() => { onClose(noti.id); navigate('/staff/task'); }}
+        <button onClick={() => {
+            onClose(noti.id);
+            // A brand-new assignment opens straight into the Task form itself
+            // (nothing to follow up on yet); every other event — completed,
+            // status/description changed, a new followup logged — opens the
+            // Followup History panel instead, since that's what actually
+            // changed. See TaskList.jsx's openTaskId/openEvent deep-link effect.
+            navigate(`/staff/task?openTaskId=${noti.taskId}&openEvent=${encodeURIComponent(noti.event)}`);
+          }}
           style={{ flex:1, padding:'6px 0', border:'none',
-            borderRadius:7, background: isCompleted ? '#16a34a' : '#1a56db', color:'white', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+            borderRadius:7, background: meta.accent, color:'white', fontSize:12, fontWeight:600, cursor:'pointer' }}>
           View
         </button>
       </div>
@@ -232,6 +255,11 @@ export function AttendanceNotificationProvider({ children }) {
   const [notifications, setNotifications] = useState([]);
   const [msgCount,      setMsgCount]      = useState(0);
   const [taskCount,     setTaskCount]     = useState(0);
+  // Field Visit tasks get their own badge on the Staff dropdown's separate
+  // "Field Visit" nav item — mutually exclusive with taskCount (a
+  // field-visit task's notification increments only this one, never both),
+  // mirroring GET /tasks/notifications/count's own count/fieldVisitCount split.
+  const [fieldVisitTaskCount, setFieldVisitTaskCount] = useState(0);
   const esRef = useRef(null);
 
   // useAuth is available here because AuthProvider wraps everything above Layout
@@ -286,11 +314,57 @@ export function AttendanceNotificationProvider({ children }) {
   }, [remove]);
 
   const clearMsgCount = useCallback(() => setMsgCount(0), []);
-  const clearTaskCount = useCallback(() => setTaskCount(0), []);
+  // Also persists server-side (task_notifications.is_read) so the count
+  // stays cleared after a refresh/re-login — previously this only reset
+  // this tab's React state, so the badge came right back on the next load
+  // even though the user had already seen everything on the Task page.
+  const clearTaskCount = useCallback(() => {
+    setTaskCount(0);
+    api.post('/tasks/notifications/read').catch(() => {});
+  }, []);
+  // Same as clearTaskCount but scoped to Field Visit tasks only — opening the
+  // Field Visit page shouldn't also mark the regular Task page's notifications
+  // as read, and vice versa (see the ?scope=fieldVisit handling server-side).
+  const clearFieldVisitTaskCount = useCallback(() => {
+    setFieldVisitTaskCount(0);
+    api.post('/tasks/notifications/read?scope=fieldVisit').catch(() => {});
+  }, []);
+
+  // Re-reads the true unread counts from task_notifications — used both to
+  // seed them on login/app-startup (below) and to re-sync after TaskList.jsx
+  // marks ONE specific task's notifications read (double-clicked open, or a
+  // followup logged against it — see markTaskRead there). The badge is meant
+  // to keep blinking per-task until that actually happens, not clear in bulk
+  // just from opening the Task/Field Visit list page, so there's no local
+  // decrement to do here — always re-fetch the real count.
+  const refreshTaskCounts = useCallback(() => {
+    if (!currentUser?.id) return;
+    api.get('/tasks/notifications/count').then(d => {
+      setTaskCount(d?.count || 0);
+      setFieldVisitTaskCount(d?.fieldVisitCount || 0);
+    }).catch(() => {});
+  }, [currentUser?.id]);
+
+  // Seed the true unread counts on login (and app startup for an
+  // already-logged-in session) — without this, taskCount always started at 0
+  // and only ever grew from live SSE events received while this tab stayed
+  // open, so anything that happened while offline was invisible even after
+  // logging back in.
+  useEffect(() => { refreshTaskCounts(); }, [refreshTaskCounts]);
 
   // Keeps beeping every few seconds while there's at least one unseen broadcast
   // message — stops the instant msgCount is cleared (user opens the inbox).
   useBeepAlert(msgCount > 0);
+  // Same "keeps beeping until seen" behavior for task notifications (assigned/
+  // completed/status/description changed) — stops the instant taskCount is
+  // cleared, which happens when the user actually opens the Task page (see
+  // clearTaskCount() in TaskList.jsx), not just from dismissing one popup —
+  // same convention as the message beep above.
+  useBeepAlert(taskCount > 0);
+  // Field Visit notifications beep on their own — a field-visit task's event
+  // only ever increments fieldVisitTaskCount (never taskCount, see the SSE
+  // handler below), so without this they'd be silent.
+  useBeepAlert(fieldVisitTaskCount > 0);
 
   useEffect(() => {
     const connect = () => {
@@ -322,10 +396,15 @@ export function AttendanceNotificationProvider({ children }) {
             const isRecipient = uid && Array.isArray(data.recipientIds) && data.recipientIds.includes(uid);
             if (isRecipient && taskNotificationsEnabledRef.current) {
               add(data);
-              setTaskCount(c => c + 1);
+              // Mutually exclusive with taskCount, matching GET /tasks/notifications/count's split.
+              if (data.isFieldVisit) setFieldVisitTaskCount(c => c + 1);
+              else setTaskCount(c => c + 1);
               if ('Notification' in window && Notification.permission === 'granted') {
-                const n = new Notification(data.event === 'completed' ? 'Task Completed' : 'Task Assigned to You', {
-                  body: data.title + (data.by ? `\n${data.event === 'completed' ? 'Completed' : 'Assigned'} by ${data.by}` : ''),
+                const meta = TASK_EVENT_META[data.event] || TASK_EVENT_META.assigned;
+                const verb = data.event === 'status_changed' && data.status
+                  ? `Marked ${data.status.replace('_', ' ')}` : meta.verb;
+                const n = new Notification(meta.label, {
+                  body: data.title + (data.by ? `\n${verb} by ${data.by}` : ''),
                   icon: '/favicon.ico',
                   tag: `task-${data.taskId}-${data.event}`,
                 });
@@ -342,7 +421,7 @@ export function AttendanceNotificationProvider({ children }) {
   }, [add, currentUser?.id]);
 
   return (
-    <NotiCtx.Provider value={{ add, remove, msgCount, clearMsgCount, taskCount, clearTaskCount }}>
+    <NotiCtx.Provider value={{ add, remove, msgCount, clearMsgCount, taskCount, clearTaskCount, fieldVisitTaskCount, clearFieldVisitTaskCount, refreshTaskCounts }}>
       {children}
       <ToastContainer notifications={notifications} onClose={remove} />
     </NotiCtx.Provider>

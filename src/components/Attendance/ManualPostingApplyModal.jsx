@@ -8,6 +8,7 @@ import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 /* Same shape as ManualPostings.jsx's inline Add form — this is the FAB's
    instant-popup entry point into the same POST /attendance/manual-postings
@@ -19,20 +20,6 @@ import useSaveShortcut from '../../hooks/useSaveShortcut.js';
    Leave/Office Visit — that sits until their configured recommender/approver
    accepts it, rather than writing straight into real attendance data. */
 const empty = { employeeId: '', date: '', checkIn: '', checkOut: '', remark: '', recommendedBy: '', approvedBy: '' };
-
-const loadRecoApproval = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
-const getRecoIds = (empId) => {
-  if (!empId) return [];
-  const r = loadRecoApproval()[String(empId)]?.reco;
-  return Array.isArray(r) ? r.map(String) : (r ? [String(r)] : []);
-};
-const getApprovalIds = (empId) => {
-  if (!empId) return [];
-  const a = loadRecoApproval()[String(empId)]?.approval;
-  return Array.isArray(a) ? a.map(String) : (a ? [String(a)] : []);
-};
 
 const TimeInput = ({ value, onChange }) => (
   <input type="time" value={value} onChange={e => onChange(e.target.value)}
@@ -60,9 +47,10 @@ const field = (label, required, err, children) => (
 
 const ManualPostingApplyModal = () => {
   const { isOpen, close, prefillDate } = useManualPostingApply();
-  const { filteredEmployees } = useData();
+  const { filteredEmployees, employees: allEmployees } = useData();
   const { currentUser, canManageSystem } = useAuth();
   const isAdmin = canManageSystem;
+  const { getRecoIds, getApprovalIds, refresh: refreshRecoApproval } = useRecoApproval();
 
   const [form,    setForm]    = useState(empty);
   const [errors,  setErrors]  = useState({});
@@ -71,18 +59,28 @@ const ManualPostingApplyModal = () => {
 
   // Non-admin: always about themselves, pre-filled and locked the moment the
   // popup opens — a raw API call ignoring this is separately rejected server-side.
+  // This modal is rendered globally and stays mounted for the whole session
+  // (see Layout.jsx), so useRecoApproval's own mount-time fetch would go
+  // stale forever the moment someone edits the config after login — refetch
+  // every time the popup actually opens instead.
   useEffect(() => {
     if (!isOpen) return;
     const base = isAdmin ? empty : { ...empty, employeeId: String(currentUser?.id || '') };
     setForm(prefillDate ? { ...base, date: prefillDate } : base);
     setErrors({});
     setSuccess(false);
+    refreshRecoApproval();
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const recoIds     = useMemo(() => getRecoIds(form.employeeId),     [form.employeeId]);
-  const approvalIds = useMemo(() => getApprovalIds(form.employeeId), [form.employeeId]);
-  const recoOptions     = useMemo(() => filteredEmployees.filter(e => recoIds.includes(String(e.id))),     [filteredEmployees, recoIds]);
-  const approvalOptions = useMemo(() => filteredEmployees.filter(e => approvalIds.includes(String(e.id))), [filteredEmployees, approvalIds]);
+  const recoIds     = getRecoIds(form.employeeId);
+  const approvalIds = getApprovalIds(form.employeeId);
+  // Full employee list, not filteredEmployees — the configured recommender/
+  // approver may be outside the current viewer's branch/dept scope, and
+  // filteredEmployees silently dropping them is exactly what made this show
+  // "— Not configured —" even when an assignment existed (same fix already
+  // applied in LeaveApplyModal.jsx).
+  const recoOptions     = allEmployees.filter(e => recoIds.includes(String(e.id)));
+  const approvalOptions = allEmployees.filter(e => approvalIds.includes(String(e.id)));
 
   const handleClose = () => {
     close();
@@ -169,8 +167,14 @@ const ManualPostingApplyModal = () => {
                     <SearchableSelect
                       value={form.employeeId}
                       onChange={v => setForm(p => ({ ...p, employeeId:v, recommendedBy:'', approvedBy:'' }))}
-                      options={filteredEmployees.map(e => ({ value:String(e.id), label:`${e.fullName} (${e.employeeId})` }))}
+                      options={filteredEmployees.map(e => ({
+                        value: String(e.id),
+                        label: e.fullName,
+                        sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+                        photo: e.profilePhoto,
+                      }))}
                       placeholder="— Select Staff —"
+                      showAvatar
                     />
                   </div>
                 )
@@ -201,17 +205,29 @@ const ManualPostingApplyModal = () => {
                   <SearchableSelect
                     value={form.recommendedBy}
                     onChange={v => setForm(p => ({ ...p, recommendedBy:v }))}
-                    options={recoOptions.map(e => ({ value:String(e.id), label:e.fullName }))}
+                    options={recoOptions.map(e => ({
+                      value: String(e.id),
+                      label: e.fullName,
+                      sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+                      photo: e.profilePhoto,
+                    }))}
                     placeholder={!form.employeeId ? '— Select staff first —' : recoOptions.length === 0 ? 'No recommendator configured' : '— Select —'}
                     disabled={!form.employeeId || recoOptions.length === 0}
+                    showAvatar
                   />
                 )}
                 {field('Approved By', false, null,
                   <SearchableSelect
                     value={form.approvedBy}
                     onChange={v => setForm(p => ({ ...p, approvedBy:v }))}
-                    options={approvalOptions.map(e => ({ value:String(e.id), label:e.fullName }))}
+                    options={approvalOptions.map(e => ({
+                      value: String(e.id),
+                      label: e.fullName,
+                      sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+                      photo: e.profilePhoto,
+                    }))}
                     placeholder={!form.employeeId ? '— Select staff first —' : approvalOptions.length === 0 ? 'No approver configured' : '— Select —'}
+                    showAvatar
                     disabled={!form.employeeId || approvalOptions.length === 0}
                   />
                 )}

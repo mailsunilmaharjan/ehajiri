@@ -1,15 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { makeDateFormatter } from '../../utils/dateUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
-
-/* ── load reco/approval settings ── */
-const loadRecoConfig = () => {
-  try { return JSON.parse(localStorage.getItem('ehajiri_reco_approval') || '{}'); } catch { return {}; }
-};
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 const StatusBadge = ({ status }) => {
   const map = {
@@ -29,13 +25,21 @@ const RecoTag = ({ name }) => (
   </span>
 );
 
-const OfficeVisitApproval = () => {
+// `embedded` — rendered inside LeaveVisitPage's full-width "Office Visit
+// Approval" popup instead of as its own routed page: skips the
+// page-container/page-header chrome since the modal shell already provides
+// a title + close (see LeaveApproval.jsx's identical prop).
+const OfficeVisitApproval = ({ embedded = false } = {}) => {
   const { currentUser } = useAuth();
   const { t }           = useLanguage();
   const { settings }    = useSettings();
   const fd              = makeDateFormatter(settings);
   const {
-    filteredVisits: officeVisits, approveVisit, rejectVisit, recommendVisit,
+    // Deliberately the RAW company-wide visits, not filteredVisits — see
+    // LeaveApproval.jsx's identical comment: org-hierarchy scoping has
+    // nothing to do with the separate "Set Recommendator & Approval"
+    // assignment, which can legitimately cross branch/department lines.
+    officeVisits, approveVisit, rejectVisit, recommendVisit,
     getEmployeeName, getEmployeeById,
   } = useData();
 
@@ -44,8 +48,8 @@ const OfficeVisitApproval = () => {
   const [toast,       setToast]       = useState(null);
 
   /* ── Load reco config ── */
-  const recoConfig       = useMemo(() => loadRecoConfig(), []);
-  const isRecoCompulsory = recoConfig._settings?.isRecoCompulsory || false;
+  const { assignments: recoConfig } = useRecoApproval();
+  const isRecoCompulsory = settings.recoApprovalCompulsory || false;
 
   const showToast = (msg, type) => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
@@ -62,8 +66,25 @@ const OfficeVisitApproval = () => {
     return ids.map(String).includes(String(currentUser.id));
   };
 
+  // Whether this employee has ANY recommender configured at all — if not,
+  // "Recommendation Compulsory" is unsatisfiable for them (nobody exists who
+  // could ever recommend it), so it must not block their approver. Mirrors
+  // authorizeRecoAction's hasRecommenderConfigured check server-side.
+  const hasRecommenderFor = (empId) => {
+    const r = recoConfig[String(empId)]?.reco;
+    const ids = Array.isArray(r) ? r : (r ? [r] : []);
+    return ids.length > 0;
+  };
+
   const canApproveVisit = (visit) =>
-    !isRecoCompulsory || !!visit.recommendedBy;
+    !isRecoCompulsory || !!visit.recommendedBy || !hasRecommenderFor(visit.employeeId);
+
+  // Separation of duties: while Recommendation Compulsory is on AND a
+  // recommender is actually configured, whoever is configured as this
+  // employee's recommender never sees the Approve button, even if they're
+  // also configured as the approver — a different person must sign off.
+  // Mirrored server-side in authorizeRecoAction.
+  const canShowApprove = (empId) => !(isRecoCompulsory && hasRecommenderFor(empId) && isRecommenderFor(empId));
 
   /* ── Handle action ── */
   const handleAction = () => {
@@ -83,8 +104,14 @@ const OfficeVisitApproval = () => {
     setComment('');
   };
 
-  const pending = officeVisits.filter(v => v.status === 'pending');
-  const all     = [...officeVisits].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));
+  // Scope everything on this page to applications the current user is
+  // actually the assigned recommender/approver for — the action buttons
+  // already only appear for those (see amReco/amApprover below), so an
+  // unfiltered org-wide list was mostly rows nobody here could act on.
+  const isMine  = (v) => isRecommenderFor(v.employeeId) || isApproverFor(v.employeeId);
+  const myVisits = officeVisits.filter(isMine);
+  const pending  = myVisits.filter(v => v.status === 'pending');
+  const all      = [...myVisits].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));
 
   /* ── Grid columns ── */
   const columns = [
@@ -115,7 +142,7 @@ const OfficeVisitApproval = () => {
     { field:'actions', header:t('Actions'), width:180, filterable:false, sortable:false,
       render:(_, row) => {
         const amReco      = isRecommenderFor(row.employeeId);
-        const amApprover  = isApproverFor(row.employeeId);
+        const amApprover  = isApproverFor(row.employeeId) && canShowApprove(row.employeeId);
         const canApprove  = canApproveVisit(row);
         const alreadyReco = !!row.recommendedBy;
 
@@ -138,11 +165,11 @@ const OfficeVisitApproval = () => {
                 title={canApprove ? t('Approve') : 'Awaiting recommendation first'}
                 onClick={e => { e.stopPropagation(); if (canApprove) { setActionModal({ id:row.id, type:'approve', visit:row }); setComment(''); } }}>✓</button>
             )}
-            {amApprover && (
+            {isApproverFor(row.employeeId) && (
               <button className="dg-action-btn reject"
                 onClick={e => { e.stopPropagation(); setActionModal({ id:row.id, type:'reject', visit:row }); setComment(''); }}>✗</button>
             )}
-            {!amReco && !amApprover && <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>}
+            {!amReco && !isApproverFor(row.employeeId) && <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>}
           </div>
         );
       }
@@ -150,35 +177,43 @@ const OfficeVisitApproval = () => {
   ];
 
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">✅ {t('Visit Approval')}</h1>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:4, flexWrap:'wrap' }}>
-            <p className="page-subtitle" style={{ margin:0 }}>{pending.length} {t('Pending Approvals')}</p>
-            {isRecoCompulsory && (
-              <span style={{ fontSize:12, fontWeight:700, padding:'2px 10px', borderRadius:10,
-                background:'#fef3c7', color:'#92400e', border:'1px solid #fde68a' }}>
-                ⚠️ Recommendation Compulsory
-              </span>
-            )}
+    <div className={embedded ? '' : 'page-container'}>
+      {!embedded && (
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">✅ {t('Visit Approval')}</h1>
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:4, flexWrap:'wrap' }}>
+              <p className="page-subtitle" style={{ margin:0 }}>{pending.length} {t('Pending Approvals')}</p>
+              {isRecoCompulsory && (
+                <span style={{ fontSize:12, fontWeight:700, padding:'2px 10px', borderRadius:10,
+                  background:'#fef3c7', color:'#92400e', border:'1px solid #fde68a' }}>
+                  ⚠️ Recommendation Compulsory
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+      {embedded && isRecoCompulsory && (
+        <div style={{ marginBottom:14 }}>
+          <span style={{ fontSize:12, fontWeight:700, padding:'2px 10px', borderRadius:10,
+            background:'#fef3c7', color:'#92400e', border:'1px solid #fde68a' }}>
+            ⚠️ Recommendation Compulsory
+          </span>
+        </div>
+      )}
 
-      {/* Stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:20 }}>
+      {/* Stats — compact pills, matching the Staff Detail summary chips */}
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:20 }}>
         {[
-          { label:t('Pending'),   count:officeVisits.filter(v=>v.status==='pending').length,  color:'#e3a008', bg:'#fdf3d0' },
-          { label:'Recommended', count:officeVisits.filter(v=>!!v.recommendedBy).length,     color:'#059669', bg:'#d1fae5' },
-          { label:t('Approved'), count:officeVisits.filter(v=>v.status==='approved').length, color:'#0e9f6e', bg:'#d1fae5' },
-          { label:t('Rejected'), count:officeVisits.filter(v=>v.status==='rejected').length, color:'#f05252', bg:'#fde8e8' },
+          { label:t('Pending'),   count:myVisits.filter(v=>v.status==='pending').length,  bg:'#fdf3d0', color:'#92400e' },
+          { label:'Recommended',  count:myVisits.filter(v=>!!v.recommendedBy).length,     bg:'#d1fae5', color:'#059669' },
+          { label:t('Approved'),  count:myVisits.filter(v=>v.status==='approved').length, bg:'#d1fae5', color:'#0e9f6e' },
+          { label:t('Rejected'),  count:myVisits.filter(v=>v.status==='rejected').length, bg:'#fde8e8', color:'#f05252' },
         ].map((s, i) => (
-          <div key={i} style={{ background:s.bg, borderRadius:8, padding:'14px 18px',
-            display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span style={{ fontSize:13, fontWeight:600, color:s.color }}>{s.label}</span>
-            <span style={{ fontSize:26, fontWeight:700, color:s.color }}>{s.count}</span>
-          </div>
+          <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:6, background:s.bg, color:s.color, borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:600 }}>
+            {s.label}: <strong style={{ fontSize:14 }}>{s.count}</strong>
+          </span>
         ))}
       </div>
 
@@ -190,7 +225,7 @@ const OfficeVisitApproval = () => {
           </div>
           {pending.map(v => {
             const amReco      = isRecommenderFor(v.employeeId);
-            const amApprover  = isApproverFor(v.employeeId);
+            const amApprover  = isApproverFor(v.employeeId) && canShowApprove(v.employeeId);
             const canApprove  = canApproveVisit(v);
             const alreadyReco = !!v.recommendedBy;
 
@@ -220,7 +255,7 @@ const OfficeVisitApproval = () => {
                       {v.country && ` · ${v.country}`}
                     </div>
                     <div style={{ fontSize:11, color:'#6b7280' }}>{v.address||v.location} · {v.fromDate} – {v.toDate}</div>
-                    {isRecoCompulsory && (
+                    {isRecoCompulsory && hasRecommenderFor(v.employeeId) && (
                       <div style={{ marginTop:3 }}>
                         {alreadyReco
                           ? <RecoTag name={getEmployeeName(v.recommendedBy)} />
@@ -240,19 +275,19 @@ const OfficeVisitApproval = () => {
                     </button>
                   )}
                   {amApprover && (
-                    <>
-                      <button className="btn btn-sm btn-success"
-                        disabled={!canApprove}
-                        style={{ opacity: canApprove ? 1 : 0.4, cursor: canApprove ? 'pointer' : 'not-allowed' }}
-                        title={canApprove ? '' : 'Recommendation required before approval'}
-                        onClick={() => { if (canApprove) { setActionModal({ id:v.id, type:'approve', visit:v }); setComment(''); } }}>
-                        ✓ {t('Approve')}
-                      </button>
-                      <button className="btn btn-sm btn-danger"
-                        onClick={() => { setActionModal({ id:v.id, type:'reject', visit:v }); setComment(''); }}>
-                        ✗ {t('Reject')}
-                      </button>
-                    </>
+                    <button className="btn btn-sm btn-success"
+                      disabled={!canApprove}
+                      style={{ opacity: canApprove ? 1 : 0.4, cursor: canApprove ? 'pointer' : 'not-allowed' }}
+                      title={canApprove ? '' : 'Recommendation required before approval'}
+                      onClick={() => { if (canApprove) { setActionModal({ id:v.id, type:'approve', visit:v }); setComment(''); } }}>
+                      ✓ {t('Approve')}
+                    </button>
+                  )}
+                  {isApproverFor(v.employeeId) && (
+                    <button className="btn btn-sm btn-danger"
+                      onClick={() => { setActionModal({ id:v.id, type:'reject', visit:v }); setComment(''); }}>
+                      ✗ {t('Reject')}
+                    </button>
                   )}
                 </div>
               </div>

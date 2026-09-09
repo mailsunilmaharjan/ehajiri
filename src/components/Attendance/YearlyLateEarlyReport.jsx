@@ -6,9 +6,11 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import ViewYearlyBtn from './ViewYearlyBtn.jsx';
+import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 
@@ -150,7 +152,7 @@ const YearlyLateEarlyReport = () => {
   const [searchParams]  = useSearchParams();
   const { language }    = useLanguage();
   const { settings }    = useSettings();
-  const { filteredEmployees: allEmployees, shifts } = useData();
+  const { filteredEmployees: allEmployees, shifts, getEmployeeById } = useData();
   const { isEmployee, currentUser } = useAuth();
   const myEmpId = isEmployee ? String(currentUser?.id || '') : '';
   const fd              = useDateFormat();
@@ -190,7 +192,7 @@ const YearlyLateEarlyReport = () => {
     try {
       const { s, e } = getYearRange();
       const activeParam = staffStatus === 'notworking' ? 'false' : 'true';
-      const result = await api.get(`/attendance/half-late-early?startDate=${s}&endDate=${e}&active=${activeParam}`);
+      const result = await api.get(`/attendance/half-late-early?startDate=${s}&endDate=${e}&active=${activeParam}&orgScope=1`);
       setData(result);
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
@@ -207,8 +209,17 @@ const YearlyLateEarlyReport = () => {
   /* ── DataGrid columns ── */
   const columns = [
     {
+      field:'id', header:L('स्टाफ आईडी','Staff ID'), sortable:false,
+      render: (v) => <span style={{ color:'#374151' }}>{getEmployeeById(v)?.employeeId || '—'}</span>,
+    },
+    {
       field:'fullName', header:L('कर्मचारी','Person'), sortable:true,
-      render: v => <span style={{ color:'#1f2937' }}>{v}</span>,
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
+          <Avatar photo={getEmployeeById(row.id)?.profilePhoto} name={v} size={22} />
+          {v}
+        </span>
+      ),
     },
     {
       field:'postShort', header:L('पद','Post'),
@@ -249,7 +260,7 @@ const YearlyLateEarlyReport = () => {
         : <span style={{ color:'#d1d5db' }}>—</span>,
     },
     {
-      field:'lateInFormatted', header:L('कैफियत','Remarks'), sortable:false, wrap:true,
+      field:'lateInFormatted', header:L('कैफियत','Remarks'), sortable:false, wrap:true, fill:true,
       render: (lateIn, row) => {
         const parts = [];
         if (lateIn) parts.push(
@@ -412,12 +423,7 @@ const YearlyLateEarlyReport = () => {
       )}
 
       {loading && (
-        <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af' }}>
-          <div style={{ fontSize:36,marginBottom:8 }}>⏳</div>
-          <div style={{ fontWeight:600,fontSize:14 }}>
-            {L('वार्षिक ढिला/चाँडो डेटा लोड हुँदैछ...','Loading yearly late/early data...')}
-          </div>
-        </div>
+        <LoadingIndicator label={L('वार्षिक ढिला/चाँडो डेटा लोड हुँदैछ...','Loading yearly late/early data...')} />
       )}
 
       {!loading && data && allRecs.length === 0 && (
