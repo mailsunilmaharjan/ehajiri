@@ -179,7 +179,7 @@ router.get('/sso-exchange', async (req, res) => {
         }
       }
       const { password: _, ...user } = rows[0];
-      const userOut = camelUser(user);
+      const userOut = await attachCoverage(camelUser(user));
       const licenseWarning = await getLicenseWarning().catch(() => null);
       return res.json({ ...userOut, token: signToken(userOut), licenseWarning });
     }
@@ -264,7 +264,7 @@ router.post('/login', async (req, res) => {
     if (!passwordOk) return res.status(401).json({ error: 'इमेल वा पासवर्ड गलत छ' });
 
     const { password: _, ...user } = row;
-    const userOut = camelUser(user);
+    const userOut = await attachCoverage(camelUser(user));
     res.json({ ...userOut, token: signToken(userOut), licenseWarning });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -415,6 +415,40 @@ router.put('/profile-email', authGuard, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Branch Area Manager / Department Incharge only — resolves their covered
+// branches/departments (manager_branch_coverage / manager_department_coverage,
+// migration v138) into plain name strings and attaches them to the login
+// response, the same shape filterByRole already expects branch/department in.
+// Deliberately NOT embedded in the JWT (signToken) — the token is long-lived
+// (30d) and coverage is meant to change immediately when an admin edits it in
+// Roles & Permission → Coverage; orgScope.js re-reads these tables live on
+// every scoped request instead of trusting a stale token claim. This means
+// the client-side copy here (used for display filtering only) can lag behind
+// a coverage edit until next login — the same staleness branch/department
+// already have today, not a new one, and never the actual authorization gate.
+async function attachCoverage(userOut) {
+  if (userOut.role === 'branchAreaManager') {
+    const { rows } = await pool.query(
+      `SELECT b.name FROM manager_branch_coverage mbc
+       JOIN branches b ON b.id = mbc.branch_id
+       WHERE mbc.user_id = $1 ORDER BY b.name`,
+      [userOut.id]
+    );
+    userOut.coverageBranches = rows.map(r => r.name);
+  } else if (userOut.role === 'departmentIncharge') {
+    const { rows } = await pool.query(
+      `SELECT d.name AS department, b.name AS branch
+       FROM manager_department_coverage mdc
+       JOIN departments d ON d.id = mdc.department_id
+       LEFT JOIN branches b ON b.id = mdc.branch_id
+       WHERE mdc.user_id = $1 ORDER BY d.name, b.name`,
+      [userOut.id]
+    );
+    userOut.coverageDepartments = rows.map(r => ({ department: r.department, branch: r.branch || null }));
+  }
+  return userOut;
+}
 
 function camelUser(r) {
   return {

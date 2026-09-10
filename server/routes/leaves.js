@@ -187,7 +187,8 @@ router.get('/', async (req, res) => {
     // what was actually asked for — narrowing management roles to their
     // own team).
     const scope = resolveOrgScope(req);
-    let ids = (scope.level === 'branch' || scope.level === 'department')
+    let ids = (scope.level === 'branch' || scope.level === 'department'
+                || scope.level === 'branches' || scope.level === 'departments')
       ? await resolveOrgEmployeeIds(req) : null;
     if (ids) {
       // Widen with anyone this caller is explicitly configured to recommend/

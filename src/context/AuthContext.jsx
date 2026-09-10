@@ -163,6 +163,14 @@ DEFAULT_PAGE_PERMISSIONS.superAdmin = {
   auditLog:      { view: true, edit: false, delete: false },
 };
 
+// Branch Area Manager / Department Incharge — same page permissions as the
+// role they extend (branchManager / departmentHead respectively); the only
+// difference is how WIDE their org scope is (several branches/departments
+// instead of one), which is resolved separately via manager_branch_coverage
+// / manager_department_coverage — see orgScope.js and filterByRole below.
+DEFAULT_PAGE_PERMISSIONS.branchAreaManager  = { ...DEFAULT_PAGE_PERMISSIONS.branchManager };
+DEFAULT_PAGE_PERMISSIONS.departmentIncharge = { ...DEFAULT_PAGE_PERMISSIONS.departmentHead };
+
 const loadPerms = () => {
   try { return JSON.parse(localStorage.getItem(PERM_KEY) || 'null'); } catch { return null; }
 };
@@ -316,26 +324,32 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /* ── Role flags ── */
-  const isSuperAdmin    = currentUser?.role === 'superAdmin';
-  const isAdmin         = currentUser?.role === 'admin' || isSuperAdmin;
-  const isBranchManager = currentUser?.role === 'branchManager';
-  const isDeptHead      = currentUser?.role === 'departmentHead';
-  const isEmployee      = !isAdmin && !isBranchManager && !isDeptHead;
+  const isSuperAdmin       = currentUser?.role === 'superAdmin';
+  const isAdmin            = currentUser?.role === 'admin' || isSuperAdmin;
+  const isBranchManager    = currentUser?.role === 'branchManager';
+  const isDeptHead         = currentUser?.role === 'departmentHead';
+  // Cover SEVERAL branches / (department, branch) pairs instead of one —
+  // see manager_branch_coverage / manager_department_coverage (migration
+  // v138) and orgScope.js. Same page permissions as branchManager/
+  // departmentHead (DEFAULT_PAGE_PERMISSIONS above), just a wider org scope.
+  const isBranchAreaManager = currentUser?.role === 'branchAreaManager';
+  const isDeptIncharge      = currentUser?.role === 'departmentIncharge';
+  const isEmployee      = !isAdmin && !isBranchManager && !isDeptHead && !isBranchAreaManager && !isDeptIncharge;
 
   // Legacy alias kept for existing usages
-  const isManager       = isAdmin || isBranchManager;
+  const isManager       = isAdmin || isBranchManager || isBranchAreaManager;
 
   // Can add / edit / delete staff (within own scope)
-  const canManageStaff  = isAdmin || isBranchManager;
+  const canManageStaff  = isAdmin || isBranchManager || isBranchAreaManager;
 
   // Can approve leave / office visits
-  const canApprove      = isAdmin || isBranchManager || isDeptHead;
+  const canApprove      = isAdmin || isBranchManager || isDeptHead || isBranchAreaManager || isDeptIncharge;
 
   // Can access settings, shifts, license, backup
   const canManageSystem = isAdmin;
 
   // Can view any reports (dept head and above)
-  const canViewReports  = isAdmin || isBranchManager || isDeptHead;
+  const canViewReports  = isAdmin || isBranchManager || isDeptHead || isBranchAreaManager || isDeptIncharge;
 
   // Any authenticated user can view their own data
   const canViewOwnReports = !!currentUser;
@@ -393,9 +407,28 @@ export const AuthProvider = ({ children }) => {
         (!myBranch || (e.branch || '').toLowerCase().trim() === myBranch)
       );
     }
+    if (isBranchAreaManager) {
+      // coverageBranches: plain branch-name strings, attached to currentUser
+      // at login (see auth.js's attachCoverage) from manager_branch_coverage.
+      const covered = new Set((currentUser.coverageBranches || []).map(b => b.toLowerCase().trim()));
+      return empList.filter(e => covered.has((e.branch || '').toLowerCase().trim()));
+    }
+    if (isDeptIncharge) {
+      // coverageDepartments: [{department, branch}] — branch:null means
+      // "that department, every branch" (see attachCoverage/migration v138).
+      const covered = (currentUser.coverageDepartments || []).map(c => ({
+        department: (c.department || '').toLowerCase().trim(),
+        branch: c.branch ? c.branch.toLowerCase().trim() : null,
+      }));
+      return empList.filter(e => {
+        const eDept   = (e.department || '').toLowerCase().trim();
+        const eBranch = (e.branch || '').toLowerCase().trim();
+        return covered.some(c => c.department === eDept && (c.branch === null || c.branch === eBranch));
+      });
+    }
     // Employee: own record only
     return empList.filter(e => String(e.id) === String(currentUser.id));
-  }, [currentUser, isAdmin, isBranchManager, isDeptHead]);
+  }, [currentUser, isAdmin, isBranchManager, isDeptHead, isBranchAreaManager, isDeptIncharge]);
 
   return (
     <AuthContext.Provider value={{
@@ -404,6 +437,7 @@ export const AuthProvider = ({ children }) => {
       licenseWarning, dismissLicenseWarning: () => setLicenseWarning(null),
       // Role flags
       isAdmin, isSuperAdmin, isBranchManager, isDeptHead, isEmployee,
+      isBranchAreaManager, isDeptIncharge,
       // Legacy
       isManager,
       // Permission helpers

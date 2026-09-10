@@ -2878,6 +2878,35 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 138,
+    description: 'manager_branch_coverage / manager_department_coverage — lets one person be assigned SEVERAL branches (Branch Area Manager) or several department+branch combinations (Department Incharge), instead of the single users.branch/department string every branchManager/departmentHead is limited to today. branch_id NULL on the department table means "that department, every branch". Purely additive — existing branchManager/departmentHead rows and queries are untouched; orgScope.js reads these only for the two new roles.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS manager_branch_coverage (
+          id        SERIAL  PRIMARY KEY,
+          user_id   INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+          branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+          UNIQUE (user_id, branch_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_manager_branch_coverage_user ON manager_branch_coverage(user_id);
+
+        CREATE TABLE IF NOT EXISTS manager_department_coverage (
+          id            SERIAL  PRIMARY KEY,
+          user_id       INTEGER NOT NULL REFERENCES users(id)       ON DELETE CASCADE,
+          department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+          branch_id     INTEGER          REFERENCES branches(id)    ON DELETE CASCADE,
+          UNIQUE (user_id, department_id, branch_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_manager_department_coverage_user ON manager_department_coverage(user_id);
+        -- Postgres treats every NULL branch_id as distinct for the UNIQUE
+        -- constraint above, so "department, every branch" (branch_id IS NULL)
+        -- needs its own partial index to actually stop duplicate rows.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_manager_department_coverage_allbranch
+          ON manager_department_coverage(user_id, department_id) WHERE branch_id IS NULL;
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

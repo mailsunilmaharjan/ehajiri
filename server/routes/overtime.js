@@ -24,7 +24,7 @@
 import { Router } from 'express';
 import pool       from '../db.js';
 import { logError } from '../utils/logError.js';
-import { resolveOrgScope } from './orgScope.js';
+import { resolveOrgScope, resolveOrgEmployeeIds } from './orgScope.js';
 import { loadRosterMap, getEffectiveRoster, isRosterWeekend, bucketPunchesByShiftDay, resolveWinterShift } from './attendance.js';
 import { authorizeRecoAction } from '../services/recoApprovalGuard.js';
 
@@ -82,6 +82,15 @@ router.get('/', async (req, res) => {
   }
   else if (scope.level === 'branch') { scopeParams.push(scope.value); scopeCond = `AND u.branch = $${scopeParams.length + 1}`; }
   else if (scope.level === 'self')   { scopeParams.push(scope.value); scopeCond = `AND u.id = $${scopeParams.length + 1}`; }
+  // Branch Area Manager / Department Incharge — several branches/departments
+  // (manager_branch_coverage / manager_department_coverage), resolved the
+  // same way every other OT-adjacent route does via resolveOrgEmployeeIds
+  // rather than re-deriving the coverage JOIN inline here.
+  else if (scope.level === 'branches' || scope.level === 'departments') {
+    const coveredIds = await resolveOrgEmployeeIds(req);
+    scopeParams.push(coveredIds || []);
+    scopeCond = `AND u.id = ANY($${scopeParams.length + 1}::int[])`;
+  }
 
   try {
     // 1. Load default shift (start, end, grace, name)

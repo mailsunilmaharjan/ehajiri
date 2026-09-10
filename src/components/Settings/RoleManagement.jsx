@@ -3,15 +3,18 @@ import { useAuth, DEFAULT_PAGE_PERMISSIONS, savePagePermissions } from '../../co
 import { useData } from '../../context/DataContext.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import api from '../../api/client.js';
+import SaveButton from '../Common/SaveButton.jsx';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Role metadata
 ───────────────────────────────────────────────────────────────────────── */
 const ROLE_META = {
-  admin:          { label: 'System Admin',   color: '#7e3af2', bg: '#ede9fe', icon: '👑' },
-  branchManager:  { label: 'Branch Manager', color: '#1a56db', bg: '#dbeafe', icon: '🏢' },
-  departmentHead: { label: 'Dept. Head',     color: '#0e9f6e', bg: '#d1fae5', icon: '🏛️' },
-  employee:       { label: 'Employee',       color: '#6b7280', bg: '#f3f4f6', icon: '👤' },
+  admin:              { label: 'System Admin',        color: '#7e3af2', bg: '#ede9fe', icon: '👑' },
+  branchAreaManager:  { label: 'Branch Area Manager',  color: '#1e3a8a', bg: '#e0e7ff', icon: '🗺️' },
+  branchManager:      { label: 'Branch Manager',       color: '#1a56db', bg: '#dbeafe', icon: '🏢' },
+  departmentIncharge: { label: 'Dept. Incharge',       color: '#047857', bg: '#a7f3d0', icon: '🧭' },
+  departmentHead:     { label: 'Dept. Head',           color: '#0e9f6e', bg: '#d1fae5', icon: '🏛️' },
+  employee:           { label: 'Employee',             color: '#6b7280', bg: '#f3f4f6', icon: '👤' },
 };
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -150,9 +153,11 @@ const OVERRIDE_GROUPS = [
 ];
 
 const ROLES_FOR_MATRIX = [
-  { key: 'employee',       label: 'Employee',       color: '#6b7280', bg: '#f3f4f6' },
-  { key: 'departmentHead', label: 'Dept. Head',     color: '#0e9f6e', bg: '#d1fae5' },
-  { key: 'branchManager',  label: 'Branch Manager', color: '#1a56db', bg: '#dbeafe' },
+  { key: 'employee',           label: 'Employee',             color: '#6b7280', bg: '#f3f4f6' },
+  { key: 'departmentHead',     label: 'Dept. Head',           color: '#0e9f6e', bg: '#d1fae5' },
+  { key: 'departmentIncharge', label: 'Dept. Incharge',       color: '#047857', bg: '#a7f3d0' },
+  { key: 'branchManager',      label: 'Branch Manager',       color: '#1a56db', bg: '#dbeafe' },
+  { key: 'branchAreaManager',  label: 'Branch Area Manager',  color: '#1e3a8a', bg: '#e0e7ff' },
 ];
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -571,6 +576,216 @@ const StaffRoleAssignment = ({ employees, updateEmployee }) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   COVERAGE ASSIGNMENT — Branch Area Manager / Department Incharge
+   Pick one of these two roles' staff, then check which branches (Area
+   Manager) or department+branch combinations (Incharge) they cover.
+   GET/PUT /api/coverage/:userId — see server/routes/coverage.js.
+═══════════════════════════════════════════════════════════════════════════ */
+const CoverageAssignment = ({ employees }) => {
+  const covered = useMemo(
+    () => (employees || [])
+      .filter(e => e.active !== false && (e.role === 'branchAreaManager' || e.role === 'departmentIncharge'))
+      .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')),
+    [employees]
+  );
+
+  const [selectedId, setSelectedId] = useState(null);
+  const [branches,   setBranches]   = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [branchIds,  setBranchIds]  = useState(new Set());
+  // departmentId -> 'all' | Set<branchId>
+  const [deptCoverage, setDeptCoverage] = useState(new Map());
+  const [loading, setLoading] = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [toast,   setToast]   = useState('');
+
+  useEffect(() => {
+    api.get('/settings/branches').then(rows => setBranches(Array.isArray(rows) ? rows : [])).catch(() => setBranches([]));
+    api.get('/settings/departments').then(rows => setDepartments(Array.isArray(rows) ? rows : [])).catch(() => setDepartments([]));
+  }, []);
+
+  const selected = covered.find(e => e.id === selectedId) || null;
+
+  useEffect(() => {
+    if (!selectedId) return;
+    setLoading(true);
+    api.get(`/coverage/${selectedId}`).then(data => {
+      setBranchIds(new Set((data.branches || []).map(b => b.id)));
+      const m = new Map();
+      (data.departments || []).forEach(d => {
+        if (d.branchId === null) { m.set(d.departmentId, 'all'); return; }
+        const cur = m.get(d.departmentId);
+        if (cur === 'all') return; // 'all' already covers every branch
+        const set = cur instanceof Set ? cur : new Set();
+        set.add(d.branchId);
+        m.set(d.departmentId, set);
+      });
+      setDeptCoverage(m);
+    }).catch(() => { setBranchIds(new Set()); setDeptCoverage(new Map()); })
+      .finally(() => setLoading(false));
+  }, [selectedId]);
+
+  const toggleBranch = (id) => setBranchIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const toggleDeptAll = (deptId) => setDeptCoverage(prev => {
+    const next = new Map(prev);
+    next.get(deptId) === 'all' ? next.delete(deptId) : next.set(deptId, 'all');
+    return next;
+  });
+
+  const toggleDeptBranch = (deptId, branchId) => setDeptCoverage(prev => {
+    const next = new Map(prev);
+    const cur = next.get(deptId);
+    const set = cur instanceof Set ? new Set(cur) : new Set();
+    set.has(branchId) ? set.delete(branchId) : set.add(branchId);
+    set.size ? next.set(deptId, set) : next.delete(deptId);
+    return next;
+  });
+
+  const save = async () => {
+    setSaving(true);
+    const departmentsPayload = [];
+    deptCoverage.forEach((val, departmentId) => {
+      if (val === 'all') departmentsPayload.push({ departmentId, branchId: null });
+      else val.forEach(branchId => departmentsPayload.push({ departmentId, branchId }));
+    });
+    try {
+      await api.put(`/coverage/${selectedId}`, { branchIds: [...branchIds], departments: departmentsPayload });
+      setToast(`Saved coverage for ${selected?.fullName}`);
+      setTimeout(() => setToast(''), 2500);
+    } catch (e) {
+      setToast(`Failed: ${e.message}`);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: '#6b7280', marginTop: 0, marginBottom: 18 }}>
+        A Branch Area Manager or Department Incharge is scoped to whatever's checked here, instead
+        of the single branch/department a Branch Manager or Dept. Head gets from their own Staff
+        Detail record. Assign the role first in <strong>Staff Role Assignment</strong>, then set their
+        coverage below.
+      </p>
+
+      {toast && (
+        <div style={{ marginBottom: 14, padding: '9px 16px', background: toast.startsWith('Failed') ? '#fee2e2' : '#d1fae5',
+          border: `1px solid ${toast.startsWith('Failed') ? '#fca5a5' : '#86efac'}`, borderRadius: 8,
+          fontSize: 13, color: toast.startsWith('Failed') ? '#991b1b' : '#065f46', fontWeight: 600 }}>
+          {toast.startsWith('Failed') ? '❌' : '✅'} {toast}
+        </div>
+      )}
+
+      {covered.length === 0 ? (
+        <div style={{ padding: 28, textAlign: 'center', color: '#9ca3af', border: '1px dashed #e2e8f0', borderRadius: 8 }}>
+          No staff currently hold the Branch Area Manager or Department Incharge role.
+          Assign one in the Staff Role Assignment tab first.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 18, alignItems: 'start' }}>
+          {/* ── staff picker ── */}
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+            {covered.map(emp => {
+              const meta = ROLE_META[emp.role];
+              return (
+                <div key={emp.id} onClick={() => setSelectedId(emp.id)}
+                  style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9',
+                    background: selectedId === emp.id ? meta.bg : 'white' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: selectedId === emp.id ? meta.color : '#111827' }}>
+                    {emp.fullName}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{meta.icon} {meta.label}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── coverage editor ── */}
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '16px 18px', minHeight: 220 }}>
+            {!selected ? (
+              <div style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>Pick a staff member to edit their coverage</div>
+            ) : loading ? (
+              <div style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>Loading…</div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <h3 style={{ margin: 0, fontSize: 14 }}>{selected.fullName}'s coverage</h3>
+                  <SaveButton onClick={save} disabled={saving} icon={saving ? '⏳' : '💾'} label={saving ? 'Saving…' : 'Save'} />
+                </div>
+
+                {selected.role === 'branchAreaManager' && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {branches.map(b => {
+                      const on = branchIds.has(b.id);
+                      return (
+                        <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '6px 12px', borderRadius: 20, cursor: 'pointer',
+                          border: `1.5px solid ${on ? '#1e3a8a' : '#d1d5db'}`,
+                          background: on ? '#e0e7ff' : 'white', fontSize: 12.5,
+                          color: on ? '#1e3a8a' : '#374151', fontWeight: on ? 700 : 500 }}>
+                          <input type="checkbox" checked={on} onChange={() => toggleBranch(b.id)} style={{ display: 'none' }} />
+                          {b.name}
+                        </label>
+                      );
+                    })}
+                    {branches.length === 0 && <span style={{ color: '#9ca3af', fontSize: 13 }}>No branches configured yet.</span>}
+                  </div>
+                )}
+
+                {selected.role === 'departmentIncharge' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {departments.map(d => {
+                      const val = deptCoverage.get(d.id);
+                      const isAll = val === 'all';
+                      return (
+                        <div key={d.id} style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 12 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                            <span style={{ fontWeight: 700, fontSize: 13, minWidth: 140 }}>{d.name}</span>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6,
+                              padding: '4px 10px', borderRadius: 20, cursor: 'pointer',
+                              border: `1.5px solid ${isAll ? '#047857' : '#d1d5db'}`,
+                              background: isAll ? '#a7f3d0' : 'white', fontSize: 11.5,
+                              color: isAll ? '#047857' : '#374151', fontWeight: isAll ? 700 : 500 }}>
+                              <input type="checkbox" checked={isAll} onChange={() => toggleDeptAll(d.id)} style={{ display: 'none' }} />
+                              Every branch
+                            </label>
+                          </div>
+                          {!isAll && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingLeft: 4 }}>
+                              {branches.map(b => {
+                                const on = val instanceof Set && val.has(b.id);
+                                return (
+                                  <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 5,
+                                    padding: '4px 10px', borderRadius: 18, cursor: 'pointer',
+                                    border: `1.5px solid ${on ? '#047857' : '#e2e8f0'}`,
+                                    background: on ? '#d1fae5' : '#f9fafb', fontSize: 11.5,
+                                    color: on ? '#047857' : '#6b7280', fontWeight: on ? 700 : 500 }}>
+                                    <input type="checkbox" checked={on} onChange={() => toggleDeptBranch(d.id, b.id)} style={{ display: 'none' }} />
+                                    {b.name}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {departments.length === 0 && <span style={{ color: '#9ca3af', fontSize: 13 }}>No departments configured yet.</span>}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
    MAIN — RoleManagement
 ═══════════════════════════════════════════════════════════════════════════ */
 const RoleManagement = () => {
@@ -671,6 +886,7 @@ const RoleManagement = () => {
     { key: 'matrix',     label: '📋 Permission Matrix'     },
     { key: 'overrides',  label: '🔧 Staff Page Overrides'  },
     { key: 'assignment', label: '🔄 Staff Role Assignment' },
+    { key: 'coverage',   label: '🗺️ Branch/Dept. Coverage' },
     // Module Controls is Super-Admin-only — a plain Admin shouldn't even see
     // the tab, not just find its toggles disabled once inside.
     isSuperAdmin && { key: 'modules', label: '🧩 Module Controls' },
@@ -835,6 +1051,11 @@ const RoleManagement = () => {
         {/* ── STAFF ROLE ASSIGNMENT TAB ── */}
         {activeTab === 'assignment' && (
           <StaffRoleAssignment employees={employees} updateEmployee={updateEmployee} />
+        )}
+
+        {/* ── BRANCH/DEPARTMENT COVERAGE TAB ── */}
+        {activeTab === 'coverage' && (
+          <CoverageAssignment employees={employees} />
         )}
 
         {/* ── MODULE CONTROLS TAB — global on/off flags, not per-role,

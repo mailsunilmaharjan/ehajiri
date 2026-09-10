@@ -103,7 +103,8 @@ router.get('/', async (req, res) => {
     // Same scoping rule as leaves.js's GET / — see its comment for why only
     // branchManager/departmentHead get narrowed here.
     const scope = resolveOrgScope(req);
-    let ids = (scope.level === 'branch' || scope.level === 'department')
+    let ids = (scope.level === 'branch' || scope.level === 'department'
+                || scope.level === 'branches' || scope.level === 'departments')
       ? await resolveOrgEmployeeIds(req) : null;
     if (ids) {
       // Widen with anyone this caller is explicitly configured to recommend/

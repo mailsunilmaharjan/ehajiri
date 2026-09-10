@@ -11,6 +11,13 @@ export function resolveOrgScope(req) {
   const { role, department, branch, id } = req.user || {};
   if (role === 'admin' || role === 'superAdmin') return { level: 'all' };
   if (role === 'branchManager' && branch) return { level: 'branch', value: branch };
+  // Branch Area Manager / Department Incharge (migration v138) cover SEVERAL
+  // branches/departments via manager_branch_coverage / manager_department_
+  // coverage — a DB lookup, not a JWT claim (see auth.js's attachCoverage for
+  // why), so this stays a cheap sync passthrough; resolveOrgEmployeeIds below
+  // is what actually queries the coverage tables.
+  if (role === 'branchAreaManager') return { level: 'branches', userId: id };
+  if (role === 'departmentIncharge') return { level: 'departments', userId: id };
   if (role === 'departmentHead' && department) {
     // A Department Head is scoped to their own branch too, not the whole
     // department company-wide — a multi-branch company (confirmed live on
@@ -36,6 +43,30 @@ export async function resolveOrgEmployeeIds(req) {
   const scope = resolveOrgScope(req);
   if (scope.level === 'all') return null;
   if (scope.level === 'self') return [scope.value];
+  if (scope.level === 'branches') {
+    const { rows } = await pool.query(
+      `SELECT u.id FROM users u
+       JOIN manager_branch_coverage mbc ON mbc.user_id = $1
+       JOIN branches b ON b.id = mbc.branch_id
+       WHERE LOWER(TRIM(u.branch)) = LOWER(TRIM(b.name))`,
+      [scope.userId]
+    );
+    return rows.map(r => r.id);
+  }
+  if (scope.level === 'departments') {
+    // branch_id IS NULL on a coverage row means "that department, every
+    // branch" (see manager_department_coverage, migration v138).
+    const { rows } = await pool.query(
+      `SELECT DISTINCT u.id FROM users u
+       JOIN manager_department_coverage mdc ON mdc.user_id = $1
+       JOIN departments d ON d.id = mdc.department_id
+       LEFT JOIN branches b ON b.id = mdc.branch_id
+       WHERE LOWER(TRIM(u.department)) = LOWER(TRIM(d.name))
+         AND (mdc.branch_id IS NULL OR LOWER(TRIM(u.branch)) = LOWER(TRIM(b.name)))`,
+      [scope.userId]
+    );
+    return rows.map(r => r.id);
+  }
   const col = scope.level === 'branch' ? 'branch' : 'department';
   const params = [scope.value];
   let where = `LOWER(TRIM(${col})) = LOWER(TRIM($1))`;

@@ -52,6 +52,7 @@ import smsConfigRouter   from './routes/smsConfig.js';
 import smsRouter         from './routes/sms.js';
 import aiAnalysisRouter  from './routes/aiAnalysis.js';
 import recoApprovalRouter from './routes/recoApproval.js';
+import coverageRouter    from './routes/coverage.js';
 import staffAnalyticsRouter from './routes/staffAnalytics.js';
 import bugReportsRouter  from './routes/bugReports.js';
 import { logBugReport }  from './services/bugReportService.js';
@@ -165,6 +166,7 @@ app.use('/api/sms-config',  licenseGuard, authGuard, requireRole('admin', 'super
 app.use('/api/sms',         licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.smsGateway, 'SMS Gateway'), smsRouter);
 app.use('/api/ai',          licenseGuard, authGuard, aiAnalysisRouter);
 app.use('/api/reco-approval', licenseGuard, authGuard, recoApprovalRouter);
+app.use('/api/coverage', licenseGuard, authGuard, coverageRouter);
 app.use('/api/staff-analytics', licenseGuard, authGuard, staffAnalyticsRouter);
 // ZKTeco ADMS push protocol — devices POST attendance to /iclock/*
 app.use('/iclock',         requireModuleEnabled(FLAG_KEYS.attendanceDevice, 'Attendance Device'), zktecoRouter);
