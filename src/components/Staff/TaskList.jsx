@@ -83,7 +83,7 @@ const AssigneeCell = ({ assignees }) => {
   const shown = assignees.slice(0, 2).map(a => a.name).join(', ');
   const extra = assignees.length - 2;
   const trigger = (
-    <span style={{ fontSize: 12.5, color: '#374151' }}>
+    <span style={{ fontSize: 13.5, color: '#374151' }}>
       {shown}{extra > 0 && <span style={{ color: '#1a56db', fontWeight: 700, cursor: 'default' }}> +{extra}</span>}
     </span>
   );
@@ -467,6 +467,18 @@ const TaskList = ({ fieldVisitOnly = false }) => {
 
   // "+ Add New" next to Customer Name — the real Contact form, in a popup
   const [contactModal, setContactModal] = useState(false);
+
+  // Task grid's right-click "Edit Customer Contact" — the same ContactFormModal,
+  // opened straight from a row's linked contact rather than the task form's
+  // "+ Add New". Holds the full contact record (looked up from `contacts`,
+  // not the task row's own flattened customerName/customerMobile/etc. fields,
+  // which are display-only and don't match ContactFormModal's expected shape).
+  const [editContactModal, setEditContactModal] = useState(null);
+  const openContactEdit = (row) => {
+    const contact = contacts.find(c => String(c.id) === String(row.contactId));
+    if (!contact) { showToast('This task has no linked customer contact', 'error'); return; }
+    setEditContactModal(contact);
+  };
 
   // Right-side Followup History panel — clicking a row opens it for that task
   const [followupTask,    setFollowupTask]    = useState(null);
@@ -1185,9 +1197,9 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         const bucket = taskDateBucket(row);
         if (bucket) {
           const b = TASK_DATE_BADGES[bucket];
-          return <span style={{ fontSize: 10.5, fontWeight: 700, background: b.bg, color: b.color, borderRadius: 20, padding: '3px 10px' }}>{b.label}</span>;
+          return <span style={{ fontSize: 11.5, fontWeight: 700, background: b.bg, color: b.color, borderRadius: 20, padding: '3px 10px' }}>{b.label}</span>;
         }
-        return <span style={{ fontSize: 11.5, color: '#374151' }}>{fd(String(v).split('T')[0])}</span>;
+        return <span style={{ fontSize: 12.5, color: '#374151' }}>{fd(String(v).split('T')[0])}</span>;
       },
     },
     {
@@ -1206,11 +1218,11 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'customerName', header: 'Customer', width: 150,
       render: (v, row) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          {v ? <span style={{ fontSize: 12.5, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
+          {v ? <span style={{ fontSize: 13.5, fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
           {row.followupCount > 0 && (
             <span title={`${row.followupCount} followup${row.followupCount === 1 ? '' : 's'} logged`}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: '#fef2f2', color: '#dc2626',
-                border: '1px solid #fecaca', borderRadius: 10, padding: '1px 6px', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+                border: '1px solid #fecaca', borderRadius: 10, padding: '1px 6px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
               💬 {row.followupCount}
             </span>
           )}
@@ -1219,25 +1231,25 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     },
     {
       field: 'personName', header: 'Person Name', width: 130,
-      render: (v) => v ? <span style={{ fontSize: 12.5, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
+      render: (v) => v ? <span style={{ fontSize: 13.5, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'customerMobile', header: 'Mobile no. | Phone', width: 170, sortable: false, filterable: false,
       render: (_, row) => {
         const parts = [row.customerMobile, row.customerMobile2, row.customerPhone].filter(Boolean);
-        return parts.length ? <span style={{ fontSize: 12.5, color: '#374151' }}>{parts.join(' | ')}</span> : <span style={{ color: '#d1d5db' }}>—</span>;
+        return parts.length ? <span style={{ fontSize: 13.5, color: '#374151' }}>{parts.join(' | ')}</span> : <span style={{ color: '#d1d5db' }}>—</span>;
       },
     },
     {
       field: 'categoryName', header: 'Category', width: 110, align: 'center',
       render: (v) => v ? (
-        <span style={{ fontSize: 10.5, fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', borderRadius: 20, padding: '3px 10px' }}>{v}</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', borderRadius: 20, padding: '3px 10px' }}>{v}</span>
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'priorityName', header: 'Priority', width: 100, align: 'center',
       render: (v, row) => v ? (
-        <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 20, padding: '3px 10px',
+        <span style={{ fontSize: 11.5, fontWeight: 700, borderRadius: 20, padding: '3px 10px',
           background: `${row.priorityColor || '#94a3b8'}22`, color: row.priorityColor || '#475569' }}>{v}</span>
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
@@ -1254,7 +1266,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         // whole memoized columns array to recompute.
         const startedNepal = isoToNepalLocalInput(v).split('T')[0];
         const n = daysBetweenISO(startedNepal, getNepalTodayISO());
-        return <span style={{ fontSize: 11.5, color: '#6b7280' }}>{n <= 0 ? 'Today' : `${n}d`}</span>;
+        return <span style={{ fontSize: 12.5, color: '#6b7280' }}>{n <= 0 ? 'Today' : `${n}d`}</span>;
       },
     },
     {
@@ -1264,7 +1276,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           : v === 'cancelled' ? { bg: '#f3f4f6', color: '#6b7280' }
           : v === 'in_progress' ? { bg: '#eff6ff', color: '#1d4ed8' }
           : { bg: '#fffbeb', color: '#b45309' };
-        return <span style={{ fontSize: 10.5, fontWeight: 700, background: s.bg, color: s.color, borderRadius: 20, padding: '3px 10px', textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
+        return <span style={{ fontSize: 11.5, fontWeight: 700, background: s.bg, color: s.color, borderRadius: 20, padding: '3px 10px', textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
       },
     },
     {
@@ -1272,10 +1284,10 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       render: (v) => {
         const text = stripHtml(v);
         if (!text) return <span style={{ color: '#d1d5db' }}>—</span>;
-        if (text.length <= 40) return <span style={{ fontSize: 12, color: '#6b7280' }}>{text}</span>;
+        if (text.length <= 40) return <span style={{ fontSize: 13, color: '#6b7280' }}>{text}</span>;
         return (
           <HoverCard
-            trigger={<span style={{ fontSize: 12, color: '#6b7280', cursor: 'default' }}>{text.slice(0, 40)}…</span>}
+            trigger={<span style={{ fontSize: 13, color: '#6b7280', cursor: 'default' }}>{text.slice(0, 40)}…</span>}
             content={text}
             maxWidth={420}
           />
@@ -1447,6 +1459,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 onDeleteSelected={removeSelected}
                 contextMenu={[
                   { label: 'Edit', icon: '✏️', onClick: (row) => openEdit(row) },
+                  { label: 'Edit Customer Contact', icon: '📇', onClick: (row) => openContactEdit(row) },
                   { label: (row) => row.isFieldVisit ? 'Remove Field Visit' : 'Mark as Field Visit', icon: '🚗', onClick: (row) => toggleFieldVisit(row) },
                   'divider',
                   { label: 'Delete', icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
@@ -2143,6 +2156,15 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           initial={CONTACT_EMPTY}
           onClose={() => setContactModal(false)}
           onSaved={handleContactSaved}
+        />
+      )}
+
+      {/* Task grid right-click > Edit Customer Contact */}
+      {editContactModal && (
+        <ContactFormModal
+          initial={editContactModal}
+          onClose={() => setEditContactModal(null)}
+          onSaved={() => { loadContacts(); setEditContactModal(null); showToast('Contact updated'); }}
         />
       )}
 

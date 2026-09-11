@@ -674,9 +674,9 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 .followup-history-grid .pg-btn { min-width: 22px; height: 22px; }
 
 /* ========== Main Task grid (Staff/TaskList.jsx) ==========
-   Smaller/denser text, matching the Staff Detail (User Management) list. */
+   Slightly larger than the DataGrid default for easier reading. */
 .task-list-grid .dg-td,
-.task-list-grid .dg-th { font-size: 11.5px; }
+.task-list-grid .dg-th { font-size: 13px; }
 /* Today's section is the only date bucket that keeps a background fill —
    everything else (Tomorrow onward) stays plain per the "no background" ask. */
 .task-list-grid .dg-group-row-today .dg-group-cell { background: #eff6ff; }
