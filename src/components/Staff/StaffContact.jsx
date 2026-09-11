@@ -334,6 +334,22 @@ const StaffContact = () => {
       render:(_,row) => <span style={{ fontWeight:600, color:'#1f2937' }}>{displayName(row)}</span>,
     },
     {
+      field:'mobile1', header:'Mobile 1', width:130,
+      render:(_,row) => <span style={{ color:'#1a56db', fontWeight:700 }}>{displayMob1(row)}</span>,
+    },
+    {
+      field:'address', header:'Address', width:180,
+      render:(_,row) => <span style={{ color:'#4b5563' }}>{displayAddress(row)}</span>,
+    },
+    {
+      field:'mobile2', header:'Mobile 2', width:120,
+      render:(_,row) => <span>{row.mobile2||'—'}</span>,
+    },
+    {
+      field:'email', header:'Email', width:200,
+      render:(_,row) => <span style={{ color:'#4b5563' }}>{displayEmail(row)}</span>,
+    },
+    {
       field:'contactInfo', header:'Type', width:230,
       render:(_,row) => (
         <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'nowrap' }}>
@@ -344,22 +360,6 @@ const StaffContact = () => {
           )}
         </div>
       ),
-    },
-    {
-      field:'address', header:'Address', width:180,
-      render:(_,row) => <span style={{ color:'#4b5563' }}>{displayAddress(row)}</span>,
-    },
-    {
-      field:'mobile1', header:'Mobile 1', width:130,
-      render:(_,row) => <span>{displayMob1(row)}</span>,
-    },
-    {
-      field:'mobile2', header:'Mobile 2', width:120,
-      render:(_,row) => <span>{row.mobile2||'—'}</span>,
-    },
-    {
-      field:'email', header:'Email', width:200,
-      render:(_,row) => <span style={{ color:'#4b5563' }}>{displayEmail(row)}</span>,
     },
   ];
 
