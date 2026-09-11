@@ -681,6 +681,19 @@ textarea.form-control { resize: vertical; min-height: 80px; }
    everything else (Tomorrow onward) stays plain per the "no background" ask. */
 .task-list-grid .dg-group-row-today .dg-group-cell { background: #eff6ff; }
 
+/* Category filter chip's 🔔 — rings continuously while that category has a
+   new, still-unseen task, instead of a static icon a viewer could miss. */
+@keyframes task-bell-ring {
+  0%, 100% { transform: rotate(0deg); }
+  10%, 30% { transform: rotate(-18deg); }
+  20%, 40% { transform: rotate(18deg); }
+  50%      { transform: rotate(0deg); }
+}
+.task-bell-ring { display: inline-block; transform-origin: top center; animation: task-bell-ring 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .task-bell-ring { animation: none; }
+}
+
 @media (max-width: 480px) {
   /* 2-col inline grids → single column */
   [style*="grid-template-columns: 1fr 1fr"],

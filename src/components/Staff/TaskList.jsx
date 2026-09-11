@@ -787,14 +787,28 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     return result;
   }, [tasks, yesterdayOnly, tomorrowOnly, quickPriorityId, quickCategoryId, fieldVisitOnly, advSearch, advSearchActive, employeeById, currentUser]);
 
-  // Header badge — total followups logged across whatever's currently
-  // bucketed as "Today" in the grid (same taskDateBucket the Task Date
-  // column itself renders), so it reflects the same rows the viewer is
-  // looking at rather than a fixed, filter-independent count.
-  const todaysFollowupCount = useMemo(
-    () => visibleTasks.reduce((sum, t) => taskDateBucket(t) === 'today' ? sum + (t.followupCount || 0) : sum, 0),
-    [visibleTasks]
-  );
+  // Per-category header chip stats — followup count + "has an unseen new
+  // task" per category, both scoped to today's tasks (same taskDateBucket
+  // the Task Date column renders). Deliberately sourced from `tasks` (the
+  // server-scoped list) rather than `visibleTasks`, which is already
+  // narrowed by quickCategoryId itself — every OTHER category's chip would
+  // read as empty the moment one category got selected otherwise.
+  const categoryStats = useMemo(() => {
+    const map = new Map(); // categoryId string -> { followupCount, hasUnseenNew }
+    const today = getNepalTodayISO();
+    tasks.forEach(t => {
+      if (taskDateBucket(t) !== 'today' || !t.categoryId) return;
+      const key = String(t.categoryId);
+      const entry = map.get(key) || { followupCount: 0, hasUnseenNew: false };
+      entry.followupCount += (t.followupCount || 0);
+      const createdNepal = t.createdAt ? isoToNepalLocalInput(t.createdAt).split('T')[0] : null;
+      const isNew = createdNepal === today;
+      const seenByMe = Array.isArray(t.seenBy) && t.seenBy.some(v => String(v.userId) === String(currentUser?.id));
+      if (isNew && !seenByMe) entry.hasUnseenNew = true;
+      map.set(key, entry);
+    });
+    return map;
+  }, [tasks, currentUser]);
 
   // WhatsApp notify — click-to-chat only (no Business API on file for this
   // tenant), so "sending" opens a pre-filled wa.me chat the user still has
@@ -1436,7 +1450,9 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           {fieldVisitOnly ? '🚗 Field Visit' : '✅ Task'}
         </h1>
 
-        {/* Task Category quick filter + today's followup total — only on the
+        {/* Task Category quick filter — each chip shows today's followup
+            count for that category (top-right corner) and a ringing 🔔 when
+            it has a new task the viewer hasn't opened yet. Only on the
             regular Task page; Field Visit's own page stays uncluttered. */}
         {!fieldVisitOnly && (
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -1448,23 +1464,32 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             </button>
             {categories.map(c => {
               const on = quickCategoryId === String(c.id);
+              const stat = categoryStats.get(String(c.id));
+              const count = stat?.followupCount || 0;
+              const hasUnseenNew = !!stat?.hasUnseenNew;
               return (
                 <button key={c.id} onClick={() => setQuickCategoryId(on ? '' : String(c.id))}
-                  style={{ height: 26, padding: '0 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 400,
-                    border: 'none',
+                  style={{ position: 'relative', height: 26, padding: '0 10px', borderRadius: 5, cursor: 'pointer',
+                    fontSize: 11, fontWeight: 400, border: 'none',
                     background: on ? '#dbeafe' : '#f1f5f9', color: on ? '#1a56db' : '#64748b', whiteSpace: 'nowrap' }}>
                   {c.name}
+                  {(count > 0 || hasUnseenNew) && (
+                    <span style={{ position: 'absolute', top: -7, right: -5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                      {hasUnseenNew && (
+                        <span className="task-bell-ring" title="New task in this category, not seen yet" style={{ fontSize: 12 }}>🔔</span>
+                      )}
+                      {count > 0 && (
+                        <span title={`${count} followup${count === 1 ? '' : 's'} logged today in this category`}
+                          style={{ background: '#dc2626', color: '#fff', borderRadius: 8, fontSize: 9, fontWeight: 700,
+                            padding: '1px 5px', lineHeight: 1.4, minWidth: 14, textAlign: 'center' }}>
+                          {count}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </button>
               );
             })}
-            {todaysFollowupCount > 0 && (
-              <span title="Total followups logged across today's tasks"
-                style={{ marginLeft: 4, height: 26, display: 'inline-flex', alignItems: 'center', gap: 5,
-                  padding: '0 10px', borderRadius: 5, background: '#dc2626', color: '#fff',
-                  fontSize: 11, fontWeight: 400, whiteSpace: 'nowrap' }}>
-                💬 Today's Followups: {todaysFollowupCount}
-              </span>
-            )}
           </div>
         )}
 
