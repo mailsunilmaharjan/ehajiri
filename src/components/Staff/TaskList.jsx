@@ -1441,27 +1441,27 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         {!fieldVisitOnly && (
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => setQuickCategoryId('')}
-              style={{ height: 30, padding: '0 12px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                border: `1.5px solid ${!quickCategoryId ? '#1a56db' : '#d1d5db'}`,
-                background: !quickCategoryId ? '#eff6ff' : '#fff', color: !quickCategoryId ? '#1a56db' : '#6b7280' }}>
+              style={{ height: 26, padding: '0 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 400,
+                border: 'none',
+                background: !quickCategoryId ? '#dbeafe' : '#f1f5f9', color: !quickCategoryId ? '#1a56db' : '#64748b' }}>
               All
             </button>
             {categories.map(c => {
               const on = quickCategoryId === String(c.id);
               return (
                 <button key={c.id} onClick={() => setQuickCategoryId(on ? '' : String(c.id))}
-                  style={{ height: 30, padding: '0 12px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                    border: `1.5px solid ${on ? '#1a56db' : '#d1d5db'}`,
-                    background: on ? '#eff6ff' : '#fff', color: on ? '#1a56db' : '#6b7280', whiteSpace: 'nowrap' }}>
+                  style={{ height: 26, padding: '0 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 400,
+                    border: 'none',
+                    background: on ? '#dbeafe' : '#f1f5f9', color: on ? '#1a56db' : '#64748b', whiteSpace: 'nowrap' }}>
                   {c.name}
                 </button>
               );
             })}
             {todaysFollowupCount > 0 && (
               <span title="Total followups logged across today's tasks"
-                style={{ marginLeft: 4, height: 30, display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '0 12px', borderRadius: 20, background: '#dc2626', color: '#fff',
-                  fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                style={{ marginLeft: 4, height: 26, display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '0 10px', borderRadius: 5, background: '#dc2626', color: '#fff',
+                  fontSize: 11, fontWeight: 400, whiteSpace: 'nowrap' }}>
                 💬 Today's Followups: {todaysFollowupCount}
               </span>
             )}
