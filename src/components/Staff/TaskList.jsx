@@ -430,11 +430,18 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     return (isAdmin || isSuperAdmin || isBranchManager || isDeptHead) ? 'all' : String(currentUser.id);
   });
 
-  // Quick filters, next to Filter by Staff — "My Yesterday Task" is always
-  // scoped to the logged-in user specifically (creator or assignee),
-  // independent of whatever Filter by Staff is currently set to.
+  // Quick filters, next to Filter by Staff — "My Yesterday Task"/"My
+  // Tomorrow's Task" are always scoped to the logged-in user specifically
+  // (creator or assignee), independent of whatever Filter by Staff is
+  // currently set to. Mutually exclusive — picking one clears the other,
+  // since both narrow the grid to a single specific day.
   const [yesterdayOnly, setYesterdayOnly] = useState(false);
+  const [tomorrowOnly,  setTomorrowOnly]  = useState(false);
   const [quickPriorityId, setQuickPriorityId] = useState('');
+  // Header-level Task Category quick filter (pill row) — separate from
+  // Advance Search's own categoryId field, same relationship quickPriorityId
+  // already has to advSearch.priorityId.
+  const [quickCategoryId, setQuickCategoryId] = useState('');
 
   // Advance Search — a fuller filter form (branch/department/post/assignee/
   // category/title/priority/customer/date range), applied on top of
@@ -744,17 +751,18 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       return daysBetweenISO(toNepalISO(t.completedAt), todayNepal) <= 1;
     });
 
-    if (yesterdayOnly) {
-      const yesterdayNepal = addDaysISO(getNepalTodayISO(), -1);
+    if (yesterdayOnly || tomorrowOnly) {
+      const targetNepal = addDaysISO(getNepalTodayISO(), yesterdayOnly ? -1 : 1);
       result = result.filter(t => {
         const due = t.dueDate ? String(t.dueDate).split('T')[0] : null;
-        if (due !== yesterdayNepal) return false;
+        if (due !== targetNepal) return false;
         return String(t.createdBy) === String(currentUser?.id)
           || (Array.isArray(t.assignees) && t.assignees.some(a => String(a.id) === String(currentUser?.id)));
       });
     }
 
     if (quickPriorityId) result = result.filter(t => String(t.priorityId) === quickPriorityId);
+    if (quickCategoryId) result = result.filter(t => String(t.categoryId) === quickCategoryId);
 
     if (fieldVisitOnly) result = result.filter(t => t.isFieldVisit);
 
@@ -777,7 +785,16 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     }
 
     return result;
-  }, [tasks, yesterdayOnly, quickPriorityId, fieldVisitOnly, advSearch, advSearchActive, employeeById, currentUser]);
+  }, [tasks, yesterdayOnly, tomorrowOnly, quickPriorityId, quickCategoryId, fieldVisitOnly, advSearch, advSearchActive, employeeById, currentUser]);
+
+  // Header badge — total followups logged across whatever's currently
+  // bucketed as "Today" in the grid (same taskDateBucket the Task Date
+  // column itself renders), so it reflects the same rows the viewer is
+  // looking at rather than a fixed, filter-independent count.
+  const todaysFollowupCount = useMemo(
+    () => visibleTasks.reduce((sum, t) => taskDateBucket(t) === 'today' ? sum + (t.followupCount || 0) : sum, 0),
+    [visibleTasks]
+  );
 
   // WhatsApp notify — click-to-chat only (no Business API on file for this
   // tenant), so "sending" opens a pre-filled wa.me chat the user still has
@@ -1226,6 +1243,18 @@ const TaskList = ({ fieldVisitOnly = false }) => {
               💬 {row.followupCount}
             </span>
           )}
+          {row.createdAt && (() => {
+            const startedNepal = isoToNepalLocalInput(row.createdAt).split('T')[0];
+            const daysStarted = daysBetweenISO(startedNepal, getNepalTodayISO());
+            return (
+              <span title="Days since this task started"
+                style={{ display: 'inline-flex', alignItems: 'center', background: '#fef3c7', color: '#92400e',
+                  border: '1px solid #fde68a', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700,
+                  flexShrink: 0, whiteSpace: 'nowrap' }}>
+                - {daysStarted <= 0 ? 'Today' : `${daysStarted} Days`}
+              </span>
+            );
+          })()}
         </span>
       ),
     },
@@ -1330,12 +1359,20 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         </div>
       </div>
 
-      <button onClick={() => setYesterdayOnly(p => !p)}
+      <button onClick={() => { setYesterdayOnly(p => !p); setTomorrowOnly(false); }}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
           border: `1px solid ${yesterdayOnly ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
           background: yesterdayOnly ? '#eff6ff' : '#fff', color: yesterdayOnly ? '#1a56db' : '#374151',
           fontSize: 12.5, fontWeight: 600 }}>
         📅 My Yesterday Task
+      </button>
+
+      <button onClick={() => { setTomorrowOnly(p => !p); setYesterdayOnly(false); }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
+          border: `1px solid ${tomorrowOnly ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
+          background: tomorrowOnly ? '#eff6ff' : '#fff', color: tomorrowOnly ? '#1a56db' : '#374151',
+          fontSize: 12.5, fontWeight: 600 }}>
+        📅 My Tomorrow's Task
       </button>
 
       <button onClick={sendTodaysTaskDigest}
@@ -1394,11 +1431,44 @@ const TaskList = ({ fieldVisitOnly = false }) => {
 
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexShrink: 0 }}>
-        <h1 className="page-title">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 18, flexShrink: 0 }}>
+        <h1 className="page-title" style={{ flexShrink: 0 }}>
           {fieldVisitOnly ? '🚗 Field Visit' : '✅ Task'}
         </h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+
+        {/* Task Category quick filter + today's followup total — only on the
+            regular Task page; Field Visit's own page stays uncluttered. */}
+        {!fieldVisitOnly && (
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => setQuickCategoryId('')}
+              style={{ height: 30, padding: '0 12px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                border: `1.5px solid ${!quickCategoryId ? '#1a56db' : '#d1d5db'}`,
+                background: !quickCategoryId ? '#eff6ff' : '#fff', color: !quickCategoryId ? '#1a56db' : '#6b7280' }}>
+              All
+            </button>
+            {categories.map(c => {
+              const on = quickCategoryId === String(c.id);
+              return (
+                <button key={c.id} onClick={() => setQuickCategoryId(on ? '' : String(c.id))}
+                  style={{ height: 30, padding: '0 12px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                    border: `1.5px solid ${on ? '#1a56db' : '#d1d5db'}`,
+                    background: on ? '#eff6ff' : '#fff', color: on ? '#1a56db' : '#6b7280', whiteSpace: 'nowrap' }}>
+                  {c.name}
+                </button>
+              );
+            })}
+            {todaysFollowupCount > 0 && (
+              <span title="Total followups logged across today's tasks"
+                style={{ marginLeft: 4, height: 30, display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '0 12px', borderRadius: 20, background: '#dc2626', color: '#fff',
+                  fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                💬 Today's Followups: {todaysFollowupCount}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: fieldVisitOnly ? 'auto' : 0 }}>
           {canManageSystem && (
             <div ref={gearRef} style={{ position: 'relative' }}>
               <button onClick={() => setGearOpen(p => !p)} title="Task settings"
