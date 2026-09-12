@@ -77,11 +77,26 @@ const StatusBadge = ({ status }) => {
 
 const emptyStats = () => ({ total: 0, pending: 0, processing: 0, complete: 0, cancel: 0, transfer: 0 });
 
-const bucketStats = (tasks, dateISO) => {
+// Same "Today" rule TaskList.jsx's own taskDateBucket already applies to its
+// Task Date column and category pill badges: a task due today counts, AND so
+// does a still-open task whose due date has already passed — it doesn't
+// silently disappear from "today's work" just because its original date
+// slipped by, it stays "today's" until someone completes it. Without this,
+// the dashboard's Today tally/category lists went empty the moment a tenant
+// had nothing due on the literal calendar date, while the Task List page's
+// own category pills (built on the same taskDateBucket rule) kept showing
+// real counts for the exact same tasks — a confusing mismatch between the
+// two pages for what's supposed to be the same "today" concept.
+const isDueTodayOrOverdue = (t, todayISO) => {
+  const due = t.dueDate ? String(t.dueDate).split('T')[0] : null;
+  if (!due) return false;
+  return due === todayISO || (due < todayISO && t.status !== 'completed');
+};
+
+const bucketStats = (tasks, matches) => {
   const s = emptyStats();
   tasks.forEach(t => {
-    const due = t.dueDate ? String(t.dueDate).split('T')[0] : null;
-    if (due !== dateISO) return;
+    if (!matches(t)) return;
     s.total++;
     if (t.status === 'pending') s.pending++;
     else if (t.status === 'in_progress') s.processing++;
@@ -92,16 +107,15 @@ const bucketStats = (tasks, dateISO) => {
   return s;
 };
 
-// Groups today's-due tasks by Task Category — only the categories that
-// actually have a task due today show up, each with its own mini "Total /
-// Completed / Uncompleted" tally alongside the row list (SN, Task Name,
-// Company Name, Mobile, Address, Status), matching the per-category tables
-// in the original Excel mockup.
+// Groups today's tasks (see isDueTodayOrOverdue above) by Task Category —
+// only the categories that actually have one show up, each with its own
+// mini "Total / Completed / Uncompleted" tally alongside the row list (SN,
+// Task Name, Company Name, Mobile, Address, Status), matching the
+// per-category tables in the original Excel mockup.
 const groupTodayByCategory = (tasks, todayISO) => {
   const map = new Map();
   tasks.forEach(t => {
-    const due = t.dueDate ? String(t.dueDate).split('T')[0] : null;
-    if (due !== todayISO) return;
+    if (!isDueTodayOrOverdue(t, todayISO)) return;
     const key = t.categoryName || 'Uncategorized';
     if (!map.has(key)) map.set(key, { categoryName: key, rows: [], total: 0, completed: 0, uncompleted: 0 });
     const g = map.get(key);
@@ -133,9 +147,11 @@ export default function TaskDashboard() {
   const yesterday = useMemo(() => addDaysISO(today, -1), [today]);
 
   const buckets = useMemo(() => ([
-    { key: 'today',     title: "Today's Task",     dateISO: today },
-    { key: 'yesterday', title: "Yesterday's Task",  dateISO: yesterday },
-  ].map(b => ({ ...b, stats: bucketStats(tasks, b.dateISO) }))), [tasks, today, yesterday]);
+    { key: 'today',     title: "Today's Task",     dateISO: today,
+      stats: bucketStats(tasks, t => isDueTodayOrOverdue(t, today)) },
+    { key: 'yesterday', title: "Yesterday's Task",  dateISO: yesterday,
+      stats: bucketStats(tasks, t => (t.dueDate ? String(t.dueDate).split('T')[0] : null) === yesterday) },
+  ]), [tasks, today, yesterday]);
 
   const categoryGroups = useMemo(() => groupTodayByCategory(tasks, today), [tasks, today]);
 
