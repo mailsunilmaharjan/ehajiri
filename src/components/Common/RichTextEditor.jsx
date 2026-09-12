@@ -74,7 +74,12 @@ const ToolButton = ({ onClick, title, children, active }) => (
 const RichTextEditor = ({ value = '', onChange, placeholder = 'Optional details...', minHeight = 110 }) => {
   const editorRef = useRef(null);
   const fileInputRef = useRef(null);
-  const lastValue = useRef(value);
+  // null (never a real value) so the sync effect below always runs on mount —
+  // seeding this with the initial `value` made the mount-time run see
+  // value === lastValue.current and skip writing innerHTML, leaving the
+  // editor blank whenever it mounted with existing content (e.g. opening
+  // Edit Task, where the modal — and this editor — mounts fresh each time).
+  const lastValue = useRef(null);
 
   useEffect(() => {
     if (editorRef.current && value !== lastValue.current && document.activeElement !== editorRef.current) {

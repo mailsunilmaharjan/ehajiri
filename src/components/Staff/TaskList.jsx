@@ -71,29 +71,43 @@ const taskDateBucket = (row) => {
   return null;
 };
 
-// "Assigned To" cell — shows only the first 2 names inline (the column isn't
-// wide enough for a whole checkbox-grid's worth of assignees) with a larger,
-// custom-styled hover card for the rest — a native `title` tooltip renders in
-// tiny OS chrome, not big enough to read a long staff list comfortably.
-// Shared hover-tooltip card — light background (never black/dark) with a
-// border and soft shadow, used for anything too long to show inline
-// (Assigned To's full staff list, a long Description in the footer strip).
+// "Assigned To" cell — avatar-only overlapping stack (same visual convention
+// as SeenByAvatars below), name text is too wide for the column once a task
+// has several assignees. Hovering an avatar shows the full name + post; a
+// native `title` tooltip renders in tiny OS chrome, not big enough to read
+// comfortably, hence the shared HoverCard used for both this and Seen By.
+const MAX_ASSIGNEE_AVATARS = 4;
 const AssigneeCell = ({ assignees }) => {
   if (!Array.isArray(assignees) || !assignees.length) return <span style={{ color: '#d1d5db' }}>—</span>;
-  const shown = assignees.slice(0, 2).map(a => a.name).join(', ');
-  const extra = assignees.length - 2;
-  const trigger = (
-    <span style={{ fontSize: 13.5, color: '#374151' }}>
-      {shown}{extra > 0 && <span style={{ color: '#1a56db', fontWeight: 700, cursor: 'default' }}> +{extra}</span>}
-    </span>
-  );
-  if (extra <= 0) return trigger;
-  const fullList = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {assignees.map((a, i) => <div key={a.id}>{i + 1}. {a.name} | {a.post || '—'}</div>)}
+  const shown = assignees.slice(0, MAX_ASSIGNEE_AVATARS);
+  const extra = assignees.length - shown.length;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      {shown.map((a, i) => (
+        <HoverCard key={a.id}
+          trigger={
+            <div style={{ marginLeft: i === 0 ? 0 : -8, borderRadius: '50%', border: '2px solid #fff',
+              boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i }}>
+              <Avatar photo={a.photo} name={a.name} size={26} />
+            </div>
+          }
+          content={
+            <div>
+              <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{a.name}</div>
+              <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>{a.post || '—'}</div>
+            </div>
+          }
+          minWidth={150} />
+      ))}
+      {extra > 0 && (
+        <div title={`+${extra} more`} style={{ marginLeft: -8, width: 26, height: 26, borderRadius: '50%',
+          border: '2px solid #fff', boxShadow: '0 0 0 1px #e5e7eb', background: '#e5e7eb', color: '#6b7280',
+          fontSize: 10.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          +{extra}
+        </div>
+      )}
     </div>
   );
-  return <HoverCard trigger={trigger} content={fullList} minWidth={220} />;
 };
 
 // WhatsApp-style emoji reactions — used on both a Followup's own description
@@ -1337,24 +1351,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         );
       },
     },
-    {
-      field: 'actions', header: 'Actions', width: 120, align: 'center', sortable: false, filterable: false,
-      render: (_, row) => (
-        <div className="dg-actions">
-          <button className="dg-action-btn edit" title="Edit" onClick={e => { e.stopPropagation(); openEdit(row); }}>✏️</button>
-          <button className="dg-action-btn" title="Notify via WhatsApp"
-            style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}
-            onClick={e => { e.stopPropagation(); handleWhatsAppClick(row); }}>💬</button>
-          {moduleFlags.smsGatewayEnabled && (
-            <button className="dg-action-btn" title="Notify via SMS" disabled={smsSending}
-              style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', opacity: smsSending ? .6 : 1 }}
-              onClick={e => { e.stopPropagation(); handleSmsClick(row); }}>📱</button>
-          )}
-          <button className="dg-action-btn delete" title="Delete" onClick={e => { e.stopPropagation(); setDeleteConfirm(row.id); }}>🗑</button>
-        </div>
-      ),
-    },
-  ], [fd, moduleFlags.smsGatewayEnabled, smsSending, fieldVisitOnly]);
+  ], [fd, fieldVisitOnly]);
 
   // Filter by Staff, quick filters, Advance Search — rendered inside the grid's
   // own toolbar (left of its Search box) via DataGrid's toolbarLeft prop.
@@ -1556,6 +1553,11 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                   { label: 'Edit', icon: '✏️', onClick: (row) => openEdit(row) },
                   { label: 'Edit Customer Contact', icon: '📇', onClick: (row) => openContactEdit(row) },
                   { label: (row) => row.isFieldVisit ? 'Remove Field Visit' : 'Mark as Field Visit', icon: '🚗', onClick: (row) => toggleFieldVisit(row) },
+                  'divider',
+                  { label: 'Notify via WhatsApp', icon: '💬', onClick: (row) => handleWhatsAppClick(row) },
+                  ...(moduleFlags.smsGatewayEnabled
+                    ? [{ label: 'Notify via SMS', icon: '📱', onClick: (row) => handleSmsClick(row) }]
+                    : []),
                   'divider',
                   { label: 'Delete', icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
                 ]}
