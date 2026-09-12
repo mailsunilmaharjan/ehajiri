@@ -30,8 +30,8 @@ import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
    Followup History panel from (see its openTaskIdParam effect). */
 
 const STYLES = `
-  .tdb-grid6 { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
-  .tdb-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; box-shadow:0 1px 4px rgba(0,0,0,.04); }
+  .tdb-grid6 { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
+  .tdb-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:8px 10px; box-shadow:0 1px 4px rgba(0,0,0,.04); min-width:0; }
   .tdb-summary-cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:22px; }
   .tdb-section { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px; }
   .tdb-section-title { font-size:14px; font-weight:800; color:#1e293b; margin:0 0 12px 0; display:flex; align-items:center; gap:8px; }
@@ -44,16 +44,17 @@ const STYLES = `
   .tdb-status-badge { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
   @media(max-width:720px){ .tdb-summary-cols{ grid-template-columns:1fr; } }
   @media(max-width:1100px){ .tdb-cat-grid{ grid-template-columns:1fr; } }
+  @media(max-width:720px){ .tdb-grid6{ grid-template-columns:repeat(3,1fr); } }
   @media(max-width:480px){ .tdb-grid6{ grid-template-columns:repeat(2,1fr); } }
 `;
 
 const STAT_DEFS = [
-  { key: 'total',      label: 'Total',      icon: '📋', iconBg: '#475569' },
-  { key: 'processing', label: 'Processing', icon: '⚙️', iconBg: '#2563eb' },
-  { key: 'pending',    label: 'Pending',    icon: '⏳', iconBg: '#d97706' },
-  { key: 'complete',   label: 'Completed',  icon: '✅', iconBg: '#059669' },
-  { key: 'cancel',     label: 'Cancels',    icon: '✖️', iconBg: '#dc2626' },
-  { key: 'transfer',   label: 'Transfer',   icon: '🔁', iconBg: '#7c3aed' },
+  { key: 'total',      label: 'Total',      icon: '📋' },
+  { key: 'processing', label: 'Processing', icon: '⚙️' },
+  { key: 'pending',    label: 'Pending',    icon: '⏳' },
+  { key: 'complete',   label: 'Completed',  icon: '✅' },
+  { key: 'cancel',     label: 'Cancels',    icon: '✖️' },
+  { key: 'transfer',   label: 'Transfer',   icon: '🔁' },
 ];
 
 const STATUS_STYLE = {
@@ -63,14 +64,13 @@ const STATUS_STYLE = {
   cancelled:   { bg: '#fff5f5', color: '#991b1b', label: 'Cancelled' },
 };
 
-const StatTile = ({ label, value, icon, iconBg }) => (
+const StatTile = ({ label, value, icon }) => (
   <div className="tdb-card">
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-      <span style={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>{label}</span>
-      <div style={{ width: 28, height: 28, borderRadius: '50%', background: iconBg, display: 'flex',
-        alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>{icon}</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, minWidth: 0 }}>
+      <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
+      <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
     </div>
-    <span style={{ fontSize: 22, fontWeight: 800, color: '#1e293b', lineHeight: 1 }}>{value}</span>
+    <span style={{ fontSize: 19, fontWeight: 800, color: '#1e293b', lineHeight: 1 }}>{value}</span>
   </div>
 );
 
