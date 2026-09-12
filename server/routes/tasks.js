@@ -284,8 +284,29 @@ async function notifyFollowupAdded(taskId, title, creatorId, assigneeIds, actorI
   await broadcastTaskEvent(taskId, title, 'followup_added', creatorId, assigneeIds, actorId, { isFieldVisit });
 }
 
+// "Belongs to $1" for a SPECIFIC person's own task list (used for the
+// default self-view and for "Filter by Staff" -> one specific person,
+// below) — a task counts as theirs if they're a listed assignee, OR they
+// created it and it has no assignees yet (so a just-drafted, not-yet-handed-
+// off task doesn't vanish on its creator). Deliberately NOT "created_by OR
+// assignee" — that older rule meant a Staff member who data-entered a batch
+// of tasks and handed every one off to a colleague still saw all of them in
+// their OWN "my tasks" list forever, since they stayed the creator even
+// after reassigning. Confirmed as a real report (Planet tenant, Achyut
+// Silwal seeing tasks he'd created but assigned to Santosh/Arishna — his
+// "Filter by Staff" was locked to himself specifically, not "Show All",
+// so this was the only way those rows could appear). The oversight/"Show
+// All Task" branch/department and company-wide scopes below are untouched —
+// those are deliberately full-transparency views for managers, where seeing
+// everything a branch/department's people have created (regardless of who
+// it ended up assigned to) is the point.
+const OWN_TASKS_WHERE = `(
+  EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = $1)
+  OR (t.created_by = $1 AND NOT EXISTS (SELECT 1 FROM task_assignees ta2 WHERE ta2.task_id = t.id))
+)`;
+
 // "Filter by Staff" on the Task page — defaults to the caller's own tasks
-// (creator or assignee, same as always) but every role can also request a
+// (see OWN_TASKS_WHERE above) but every role can also request a
 // wider view via ?staffId=:
 //   staffId=all        -> admin/superAdmin: every task company-wide.
 //                          branchManager/departmentHead: every task whose
@@ -308,7 +329,7 @@ router.get('/', async (req, res) => {
     const isDH    = role === 'departmentHead';
 
     const requested = req.query.staffId ? String(req.query.staffId) : '';
-    let where  = `(t.created_by = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = $1))`;
+    let where  = OWN_TASKS_WHERE;
     let params = [me.id];
 
     if (requested === 'all' && (isAdmin || isBM || isDH)) {
@@ -342,7 +363,7 @@ router.get('/', async (req, res) => {
           }
         }
         if (allowed) {
-          where  = `(t.created_by = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = $1))`;
+          where  = OWN_TASKS_WHERE;
           params = [staffId];
         }
       }
