@@ -89,7 +89,7 @@ const AssigneeCell = ({ assignees }) => {
           trigger={
             <div style={{ marginLeft: i === 0 ? 0 : -8, borderRadius: '50%', border: '2px solid #fff',
               boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i }}>
-              <Avatar photo={a.photo} name={a.name} size={26} />
+              <Avatar photo={a.photo} name={a.name} size={22} />
             </div>
           }
           content={
@@ -101,9 +101,9 @@ const AssigneeCell = ({ assignees }) => {
           minWidth={150} />
       ))}
       {extra > 0 && (
-        <div title={`+${extra} more`} style={{ marginLeft: -8, width: 26, height: 26, borderRadius: '50%',
+        <div title={`+${extra} more`} style={{ marginLeft: -8, width: 22, height: 22, borderRadius: '50%',
           border: '2px solid #fff', boxShadow: '0 0 0 1px #e5e7eb', background: '#e5e7eb', color: '#6b7280',
-          fontSize: 10.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          fontSize: 9.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           +{extra}
         </div>
       )}
@@ -1281,7 +1281,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'customerName', header: 'Customer', width: 150,
       render: (v, row) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          {v ? <span style={{ fontSize: 13.5, fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
+          {v ? <span style={{ fontSize: 12.5, fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
           {/* Small plain icon+number, no pill/border — the old badge-style
               chips (colored background, border, padding) added enough
               height to noticeably bloat every row; this keeps the cell to a
@@ -1307,13 +1307,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     },
     {
       field: 'personName', header: 'Person Name', width: 130,
-      render: (v) => v ? <span style={{ fontSize: 13.5, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
+      render: (v) => v ? <span style={{ fontSize: 12.5, color: '#374151' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'customerMobile', header: 'Mobile no. | Phone', width: 170, sortable: false, filterable: false,
       render: (_, row) => {
         const parts = [row.customerMobile, row.customerMobile2, row.customerPhone].filter(Boolean);
-        return parts.length ? <span style={{ fontSize: 13.5, color: '#374151' }}>{parts.join(' | ')}</span> : <span style={{ color: '#d1d5db' }}>—</span>;
+        return parts.length ? <span style={{ fontSize: 12.5, color: '#374151' }}>{parts.join(' | ')}</span> : <span style={{ color: '#d1d5db' }}>—</span>;
       },
     },
     {
@@ -1333,7 +1333,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'createdByName', header: 'Assign By', width: 60, sortable: false, filterable: false, align: 'center',
       render: (v, row) => v ? (
         <HoverCard
-          trigger={<div style={{ display: 'inline-flex' }}><Avatar photo={row.createdByPhoto} name={v} size={26} /></div>}
+          trigger={<div style={{ display: 'inline-flex' }}><Avatar photo={row.createdByPhoto} name={v} size={22} /></div>}
           content={<div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{v}</div>}
           minWidth={100} />
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
