@@ -27,6 +27,10 @@ import StaffAnalyticsReport   from './components/Staff/StaffAnalyticsReport.jsx'
 import TaskList               from './components/Staff/TaskList.jsx';
 import TaskLookupPage         from './components/Staff/TaskLookupPage.jsx';
 import TaskDashboard          from './components/Staff/TaskDashboard.jsx';
+import PayrollDashboard       from './components/Payroll/PayrollDashboard.jsx';
+import PayrollItems           from './components/Payroll/PayrollItems.jsx';
+import PayrollTaxSlab         from './components/Payroll/PayrollTaxSlab.jsx';
+import PayrollReports         from './components/Payroll/PayrollReports.jsx';
 import TaskSettings           from './components/Staff/TaskSettings.jsx';
 import StaffMessage           from './components/Staff/StaffMessage.jsx';
 import ChatPage                from './components/Chat/ChatPage.jsx';
@@ -342,6 +346,18 @@ const App = () => {
       } />
       <Route path="/staff/task/priorities" element={
         <Protected pageKey="task" moduleKey="task"><TaskLookupPage title="Task Priority" endpoint="taskPriorities" withColor /></Protected>
+      } />
+      <Route path="/payroll/dashboard" element={
+        <Protected pageKey="payroll"><PayrollDashboard /></Protected>
+      } />
+      <Route path="/payroll/items" element={
+        <Protected pageKey="payroll"><PayrollItems /></Protected>
+      } />
+      <Route path="/payroll/tax-slab" element={
+        <Protected pageKey="payroll"><PayrollTaxSlab /></Protected>
+      } />
+      <Route path="/payroll/reports" element={
+        <Protected pageKey="payroll"><PayrollReports /></Protected>
       } />
       <Route path="/staff/contact" element={
         <Protected pageKey="staffContact"><StaffContact /></Protected>

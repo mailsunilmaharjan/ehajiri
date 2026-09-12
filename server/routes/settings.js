@@ -139,6 +139,8 @@ const SETUP_TABLES = {
   weekendHistory   : { table: 'weekend_history',    cols: ['weekends','effective_date','changed_date','changed_by','reason'] },
   taskCategories   : { table: 'task_categories',    cols: ['name','ranking_order'] },
   taskPriorities   : { table: 'task_priorities',    cols: ['name','color','ranking_order'] },
+  payrollItems     : { table: 'payroll_items',      cols: ['name','type','calc_method','calc_value','formula','taxable','ranking_order'] },
+  payrollTaxSlabs  : { table: 'payroll_tax_slabs',  cols: ['fiscal_year','income_from','income_to','rate_percent','ranking_order'] },
 };
 
 router.get('/:list', async (req, res) => {
@@ -206,7 +208,11 @@ function snakeToCamel(obj) {
 function camelVal(body, snakeKey) {
   const camel = snakeKey.replace(/_([a-z])/g, (_, l) => l.toUpperCase());
   const val = body[camel] ?? body[snakeKey];
-  if (val !== undefined && typeof val === 'object') return JSON.stringify(val);
+  // `typeof null === 'object'` in JS — without this check, a field a caller
+  // deliberately sent as null (e.g. Payroll Items' formula, unused unless
+  // calcMethod is 'formula') got JSON.stringify'd into the literal string
+  // "null" instead of a real SQL NULL.
+  if (val !== undefined && val !== null && typeof val === 'object') return JSON.stringify(val);
   return val ?? null;
 }
 

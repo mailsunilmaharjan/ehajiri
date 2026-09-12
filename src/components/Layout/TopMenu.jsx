@@ -550,6 +550,19 @@ const TopMenu = () => {
           </div>
         </div>
 
+        {/* 5. Payroll — plain link (no dropdown): clicking it goes straight
+            to the Payroll Dashboard, which has its own Settings (Payroll
+            Items / Payroll Tax Slab) and Reports in its header — see
+            PayrollDashboard.jsx. Gated by the payroll pageKey only (no
+            moduleFlags entry — unlike Task/Duty Roster/Chat this isn't an
+            optional bigger feature area with its own on/off toggle, same
+            convention as myNotes/staffContact/leaveApply etc.). */}
+        {canView('payroll') && (
+          <div className={`tm-item ${isActive('/payroll') ? 'active' : ''}`} onClick={() => navTo('/payroll/dashboard')}>
+            <span>{t('Payroll')}</span>
+          </div>
+        )}
+
       </div>
 
       {/* ── Right side ── */}

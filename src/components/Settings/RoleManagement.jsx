@@ -78,6 +78,12 @@ const MATRIX_GROUPS = [
       { key: 'standaloneDevice', label: 'StandAlone Device',  icon: '🖥️', adminOnly: true },
     ],
   },
+  {
+    group: 'Payroll',
+    pages: [
+      { key: 'payroll', label: 'Payroll', icon: '💰' },
+    ],
+  },
 ];
 
 const ALL_MATRIX_PAGES = MATRIX_GROUPS.flatMap(g => g.pages);
@@ -148,6 +154,14 @@ const OVERRIDE_GROUPS = [
       { key: 'attendanceMonthly',     label: 'Monthly Reports',      icon: '📅' },
       { key: 'attendanceYearly',      label: 'Yearly Reports',       icon: '📋' },
       { key: 'dutyRoster',            label: 'Duty Roster',          icon: '🗓️' },
+    ],
+  },
+  {
+    group: 'Payroll',
+    color: '#a16207', bg: '#fef9c3',
+    desc: 'Payroll module access',
+    pages: [
+      { key: 'payroll', label: 'Payroll', icon: '💰' },
     ],
   },
 ];

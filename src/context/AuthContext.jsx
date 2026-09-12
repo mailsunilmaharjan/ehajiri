@@ -45,6 +45,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     standaloneDevice:      { view: false, edit: false, delete: false },
     eventVisitorRegistration: { view: false, edit: true, delete: false },
     staffAnalytics:        { view: false, edit: false, delete: false },
+    payroll:               { view: false, edit: false, delete: false },
   },
   departmentHead: {
     dashboard:             { view: true,  edit: false, delete: false },
@@ -79,6 +80,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     standaloneDevice:      { view: false, edit: false, delete: false },
     eventVisitorRegistration: { view: false, edit: true, delete: false },
     staffAnalytics:        { view: false, edit: false, delete: false },
+    payroll:               { view: false, edit: false, delete: false },
   },
   branchManager: {
     dashboard:             { view: true,  edit: false, delete: false },
@@ -113,6 +115,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     standaloneDevice:      { view: false, edit: false, delete: false },
     eventVisitorRegistration: { view: false, edit: true, delete: false },
     staffAnalytics:        { view: false, edit: false, delete: false },
+    payroll:               { view: false, edit: false, delete: false },
   },
   admin: {
     dashboard:             { view: true,  edit: true,  delete: true  },
@@ -147,6 +150,7 @@ export const DEFAULT_PAGE_PERMISSIONS = {
     standaloneDevice:      { view: true,  edit: true,  delete: true  },
     eventVisitorRegistration: { view: true,  edit: true,  delete: true  },
     staffAnalytics:        { view: true,  edit: true,  delete: true  },
+    payroll:               { view: true,  edit: true,  delete: true  },
   },
 };
 

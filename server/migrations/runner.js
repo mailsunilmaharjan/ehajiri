@@ -2907,6 +2907,35 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 139,
+    description: 'payroll_items / payroll_tax_slabs — setup lists for the new Payroll module (Settings → Payroll Items / Payroll Tax Slab). Same generic setup-list CRUD as task_categories etc. (see SETUP_TABLES in server/routes/settings.js) — no payslip/calculation engine yet, this is just the configurable data these will eventually be computed from.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS payroll_items (
+          id            SERIAL       PRIMARY KEY,
+          name          TEXT         NOT NULL,
+          type          VARCHAR(20)  NOT NULL DEFAULT 'earning',
+          calc_method   VARCHAR(20)  NOT NULL DEFAULT 'fixed',
+          calc_value    NUMERIC(12,2),
+          formula       TEXT,
+          taxable       BOOLEAN      NOT NULL DEFAULT TRUE,
+          ranking_order INTEGER,
+          created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS payroll_tax_slabs (
+          id            SERIAL       PRIMARY KEY,
+          fiscal_year   TEXT         NOT NULL,
+          income_from   NUMERIC(14,2) NOT NULL DEFAULT 0,
+          income_to     NUMERIC(14,2),
+          rate_percent  NUMERIC(5,2)  NOT NULL DEFAULT 0,
+          ranking_order INTEGER,
+          created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+        );
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

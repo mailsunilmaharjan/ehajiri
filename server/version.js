@@ -28,7 +28,7 @@ function readAppVersion() {
 }
 
 export const APP_VERSION = readAppVersion();
-export const DB_VERSION  = 137;
+export const DB_VERSION  = 139;
 
 /** Human-readable changelog shown in the UI */
 export const VERSION_HISTORY = [
@@ -1063,5 +1063,11 @@ export const VERSION_HISTORY = [
     dbVersion  : 137,
     releaseDate: '2026-09-09',
     notes      : 'Task/Field Visit page heading now uses the same shared page-title style as the rest of the Staff section (Notes, Contact) instead of its own larger inline size. Task notification popups now open the right place on "View": a brand-new assignment opens the Task form itself, while every other event (completed, status/description changed, a new followup logged) opens the Followup History panel instead. New Cancelled task status alongside Pending/In Progress/Completed, and a Status dropdown directly in the Followup History panel header (previously only changeable from the Edit Task form or the grid\'s plain complete/reopen checkbox). New/Edit Task form and the Followup History panel (both the task itself and each individual followup entry) now show WhatsApp-style emoji reactions and a "Seen by" avatar stack — hover an avatar for the viewer\'s name and exact seen date/time.',
+  },
+  {
+    appVersion : '1.0.188',
+    dbVersion  : 139,
+    releaseDate: '2026-09-12',
+    notes      : 'New Payroll menu (next to Attendance): a Payroll Dashboard, with Settings (Payroll Items, Payroll Tax Slab) and Reports in its top-right corner. Payroll Items and Payroll Tax Slab are working setup lists (add/edit/delete) — Payroll Items has a Name/Type (Earning or Deduction)/Calculation method (Fixed amount, % of Basic, or Formula)/Taxable flag; Payroll Tax Slab has a Fiscal Year/income bracket (From–To)/Rate %. This is the navigation and configuration layer only — payslip generation and payroll runs are not implemented yet.',
   },
 ];
