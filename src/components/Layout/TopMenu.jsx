@@ -337,49 +337,20 @@ const TopMenu = () => {
           </div>
         </div>
 
-        {/* 2. Task — all authenticated users with the task pageKey + module on */}
+        {/* 2. Task — plain link (no dropdown): clicking it goes straight to
+            the Task Dashboard, which has its own Settings (Task Category /
+            Task Priority) and Task List / Field Visit quick links in its
+            header — see TaskDashboard.jsx. Same convention as Payroll
+            (PayrollDashboard.jsx) below. */}
         {canView('task') && moduleFlags.taskEnabled && (
           <div
-            className={`tm-item ${(isActive('/staff/task') || isActive('/staff/field-visit')) ? 'active' : ''} ${openDropdown === 'task' ? 'open' : ''}`}
-            onClick={() => toggleDropdown('task')}
+            className={`tm-item ${(isActive('/staff/task') || isActive('/staff/field-visit')) ? 'active' : ''}`}
+            onClick={() => navTo('/staff/task/dashboard')}
           >
             <span>{t('Task')}</span>
             {(taskCount + fieldVisitTaskCount) > 0 && (
               <span className="tm-badge" style={{ marginLeft: 4 }}>{taskCount + fieldVisitTaskCount}</span>
             )}
-            <Chevron />
-
-            <div
-              className={`tm-dropdown ${openDropdown === 'task' ? 'show' : ''}`}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="tm-dropdown-item" onClick={() => navTo('/staff/task/dashboard')}>
-                <MIcon name="grid" /> {t('Dashboard')}
-              </div>
-              <div className="tm-dropdown-item" onClick={() => navTo('/staff/task')}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><MIcon name="checkSquare" /> {t('Task')}</span>
-                {taskCount > 0 && (
-                  <span className="tm-nav-badge" style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
-                    fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
-                    {taskCount}
-                  </span>
-                )}
-              </div>
-              <div className="tm-dropdown-item" onClick={() => navTo('/staff/field-visit')}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><MIcon name="truck" /> {t('Field Visit')}</span>
-                {fieldVisitTaskCount > 0 && (
-                  <span className="tm-nav-badge" style={{ background: '#dc2626', color: '#fff', borderRadius: 10,
-                    fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
-                    {fieldVisitTaskCount}
-                  </span>
-                )}
-              </div>
-              <div className="tm-dropdown-item" onClick={() => navTo('/staff/task/settings')}>
-                <MIcon name="sliders" /> {t('Task Setting')}
-              </div>
-            </div>
           </div>
         )}
 

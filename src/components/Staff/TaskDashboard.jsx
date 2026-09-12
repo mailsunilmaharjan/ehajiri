@@ -1,16 +1,26 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { getNepalTodayISO, addDaysISO } from '../../utils/dateUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 
-/* Task module landing page (Task > Dashboard). Reuses the exact same
-   GET /api/tasks(?staffId=all) scoping TaskList.jsx already uses for its
-   "Filter by Staff" default (admin/superAdmin -> company-wide,
-   branchManager/departmentHead -> their branch/department, plain employee ->
-   own tasks only, server-scoped) — no new endpoint.
+/* Task module landing page — now the direct target of the top-nav "Task"
+   item (Task is a plain link, no dropdown, same convention as Payroll — see
+   TopMenu.jsx). Reuses the exact same GET /api/tasks(?staffId=all) scoping
+   TaskList.jsx already uses for its "Filter by Staff" default (admin/
+   superAdmin -> company-wide, branchManager/departmentHead -> their branch/
+   department, plain employee -> own tasks only, server-scoped) — no new
+   endpoint.
+
+   Header (right side) carries the Task List / Field Visit quick links plus
+   a Settings dropdown (Task Category / Task Priority) — the same small
+   dropdown interaction as PayrollDashboard.jsx's Settings menu, replacing
+   the standalone "Task Setting" nav entry the old Task dropdown used to
+   have (TaskSettings.jsx's cards page still exists but nothing links to it
+   from the nav anymore).
 
    Layout: Today's / Yesterday's summary tiles first, then a Task-Category-
    wise breakdown of ONLY today's tasks — one real DataGrid per category (the
@@ -123,9 +133,18 @@ const groupTodayByCategory = (tasks, todayISO) => {
 export default function TaskDashboard() {
   const navigate = useNavigate();
   const { isAdmin, isSuperAdmin, isBranchManager, isDeptHead } = useAuth();
+  const { taskCount, fieldVisitTaskCount } = useNotifications();
   const fd = useDateFormat();
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (settingsRef.current && !settingsRef.current.contains(e.target)) setSettingsOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const isWideScope = isAdmin || isSuperAdmin || isBranchManager || isDeptHead;
 
@@ -167,9 +186,57 @@ export default function TaskDashboard() {
       <style>{STYLES}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <h1 className="page-title">📊 Task Dashboard</h1>
-        <button className="btn btn-primary" onClick={() => navigate('/staff/task')}>
-          👁️ View Task
-        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => navigate('/staff/field-visit')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', height: 36,
+              background: '#fff', border: '1px solid #d1d5db', color: '#374151', borderRadius: 8,
+              fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            🚗 Field Visit
+            {fieldVisitTaskCount > 0 && (
+              <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10, fontSize: 10, fontWeight: 700,
+                padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>
+                {fieldVisitTaskCount}
+              </span>
+            )}
+          </button>
+
+          <button className="btn btn-primary" onClick={() => navigate('/staff/task')}>
+            👁️ View Task
+            {taskCount > 0 && (
+              <span style={{ background: '#dc2626', color: '#fff', borderRadius: 10, fontSize: 10, fontWeight: 700,
+                padding: '1px 6px', minWidth: 18, textAlign: 'center', marginLeft: 6 }}>
+                {taskCount}
+              </span>
+            )}
+          </button>
+
+          <div ref={settingsRef} style={{ position: 'relative' }}>
+            <button onClick={() => setSettingsOpen(p => !p)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', height: 36,
+                background: '#fff', border: '1px solid #d1d5db', color: '#374151', borderRadius: 8,
+                fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              ⚙️ Settings
+            </button>
+            {settingsOpen && (
+              <div style={{ position: 'absolute', right: 0, top: 42, background: '#fff', border: '1px solid #e5e7eb',
+                borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,.12)', minWidth: 190, zIndex: 20, overflow: 'hidden' }}>
+                <div onClick={() => { setSettingsOpen(false); navigate('/staff/task/categories'); }}
+                  style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f3f4f6'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  Task Category
+                </div>
+                <div onClick={() => { setSettingsOpen(false); navigate('/staff/task/priorities'); }}
+                  style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid #f1f5f9' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f3f4f6'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  Task Priority
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {loading ? (
