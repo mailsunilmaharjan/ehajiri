@@ -1274,7 +1274,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         // taking up a whole column's width for what's usually a short note.
         const descText = stripHtml(row.description);
         if (!descText) return titleSpan;
-        return <HoverCard trigger={titleSpan} content={descText} maxWidth={320} />;
+        return <HoverCard trigger={titleSpan} content={descText} maxWidth={320} side="right" arrow bg="#eff6ff" />;
       },
     },
     {
