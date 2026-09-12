@@ -58,9 +58,9 @@ const daysBetweenISO = (fromISO, toISO) => {
 // exactly the rows that column is showing as "Today" (including a still-open
 // overdue task carried forward) without re-deriving the rule twice.
 const TASK_DATE_BADGES = {
-  today:    { label: 'Today',      bg: '#fef2f2', color: '#dc2626' },
-  tomorrow: { label: 'Tomorrow',   bg: '#fffbeb', color: '#b45309' },
-  dayAfter: { label: 'Day Af.To',  bg: '#eff6ff', color: '#1d4ed8' },
+  today:    { label: 'Today',      color: '#dc2626' },
+  tomorrow: { label: 'Tomorrow',   color: '#b45309' },
+  dayAfter: { label: 'Day Af.To',  color: '#1d4ed8' },
 };
 const taskDateBucket = (row) => {
   const due = row.dueDate ? String(row.dueDate).split('T')[0] : null;
@@ -1260,10 +1260,9 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         const bucket = taskDateBucket(row);
         if (bucket) {
           const b = TASK_DATE_BADGES[bucket];
-          return <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
-            background: b.bg, color: b.color, border: `1px solid ${b.color}44`, whiteSpace: 'nowrap' }}>{b.label}</span>;
+          return <span style={{ fontSize: 12.5, color: b.color }}>{b.label}</span>;
         }
-        return <span style={{ fontSize: 10.5 }}>{fd(String(v).split('T')[0])}</span>;
+        return <span style={{ fontSize: 12.5 }}>{fd(String(v).split('T')[0])}</span>;
       },
     },
     {
@@ -1327,21 +1326,11 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     },
     {
       field: 'categoryName', header: 'Category', width: 110, align: 'center',
-      render: (v) => v ? (
-        <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
-          background: '#eff6ff', color: '#1d4ed8', border: '1px solid #1d4ed844', whiteSpace: 'nowrap' }}>{v}</span>
-      ) : <span style={{ color: '#d1d5db' }}>—</span>,
+      render: (v) => v ? <span style={{ fontSize: 12.5, color: '#1d4ed8' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'priorityName', header: 'Priority', width: 100, align: 'center',
-      render: (v, row) => {
-        if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
-        const color = row.priorityColor || '#475569';
-        return (
-          <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
-            background: `${color}22`, color, border: `1px solid ${color}44`, whiteSpace: 'nowrap' }}>{v}</span>
-        );
-      },
+      render: (v, row) => v ? <span style={{ fontSize: 12.5, color: row.priorityColor || '#475569' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'createdByName', header: 'Assign By', width: 60, sortable: false, filterable: false, align: 'center',
@@ -1359,12 +1348,11 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     {
       field: 'status', header: 'Status', width: 100, align: 'center',
       render: (v) => {
-        const s = v === 'completed' ? { bg: '#f0fdf4', color: '#15803d' }
-          : v === 'cancelled' ? { bg: '#f3f4f6', color: '#6b7280' }
-          : v === 'in_progress' ? { bg: '#eff6ff', color: '#1d4ed8' }
-          : { bg: '#fffbeb', color: '#b45309' };
-        return <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
-          background: s.bg, color: s.color, border: `1px solid ${s.color}44`, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{v.replace('_', ' ')}</span>;
+        const color = v === 'completed' ? '#15803d'
+          : v === 'cancelled' ? '#6b7280'
+          : v === 'in_progress' ? '#1d4ed8'
+          : '#b45309';
+        return <span style={{ fontSize: 12.5, color, textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
       },
     },
   ], [fd, fieldVisitOnly]);
