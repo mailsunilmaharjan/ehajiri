@@ -4,6 +4,7 @@ import api from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { getNepalTodayISO, addDaysISO } from '../../utils/dateUtils.js';
+import DataGrid from '../DataGrid/DataGrid.jsx';
 
 /* Task module landing page (Task > Dashboard). Reuses the exact same
    GET /api/tasks(?staffId=all) scoping TaskList.jsx already uses for its
@@ -12,12 +13,11 @@ import { getNepalTodayISO, addDaysISO } from '../../utils/dateUtils.js';
    own tasks only, server-scoped) — no new endpoint.
 
    Layout: Today's / Yesterday's summary tiles first, then a Task-Category-
-   wise breakdown of ONLY today's tasks (one table per category, DataGrid's
-   standard header/border tokens — see CLAUDE.md's DataGrid Standards table —
-   so this reads as the same grid style as every other list page, not a
-   one-off). Category tables reuse the openTaskId/openEvent deep link
-   TaskList.jsx already opens the Followup History panel from (see its
-   openTaskIdParam effect) so a row click jumps straight to that task. */
+   wise breakdown of ONLY today's tasks — one real DataGrid per category (the
+   same shared component/standard styling as Staff Detail etc., not a hand-
+   rolled table), two categories per row, 15 rows/page. Each grid's row click
+   reuses the openTaskId/openEvent deep link TaskList.jsx already opens the
+   Followup History panel from (see its openTaskIdParam effect). */
 
 const STYLES = `
   .tdb-grid6 { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
@@ -27,19 +27,13 @@ const STYLES = `
   .tdb-section-title { font-size:14px; font-weight:800; color:#1e293b; margin:0 0 12px 0; display:flex; align-items:center; gap:8px; }
   .tdb-section-date { font-size:11.5px; font-weight:600; color:#94a3b8; }
   .tdb-page-heading { font-size:15px; font-weight:800; color:#1e293b; margin:0 0 12px 0; display:flex; align-items:center; gap:8px; }
-  .tdb-cat-card { background:#fff; border:1px solid #dedede; border-radius:10px; margin-bottom:16px; overflow:hidden; }
-  .tdb-cat-head { background:#efefef; border-bottom:2px solid #dedede; padding:9px 14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
-  .tdb-cat-name { font-size:13px; font-weight:700; color:#374151; }
-  .tdb-cat-chip { font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; margin-left:6px; }
-  .tdb-table { width:100%; border-collapse:collapse; }
-  .tdb-table th { background:#efefef; color:#374151; font-size:12px; font-weight:700; text-align:left; padding:8px 12px; border-bottom:2px solid #dedede; border-right:1px solid #dedede; white-space:nowrap; }
-  .tdb-table th:last-child, .tdb-table td:last-child { border-right:none; }
-  .tdb-table td { font-size:13px; color:#374151; padding:8px 12px; border-bottom:1px solid #dedede; border-right:1px solid #dedede; }
-  .tdb-table tbody tr { cursor:pointer; }
-  .tdb-table tbody tr:nth-child(even) { background:#fafafa; }
-  .tdb-table tbody tr:hover { background:#e0e7f0; }
+  .tdb-cat-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
+  .tdb-cat-grid .dg-container { min-width:0; }
+  .tdb-cat-chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
+  .tdb-cat-chip { font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
   .tdb-status-badge { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
   @media(max-width:720px){ .tdb-summary-cols{ grid-template-columns:1fr; } }
+  @media(max-width:1100px){ .tdb-cat-grid{ grid-template-columns:1fr; } }
   @media(max-width:480px){ .tdb-grid6{ grid-template-columns:repeat(2,1fr); } }
 `;
 
@@ -157,6 +151,17 @@ export default function TaskDashboard() {
 
   const openTask = (row) => navigate(`/staff/task?openTaskId=${row.id}&openEvent=view`);
 
+  const categoryColumns = useMemo(() => [
+    { field: 'title', header: 'Task Name', width: 180 },
+    { field: 'customerName', header: 'Company Name', width: 160,
+      render: v => v || <span style={{ color: '#d1d5db' }}>—</span> },
+    { field: 'customerMobile', header: 'Mobile', width: 120,
+      render: (v, row) => v || row.customerPhone || <span style={{ color: '#d1d5db' }}>—</span> },
+    { field: 'customerAddress', header: 'Address', width: 160,
+      render: (v, row) => v || row.customerCompanyAddress || <span style={{ color: '#d1d5db' }}>—</span> },
+    { field: 'status', header: 'Status', width: 110, render: v => <StatusBadge status={v} /> },
+  ], []);
+
   return (
     <div style={{ padding: '20px 24px' }}>
       <style>{STYLES}</style>
@@ -195,44 +200,31 @@ export default function TaskDashboard() {
               No tasks due today.
             </div>
           ) : (
-            categoryGroups.map(g => (
-              <div key={g.categoryName} className="tdb-cat-card">
-                <div className="tdb-cat-head">
-                  <span className="tdb-cat-name">{g.categoryName}</span>
-                  <div>
-                    <span className="tdb-cat-chip" style={{ background: '#e2e8f0', color: '#374151' }}>Total: {g.total}</span>
-                    <span className="tdb-cat-chip" style={{ background: '#f0fdf4', color: '#065f46' }}>Completed: {g.completed}</span>
-                    <span className="tdb-cat-chip" style={{ background: '#fff5f5', color: '#991b1b' }}>Uncompleted: {g.uncompleted}</span>
-                  </div>
-                </div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="tdb-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 46 }}>SN</th>
-                        <th>Task Name</th>
-                        <th>Company Name</th>
-                        <th>Mobile</th>
-                        <th>Address</th>
-                        <th style={{ width: 110 }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {g.rows.map((t, i) => (
-                        <tr key={t.id} onClick={() => openTask(t)}>
-                          <td>{i + 1}</td>
-                          <td>{t.title || '—'}</td>
-                          <td>{t.customerName || '—'}</td>
-                          <td>{t.customerMobile || t.customerPhone || '—'}</td>
-                          <td>{t.customerAddress || t.customerCompanyAddress || '—'}</td>
-                          <td><StatusBadge status={t.status} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))
+            <div className="tdb-cat-grid">
+              {categoryGroups.map(g => (
+                <DataGrid
+                  key={g.categoryName}
+                  title={g.categoryName}
+                  toolbarLeft={
+                    <div className="tdb-cat-chips">
+                      <span className="tdb-cat-chip" style={{ background: '#e2e8f0', color: '#374151' }}>Total: {g.total}</span>
+                      <span className="tdb-cat-chip" style={{ background: '#f0fdf4', color: '#065f46' }}>Completed: {g.completed}</span>
+                      <span className="tdb-cat-chip" style={{ background: '#fff5f5', color: '#991b1b' }}>Uncompleted: {g.uncompleted}</span>
+                    </div>
+                  }
+                  columns={categoryColumns}
+                  data={g.rows}
+                  rowKey="id"
+                  defaultPageSize={15}
+                  pageSizeOptions={[15, 25, 50]}
+                  compact
+                  showCheckbox={false}
+                  showFilterButton={false}
+                  searchPlaceholder="Search..."
+                  onRowClick={openTask}
+                />
+              ))}
+            </div>
           )}
         </>
       )}
