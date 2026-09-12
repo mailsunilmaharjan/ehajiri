@@ -87,10 +87,18 @@ const AssigneeCell = ({ assignees }) => {
       {shown.map((a, i) => (
         <HoverCard key={a.id}
           trigger={
-            <div style={{ marginLeft: i === 0 ? 0 : -8, borderRadius: '50%', border: '2px solid #fff',
-              boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i }}>
-              <Avatar photo={a.photo} name={a.name} size={22} />
-            </div>
+            // Only overlapping avatars (i > 0) need the white separator ring —
+            // it's what tells two circles apart where they overlap. The first
+            // one doesn't overlap anything, so it renders plain (same as the
+            // single Assign By avatar / Staff Details' Avatar) instead of
+            // paying the ring's +4px height on every row that has just one
+            // assignee, which pushed those rows taller than Staff Details'.
+            i === 0 ? <Avatar photo={a.photo} name={a.name} size={22} /> : (
+              <div style={{ marginLeft: -8, borderRadius: '50%', border: '2px solid #fff',
+                boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i }}>
+                <Avatar photo={a.photo} name={a.name} size={22} />
+              </div>
+            )
           }
           content={
             <div>
@@ -1289,7 +1297,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
               single text line, matching the grid's other compact columns. */}
           {row.followupCount > 0 && (
             <span title={`${row.followupCount} followup${row.followupCount === 1 ? '' : 's'} logged`}
-              style={{ fontSize: 10.5, color: '#dc2626', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              style={{ fontSize: 12.5, color: '#dc2626', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
               💬{row.followupCount}
             </span>
           )}
@@ -1298,7 +1306,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             const daysStarted = daysBetweenISO(startedNepal, getNepalTodayISO());
             return (
               <span title="Days since this task started"
-                style={{ fontSize: 10.5, color: '#92400e', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                style={{ fontSize: 12.5, color: '#92400e', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
                 {daysStarted <= 0 ? 'Today' : `${daysStarted}d`}
               </span>
             );
