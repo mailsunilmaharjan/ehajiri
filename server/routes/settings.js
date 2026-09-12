@@ -140,7 +140,7 @@ const SETUP_TABLES = {
   taskCategories   : { table: 'task_categories',    cols: ['name','ranking_order'] },
   taskPriorities   : { table: 'task_priorities',    cols: ['name','color','ranking_order'] },
   payrollItems     : { table: 'payroll_items',      cols: ['name','type','calc_method','calc_value','formula','taxable','ranking_order'] },
-  payrollTaxSlabs  : { table: 'payroll_tax_slabs',  cols: ['fiscal_year','income_from','income_to','rate_percent','ranking_order'] },
+  payrollTaxSlabs  : { table: 'payroll_tax_slabs',  cols: ['yearly_income_slab','effective_date','income_from','income_to','rate_percent','ranking_order'] },
 };
 
 router.get('/:list', async (req, res) => {

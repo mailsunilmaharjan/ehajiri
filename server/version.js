@@ -28,7 +28,7 @@ function readAppVersion() {
 }
 
 export const APP_VERSION = readAppVersion();
-export const DB_VERSION  = 139;
+export const DB_VERSION  = 140;
 
 /** Human-readable changelog shown in the UI */
 export const VERSION_HISTORY = [
@@ -1069,5 +1069,11 @@ export const VERSION_HISTORY = [
     dbVersion  : 139,
     releaseDate: '2026-09-12',
     notes      : 'New Payroll menu (next to Attendance): a Payroll Dashboard, with Settings (Payroll Items, Payroll Tax Slab) and Reports in its top-right corner. Payroll Items and Payroll Tax Slab are working setup lists (add/edit/delete) — Payroll Items has a Name/Type (Earning or Deduction)/Calculation method (Fixed amount, % of Basic, or Formula)/Taxable flag; Payroll Tax Slab has a Fiscal Year/income bracket (From–To)/Rate %. This is the navigation and configuration layer only — payslip generation and payroll runs are not implemented yet.',
+  },
+  {
+    appVersion : '1.0.189',
+    dbVersion  : 140,
+    releaseDate: '2026-09-12',
+    notes      : 'Payroll Tax Slab: renamed the "Fiscal Year" field to "Yearly Income Slab" and added a required "Effective Date" — the date each slab set actually starts applying from, replacing the plain fiscal-year label as the thing that determines which slab is in effect for a given date.',
   },
 ];

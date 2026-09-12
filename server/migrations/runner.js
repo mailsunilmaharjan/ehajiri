@@ -2936,6 +2936,25 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 140,
+    description: 'payroll_tax_slabs: rename fiscal_year -> yearly_income_slab (same free-text label field, just renamed — it was never really tied to an official fiscal year, just a descriptive name for one slab table) and add effective_date, the date a given slab set actually starts applying from. Renamed rather than added-alongside since the table shipped in the previous release with no real tenant data in it yet.',
+    up: async (client) => {
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'payroll_tax_slabs' AND column_name = 'fiscal_year'
+          ) THEN
+            ALTER TABLE payroll_tax_slabs RENAME COLUMN fiscal_year TO yearly_income_slab;
+          END IF;
+        END $$;
+
+        ALTER TABLE payroll_tax_slabs ADD COLUMN IF NOT EXISTS effective_date DATE;
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

@@ -5,22 +5,25 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
+import useDateFormat from '../../hooks/useDateFormat.js';
 
 /* Settings → Payroll Tax Slab (Payroll → Settings → Payroll Tax Slab) —
    Nepal-style annual income tax brackets (income range + rate %), one set
-   per fiscal year. Plain setup-list CRUD against the generic
-   /api/settings/:list endpoint (payrollTaxSlabs -> payroll_tax_slabs, see
-   SETUP_TABLES in server/routes/settings.js), same pattern as
-   TaskLookupPage.jsx / PayrollItems.jsx. No calculation engine yet — this
-   only stores the bracket definitions a future payroll run would apply. */
+   per Yearly Income Slab, active from its own Effective Date. Plain
+   setup-list CRUD against the generic /api/settings/:list endpoint
+   (payrollTaxSlabs -> payroll_tax_slabs, see SETUP_TABLES in
+   server/routes/settings.js), same pattern as TaskLookupPage.jsx /
+   PayrollItems.jsx. No calculation engine yet — this only stores the
+   bracket definitions a future payroll run would apply. */
 
-const emptyForm = { fiscalYear: '', incomeFrom: '0', incomeTo: '', ratePercent: '' };
+const emptyForm = { yearlyIncomeSlab: '', effectiveDate: '', incomeFrom: '0', incomeTo: '', ratePercent: '' };
 
 const fmtNum = (v) => v == null ? '—' : Number(v).toLocaleString();
 
 const PayrollTaxSlab = () => {
   const navigate = useNavigate();
   const { canManageSystem } = useAuth();
+  const fd = useDateFormat();
 
   const [items,   setItems]   = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +48,8 @@ const PayrollTaxSlab = () => {
   const openEdit = (row) => {
     setEditId(row.id);
     setForm({
-      fiscalYear: row.fiscalYear || '',
+      yearlyIncomeSlab: row.yearlyIncomeSlab || '',
+      effectiveDate: row.effectiveDate ? String(row.effectiveDate).split('T')[0] : '',
       incomeFrom: row.incomeFrom != null ? String(row.incomeFrom) : '0',
       incomeTo:   row.incomeTo   != null ? String(row.incomeTo)   : '',
       ratePercent: row.ratePercent != null ? String(row.ratePercent) : '',
@@ -54,11 +58,13 @@ const PayrollTaxSlab = () => {
   };
 
   const save = async () => {
-    if (!form.fiscalYear.trim()) { setError('Fiscal Year is required'); return; }
+    if (!form.yearlyIncomeSlab.trim()) { setError('Yearly Income Slab is required'); return; }
+    if (!form.effectiveDate) { setError('Effective Date is required'); return; }
     if (form.incomeFrom === '' || form.ratePercent === '') { setError('Income From and Rate % are required'); return; }
     setSaving(true);
     const payload = {
-      fiscalYear: form.fiscalYear.trim(),
+      yearlyIncomeSlab: form.yearlyIncomeSlab.trim(),
+      effectiveDate: form.effectiveDate,
       incomeFrom: Number(form.incomeFrom),
       incomeTo:   form.incomeTo === '' ? null : Number(form.incomeTo),
       ratePercent: Number(form.ratePercent),
@@ -89,7 +95,9 @@ const PayrollTaxSlab = () => {
 
   const columns = useMemo(() => {
     const cols = [
-      { field: 'fiscalYear', header: 'Fiscal Year', width: 130 },
+      { field: 'yearlyIncomeSlab', header: 'Yearly Income Slab', width: 160 },
+      { field: 'effectiveDate', header: 'Effective Date', width: 130,
+        render: v => v ? fd(String(v).split('T')[0]) : '—' },
       { field: 'incomeFrom', header: 'Income From', width: 130, render: v => fmtNum(v) },
       { field: 'incomeTo',   header: 'Income To',   width: 130, render: v => v == null ? 'and above' : fmtNum(v) },
       { field: 'ratePercent', header: 'Rate %', width: 100, render: v => `${v ?? 0}%` },
@@ -106,7 +114,7 @@ const PayrollTaxSlab = () => {
       });
     }
     return cols;
-  }, [canManageSystem]);
+  }, [canManageSystem, fd]);
 
   return (
     <div style={{ padding: '20px 24px' }}>
@@ -152,12 +160,21 @@ const PayrollTaxSlab = () => {
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
-                  Fiscal Year<span style={{ color: '#dc2626' }}> *</span>
+                  Yearly Income Slab<span style={{ color: '#dc2626' }}> *</span>
                 </label>
-                <input value={form.fiscalYear} onChange={e => setForm(f => ({ ...f, fiscalYear: e.target.value }))} autoFocus
-                  placeholder="e.g. 2082/83"
+                <input value={form.yearlyIncomeSlab} onChange={e => setForm(f => ({ ...f, yearlyIncomeSlab: e.target.value }))} autoFocus
+                  placeholder="e.g. 2082/83 Slab"
                   onKeyDown={e => e.key === 'Enter' && save()}
                   style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13 }} />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+                  Effective Date<span style={{ color: '#dc2626' }}> *</span>
+                </label>
+                <input type="date" value={form.effectiveDate} onChange={e => setForm(f => ({ ...f, effectiveDate: e.target.value }))}
+                  style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13 }} />
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>The date this slab starts applying from.</span>
               </div>
 
               <div style={{ display: 'flex', gap: 10 }}>
