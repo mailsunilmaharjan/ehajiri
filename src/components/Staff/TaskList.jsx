@@ -1249,26 +1249,37 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     },
     {
       field: 'title', header: 'Task', minWidth: 170,
-      render: (v, row) => (
-        <span style={{ fontWeight: 600, color: row.status === 'completed' ? '#9ca3af' : '#1e293b',
-          textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>
-          {/* Only shown on the regular Task page — every row on the Field Visit
-              page is already a field visit, so the icon would be redundant there. */}
-          {row.isFieldVisit && !fieldVisitOnly && <span title="Field Visit" style={{ marginRight: 5 }}>🚗</span>}
-          {v}
-        </span>
-      ),
+      render: (v, row) => {
+        const titleSpan = (
+          <span style={{ fontWeight: 600, color: row.status === 'completed' ? '#9ca3af' : '#1e293b',
+            textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>
+            {/* Only shown on the regular Task page — every row on the Field Visit
+                page is already a field visit, so the icon would be redundant there. */}
+            {row.isFieldVisit && !fieldVisitOnly && <span title="Field Visit" style={{ marginRight: 5 }}>🚗</span>}
+            {v}
+          </span>
+        );
+        // Description moved here as a hover tooltip (its own grid column was
+        // removed — see below) since it's rarely needed at a glance and was
+        // taking up a whole column's width for what's usually a short note.
+        const descText = stripHtml(row.description);
+        if (!descText) return titleSpan;
+        return <HoverCard trigger={titleSpan} content={descText} maxWidth={320} />;
+      },
     },
     {
       field: 'customerName', header: 'Customer', width: 150,
       render: (v, row) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           {v ? <span style={{ fontSize: 13.5, fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
+          {/* Small plain icon+number, no pill/border — the old badge-style
+              chips (colored background, border, padding) added enough
+              height to noticeably bloat every row; this keeps the cell to a
+              single text line, matching the grid's other compact columns. */}
           {row.followupCount > 0 && (
             <span title={`${row.followupCount} followup${row.followupCount === 1 ? '' : 's'} logged`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: '#fef2f2', color: '#dc2626',
-                border: '1px solid #fecaca', borderRadius: 10, padding: '1px 6px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-              💬 {row.followupCount}
+              style={{ fontSize: 10.5, color: '#dc2626', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              💬{row.followupCount}
             </span>
           )}
           {row.createdAt && (() => {
@@ -1276,10 +1287,8 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             const daysStarted = daysBetweenISO(startedNepal, getNepalTodayISO());
             return (
               <span title="Days since this task started"
-                style={{ display: 'inline-flex', alignItems: 'center', background: '#fef3c7', color: '#92400e',
-                  border: '1px solid #fde68a', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700,
-                  flexShrink: 0, whiteSpace: 'nowrap' }}>
-                - {daysStarted <= 0 ? 'Today' : `${daysStarted} Days`}
+                style={{ fontSize: 10.5, color: '#92400e', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                {daysStarted <= 0 ? 'Today' : `${daysStarted}d`}
               </span>
             );
           })()}
@@ -1311,20 +1320,17 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
-      field: 'assignees', header: 'Assigned To', width: 150, sortable: false, filterable: false,
-      render: (v) => <AssigneeCell assignees={v} />,
+      field: 'createdByName', header: 'Assign By', width: 60, sortable: false, filterable: false, align: 'center',
+      render: (v, row) => v ? (
+        <HoverCard
+          trigger={<div style={{ display: 'inline-flex' }}><Avatar photo={row.createdByPhoto} name={v} size={26} /></div>}
+          content={<div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{v}</div>}
+          minWidth={100} />
+      ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
-      field: 'createdAt', header: 'Days', width: 80, align: 'center',
-      render: (v) => {
-        if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
-        // Computed live off getNepalTodayISO() each render (not a captured outer
-        // const) so the count keeps advancing day to day without needing the
-        // whole memoized columns array to recompute.
-        const startedNepal = isoToNepalLocalInput(v).split('T')[0];
-        const n = daysBetweenISO(startedNepal, getNepalTodayISO());
-        return <span style={{ fontSize: 12.5, color: '#6b7280' }}>{n <= 0 ? 'Today' : `${n}d`}</span>;
-      },
+      field: 'assignees', header: 'Assigned To', width: 150, sortable: false, filterable: false,
+      render: (v) => <AssigneeCell assignees={v} />,
     },
     {
       field: 'status', header: 'Status', width: 100, align: 'center',
@@ -1334,21 +1340,6 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           : v === 'in_progress' ? { bg: '#eff6ff', color: '#1d4ed8' }
           : { bg: '#fffbeb', color: '#b45309' };
         return <span style={{ fontSize: 11.5, fontWeight: 700, background: s.bg, color: s.color, borderRadius: 20, padding: '3px 10px', textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
-      },
-    },
-    {
-      field: 'description', header: 'Description', width: 180, minWidth: 160,
-      render: (v) => {
-        const text = stripHtml(v);
-        if (!text) return <span style={{ color: '#d1d5db' }}>—</span>;
-        if (text.length <= 40) return <span style={{ fontSize: 13, color: '#6b7280' }}>{text}</span>;
-        return (
-          <HoverCard
-            trigger={<span style={{ fontSize: 13, color: '#6b7280', cursor: 'default' }}>{text.slice(0, 40)}…</span>}
-            content={text}
-            maxWidth={420}
-          />
-        );
       },
     },
   ], [fd, fieldVisitOnly]);
@@ -1577,7 +1568,11 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div onClick={() => openEdit(followupTask)} title="Open Edit Task"
+                    style={{ fontSize: 15, fontWeight: 700, color: '#111827', display: 'flex', alignItems: 'center',
+                      gap: 6, cursor: 'pointer' }}
+                    onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                    onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
                     📄 {followupTask.title}
                   </div>
                   <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -1591,9 +1586,9 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                         const r = await reactToTask(followupTask.id, emoji);
                         if (r) setFollowupTask(prev => prev ? { ...prev, reactions: r } : prev);
                       }} />
-                  </div>
-                  <div style={{ marginTop: 6 }}>
-                    <SeenByAvatars seenBy={followupTask.seenBy} fd={fd} />
+                    <div style={{ marginLeft: 'auto' }}>
+                      <SeenByAvatars seenBy={followupTask.seenBy} fd={fd} />
+                    </div>
                   </div>
                   <div style={{ marginTop: 6, padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 7 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#166534' }}>
