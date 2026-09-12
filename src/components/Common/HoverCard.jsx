@@ -32,7 +32,7 @@ import { createPortal } from 'react-dom';
 // own ellipsis truncation (a `width:100%` child inside a shrink-to-fit
 // inline-block never actually gets a definite width to overflow against —
 // it just collapses the wrapper to ~0 instead of expanding it).
-const HoverCard = ({ trigger, content, minWidth = 200, maxWidth = 340, arrow = false, side = 'bottom', bg = '#ffffff', fill = false }) => {
+const HoverCard = ({ trigger, content, minWidth = 200, maxWidth = 340, arrow = false, side = 'bottom', bg = '#ffffff', fontSize = 14, fill = false }) => {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState(null);
   const [opensUp, setOpensUp] = useState(false);
@@ -68,7 +68,7 @@ const HoverCard = ({ trigger, content, minWidth = 200, maxWidth = 340, arrow = f
       {show && pos && createPortal(
         <div className="hover-card" style={{ position: 'fixed', zIndex: 9999, minWidth, maxWidth, ...pos,
           transform: side === 'right' ? 'translateY(-50%)' : 'none',
-          background: bg, color: '#1f2937', fontSize: 14, lineHeight: 1.8, padding: '10px 14px',
+          background: bg, color: '#1f2937', fontSize, lineHeight: 1.8, padding: '10px 14px',
           borderRadius: 8, border: '1px solid #e5e7eb', boxShadow: '0 10px 28px rgba(0,0,0,.18)', whiteSpace: 'normal' }}>
           {content}
           {arrow && (side === 'right' ? (

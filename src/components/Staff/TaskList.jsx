@@ -1252,7 +1252,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         const bucket = taskDateBucket(row);
         if (bucket) {
           const b = TASK_DATE_BADGES[bucket];
-          return <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
+          return <span style={{ fontSize: 12.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
             background: b.bg, color: b.color, border: `1px solid ${b.color}44`, whiteSpace: 'nowrap' }}>{b.label}</span>;
         }
         return <span>{fd(String(v).split('T')[0])}</span>;
@@ -1275,7 +1275,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         // taking up a whole column's width for what's usually a short note.
         const descText = stripHtml(row.description);
         if (!descText) return titleSpan;
-        return <HoverCard trigger={titleSpan} content={descText} maxWidth={320} side="right" arrow bg="#eff6ff" />;
+        return <HoverCard trigger={titleSpan} content={descText} maxWidth={320} side="right" arrow fontSize={12.5} />;
       },
     },
     {
@@ -1320,7 +1320,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     {
       field: 'categoryName', header: 'Category', width: 110, align: 'center',
       render: (v) => v ? (
-        <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
+        <span style={{ fontSize: 12.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
           background: '#eff6ff', color: '#1d4ed8', border: '1px solid #1d4ed844', whiteSpace: 'nowrap' }}>{v}</span>
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
@@ -1330,7 +1330,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
         const color = row.priorityColor || '#475569';
         return (
-          <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
+          <span style={{ fontSize: 12.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
             background: `${color}22`, color, border: `1px solid ${color}44`, whiteSpace: 'nowrap' }}>{v}</span>
         );
       },
@@ -1355,7 +1355,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           : v === 'cancelled' ? { bg: '#f3f4f6', color: '#6b7280' }
           : v === 'in_progress' ? { bg: '#eff6ff', color: '#1d4ed8' }
           : { bg: '#fffbeb', color: '#b45309' };
-        return <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
+        return <span style={{ fontSize: 12.5, fontWeight: 700, padding: '2px 10px', borderRadius: 10,
           background: s.bg, color: s.color, border: `1px solid ${s.color}44`, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{v.replace('_', ' ')}</span>;
       },
     },
