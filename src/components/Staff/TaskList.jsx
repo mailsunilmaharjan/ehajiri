@@ -1325,7 +1325,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     {
       field: 'priorityName', header: 'Priority', width: 100, align: 'center',
       render: (v, row) => v ? (
-        <span style={{ fontSize: 11.5, fontWeight: 700, borderRadius: 20, padding: '3px 10px',
+        <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 20, padding: '3px 10px',
           background: `${row.priorityColor || '#94a3b8'}22`, color: row.priorityColor || '#475569' }}>{v}</span>
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
