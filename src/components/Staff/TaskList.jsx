@@ -1262,7 +1262,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'title', header: 'Task', minWidth: 170,
       render: (v, row) => {
         const titleSpan = (
-          <span style={{ color: row.status === 'completed' ? '#9ca3af' : '#1f2937',
+          <span style={{ fontSize: 12.5, color: row.status === 'completed' ? '#9ca3af' : '#1f2937',
             textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>
             {/* Only shown on the regular Task page — every row on the Field Visit
                 page is already a field visit, so the icon would be redundant there. */}
@@ -1282,7 +1282,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'customerName', header: 'Customer', width: 150,
       render: (v, row) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          {v ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
+          {v ? <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
           {/* Small plain icon+number, no pill/border — the old badge-style
               chips (colored background, border, padding) added enough
               height to noticeably bloat every row; this keeps the cell to a
@@ -1308,13 +1308,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     },
     {
       field: 'personName', header: 'Person Name', width: 130,
-      render: (v) => v || <span style={{ color: '#d1d5db' }}>—</span>,
+      render: (v) => v ? <span style={{ fontSize: 12.5 }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'customerMobile', header: 'Mobile no. | Phone', width: 170, sortable: false, filterable: false,
       render: (_, row) => {
         const parts = [row.customerMobile, row.customerMobile2, row.customerPhone].filter(Boolean);
-        return parts.length ? parts.join(' | ') : <span style={{ color: '#d1d5db' }}>—</span>;
+        return parts.length ? <span style={{ fontSize: 12.5 }}>{parts.join(' | ')}</span> : <span style={{ color: '#d1d5db' }}>—</span>;
       },
     },
     {
