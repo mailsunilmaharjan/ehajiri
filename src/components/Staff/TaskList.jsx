@@ -8,6 +8,7 @@ import { useModuleFlags } from '../../context/ModuleFlagsContext.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import DateTimePicker from '../Common/DateTimePicker.jsx';
+import NepaliDateTimePicker from '../Common/NepaliDateTimePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import RichTextEditor from '../Common/RichTextEditor.jsx';
@@ -361,6 +362,15 @@ const DateInput = ({ value, onChange }) => {
     <input type="date" value={value} onChange={e => onChange(e.target.value)}
       style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
   );
+};
+
+// Same Default Calendar switch as DateInput above, for a date+time field
+// ("Next Followup & Time") — Nepali when Settings → Default Calendar is set
+// to "np", plain Gregorian otherwise.
+const DateTimeInput = (props) => {
+  const { settings } = useSettings();
+  if (settings.defaultCalendar === 'np') return <NepaliDateTimePicker {...props} />;
+  return <DateTimePicker {...props} />;
 };
 
 const field = (label, required, err, children) => (
@@ -2186,7 +2196,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {field('Next Followup & Time', false, null,
-                  <DateTimePicker value={followupForm.nextFollowupAt}
+                  <DateTimeInput value={followupForm.nextFollowupAt}
                     onChange={v => setFollowupForm(p => ({ ...p, nextFollowupAt: v }))} />
                 )}
                 {field('Hand Over', false, null,
