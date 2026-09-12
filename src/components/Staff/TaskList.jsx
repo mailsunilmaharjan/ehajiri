@@ -1252,16 +1252,16 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         const bucket = taskDateBucket(row);
         if (bucket) {
           const b = TASK_DATE_BADGES[bucket];
-          return <span style={{ fontSize: 10.5, fontWeight: 700, background: b.bg, color: b.color, borderRadius: 20, padding: '3px 10px' }}>{b.label}</span>;
+          return <span style={{ fontSize: 12.5, fontWeight: 700, background: b.bg, color: b.color, borderRadius: 20, padding: '3px 10px' }}>{b.label}</span>;
         }
-        return <span style={{ fontSize: 11.5, color: '#374151' }}>{fd(String(v).split('T')[0])}</span>;
+        return <span style={{ fontSize: 12.5, color: '#374151' }}>{fd(String(v).split('T')[0])}</span>;
       },
     },
     {
       field: 'title', header: 'Task', minWidth: 170,
       render: (v, row) => {
         const titleSpan = (
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: row.status === 'completed' ? '#9ca3af' : '#1e293b',
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: row.status === 'completed' ? '#9ca3af' : '#1e293b',
             textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>
             {/* Only shown on the regular Task page — every row on the Field Visit
                 page is already a field visit, so the icon would be redundant there. */}
@@ -1281,7 +1281,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'customerName', header: 'Customer', width: 150,
       render: (v, row) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          {v ? <span style={{ fontSize: 11.5, fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
+          {v ? <span style={{ fontSize: 12.5, fontWeight: 700, color: '#1a56db', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
           {/* Small plain icon+number, no pill/border — the old badge-style
               chips (colored background, border, padding) added enough
               height to noticeably bloat every row; this keeps the cell to a
@@ -1319,13 +1319,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     {
       field: 'categoryName', header: 'Category', width: 110, align: 'center',
       render: (v) => v ? (
-        <span style={{ fontSize: 11.5, fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', borderRadius: 20, padding: '3px 10px' }}>{v}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', borderRadius: 20, padding: '3px 10px' }}>{v}</span>
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'priorityName', header: 'Priority', width: 100, align: 'center',
       render: (v, row) => v ? (
-        <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 20, padding: '3px 10px',
+        <span style={{ fontSize: 12.5, fontWeight: 700, borderRadius: 20, padding: '3px 10px',
           background: `${row.priorityColor || '#94a3b8'}22`, color: row.priorityColor || '#475569' }}>{v}</span>
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
@@ -1349,7 +1349,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           : v === 'cancelled' ? { bg: '#f3f4f6', color: '#6b7280' }
           : v === 'in_progress' ? { bg: '#eff6ff', color: '#1d4ed8' }
           : { bg: '#fffbeb', color: '#b45309' };
-        return <span style={{ fontSize: 11.5, fontWeight: 700, background: s.bg, color: s.color, borderRadius: 20, padding: '3px 10px', textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
+        return <span style={{ fontSize: 12.5, fontWeight: 700, background: s.bg, color: s.color, borderRadius: 20, padding: '3px 10px', textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
       },
     },
   ], [fd, fieldVisitOnly]);
