@@ -2,10 +2,27 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { useSettings } from '../../context/SettingsContext.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
+import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+
+// Same calendar-aware date field every apply/settings form in the app uses
+// (see e.g. TaskList.jsx's own DateInput) — Settings → Official Setting's
+// Default Calendar decides which one shows: Nepali (BS picker) or English
+// (plain styled <input type="date">). Both always store/emit a plain AD
+// ISO string, so the rest of the form never needs to know which one rendered.
+const DateInput = ({ value, onChange, error }) => {
+  const { settings } = useSettings();
+  if (settings.defaultCalendar === 'np') return <NepaliDatePicker value={value} onChange={onChange} error={error} />;
+  return (
+    <input type="date" value={value} onChange={e => onChange(e.target.value)}
+      style={{ height: 36, width: '100%', border: `1px solid ${error ? '#dc2626' : '#d1d5db'}`, borderRadius: 7,
+        padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
+  );
+};
 
 /* Settings → Payroll Tax Slab (Payroll → Settings → Payroll Tax Slab) —
    Nepal-style annual income tax brackets (income range + rate %), one set
@@ -172,8 +189,8 @@ const PayrollTaxSlab = () => {
                 <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
                   Effective Date<span style={{ color: '#dc2626' }}> *</span>
                 </label>
-                <input type="date" value={form.effectiveDate} onChange={e => setForm(f => ({ ...f, effectiveDate: e.target.value }))}
-                  style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13 }} />
+                <DateInput value={form.effectiveDate} onChange={v => setForm(f => ({ ...f, effectiveDate: v }))}
+                  error={!!error && !form.effectiveDate} />
                 <span style={{ fontSize: 11, color: '#9ca3af' }}>The date this slab starts applying from.</span>
               </div>
 

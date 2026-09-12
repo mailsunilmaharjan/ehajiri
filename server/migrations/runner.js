@@ -2955,6 +2955,15 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 141,
+    description: 'payroll_items: add payment_mode (Monthly / Yearly / Need Basis) — how often this item is actually paid out, e.g. Basic Salary is Monthly, an annual Bonus is Yearly, a one-off allowance is Need Basis (ad-hoc, not on a fixed schedule).',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE payroll_items ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(20) NOT NULL DEFAULT 'monthly';
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

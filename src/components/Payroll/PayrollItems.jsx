@@ -23,12 +23,18 @@ const CALC_OPTS = [
   { value: 'percent_of_basic', label: '% of Basic' },
   { value: 'formula',          label: 'Formula' },
 ];
+const PAYMENT_MODE_OPTS = [
+  { value: 'monthly',    label: 'Monthly' },
+  { value: 'yearly',     label: 'Yearly' },
+  { value: 'need_basis', label: 'Need Basis' },
+];
+const PAYMENT_MODE_LABEL = Object.fromEntries(PAYMENT_MODE_OPTS.map(o => [o.value, o.label]));
 const TYPE_STYLE = {
   earning:   { bg: '#f0fdf4', color: '#065f46', label: 'Earning' },
   deduction: { bg: '#fff5f5', color: '#991b1b', label: 'Deduction' },
 };
 
-const emptyForm = { name: '', type: 'earning', calcMethod: 'fixed', calcValue: '', formula: '', taxable: true };
+const emptyForm = { name: '', type: 'earning', calcMethod: 'fixed', calcValue: '', formula: '', taxable: true, paymentMode: 'monthly' };
 
 const PayrollItems = () => {
   const navigate = useNavigate();
@@ -59,7 +65,7 @@ const PayrollItems = () => {
     setForm({
       name: row.name || '', type: row.type || 'earning', calcMethod: row.calcMethod || 'fixed',
       calcValue: row.calcValue != null ? String(row.calcValue) : '', formula: row.formula || '',
-      taxable: row.taxable !== false,
+      taxable: row.taxable !== false, paymentMode: row.paymentMode || 'monthly',
     });
     setError(''); setModal(true);
   };
@@ -76,6 +82,7 @@ const PayrollItems = () => {
       calcValue: form.calcMethod === 'formula' ? null : Number(form.calcValue),
       formula: form.calcMethod === 'formula' ? form.formula.trim() : null,
       taxable: form.taxable,
+      paymentMode: form.paymentMode,
       rankingOrder: editId ? undefined : items.length + 1,
     };
     try {
@@ -116,6 +123,7 @@ const PayrollItems = () => {
           return <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: s.bg, color: s.color }}>{s.label}</span>;
         } },
       { field: 'calcMethod', header: 'Calculation', minWidth: 160, render: (_, row) => fmtCalc(row) },
+      { field: 'paymentMode', header: 'Payment Mode', width: 120, render: v => PAYMENT_MODE_LABEL[v] || 'Monthly' },
       { field: 'taxable', header: 'Taxable', width: 90, align: 'center',
         render: v => v === false
           ? <span style={{ color: '#991b1b', fontWeight: 700, fontSize: 12 }}>No</span>
@@ -201,6 +209,14 @@ const PayrollItems = () => {
                     {CALC_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Payment Mode</label>
+                <select value={form.paymentMode} onChange={e => setForm(f => ({ ...f, paymentMode: e.target.value }))}
+                  style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  {PAYMENT_MODE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
               </div>
 
               {form.calcMethod === 'formula' ? (

@@ -28,7 +28,7 @@ function readAppVersion() {
 }
 
 export const APP_VERSION = readAppVersion();
-export const DB_VERSION  = 140;
+export const DB_VERSION  = 141;
 
 /** Human-readable changelog shown in the UI */
 export const VERSION_HISTORY = [
@@ -1075,5 +1075,11 @@ export const VERSION_HISTORY = [
     dbVersion  : 140,
     releaseDate: '2026-09-12',
     notes      : 'Payroll Tax Slab: renamed the "Fiscal Year" field to "Yearly Income Slab" and added a required "Effective Date" — the date each slab set actually starts applying from, replacing the plain fiscal-year label as the thing that determines which slab is in effect for a given date.',
+  },
+  {
+    appVersion : '1.0.190',
+    dbVersion  : 141,
+    releaseDate: '2026-09-12',
+    notes      : 'Payroll Tax Slab\'s Effective Date now respects Settings → Official Setting\'s Default Calendar — shows the Nepali (BS) date picker when that\'s set to Nepali, a properly styled English date field otherwise (previously always a plain native English date input regardless of the setting). Payroll Items: new Payment Mode field (Monthly / Yearly / Need Basis) — how often that item is actually paid out.',
   },
 ];
