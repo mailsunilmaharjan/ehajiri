@@ -58,9 +58,9 @@ const daysBetweenISO = (fromISO, toISO) => {
 // exactly the rows that column is showing as "Today" (including a still-open
 // overdue task carried forward) without re-deriving the rule twice.
 const TASK_DATE_BADGES = {
-  today:    { label: 'Today',      color: '#dc2626' },
-  tomorrow: { label: 'Tomorrow',   color: '#b45309' },
-  dayAfter: { label: 'Day Af.To',  color: '#1d4ed8' },
+  today:    { label: 'Today',      bg: '#fef2f2' },
+  tomorrow: { label: 'Tomorrow',   bg: '#fffbeb' },
+  dayAfter: { label: 'Day Af.To',  bg: '#eff6ff' },
 };
 const taskDateBucket = (row) => {
   const due = row.dueDate ? String(row.dueDate).split('T')[0] : null;
@@ -1266,13 +1266,15 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         const bucket = taskDateBucket(row);
         if (bucket) {
           const b = TASK_DATE_BADGES[bucket];
-          return <span style={{ fontSize: 12.5, color: b.color }}>{b.label}</span>;
+          // Black text like every other column, just a light background tint
+          // to still catch the eye — no border, no fully-rounded pill shape.
+          return <span style={{ fontSize: 12.5, color: '#1f2937', background: b.bg, padding: '2px 8px', borderRadius: 4 }}>{b.label}</span>;
         }
         return <span style={{ fontSize: 12.5 }}>{fd(String(v).split('T')[0])}</span>;
       },
     },
     {
-      field: 'title', header: 'Task', minWidth: 170,
+      field: 'title', header: 'Task', minWidth: 130,
       render: (v, row) => {
         const titleSpan = (
           <span style={{ fontSize: 12.5, color: row.status === 'completed' ? '#9ca3af' : '#1f2937',
@@ -1335,11 +1337,20 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       render: (v) => v ? <span style={{ fontSize: 12.5, color: '#1d4ed8' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
-      field: 'priorityName', header: 'Priority', width: 100, align: 'center',
-      render: (v, row) => v ? <span style={{ fontSize: 12.5, color: row.priorityColor || '#475569' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>,
+      field: 'priorityName', header: 'Priority', width: 80, align: 'center',
+      render: (v, row) => {
+        if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
+        const color = row.priorityColor || '#475569';
+        // Whole-cell light tint (unlike Category, which stays plain text) so
+        // priority still stands out at a glance even without the old pill.
+        return (
+          <span style={{ display: 'block', width: '100%', boxSizing: 'border-box', padding: '2px 6px',
+            fontSize: 12.5, color, background: `${color}22` }}>{v}</span>
+        );
+      },
     },
     {
-      field: 'createdByName', header: 'Assign By', width: 60, sortable: false, filterable: false, align: 'center',
+      field: 'createdByName', header: 'Assign By', width: 50, sortable: false, filterable: false, align: 'center',
       render: (v, row) => v ? (
         <HoverCard
           trigger={<div style={{ display: 'inline-flex' }}><Avatar photo={row.createdByPhoto} name={v} size={22} /></div>}
@@ -1352,7 +1363,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       render: (v) => <AssigneeCell assignees={v} />,
     },
     {
-      field: 'status', header: 'Status', width: 100, align: 'center',
+      field: 'status', header: 'Status', width: 80, align: 'center',
       render: (v) => {
         const color = v === 'completed' ? '#15803d'
           : v === 'cancelled' ? '#6b7280'
