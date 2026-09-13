@@ -30,6 +30,11 @@ const MissingAttendanceRequests = () => {
   const [actionModal, setActionModal] = useState(null); // { id, type:'recommend'|'approve'|'reject', row }
   const [comment,     setComment]     = useState('');
   const [busy,        setBusy]        = useState(false);
+  const [activeTab,   setActiveTab]   = useState('assigned'); // 'assigned' | 'mine'
+  // Reason is truncated in the grid itself (see reasonCell below) so the
+  // table fits the screen without a horizontal scrollbar — hovering a row
+  // shows its full text here instead of in a per-cell tooltip.
+  const [previewReason, setPreviewReason] = useState(null);
 
   const getEmpName = (id) => employees.find(e => String(e.id) === String(id))?.fullName || `#${id}`;
   const getEmpPhoto = (id) => employees.find(e => String(e.id) === String(id))?.profilePhoto;
@@ -72,6 +77,18 @@ const MissingAttendanceRequests = () => {
     finally { setBusy(false); }
   };
 
+  // Truncated inline, full text shown in the panel below the grid on hover —
+  // keeps the Reason column narrow enough that the table fits the screen
+  // width instead of needing a horizontal scrollbar.
+  const reasonCell = (v) => v ? (
+    <span
+      onMouseEnter={() => setPreviewReason(v)}
+      onMouseLeave={() => setPreviewReason(null)}
+      style={{ display: 'block', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default' }}>
+      {v}
+    </span>
+  ) : <span style={{ color: '#d1d5db' }}>—</span>;
+
   const assignedColumns = [
     { field: 'employeeId', header: 'Staff ID', width: 80, sortable: false, render: (_, r) =>
         employees.find(e => String(e.id) === String(r.employeeId))?.employeeId || '—' },
@@ -84,7 +101,7 @@ const MissingAttendanceRequests = () => {
     { field: 'date',         header: 'Date',       width: 110, render: v => fd(v) },
     { field: 'checkIn',      header: 'Check In',   width: 90 },
     { field: 'checkOut',     header: 'Check Out',  width: 90 },
-    { field: 'reason',       header: 'Reason',     width: 220 },
+    { field: 'reason',       header: 'Reason',     width: 140, render: v => reasonCell(v) },
     { field: 'recommendedByName', header: 'Recommendator', width: 140, render: (v, r) => v || (r.recommendedBy ? getEmpName(r.recommendedBy) : '—') },
     { field: 'approvedByName',    header: 'Approver',      width: 140, render: (v, r) => v || (r.approvedBy ? getEmpName(r.approvedBy) : '—') },
     { field: 'status',       header: 'Status',     width: 110, render: v => <StatusBadge status={v} /> },
@@ -120,7 +137,7 @@ const MissingAttendanceRequests = () => {
     { field: 'date',     header: 'Date',      width: 110, render: v => fd(v) },
     { field: 'checkIn',  header: 'Check In',  width: 90 },
     { field: 'checkOut', header: 'Check Out', width: 90 },
-    { field: 'reason',   header: 'Reason',    width: 220 },
+    { field: 'reason',   header: 'Reason',    width: 140, render: v => reasonCell(v) },
     { field: 'recommendedByName', header: 'Recommendator', width: 140, render: (v, r) => v || (r.recommendedBy ? getEmpName(r.recommendedBy) : '—') },
     { field: 'approvedByName',    header: 'Approver',      width: 140, render: (v, r) => v || (r.approvedBy ? getEmpName(r.approvedBy) : '—') },
     { field: 'status',   header: 'Status',    width: 110, render: v => <StatusBadge status={v} /> },
@@ -146,16 +163,32 @@ const MissingAttendanceRequests = () => {
         </div>
       )}
 
-      <div style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Assigned to Me</h2>
-        <DataGrid columns={assignedColumns} data={assignedToMe} loading={loading}
-          defaultPageSize={10} showCheckbox={false} autoWidth={true} />
+      <div className="tabs" style={{ marginBottom: 16 }}>
+        <button className={`tab-btn ${activeTab === 'assigned' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('assigned'); setPreviewReason(null); }}>
+          Assigned to Me ({assignedToMe.length})
+        </button>
+        <button className={`tab-btn ${activeTab === 'mine' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('mine'); setPreviewReason(null); }}>
+          My Requests ({myRequests.length})
+        </button>
       </div>
 
-      <div>
-        <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>My Requests</h2>
+      {activeTab === 'assigned' ? (
+        <DataGrid columns={assignedColumns} data={assignedToMe} loading={loading}
+          defaultPageSize={10} showCheckbox={false} autoWidth={true} />
+      ) : (
         <DataGrid columns={myColumns} data={myRequests} loading={loading}
           defaultPageSize={10} showCheckbox={false} autoWidth={true} />
+      )}
+
+      {/* Full Reason text — the grid's own Reason column is truncated to keep
+          the table from needing a horizontal scrollbar; hovering a row shows
+          its full text here instead. */}
+      <div style={{ marginTop: 12, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+        padding: '10px 14px', minHeight: 40, fontSize: 13, color: previewReason ? '#374151' : '#9ca3af' }}>
+        <strong style={{ color: '#374151', marginRight: 6 }}>Description:</strong>
+        {previewReason || 'Hover a row above to see its full Reason text here.'}
       </div>
 
       {actionModal && (
