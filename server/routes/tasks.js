@@ -45,7 +45,13 @@ const viewsSubquery = (targetType, targetIdCol) => `
 // contact's — a company record itself has no personal phone number, so
 // without this, "Person Name"/"Mobile no." would stay blank for every task
 // against a company customer.
-const SEL = `
+// userId is always req.user.id (a verified server-side integer off the JWT,
+// never raw request input) — coerced through Number() before interpolating
+// so a bad/missing value can only ever fold the EXISTS clause to "no match"
+// rather than touch SQL syntax. Made a function (not a plain constant) only
+// for this one per-user field — every other column here is the same for
+// anyone looking at the row.
+const SEL = (userId) => `
   t.id, t.title, t.description, t.status,
   t.due_date    AS "dueDate",
   t.is_field_visit AS "isFieldVisit",
@@ -82,7 +88,11 @@ const SEL = `
     WHERE tf2.task_id = t.id AND tf2.handed_over_to IS NOT NULL
   ) AS "hasTransfer",
   ${reactionsSubquery('task', 't.id')},
-  ${viewsSubquery('task', 't.id')}
+  ${viewsSubquery('task', 't.id')},
+  EXISTS (
+    SELECT 1 FROM task_notifications tn
+    WHERE tn.task_id = t.id AND tn.user_id = ${Number(userId) || 0} AND tn.is_read = FALSE
+  ) AS "hasUnreadNotification"
 `;
 const JOINS = `
   FROM tasks t
@@ -371,7 +381,7 @@ router.get('/', async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      `SELECT ${SEL} ${JOINS}
+      `SELECT ${SEL(me.id)} ${JOINS}
        WHERE ${where}
        ORDER BY t.status = 'completed', t.due_date NULLS LAST, t.id DESC`,
       params
@@ -456,7 +466,7 @@ router.post('/', async (req, res) => {
     await client.query('COMMIT');
     // Everyone assigned at creation is "new" — creator and actor are the same person here.
     await notifyAssignees(taskId, title.trim(), assigneeIds, req.user.id, assigneeIds, req.user.id, !!isFieldVisit);
-    const { rows: full } = await pool.query(`SELECT ${SEL} ${JOINS} WHERE t.id = $1`, [taskId]);
+    const { rows: full } = await pool.query(`SELECT ${SEL(req.user.id)} ${JOINS} WHERE t.id = $1`, [taskId]);
     res.status(201).json(full[0]);
   } catch (e) {
     await client.query('ROLLBACK');
@@ -524,7 +534,7 @@ router.put('/:id', async (req, res) => {
       await notifyDescriptionChanged(id, newTitle, before.createdBy, assigneeIds, req.user.id, fieldVisit);
     }
 
-    const { rows: full } = await pool.query(`SELECT ${SEL} ${JOINS} WHERE t.id = $1`, [id]);
+    const { rows: full } = await pool.query(`SELECT ${SEL(req.user.id)} ${JOINS} WHERE t.id = $1`, [id]);
     res.json(full[0]);
   } catch (e) {
     await client.query('ROLLBACK');

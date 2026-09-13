@@ -696,6 +696,21 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   .task-bell-ring { animation: none; }
 }
 
+/* Task grid row — small dot next to the title that blinks while this
+   specific task has an unread notification for the current user (see
+   row.hasUnreadNotification in TaskList.jsx), same "keeps going until
+   actually seen" convention as the bell above and the nav badge's beep —
+   opening/double-clicking the task or logging a followup against it stops
+   this one dot, independent of every other still-unseen row's own dot. */
+@keyframes task-unread-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.15; }
+}
+.task-unread-dot { animation: task-unread-blink 1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .task-unread-dot { animation: none; }
+}
+
 @media (max-width: 480px) {
   /* 2-col inline grids → single column */
   [style*="grid-template-columns: 1fr 1fr"],

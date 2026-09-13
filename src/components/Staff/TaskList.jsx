@@ -431,16 +431,6 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   const { settings } = useSettings();
   const fd = useDateFormat();
 
-  // The Staff/Task nav badge is meant to keep blinking per-task until that
-  // task is actually acted on — double-clicked open, or a followup logged
-  // against it (see openEdit/saveFollowup below) — NOT cleared in bulk just
-  // from opening this list page. (Previously this cleared every unread
-  // notification the instant the page mounted, so the blink never had a
-  // chance to mean anything.)
-  const markTaskRead = (taskId) => {
-    api.post(`/tasks/${taskId}/notifications/read`).then(refreshTaskCounts).catch(() => {});
-  };
-
   const [tasks,      setTasks]      = useState([]);
   const [categories, setCategories] = useState([]);
   const [priorities, setPriorities] = useState([]);
@@ -457,6 +447,20 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   const [taskModalMeta, setTaskModalMeta] = useState({ reactions: [], seenBy: [] });
   const [trackFlowOpen, setTrackFlowOpen] = useState(false);
   const [saving,  setSaving]  = useState(false);
+
+  // The Staff/Task nav badge (and this grid's own per-row blink, see the
+  // 'title' column below) is meant to keep going per-task until that task is
+  // actually acted on — double-clicked open, or a followup logged against it
+  // (see openEdit/saveFollowup below) — NOT cleared in bulk just from opening
+  // this list page. (Previously this cleared every unread notification the
+  // instant the page mounted, so the blink never had a chance to mean
+  // anything.) The local setTasks update here is what stops THIS row's own
+  // blink immediately, without waiting on a full reload — refreshTaskCounts
+  // only re-syncs the aggregate nav badge, not each row's own flag.
+  const markTaskRead = (taskId) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, hasUnreadNotification: false } : t));
+    api.post(`/tasks/${taskId}/notifications/read`).then(refreshTaskCounts).catch(() => {});
+  };
 
   // Filter by Staff — a plain employee defaults to seeing only their own
   // tasks (creator or assignee); anyone with company-wide or branch/
@@ -1087,6 +1091,11 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     markTaskSeen(row.id).then(seenBy => {
       if (seenBy) setFollowupTask(prev => (prev && prev.id === row.id) ? { ...prev, seenBy } : prev);
     });
+    // A plain click already counts as "seen it" for this row's own blink/
+    // notification — no need to also double-click or log a followup just to
+    // stop it, unlike the nav badge's own more conservative bar (see
+    // markTaskRead's own comment).
+    if (row.hasUnreadNotification) markTaskRead(row.id);
   };
   const closeFollowupPanel = () => { setFollowupTask(null); setFollowups([]); setSelectedFollowup(null); setFollowupSearch(''); setDescriptionModalOpen(false); };
 
@@ -1285,6 +1294,14 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         const titleSpan = (
           <span style={{ fontSize: 12.5, color: row.status === 'completed' ? '#9ca3af' : '#1f2937',
             textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>
+            {/* Blinks while this task has an unread notification for the
+                current user — stops the instant it's opened/double-clicked
+                or a followup is logged against it (see markTaskRead). */}
+            {row.hasUnreadNotification && (
+              <span className="task-unread-dot" title="New / unseen"
+                style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+                  background: '#dc2626', marginRight: 6, flexShrink: 0 }} />
+            )}
             {/* Only shown on the regular Task page — every row on the Field Visit
                 page is already a field visit, so the icon would be redundant there. */}
             {row.isFieldVisit && !fieldVisitOnly && <span title="Field Visit" style={{ marginRight: 5 }}>🚗</span>}
@@ -1491,9 +1508,9 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         {!fieldVisitOnly && (
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => setQuickCategoryId('')}
-              style={{ height: 26, padding: '0 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 400,
+              style={{ height: 28, padding: '0 10px', borderRadius: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: 500,
                 border: 'none',
-                background: !quickCategoryId ? '#dbeafe' : '#f1f5f9', color: !quickCategoryId ? '#1a56db' : '#64748b' }}>
+                background: !quickCategoryId ? '#dbeafe' : '#f1f5f9', color: !quickCategoryId ? '#1a56db' : '#374151' }}>
               All
             </button>
             {categories.map(c => {
@@ -1503,9 +1520,9 @@ const TaskList = ({ fieldVisitOnly = false }) => {
               const hasUnseenNew = !!stat?.hasUnseenNew;
               return (
                 <button key={c.id} onClick={() => setQuickCategoryId(on ? '' : String(c.id))}
-                  style={{ position: 'relative', height: 26, padding: '0 10px', borderRadius: 5, cursor: 'pointer',
-                    fontSize: 11, fontWeight: 400, border: 'none',
-                    background: on ? '#dbeafe' : '#f1f5f9', color: on ? '#1a56db' : '#64748b', whiteSpace: 'nowrap' }}>
+                  style={{ position: 'relative', height: 28, padding: '0 10px', borderRadius: 5, cursor: 'pointer',
+                    fontSize: 12.5, fontWeight: 500, border: 'none',
+                    background: on ? '#dbeafe' : '#f1f5f9', color: on ? '#1a56db' : '#374151', whiteSpace: 'nowrap' }}>
                   {c.name}
                   {(count > 0 || hasUnseenNew) && (
                     <span style={{ position: 'absolute', top: -7, right: -5, display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -1531,8 +1548,8 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           {canManageSystem && (
             <div ref={gearRef} style={{ position: 'relative' }}>
               <button onClick={() => setGearOpen(p => !p)} title="Task settings"
-                style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: '1px solid #d1d5db', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 16 }}>
+                style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: '1px solid #d1d5db', borderRadius: 7, background: '#fff', cursor: 'pointer', fontSize: 13 }}>
                 ⚙️
               </button>
               {gearOpen && (
@@ -1555,8 +1572,8 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             </div>
           )}
           <button onClick={openAdd}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 18px', background: '#1a56db',
-              color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 30, background: '#1a56db',
+              color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(26,86,219,.25)' }}>
             + Add {fieldVisitOnly ? 'Field Visit' : 'Task'}
           </button>
