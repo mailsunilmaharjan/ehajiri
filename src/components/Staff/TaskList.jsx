@@ -98,21 +98,27 @@ const AssigneeCell = ({ assignees }) => {
             // it used to just wrap a full 22px Avatar, so the border added 4px
             // on top of that (26px total), inflating the row height on every
             // task with 2+ assignees (nearly all of them in real data).
-            i === 0 ? <Avatar photo={a.photo} name={a.name} size={22} /> : (
+            // preview={false} — Avatar's own built-in zoom-preview would
+            // otherwise pop up as a second, disconnected overlay alongside
+            // this HoverCard's own photo+name bubble below.
+            i === 0 ? <Avatar photo={a.photo} name={a.name} size={22} preview={false} /> : (
               <div style={{ marginLeft: -8, width: 22, height: 22, boxSizing: 'border-box', borderRadius: '50%',
                 border: '2px solid #fff', boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i,
                 overflow: 'hidden', display: 'flex' }}>
-                <Avatar photo={a.photo} name={a.name} size={18} />
+                <Avatar photo={a.photo} name={a.name} size={18} preview={false} />
               </div>
             )
           }
           content={
-            <div>
-              <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{a.name}</div>
-              <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>{a.post || '—'}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Avatar photo={a.photo} name={a.name} size={40} preview={false} />
+              <div>
+                <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{a.name}</div>
+                <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>{a.post || '—'}</div>
+              </div>
             </div>
           }
-          minWidth={150} />
+          side="right" arrow minWidth={180} />
       ))}
       {extra > 0 && (
         <div title={`+${extra} more`} style={{ marginLeft: -8, width: 22, height: 22, boxSizing: 'border-box', borderRadius: '50%',
@@ -1353,9 +1359,14 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'createdByName', header: 'Assign By', width: 50, sortable: false, filterable: false, align: 'center',
       render: (v, row) => v ? (
         <HoverCard
-          trigger={<div style={{ display: 'inline-flex' }}><Avatar photo={row.createdByPhoto} name={v} size={22} /></div>}
-          content={<div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{v}</div>}
-          minWidth={100} />
+          trigger={<div style={{ display: 'inline-flex' }}><Avatar photo={row.createdByPhoto} name={v} size={22} preview={false} /></div>}
+          content={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Avatar photo={row.createdByPhoto} name={v} size={40} preview={false} />
+              <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{v}</div>
+            </div>
+          }
+          side="right" arrow minWidth={160} />
       ) : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {

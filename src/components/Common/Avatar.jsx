@@ -18,8 +18,14 @@ const PREVIEW = 168;
      name     full name — first letter becomes the fallback initial
      size     px (default 40)
      style    extra styles merged onto the circle
+     preview  (default true) — set false when the caller already wraps this
+              Avatar in its own richer tooltip (e.g. a HoverCard showing the
+              photo + name together with an arrow) so hovering doesn't pop
+              two disconnected overlays at once — this component's own
+              zoom preview, floating near the avatar, and the caller's
+              tooltip, positioned wherever its own logic puts it.
 ════════════════════════════════════════════════════════════ */
-const Avatar = ({ photo, name, size = 40, style = {} }) => {
+const Avatar = ({ photo, name, size = 40, style = {}, preview = true }) => {
   const [show, setShow] = useState(false);
   const [pos,  setPos]  = useState(null);
   const ref = useRef(null);
@@ -28,11 +34,12 @@ const Avatar = ({ photo, name, size = 40, style = {} }) => {
   const base = {
     width: size, height: size, borderRadius: '50%', flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    overflow: 'hidden', cursor: 'zoom-in',
+    overflow: 'hidden', cursor: preview ? 'zoom-in' : 'default',
     ...style,
   };
 
   const openPreview = () => {
+    if (!preview) return;
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
