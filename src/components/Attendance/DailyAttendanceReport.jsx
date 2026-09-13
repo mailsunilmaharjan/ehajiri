@@ -499,53 +499,62 @@ const DailyAttendanceReport = () => {
       },
     },
     {
-      field:'remarks', header:L('कैफियत','Remarks'), sortable:false, wrap:true, fill:true,
+      field:'remarks', header:L('कैफियत','Remarks'), sortable:false,
       render: (v, row) => {
+        // Capped to a fraction of the viewport width (clamp'd between a
+        // floor and ceiling) instead of a bare pixel value, so the column
+        // never forces horizontal scroll regardless of monitor resolution —
+        // the "On Leave" free-text reason especially could run to a full
+        // sentence or more and used to blow the column (and the whole
+        // table) wide open with no cap at all.
+        const cellMaxWidth = 'clamp(140px, 18vw, 320px)';
+        const ellipsis = { overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' };
+        const emp = getEmployeeById(row.id);
+        // Same avatar+name+post header convention as the Task grid's
+        // Assign By/Assigned To hover — identifies whose remarks these are
+        // before showing the full text below it.
+        const header = (
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6, paddingBottom:6, borderBottom:'1px solid #f1f5f9' }}>
+            <Avatar photo={emp?.profilePhoto} name={row.fullName} size={36} preview={false} />
+            <div>
+              <div style={{ fontWeight:700, color:'#1e293b', fontSize:12.5 }}>{row.fullName}</div>
+              <div style={{ color:'#6b7280', fontSize:11 }}>{emp?.position || '—'}</div>
+            </div>
+          </div>
+        );
+
         if (row.status === 'On Leave') {
           const parts = [];
-          if (row.leaveType)  parts.push(<span key="type" style={{ fontWeight:700, color:'#1e40af' }}>{row.leaveType}</span>);
-          if (row.leaveReason) parts.push(<span key="reason" style={{ color:'#374151' }}>{row.leaveReason}</span>);
-          if (row.recommendedBy) parts.push(
-            <span key="reco" style={{ color:'#059669' }}>
-              <span style={{ fontWeight:600 }}>{L('सिफारिस:','Reco. by:')}</span> {getEmployeeName(row.recommendedBy)}
-            </span>
-          );
-          if (row.approvedBy) parts.push(
-            <span key="appr" style={{ color:'#7c3aed' }}>
-              <span style={{ fontWeight:600 }}>{L('स्वीकृत:','Appr. by:')}</span> {getEmployeeName(row.approvedBy)}
-            </span>
-          );
-          return (
-            <div style={{ display:'flex', flexWrap:'wrap', gap:'0 8px', alignItems:'center', width:'100%' }}>
+          if (row.leaveType)  parts.push({ text: row.leaveType, color:'#1e40af', weight:700 });
+          if (row.leaveReason) parts.push({ text: row.leaveReason, color:'#374151' });
+          if (row.recommendedBy) parts.push({ text: `${L('सिफारिस:','Reco. by:')} ${getEmployeeName(row.recommendedBy)}`, color:'#059669' });
+          if (row.approvedBy) parts.push({ text: `${L('स्वीकृत:','Appr. by:')} ${getEmployeeName(row.approvedBy)}`, color:'#7c3aed' });
+          if (!parts.length) return <span style={{ color:'#d1d5db' }}>—</span>;
+          const fullBody = (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'0 8px', alignItems:'center' }}>
               {parts.map((p, i) => (
                 <React.Fragment key={i}>
                   {i > 0 && <span style={{ color:'#d1d5db', fontSize:10 }}>|</span>}
-                  {p}
+                  <span style={{ color:p.color, fontWeight:p.weight }}>{p.text}</span>
                 </React.Fragment>
               ))}
             </div>
           );
-        }
-        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
-        const segs = v.split(' | ').map(s => s.trim()).filter(Boolean);
-        const isMeta = (s) => s.includes('Recom. by') || s.includes('App. by');
-        const ellipsis = { overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' };
-        if (!segs.some(isMeta)) {
           return (
-            <HoverCard arrow fill content={v} trigger={
-              <span style={{ color:'#374151', lineHeight:1.4, display:'block', width:'100%', ...ellipsis }}>{v}</span>
+            <HoverCard arrow fill content={<div>{header}{fullBody}</div>} trigger={
+              <span style={{ color:'#374151', lineHeight:1.4, display:'block', width:'100%', maxWidth:cellMaxWidth, ...ellipsis }}>
+                {parts.map(p => p.text).join(' | ')}
+              </span>
             } />
           );
         }
-        const fullText = <div style={{ display:'flex', flexDirection:'column', gap:4 }}>{segs.map((s, i) => <div key={i}>{s}</div>)}</div>;
+
+        if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
+        const segs = v.split(' | ').map(s => s.trim()).filter(Boolean);
+        const fullBody = <div style={{ display:'flex', flexDirection:'column', gap:4 }}>{segs.map((s, i) => <div key={i}>{s}</div>)}</div>;
         return (
-          <HoverCard arrow fill content={fullText} trigger={
-            <div style={{ display:'flex', flexDirection:'column', gap:1, width:'100%', overflow:'hidden' }}>
-              {segs.map((seg, i) => isMeta(seg)
-                ? <span key={i} style={{ fontSize:11, color:'#9ca3af', lineHeight:1.3, ...ellipsis }}>{seg}</span>
-                : <span key={i} style={{ color:'#374151', lineHeight:1.3, ...ellipsis }}>{seg}</span>
-              )}
-            </div>
+          <HoverCard arrow fill content={<div>{header}{fullBody}</div>} trigger={
+            <span style={{ color:'#374151', lineHeight:1.4, display:'block', width:'100%', maxWidth:cellMaxWidth, ...ellipsis }}>{v}</span>
           } />
         );
       },
