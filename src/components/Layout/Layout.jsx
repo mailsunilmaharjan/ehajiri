@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import TopMenu from './TopMenu.jsx';
 import GlobalFAB from './GlobalFAB.jsx';
 import LeaveApplyModal from '../Leave/LeaveApplyModal.jsx';
@@ -24,6 +25,18 @@ import { useModuleFlags } from '../../context/ModuleFlagsContext.jsx';
  */
 const Layout = ({ children }) => {
   const { flags: moduleFlags } = useModuleFlags();
+  const location = useLocation();
+
+  /* ── 0. Scroll to top on every route change — the window (not a nested
+     container) is what actually scrolls in this layout (see .main-layout,
+     no overflow set), and React Router doesn't reset that on navigation.
+     Without this, clicking a nav link while scrolled down on a long page
+     (e.g. the Task grid) landed on the new page still scrolled down,
+     showing whatever content happened to be at that old offset instead of
+     the top of the page just navigated to. */
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   /* ── 1. ESC + Enter-as-Tab ── */
   useEffect(() => {
