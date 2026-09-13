@@ -1560,6 +1560,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 rowKey="id"
                 defaultPageSize={30}
                 compact={true}
+                ultraCompact={true}
                 className="task-list-grid"
                 showFilterButton={false}
                 toolbarLeft={taskFilterToolbar}
