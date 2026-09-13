@@ -1303,15 +1303,20 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'customerName', header: 'Customer', width: 150,
       render: (v, row) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          {v ? <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
+          {v ? <span style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> : <span style={{ color: '#d1d5db' }}>—</span>}
           {/* Small plain icon+number, no pill/border — the old badge-style
               chips (colored background, border, padding) added enough
               height to noticeably bloat every row; this keeps the cell to a
-              single text line, matching the grid's other compact columns. */}
+              single text line, matching the grid's other compact columns.
+              lineHeight:1 on both the chip and the icon itself keeps the
+              bigger emoji glyph from stretching the row — font metrics for
+              emoji can have a taller natural line box than the surrounding
+              text at the same nominal size otherwise. */}
           {row.followupCount > 0 && (
             <span title={`${row.followupCount} followup${row.followupCount === 1 ? '' : 's'} logged`}
-              style={{ fontSize: 12.5, color: '#dc2626', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
-              💬{row.followupCount}
+              style={{ fontSize: 12.5, lineHeight: 1, color: '#dc2626', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap',
+                display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              <span style={{ fontSize: 15, lineHeight: 1 }}>💬</span>{row.followupCount}
             </span>
           )}
           {row.createdAt && (() => {
