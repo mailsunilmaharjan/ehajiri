@@ -93,10 +93,16 @@ const AssigneeCell = ({ assignees }) => {
             // single Assign By avatar / Staff Details' Avatar) instead of
             // paying the ring's +4px height on every row that has just one
             // assignee, which pushed those rows taller than Staff Details'.
+            // The ring's 2px border is drawn INSIDE a fixed 22px box (boxSizing:
+            // border-box), same total footprint as the unringed first avatar —
+            // it used to just wrap a full 22px Avatar, so the border added 4px
+            // on top of that (26px total), inflating the row height on every
+            // task with 2+ assignees (nearly all of them in real data).
             i === 0 ? <Avatar photo={a.photo} name={a.name} size={22} /> : (
-              <div style={{ marginLeft: -8, borderRadius: '50%', border: '2px solid #fff',
-                boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i }}>
-                <Avatar photo={a.photo} name={a.name} size={22} />
+              <div style={{ marginLeft: -8, width: 22, height: 22, boxSizing: 'border-box', borderRadius: '50%',
+                border: '2px solid #fff', boxShadow: '0 0 0 1px #e5e7eb', position: 'relative', zIndex: shown.length - i,
+                overflow: 'hidden', display: 'flex' }}>
+                <Avatar photo={a.photo} name={a.name} size={18} />
               </div>
             )
           }
@@ -109,7 +115,7 @@ const AssigneeCell = ({ assignees }) => {
           minWidth={150} />
       ))}
       {extra > 0 && (
-        <div title={`+${extra} more`} style={{ marginLeft: -8, width: 22, height: 22, borderRadius: '50%',
+        <div title={`+${extra} more`} style={{ marginLeft: -8, width: 22, height: 22, boxSizing: 'border-box', borderRadius: '50%',
           border: '2px solid #fff', boxShadow: '0 0 0 1px #e5e7eb', background: '#e5e7eb', color: '#6b7280',
           fontSize: 9.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           +{extra}
