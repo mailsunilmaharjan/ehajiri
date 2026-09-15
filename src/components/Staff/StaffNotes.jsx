@@ -219,6 +219,7 @@ const StaffNotes = () => {
   const [showPwd,     setShowPwd]     = useState(false);
   const [err,         setErr]         = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [copiedDetails, setCopiedDetails] = useState(false);
 
   // Gmail config (per-user, shared)
   const [gmailAccount,     setGmailAccount]     = useState('');
@@ -296,8 +297,17 @@ const StaffNotes = () => {
 
   const resetOtp = () => { setOtpInput(''); setOtpVerified(false); setOtpError(''); };
 
+  const copyNoteDetails = async () => {
+    if (!form.noteDetails) return;
+    try {
+      await navigator.clipboard.writeText(form.noteDetails);
+      setCopiedDetails(true);
+      setTimeout(() => setCopiedDetails(false), 1500);
+    } catch (e) { alert('Failed to copy'); }
+  };
+
   const openAdd = () => {
-    setEditRow(null); setForm(EMPTY); setShowPwd(false); resetOtp(); setSetupDone(false);
+    setEditRow(null); setForm(EMPTY); setShowPwd(false); resetOtp(); setSetupDone(false); setCopiedDetails(false);
     prevSecurityType.current = 'normal'; setErr(''); setShowModal(true);
   };
 
@@ -315,7 +325,7 @@ const StaffNotes = () => {
       remarks:       row.remarks       || '',
       visibility:    row.visibility    || 'private',
     });
-    setShowPwd(false); resetOtp();
+    setShowPwd(false); resetOtp(); setCopiedDetails(false);
     // For edit, assume QR was already set up (user has it in their app)
     setSetupDone(row.securityType === 'encrypt' && !!row.totpSecret);
     prevSecurityType.current = row.securityType || 'normal';
@@ -539,9 +549,9 @@ const StaffNotes = () => {
               </div>
 
               {/* Note Type */}
-              <div className="form-group">
-                <label className="form-label">Note Type</label>
-                <div style={{ display: 'flex', gap: 24, paddingTop: 4 }}>
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                <label className="form-label" style={{ marginBottom: 0, whiteSpace: 'nowrap' }}>Note Type</label>
+                <div style={{ display: 'flex', gap: 24 }}>
                   {[['normal', '📄 Normal'], ['credential', '🔑 Username Password']].map(([val, lbl]) => (
                     <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>
                       <input type="radio" name="noteType" value={val} checked={form.noteType === val} onChange={() => set('noteType', val)} />
@@ -553,9 +563,9 @@ const StaffNotes = () => {
 
               {/* Visibility — private (only you) vs public (every staff member can see
                   it, but only you can still edit/delete it). Defaults to private. */}
-              <div className="form-group">
-                <label className="form-label">Visibility</label>
-                <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                <label className="form-label" style={{ marginBottom: 0, whiteSpace: 'nowrap' }}>Visibility</label>
+                <div style={{ display: 'flex', gap: 10, flex: 1 }}>
                   {[
                     ['private', '🔒 Private', 'Only visible to you', '#be185d', '#fde8ef'],
                     ['public',  '🌐 Public',  'Visible to every staff member', '#065f46', '#d1fae5'],
@@ -576,8 +586,20 @@ const StaffNotes = () => {
               {/* Normal: Note Details */}
               {form.noteType === 'normal' && (
                 <div className="form-group">
-                  <label className="form-label">Note Details</label>
-                  <textarea className="form-control" rows={4} value={form.noteDetails}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <label className="form-label" style={{ marginBottom: 0 }}>Note Details</label>
+                    <button type="button" onClick={copyNoteDetails} disabled={!form.noteDetails}
+                      title="Copy all note details"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 5, background: copiedDetails ? '#d1fae5' : '#f3f4f6',
+                        color: copiedDetails ? '#065f46' : '#374151', border: 'none', borderRadius: 6,
+                        padding: '4px 10px', fontSize: 11, fontWeight: 600,
+                        cursor: form.noteDetails ? 'pointer' : 'default', opacity: form.noteDetails ? 1 : 0.5,
+                      }}>
+                      {copiedDetails ? '✅ Copied' : '📋 Copy'}
+                    </button>
+                  </div>
+                  <textarea className="form-control" rows={10} style={{ minHeight: 220 }} value={form.noteDetails}
                     placeholder="Enter note details…" onChange={e => set('noteDetails', e.target.value)} />
                 </div>
               )}
@@ -757,14 +779,7 @@ const StaffNotes = () => {
                 </>
               )}
 
-              {/* Remarks */}
-              <div className="form-group">
-                <label className="form-label">Remarks</label>
-                <input className="form-control" value={form.remarks} placeholder="Optional remarks"
-                  onChange={e => set('remarks', e.target.value)} />
-              </div>
-
-              {err && <div style={{ background: '#fee2e2', color: '#991b1b', borderRadius: 6, padding: '8px 12px', fontSize: 12, marginBottom: 12 }}>{err}</div>}
+              {err &&<div style={{ background: '#fee2e2', color: '#991b1b', borderRadius: 6, padding: '8px 12px', fontSize: 12, marginBottom: 12 }}>{err}</div>}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 4 }}>
                 <button onClick={close} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 7, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>

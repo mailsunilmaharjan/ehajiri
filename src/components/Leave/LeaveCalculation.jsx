@@ -469,6 +469,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
   const [fyId,       setFyId]       = useState(defaultFY?.id || '');
   const [editVals,   setEditVals]   = useState({});
   const [headerVals, setHeaderVals] = useState({});
+  const [focusedCol, setFocusedCol] = useState(null); // shortName of the leave-type column currently being edited — highlights every cell in that column
   const [search,     setSearch]     = useState('');
   const [toast,      setToast]      = useState(null);
   const [alertMsg,   setAlertMsg]   = useState(null);
@@ -743,35 +744,65 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
         <div className="dg-scroll-wrapper">
           <table className="dg-table compact">
             <thead>
+              {/* Label row — plain single-line headers, exactly like the Staff Detail
+                  grid (DataGrid's own dg-header-row/dg-th). The bulk-fill inputs live
+                  in their own row below (like DataGrid's dg-filter-row) instead of
+                  being stacked inside this same cell — cramming both into one <th>
+                  gave the sticky header row an uneven height across columns and made
+                  the fill input look like it was bleeding into row 1 underneath it. */}
               <tr className="dg-header-row">
-                {/* SN */}
                 <th className="dg-th dg-sn-col" style={{ width:42 }}>SN</th>
                 <th className="dg-th" style={{ width:80 }}>{L('स्टाफ आईडी','Staff ID')}</th>
                 <th className="dg-th" style={{ minWidth:160 }}>{L('कर्मचारी नाम','Staff Name')}</th>
                 <th className="dg-th" style={{ width:80 }}>{L('पद','Post')}</th>
                 <th className="dg-th" style={{ width:80 }}>{L('विभाग','Dept')}</th>
                 <th className="dg-th" style={{ width:80 }}>{L('शाखा','Branch')}</th>
-                {filteredLtConfigs.map(lt => (
-                  <th key={lt.shortName} className="dg-th" style={{ textAlign:'center', minWidth:96, whiteSpace:'normal' }}>
-                    <div style={{ fontSize:13, color:'#374151', fontWeight:600, marginBottom:5 }}>
-                      {lt.name} <span style={{ fontWeight:500, color:'#6b7280' }}>(Max. {lt.daysPerYear})</span>
-                    </div>
-                    <input
-                      type="text" inputMode="numeric" pattern="[0-9.]*"
-                      placeholder="0"
-                      value={headerVals[lt.shortName] ?? ''}
-                      onChange={e => {
-                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
-                        setHeaderVals(p => ({ ...p, [lt.shortName]: v }));
-                      }}
-                      onBlur={() => applyHeaderVal(lt)}
-                      onKeyDown={e => { if (e.key === 'Enter') { applyHeaderVal(lt); e.target.blur(); } }}
-                      onClick={e => { e.stopPropagation(); e.target.select(); }}
-                      title={`Fill ALL staff (max ${lt.daysPerYear} days)`}
-                      style={{ ...numInput, width:60, border:'1px solid #bfdbfe', background:'#eff6ff', color:'#1e40af' }}
-                    />
-                  </th>
-                ))}
+                {filteredLtConfigs.map(lt => {
+                  const active = focusedCol === lt.shortName;
+                  return (
+                    <th key={lt.shortName} className="dg-th" style={{
+                      textAlign:'center', minWidth:96, whiteSpace:'normal',
+                      background: active ? '#e0e7f0' : undefined,
+                      color:      active ? '#1a56db' : undefined,
+                    }}>
+                      {lt.name} <span style={{ fontWeight:500, color: active ? '#1a56db' : '#6b7280' }}>(Max. {lt.daysPerYear})</span>
+                    </th>
+                  );
+                })}
+              </tr>
+              {/* Bulk-fill row — same dg-filter-row/dg-filter-cell classes DataGrid
+                  itself uses for its column filter inputs, so this reads as one
+                  continuous grid with Staff Detail instead of a bespoke look. */}
+              <tr className="dg-filter-row">
+                <th className="dg-filter-cell dg-sn-col"></th>
+                <th className="dg-filter-cell"></th>
+                <th className="dg-filter-cell"></th>
+                <th className="dg-filter-cell"></th>
+                <th className="dg-filter-cell"></th>
+                <th className="dg-filter-cell"></th>
+                {filteredLtConfigs.map(lt => {
+                  const active = focusedCol === lt.shortName;
+                  return (
+                    <th key={lt.shortName} className="dg-filter-cell" style={{ textAlign:'center', background: active ? '#e0e7f0' : undefined }}>
+                      <input
+                        type="text" inputMode="numeric" pattern="[0-9.]*"
+                        placeholder="Fill all: 0"
+                        value={headerVals[lt.shortName] ?? ''}
+                        onChange={e => {
+                          const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                          setHeaderVals(p => ({ ...p, [lt.shortName]: v }));
+                        }}
+                        onFocus={e => { e.target.select(); setFocusedCol(lt.shortName); }}
+                        onBlur={() => { applyHeaderVal(lt); setFocusedCol(null); }}
+                        onKeyDown={e => { if (e.key === 'Enter') { applyHeaderVal(lt); e.target.blur(); } }}
+                        onClick={e => e.stopPropagation()}
+                        title={`Fill ALL staff (max ${lt.daysPerYear} days)`}
+                        className="dg-filter-input"
+                        style={{ textAlign:'center', fontWeight:600, color:'#1e40af' }}
+                      />
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -798,27 +829,31 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
                     <td className="dg-td" style={{ padding:'3px 8px' }}>
                       <span style={{ color:'#1f2937' }}>{row.branchShort}</span>
                     </td>
-                    {filteredLtConfigs.map(lt => (
-                      <td key={lt.shortName} className="dg-td" style={{ textAlign:'center', padding:'3px 6px' }}>
-                        <input
-                          data-leave-cell
-                          type="text" inputMode="numeric" pattern="[0-9.]*"
-                          value={getVal(row.id, lt.shortName)}
-                          onChange={e => {
-                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
-                            handleCellChange(row.id, lt.shortName, v, lt);
-                          }}
-                          onKeyDown={handleEnterNav}
-                          onClick={e => { e.stopPropagation(); e.target.select(); }}
-                          onFocus={e => e.target.select()}
-                          style={{
-                            ...numInput,
-                            border: `1px solid ${getVal(row.id, lt.shortName) > 0 ? '#a7f3d0' : '#d1d5db'}`,
-                            color:  getVal(row.id, lt.shortName) > 0 ? '#065f46' : '#6b7280',
-                          }}
-                        />
-                      </td>
-                    ))}
+                    {filteredLtConfigs.map(lt => {
+                      const active = focusedCol === lt.shortName;
+                      return (
+                        <td key={lt.shortName} className="dg-td" style={{ textAlign:'center', padding:'3px 6px', background: active ? '#e0e7f0' : undefined }}>
+                          <input
+                            data-leave-cell
+                            type="text" inputMode="numeric" pattern="[0-9.]*"
+                            value={getVal(row.id, lt.shortName)}
+                            onChange={e => {
+                              const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                              handleCellChange(row.id, lt.shortName, v, lt);
+                            }}
+                            onKeyDown={handleEnterNav}
+                            onClick={e => { e.stopPropagation(); e.target.select(); }}
+                            onFocus={e => { e.target.select(); setFocusedCol(lt.shortName); }}
+                            onBlur={() => setFocusedCol(null)}
+                            style={{
+                              ...numInput,
+                              border: `1px solid ${getVal(row.id, lt.shortName) > 0 ? '#a7f3d0' : '#d1d5db'}`,
+                              color:  getVal(row.id, lt.shortName) > 0 ? '#065f46' : '#6b7280',
+                            }}
+                          />
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
@@ -906,6 +941,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   const [search,      setSearch]     = useState('');
   const [editMode,    setEditMode]   = useState(false);
   const [editVals,    setEditVals]   = useState({});
+  const [focusedCol,  setFocusedCol] = useState(null); // shortName of the leave-type column currently being edited — highlights every cell in that column
   const [toast,       setToast]      = useState(null);
   const [prevAlert,   setPrevAlert]  = useState(null); // { ltName, maxDays }
   const [tFilterOpen, setTFilterOpen] = useState(false);
@@ -1001,7 +1037,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     setEditMode(true);
   }, [allRows, ltConfigs]);
 
-  const cancelEdit = useCallback(() => { setEditMode(false); setEditVals({}); }, []);
+  const cancelEdit = useCallback(() => { setEditMode(false); setEditVals({}); setFocusedCol(null); }, []);
 
   const saveEdit = useCallback(() => {
     /* Prev Year = accumulate carry-forward; validate only carryForward leave types against maxAccumulateDays.
@@ -1045,6 +1081,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     setOpening(next, [prevOpeningKey, fyId]);
     setEditMode(false);
     setEditVals({});
+    setFocusedCol(null);
     showToast(L('बिदा सुरक्षित भयो', 'Saved successfully'));
   }, [opening, allRows, ltConfigs, editVals, fyId, prevOpeningKey]);
 
@@ -1221,6 +1258,11 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
           <div>
             <table className="dg-table compact">
               <thead>
+                {/* Label row — plain #efefef/#374151 dg-th styling, matching the
+                    Staff Detail grid exactly instead of the ad-hoc blue tint this
+                    used to carry (see the CLAUDE.md DataGrid standard: never a
+                    colored header). Tints itself only when the column is being
+                    actively edited (focusedCol), same as the Leave Opening tab. */}
                 <tr className="dg-header-row">
                   <th className="dg-th dg-sn-col" style={{ width:40 }}>SN</th>
                   <th className="dg-th" style={{ width:80 }}>{L('स्टाफ आईडी','Staff ID')}</th>
@@ -1228,23 +1270,34 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                   <th className="dg-th" style={{ width:80 }}>{L('पद','Post')}</th>
                   <th className="dg-th" style={{ width:80 }}>{L('विभाग','Dept')}</th>
                   <th className="dg-th" style={{ width:80 }}>{L('शाखा','Branch')}</th>
-                  {visibleLtConfigs.map(lt => (
-                    <th key={lt.shortName} colSpan={2} className="dg-th"
-                      style={{ background:'#eff6ff', color:'#1a56db', textAlign:'center', borderBottom:'1px solid #dce6f0' }}>
-                      {lt.name} <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>({lt.shortName})</span>
-                    </th>
-                  ))}
+                  {visibleLtConfigs.map(lt => {
+                    const active = focusedCol === lt.shortName;
+                    return (
+                      <th key={lt.shortName} colSpan={2} className="dg-th" style={{
+                        textAlign:'center',
+                        background: active ? '#e0e7f0' : undefined,
+                        color:      active ? '#1a56db' : undefined,
+                      }}>
+                        {lt.name} <span style={{ fontSize:11, color: active ? '#1a56db' : '#6b7280', fontWeight:400 }}>({lt.shortName})</span>
+                      </th>
+                    );
+                  })}
                 </tr>
-                <tr style={{ background:'#f8fafc' }}>
-                  <th colSpan={6} className="dg-th" style={{ textAlign:'left', paddingLeft:12, letterSpacing:'.3px', background:'#f8fafc' }}>
+                {/* Sub-header row — same dg-filter-row/dg-filter-cell classes the
+                    Leave Opening tab and DataGrid's own column filters use. */}
+                <tr className="dg-filter-row">
+                  <th className="dg-filter-cell" colSpan={6} style={{ textAlign:'left', paddingLeft:12, fontWeight:600, color:'#374151' }}>
                     {prevFY ? prevFY.name : ''} {currentFY ? `→ ${currentFY.name}` : ''}
                   </th>
-                  {visibleLtConfigs.map(lt => (
-                    <React.Fragment key={lt.shortName}>
-                      <th className="dg-th" style={{ background:'#fef3c7', color:'#92400e', width:82 }}>{L('अघिल्लो वर्ष','Prev Year')}</th>
-                      <th className="dg-th" style={{ background:'#d1fae5', color:'#065f46', width:82 }}>{L('चालु वर्ष','Curr Year')}</th>
-                    </React.Fragment>
-                  ))}
+                  {visibleLtConfigs.map(lt => {
+                    const active = focusedCol === lt.shortName;
+                    return (
+                      <React.Fragment key={lt.shortName}>
+                        <th className="dg-filter-cell" style={{ width:82, fontWeight:600, color:'#374151', background: active ? '#e0e7f0' : undefined }}>{L('अघिल्लो वर्ष','Prev Year')}</th>
+                        <th className="dg-filter-cell" style={{ width:82, fontWeight:600, color:'#374151', background: active ? '#e0e7f0' : undefined }}>{L('चालु वर्ष','Curr Year')}</th>
+                      </React.Fragment>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -1274,14 +1327,16 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                       const currKey = `${row.id}_${lt.shortName}_curr`;
                       const prevVal = editMode ? (editVals[prevKey] ?? 0) : (row[`${lt.shortName}_prev`] ?? 0);
                       const currVal = editMode ? (editVals[currKey] ?? 0) : (row[`${lt.shortName}_curr`] ?? 0);
+                      const active  = focusedCol === lt.shortName;
                       return (
                         <React.Fragment key={lt.shortName}>
-                          <td className="dg-td" style={{ background:'#fffbeb', textAlign:'center', padding:'4px 6px' }}>
+                          <td className="dg-td" style={{ background: active ? '#e0e7f0' : '#fffbeb', textAlign:'center', padding:'4px 6px' }}>
                             {editMode
                               ? <input type="text" inputMode="numeric" pattern="[0-9.]*" value={prevVal}
                                   data-transfer-input
                                   onKeyDown={handleEnterTab}
-                                  onFocus={e => e.target.select()}
+                                  onFocus={e => { e.target.select(); setFocusedCol(lt.shortName); }}
+                                  onBlur={() => setFocusedCol(null)}
                                   onChange={e => {
                                     const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
                                     const maxAccum = lt.maxAccumulateDays != null ? Number(lt.maxAccumulateDays) : null;
@@ -1295,7 +1350,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
                                 />
                               : <span style={{ color:'#92400e', fontWeight:600 }}>{prevVal}</span>}
                           </td>
-                          <td className="dg-td" style={{ background:'#f3f4f6', textAlign:'center', padding:'4px 6px' }}>
+                          <td className="dg-td" style={{ background: active ? '#e0e7f0' : '#f3f4f6', textAlign:'center', padding:'4px 6px' }}>
                             <span style={{ color:'#6b7280', fontWeight:600 }}>{currVal}</span>
                           </td>
                         </React.Fragment>
