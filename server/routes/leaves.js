@@ -95,6 +95,8 @@ const toLeave = r => ({
   recommendedDate: r.recommended_date,
   recommendedAt  : r.recommended_at,
   recommendComment: r.recommend_comment,
+  recoId         : r.reco_id,
+  approvalId     : r.approval_id,
   isManual       : !!r.is_manual,
   updatedBy      : r.updated_by,
   updatedAt      : r.updated_at,
@@ -227,16 +229,23 @@ router.post('/', async (req, res) => {
   const finalAppBy    = isPrivileged && finalStatus !== 'pending' ? (approvedBy   || null) : null;
   const finalAppDate  = isPrivileged && finalStatus !== 'pending' ? (approvedDate || new Date().toISOString().split('T')[0]) : null;
   const finalIsManual = isPrivileged && isManual === true;
+  // The specific recommender/approver the applicant picked from Set
+  // Recommendator & Approval's configured candidates (LeaveVisitPage.jsx's
+  // Apply form) — unlike recommendedBy/approvedBy above, this is never
+  // privileged-gated: it's just recording the applicant's own choice, not an
+  // outcome. See migration 142.
+  const recoId     = Array.isArray(reco)     ? (reco[0]     || null) : (reco     || null);
+  const approvalId = Array.isArray(approval) ? (approval[0] || null) : (approval || null);
 
   try {
     if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
     const { rows } = await pool.query(
       `INSERT INTO leaves
-         (employee_id,leave_type_code,from_date,to_date,days,reason,half_day,status,recommended_by,recommended_date,approved_by,approved_date,is_manual,updated_by,updated_at,updated_device)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),$15) RETURNING *`,
+         (employee_id,leave_type_code,from_date,to_date,days,reason,half_day,status,recommended_by,recommended_date,approved_by,approved_date,is_manual,reco_id,approval_id,updated_by,updated_at,updated_device)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),$17) RETURNING *`,
       [employeeId, leaveTypeCode, fromDate, toDate, days, reason, !!halfDay,
        finalStatus, finalRecoBy, finalRecoDate, finalAppBy, finalAppDate, finalIsManual,
-       req.user.id, deviceInfo || null]
+       recoId, approvalId, req.user.id, deviceInfo || null]
     );
     const leave = toLeave(rows[0]);
     if (finalStatus === 'pending') notifyLeaveApplication({ ...leave, reco, approval });

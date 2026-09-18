@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
@@ -7,6 +7,7 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker, { adToISO } from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import ImportDeviceUsersModal from '../Common/ImportDeviceUsersModal.jsx';
 import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
 import ImportExcelModal       from './ImportExcelModal.jsx';
@@ -17,6 +18,7 @@ import SaveButton       from '../Common/SaveButton.jsx';
 import LastSavedBy      from '../Common/LastSavedBy.jsx';
 import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import useNewShortcut   from '../../hooks/useNewShortcut.js';
+import useFieldShortcuts from '../../hooks/useFieldShortcuts.js';
 import api, { apiUrl }  from '../../api/client.js';
 import { staffRankCompare, branchRankOf } from '../../utils/branchUtils.js';
 import { getDeviceInfo } from '../../utils/deviceInfo.js';
@@ -38,28 +40,55 @@ const ROLE_LABELS = {
 };
 const MODAL_TABS  = ['Staff Detail', 'Staff Identity', 'Officially Changes', 'Device Connectivity'];
 
+/* ── Staff Detail tab: Alt+<letter> shortcuts ──
+   { letter: formFieldKey }. A few requested letters collided with another
+   field already using them (Staff Name / Mobile both wanted "e"/"m") — those
+   were reassigned to the field's own next free letter instead, and are
+   called out where they diverge from what was asked for. */
+const STAFF_FIELD_SHORTCUTS = {
+  a: 'deviceId',        // Attendance Device ID
+  t: 'employeeId',      // Staff ID
+  s: 'fullName',        // Staff Name — "e" was already taken by Email, so first free letter of its own label
+  g: 'gender',
+  r: 'religion',
+  h: 'handicapped',
+  e: 'email',
+  m: 'phone',           // Mobile No.
+  b: 'branch',          // Company HQ / Branch
+  d: 'department',
+  p: 'position',        // Post
+  n: 'mode',            // Mode — "m"/"o"/"d"/"e" all already taken, so fell back to "n"
+  l: 'grade',
+  i: 'timingType',
+  o: 'eligibleForOt',
+  f: 'dob',             // Date of Birth
+  j: 'joinDate',
+  c: 'attendanceDate',
+  u: 'status',
+  w: 'rankingOrder',
+  x: 'role',            // User Role
+  k: 'remarks',
+};
+const FIELD_SHORTCUT_LETTER = Object.fromEntries(
+  Object.entries(STAFF_FIELD_SHORTCUTS).map(([letter, field]) => [field, letter])
+);
+
 /* NepaliDatePicker imported from Common/NepaliDatePicker.jsx */
 
 
 /* ── AD date input ── */
-const ADDateInput = ({ value, onChange, error }) => {
-  return (
-    <input type="date"
-      className={`form-control ${error ? 'error' : ''}`}
-      style={{ fontSize:13 }}
-      value={value}
-      onChange={e => onChange(e.target.value)} />
-  );
-};
+const ADDateInput = forwardRef(({ value, onChange, error }, ref) => (
+  <EnglishDatePicker ref={ref} value={value} onChange={onChange} error={error} />
+));
 
 /* ── Date field dispatcher ── */
-const DateInput = ({ value, onChange, error }) => {
+const DateInput = forwardRef(({ value, onChange, error }, ref) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} />;
+    return <NepaliDatePicker ref={ref} value={value} onChange={onChange} error={error} />;
   }
-  return <ADDateInput value={value} onChange={onChange} error={error} />;
-};
+  return <ADDateInput ref={ref} value={value} onChange={onChange} error={error} />;
+});
 
 /* ── Row colors — very subtle tints per row index ── */
 const ROW_BG = [
@@ -90,11 +119,18 @@ const Fg = ({ children, idx = 0 }) => (
   </div>
 );
 
-/* ── Field label + optional Quick Add button ── */
-const Fl = ({ children, required, onQA }) => (
+/* ── Field label + optional Quick Add button ──
+   `shortcut` (a single letter) shows an "Alt+X" hint next to the label —
+   purely visual, the actual Alt+key handling lives in useFieldShortcuts. */
+const Fl = ({ children, required, onQA, shortcut }) => (
   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
     <span style={{ fontSize:12, fontWeight:500, color:'#374151' }}>
       {children}{required && <span style={{ color:'#f05252', marginLeft:2 }}>*</span>}
+      {shortcut && (
+        <span style={{ fontSize:9.5, color:'#9ca3af', marginLeft:6, fontWeight:600, letterSpacing:'.3px' }}>
+          Alt+{shortcut.toUpperCase()}
+        </span>
+      )}
     </span>
     {onQA && (
       <button type="button" onClick={onQA}
@@ -111,6 +147,19 @@ const FINGER_LABELS = [
   'Right Pinky','Right Ring','Right Middle','Right Index','Right Thumb',
   'Left Thumb','Left Index','Left Middle','Left Ring','Left Pinky',
 ];
+
+// Known ADMS "Return=" codes from devicecmd acks — see server/routes/zkteco.js.
+// Not exhaustive; anything not listed just shows the bare code so it's never
+// a total black box, instead of the old generic "device rejected the command".
+const ZK_RETURN_HINTS = {
+  '-3':    'command not supported by this device/firmware',
+  '-1003': 'field/feature not supported — often a hardware limitation (e.g. this model has no camera for face enrollment)',
+};
+const zkReturnHint = (code) => {
+  if (code == null) return '';
+  const known = ZK_RETURN_HINTS[String(code)];
+  return known ? ` — Return=${code} (${known})` : ` — Return=${code}`;
+};
 const PRIV_OPTIONS = [
   { value:0,  label:'User' },
   { value:1,  label:'Enroller' },
@@ -155,7 +204,8 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
   const watchCommand = (devId, sn, cmdId, label) => {
     if (watchTimers.current[devId]) clearInterval(watchTimers.current[devId]);
     setCmdWatch(prev => ({ ...prev, [devId]: { status: 'queued', label } }));
-    let elapsed = 0;
+    let elapsed = 0;   // seconds since queued
+    let sentAt  = null; // `elapsed` value at the moment it first became SENT
     const poll = async () => {
       elapsed += 3;
       try {
@@ -169,16 +219,32 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
         }
         if (row?.status === 'ERROR') {
           clearInterval(watchTimers.current[devId]); delete watchTimers.current[devId];
-          setCmdWatch(prev => ({ ...prev, [devId]: { status: 'error', label } }));
+          setCmdWatch(prev => ({ ...prev, [devId]: { status: 'error', label, returnCode: row.return_code } }));
           return;
         }
         if (row?.status === 'SENT') {
+          if (sentAt == null) sentAt = elapsed;
           setCmdWatch(prev => ({ ...prev, [devId]: { status: 'sent', label } }));
         }
       } catch { /* transient — keep polling */ }
-      if (elapsed >= 120) {
+      // Two different give-ups, not one shared clock — this used to check
+      // `elapsed >= 60` unconditionally, which meant a command that reached
+      // SENT right around the 60s mark (device finally checked in — the
+      // *good* outcome) got immediately clobbered back to "may be offline"
+      // by this same or the very next tick, because SENT doesn't `return`
+      // above. A live fingerprint/face capture on the terminal (up to 3
+      // retries, each waiting on a human) can easily run another 60-90s
+      // past that point on its own — that's normal, not a stall.
+      // - Still QUEUED after 60s: device hasn't checked in at all — the
+      //   "may be offline" case.
+      // - Already SENT but no DONE/ERROR 90s after check-in: device took
+      //   the command but never reported back — a different, narrower
+      //   problem (the message below reflects that, not "offline").
+      const neverCheckedIn = sentAt == null && elapsed >= 60;
+      const stuckAfterSent = sentAt != null && (elapsed - sentAt) >= 90;
+      if (neverCheckedIn || stuckAfterSent) {
         clearInterval(watchTimers.current[devId]); delete watchTimers.current[devId];
-        setCmdWatch(prev => ({ ...prev, [devId]: { status: 'timeout', label } }));
+        setCmdWatch(prev => ({ ...prev, [devId]: { status: 'timeout', label, neverCheckedIn } }));
       }
     };
     watchTimers.current[devId] = setInterval(poll, 3000);
@@ -514,9 +580,11 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
               const style = {
                 queued:  { bg:'#f3f4f6', fg:'#6b7280', text:`⏳ ${w.label}: waiting for device to check in…` },
                 sent:    { bg:'#fef3c7', fg:'#92400e', text:`📡 ${w.label}: device is attempting it now — ask the staff member to present their finger/face!` },
-                done:    { bg:'#d1fae5', fg:'#065f46', text:`✅ ${w.label}: completed` },
-                error:   { bg:'#fee2e2', fg:'#991b1b', text:`❌ ${w.label}: device rejected the command` },
-                timeout: { bg:'#fee2e2', fg:'#991b1b', text:`⚠️ ${w.label}: no response from device after 2 minutes — it may be offline` },
+                done:    { bg:'#d1fae5', fg:'#065f46', text:`✅ ${w.label}: successfully captured!` },
+                error:   { bg:'#fee2e2', fg:'#991b1b', text:`❌ ${w.label}: device rejected the command${zkReturnHint(w.returnCode)}` },
+                timeout: { bg:'#fee2e2', fg:'#991b1b', text: w.neverCheckedIn
+                  ? `⚠️ ${w.label}: no response from device after 60s — it may be offline`
+                  : `⚠️ ${w.label}: device took the command but never confirmed — check the terminal and try again` },
               }[w.status];
               return (
                 <div style={{ fontSize:12, fontWeight:600, padding:'6px 10px', borderRadius:6, background:style.bg, color:style.fg }}>
@@ -634,32 +702,12 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                 <div>
                   <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', letterSpacing:'.4px',
                     textTransform:'uppercase', display:'block', marginBottom:5 }}>{t('From Date')}</span>
-                  <div style={{ position:'relative' }}>
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                      style={{ width:'100%', height:38, border:'2px solid #e5e7eb', borderRadius:8,
-                        padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
-                        outline:'none', fontWeight:500, background:'#f9fafb',
-                        cursor:'pointer' }}
-                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
-                      onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
-                    <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
-                      fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
-                  </div>
+                  <EnglishDatePicker value={startDate} onChange={setStartDate} />
                 </div>
                 <div>
                   <span style={{ fontSize:11, fontWeight:700, color:'#6b7280', letterSpacing:'.4px',
                     textTransform:'uppercase', display:'block', marginBottom:5 }}>{t('To Date')}</span>
-                  <div style={{ position:'relative' }}>
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                      style={{ width:'100%', height:38, border:'2px solid #e5e7eb', borderRadius:8,
-                        padding:'0 38px 0 12px', fontSize:13, boxSizing:'border-box',
-                        outline:'none', fontWeight:500, background:'#f9fafb',
-                        cursor:'pointer' }}
-                      onFocus={e => { e.target.style.borderColor='#3b82f6'; e.target.style.background='white'; }}
-                      onBlur={e  => { e.target.style.borderColor='#e5e7eb'; e.target.style.background='#f9fafb'; }} />
-                    <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
-                      fontSize:15, pointerEvents:'none', userSelect:'none' }}>📅</span>
-                  </div>
+                  <EnglishDatePicker value={endDate} onChange={setEndDate} />
                 </div>
               </div>
             </div>
@@ -1688,6 +1736,9 @@ const UserManagement = () => {
   const [resetPwdShowPass,  setResetPwdShowPass]  = useState(false);
   const modalBodyRef = useRef(null);
   const deviceIdInputRef = useRef(null);
+  /* { formFieldKey: element | { focus() } } — populated by callback refs on
+     each Staff Detail field, read by useFieldShortcuts below. */
+  const staffFieldRefs = useRef({});
   const [advFilters, setAdvFilters] = useState({
     q: '',
     branches: [], departments: [], positions: [], grades: [],
@@ -1922,6 +1973,8 @@ const UserManagement = () => {
   useSaveShortcut(modal && activeTab !== 'Device Connectivity' && activeTab !== 'Officially Changes' && activeTab !== 'Staff Identity', handleSave);
   /* Ctrl+N opens a blank Add Staff Management form when no modal is open. */
   useNewShortcut(!modal, openAdd);
+  /* Alt+<letter> jumps focus to a Staff Detail field — see STAFF_FIELD_SHORTCUTS. */
+  useFieldShortcuts(modal && activeTab === 'Staff Detail', STAFF_FIELD_SHORTCUTS, staffFieldRefs);
 
   /* Called by the Officially Changes tab after a change is saved/edited.
      If it took effect immediately (effective date ≤ today), sync the form so a
@@ -2657,17 +2710,27 @@ const UserManagement = () => {
       {modal && (
         <div className={`modal-overlay ${quickDeviceView ? 'modal-drawer-overlay' : ''}`}>
           <div className={`modal ${quickDeviceView ? 'modal-drawer' : ''}`} ref={modalBodyRef}
-            style={{ maxWidth: quickDeviceView ? 480 : 1100, maxHeight: quickDeviceView ? undefined : '95vh' }}
+            style={{
+              maxWidth: quickDeviceView ? 480 : 1100,
+              maxHeight: quickDeviceView ? undefined : '95vh',
+              // A definite height (not just maxHeight) so every tab gets the
+              // exact same modal size — a flex:1 child only fills *extra*
+              // space inside a container whose own height is definite; with
+              // just a max-height cap the container (and so the body) still
+              // shrinks to each tab's own natural content size, which was
+              // the "some small some bigger" inconsistency across tabs.
+              ...(quickDeviceView ? {} : { display:'flex', flexDirection:'column', height:'95vh' }),
+            }}
             onClick={e => e.stopPropagation()}>
 
             {/* Header */}
-            <div className="modal-header">
+            <div className="modal-header" style={{ flexShrink:0 }}>
               <h2>{quickDeviceView ? `📲 ${t('Device Connectivity')}` : editId ? `✏️ ${t('Edit Staff')}` : `+ ${t('Add Staff Management')}`}</h2>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
 
             {/* Tab bar — hidden in quick device view (row click), shown for full Edit */}
-            {!quickDeviceView && <div style={{ display:'flex', borderBottom:'1px solid var(--border)', padding:'0 20px', background:'#fafbfc' }}>
+            {!quickDeviceView && <div style={{ display:'flex', flexShrink:0, borderBottom:'1px solid var(--border)', padding:'0 20px', background:'#fafbfc' }}>
               {MODAL_TABS.map(tab => (
                 <button key={tab} className={`tab-btn ${activeTab===tab?'active':''}`} onClick={() => setActiveTab(tab)}>
                   {tab}
@@ -2675,8 +2738,16 @@ const UserManagement = () => {
               ))}
             </div>}
 
-            {/* Body */}
-            <div className="modal-body" style={{ padding:'16px 20px' }}>
+            {/* Body — fills all remaining height in the modal (flex:1 against
+                the column above, capped by the modal's own 95vh) instead of a
+                guessed vh number, so switching tabs never resizes the modal:
+                previously each tab's content just rendered at its own
+                natural height, so a short tab like Staff Identity's empty
+                Address table made the whole modal shrink, then jump back
+                to full size on Staff Detail. Every tab now renders inside
+                the same box and scrolls internally if its content runs
+                past it — including Staff Detail itself, on a short screen. */}
+            <div className="modal-body" style={{ padding:'16px 20px', ...(quickDeviceView ? {} : { flex:'1 1 auto', minHeight:0, overflowY:'auto' }) }}>
               {activeTab === 'Staff Detail' ? (
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
                 <div style={{ gridRow:'1 / 3' }}>
@@ -2684,9 +2755,9 @@ const UserManagement = () => {
                   {/* ── Panel 1: Personal Information ── */}
                   <Panel title="Personal Information">
                     <Fg idx={0}>
-                      <Fl required>Attendance Device ID</Fl>
+                      <Fl required shortcut={FIELD_SHORTCUT_LETTER.deviceId}>Attendance Device ID</Fl>
                       <input type="text"
-                        ref={deviceIdInputRef}
+                        ref={el => { deviceIdInputRef.current = el; staffFieldRefs.current.deviceId = el; }}
                         className={`form-control ${errors.deviceId?'error':''}`}
                         style={{ fontSize:13, background: editId ? '#f3f4f6' : 'white', color: editId ? '#6b7280' : undefined }}
                         placeholder="DEV-001"
@@ -2702,51 +2773,58 @@ const UserManagement = () => {
                       {errors.deviceId && <div className="form-error">{errors.deviceId}</div>}
                     </Fg>
                     <Fg idx={1}>
-                      <Fl>Staff ID</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.employeeId}>Staff ID</Fl>
                       <input type="text" className="form-control" style={{ fontSize:13, fontFamily:'monospace' }}
+                        ref={el => (staffFieldRefs.current.employeeId = el)}
                         value={form.employeeId} onChange={e => handleChange('employeeId', e.target.value)} />
                     </Fg>
                     <Fg idx={2}>
-                      <Fl required>Staff Name</Fl>
+                      <Fl required shortcut={FIELD_SHORTCUT_LETTER.fullName}>Staff Name</Fl>
                       <input type="text" className={`form-control ${errors.fullName?'error':''}`} style={{ fontSize:13 }}
+                        ref={el => (staffFieldRefs.current.fullName = el)}
                         placeholder="राम प्रसाद श्रेष्ठ" value={form.fullName}
                         onChange={e => handleChange('fullName', e.target.value)} />
                       {errors.fullName && <div className="form-error">{errors.fullName}</div>}
                     </Fg>
                     <Fg idx={3}>
-                      <Fl>Gender</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.gender}>Gender</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.gender = el)}
                         value={form.gender}
                         onChange={v => handleChange('gender', v)}
                         options={[{value:'male',label:'Male'},{value:'female',label:'Female'},{value:'other',label:'Other'}]}
                       />
                     </Fg>
                     <Fg idx={5}>
-                      <Fl>Religion</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.religion}>Religion</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.religion = el)}
                         value={form.religion}
                         onChange={v => handleChange('religion', v)}
                         options={[{value:'',label:'— Select —'}, ...(settings.religions||[]).map(r => ({value:r.name,label:r.name}))]}
                       />
                     </Fg>
                     <Fg idx={6}>
-                      <Fl>Handicapped</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.handicapped}>Handicapped</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.handicapped = el)}
                         value={form.handicapped ? 'yes' : 'no'}
                         onChange={v => handleChange('handicapped', v === 'yes')}
                         options={[{value:'no',label:'No'},{value:'yes',label:'Yes'}]}
                       />
                     </Fg>
                     <Fg idx={7}>
-                      <Fl required>Email Address</Fl>
+                      <Fl required shortcut={FIELD_SHORTCUT_LETTER.email}>Email Address</Fl>
                       <input type="email" className={`form-control ${errors.email?'error':''}`} style={{ fontSize:13 }}
+                        ref={el => (staffFieldRefs.current.email = el)}
                         placeholder="name@company.com" value={form.email}
                         onChange={e => handleChange('email', e.target.value)} />
                       {errors.email && <div className="form-error">{errors.email}</div>}
                     </Fg>
                     <Fg idx={0}>
-                      <Fl>Mobile No.</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.phone}>Mobile No.</Fl>
                       <input type="tel" className="form-control" style={{ fontSize:13 }}
+                        ref={el => (staffFieldRefs.current.phone = el)}
                         placeholder="98XXXXXXXX" value={form.phone}
                         onChange={e => handleChange('phone', e.target.value.replace(/\D/g, ''))}
                         inputMode="numeric" maxLength={15} />
@@ -2757,8 +2835,9 @@ const UserManagement = () => {
                   {/* ── Panel 2: Organization ── */}
                   <Panel title="Organization">
                     <Fg idx={0}>
-                      <Fl onQA={() => openQA('Branch', 'branches', 'branch')}>Company HQ / Branch</Fl>
+                      <Fl onQA={() => openQA('Branch', 'branches', 'branch')} shortcut={FIELD_SHORTCUT_LETTER.branch}>Company HQ / Branch</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.branch = el)}
                         value={form.branch}
                         onChange={v => handleChange('branch', v)}
                         placeholder="— None —"
@@ -2769,48 +2848,54 @@ const UserManagement = () => {
                       />
                     </Fg>
                     <Fg idx={1}>
-                      <Fl onQA={() => openQA('Department', 'departments', 'department')}>Department</Fl>
+                      <Fl onQA={() => openQA('Department', 'departments', 'department')} shortcut={FIELD_SHORTCUT_LETTER.department}>Department</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.department = el)}
                         value={form.department}
                         onChange={v => handleChange('department', v)}
                         options={[{value:'',label:'— Select —'}, ...(settings.departments||[]).map(d => ({value:d.name,label:d.name}))]}
                       />
                     </Fg>
                     <Fg idx={2}>
-                      <Fl onQA={() => openQA('Post', 'posts', 'position')}>Post</Fl>
+                      <Fl onQA={() => openQA('Post', 'posts', 'position')} shortcut={FIELD_SHORTCUT_LETTER.position}>Post</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.position = el)}
                         value={form.position}
                         onChange={v => handleChange('position', v)}
                         options={[{value:'',label:'— Select —'}, ...(settings.posts||[]).map(p => ({value:p.name,label:p.name}))]}
                       />
                     </Fg>
                     <Fg idx={3}>
-                      <Fl onQA={() => openQA('Mode', 'modes', 'mode')}>Mode</Fl>
+                      <Fl onQA={() => openQA('Mode', 'modes', 'mode')} shortcut={FIELD_SHORTCUT_LETTER.mode}>Mode</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.mode = el)}
                         value={form.mode}
                         onChange={v => handleChange('mode', v)}
                         options={[{value:'',label:'— Select —'}, ...(settings.modes||[]).map(m => ({value:m.name,label:m.name}))]}
                       />
                     </Fg>
                     <Fg idx={4}>
-                      <Fl>Grade</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.grade}>Grade</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.grade = el)}
                         value={form.grade}
                         onChange={v => handleChange('grade', v)}
                         options={[{value:'',label:'— Select —'}, ...(settings.grades||[]).map(g => ({value:g.name,label:g.name}))]}
                       />
                     </Fg>
                     <Fg idx={5}>
-                      <Fl>Timing Type</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.timingType}>Timing Type</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.timingType = el)}
                         value={form.timingType}
                         onChange={v => handleChange('timingType', v)}
                         options={[{value:'',label:'— Select —'}, ...(settings.jobTimings||[]).map(jt => ({value:jt.name,label:jt.name}))]}
                       />
                     </Fg>
                     <Fg idx={6}>
-                      <Fl>Eligible for OT</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.eligibleForOt}>Eligible for OT</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.eligibleForOt = el)}
                         value={form.eligibleForOt ? 'yes' : 'no'}
                         onChange={v => handleChange('eligibleForOt', v === 'yes')}
                         options={[{value:'yes',label:'Yes'},{value:'no',label:'No'}]}
@@ -2821,34 +2906,36 @@ const UserManagement = () => {
                   {/* ── Panel 3: Dates & Status ── */}
                   <Panel title="Dates & Status">
                     <Fg idx={0}>
-                      <Fl>Date of Birth</Fl>
-                      <DateInput value={form.dob} onChange={v => handleChange('dob', v)} />
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.dob}>Date of Birth</Fl>
+                      <DateInput ref={el => (staffFieldRefs.current.dob = el)} value={form.dob} onChange={v => handleChange('dob', v)} />
                     </Fg>
                     <Fg idx={1}>
-                      <Fl required>Join Date</Fl>
-                      <DateInput value={form.joinDate} onChange={v => handleChange('joinDate', v)} error={!!errors.joinDate} />
+                      <Fl required shortcut={FIELD_SHORTCUT_LETTER.joinDate}>Join Date</Fl>
+                      <DateInput ref={el => (staffFieldRefs.current.joinDate = el)} value={form.joinDate} onChange={v => handleChange('joinDate', v)} error={!!errors.joinDate} />
                       {errors.joinDate && <div className="form-error">{errors.joinDate}</div>}
                     </Fg>
                     <Fg idx={2}>
-                      <Fl>Attendance Date</Fl>
-                      <DateInput value={form.attendanceDate} onChange={v => handleChange('attendanceDate', v)} />
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.attendanceDate}>Attendance Date</Fl>
+                      <DateInput ref={el => (staffFieldRefs.current.attendanceDate = el)} value={form.attendanceDate} onChange={v => handleChange('attendanceDate', v)} />
                     </Fg>
                     <Fg idx={3}>
-                      <Fl>Status</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.status}>Status</Fl>
                       <SearchableSelect
+                        ref={el => (staffFieldRefs.current.status = el)}
                         value={form.status}
                         onChange={v => handleChange('status', v)}
                         options={(settings.statuses||[]).map(s => ({value:s.name,label:s.name}))}
                       />
                     </Fg>
                     <Fg idx={4}>
-                      <Fl>Ranking Order</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.rankingOrder}>Ranking Order</Fl>
                       <input
                         type="number"
                         min="1"
                         className="form-control"
                         style={{ fontSize:13 }}
                         placeholder="e.g. 1, 2, 3..."
+                        ref={el => (staffFieldRefs.current.rankingOrder = el)}
                         value={form.rankingOrder}
                         onChange={e => handleChange('rankingOrder', e.target.value === '' ? '' : e.target.value.replace(/[^0-9]/g, ''))}
                       />
@@ -2859,8 +2946,9 @@ const UserManagement = () => {
                       </div>
                     </Fg>
                     <Fg idx={5}>
-                      <Fl>User Role</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.role}>User Role</Fl>
                       <select className="form-control" style={{ fontSize:13 }}
+                        ref={el => (staffFieldRefs.current.role = el)}
                         value={form.role}
                         onChange={e => handleChange('role', e.target.value)}>
                         <option value="employee">👤 Employee</option>
@@ -2875,12 +2963,13 @@ const UserManagement = () => {
                 <div style={{ gridColumn:'2 / 4' }}>
                   <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius-md)', overflow:'hidden' }}>
                     <div style={{ padding:'8px 14px', background:'white' }}>
-                      <Fl>Remarks</Fl>
+                      <Fl shortcut={FIELD_SHORTCUT_LETTER.remarks}>Remarks</Fl>
                       <textarea
                         className="form-control"
                         rows={4}
                         placeholder="Additional notes or remarks about this staff member..."
                         style={{ fontSize:13, resize:'vertical' }}
+                        ref={el => (staffFieldRefs.current.remarks = el)}
                         value={form.remarks}
                         onChange={e => handleChange('remarks', e.target.value)}
                       />
@@ -2941,7 +3030,7 @@ const UserManagement = () => {
               )}
             </div>
 
-            <div className="modal-footer">
+            <div className="modal-footer" style={{ flexShrink:0 }}>
               {editId && (
                 <LastSavedBy
                   // Falls back to "—" if the saver was a superAdmin — that

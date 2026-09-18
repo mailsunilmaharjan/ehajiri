@@ -105,14 +105,23 @@ async function seed() {
     `);
 
     /* ── Fiscal Years ── */
-    // Delete existing fiscal years if any and insert fresh defaults
+    // Seed only the fiscal year that is current as of today, as the default —
+    // computed relative to now instead of hardcoded, so a tenant created any
+    // year still gets the right one (BS year boundary approximated at Apr 14
+    // / Baisakh 1, matching this project's existing FY date convention).
     await client.query('DELETE FROM fiscal_years WHERE is_system = TRUE');
-    await client.query(`
-      INSERT INTO fiscal_years (name,start_date,end_date,is_default,is_system) VALUES
-        ('FY 2081/082','2024-04-14','2025-04-13',FALSE,TRUE),
-        ('FY 2082/083','2025-04-14','2026-04-13',TRUE,TRUE),
-        ('FY 2083/084','2026-04-14','2027-04-13',FALSE,TRUE)
-    `);
+    const today = new Date();
+    const boundary = new Date(today.getFullYear(), 3, 14); // Apr 14 this Gregorian year
+    const startGregorianYear = today >= boundary ? today.getFullYear() : today.getFullYear() - 1;
+    const bsYear = startGregorianYear + 57; // 2024-04-14 anchors BS 2081
+    await client.query(
+      `INSERT INTO fiscal_years (name,start_date,end_date,is_default,is_system) VALUES ($1,$2,$3,TRUE,TRUE)`,
+      [
+        `FY ${bsYear}/${String(bsYear + 1).slice(-3)}`,
+        `${startGregorianYear}-04-14`,
+        `${startGregorianYear + 1}-04-13`,
+      ]
+    );
 
     /* ── Weekend History ── */
     await client.query(`

@@ -213,8 +213,11 @@ const YearlyInOutReport = () => {
           otHrs:     d2.otHrs||null,
           punches:   d2.punches||0,
           isWeekend: meta.isWeekend||false,
-          isHoliday: meta.isHoliday||false,
-          holidayName: meta.holidayName||null,
+          // Prefer this employee's own scoped holiday flag (a holiday can be
+          // limited to e.g. Gender=Female) — meta.isHoliday is the shared,
+          // unscoped company-wide value, used only as a fallback.
+          isHoliday: d2.isHoliday ?? meta.isHoliday ?? false,
+          holidayName: d2.holidayName ?? meta.holidayName ?? null,
         };
       });
       return { label:monthLabel, days };

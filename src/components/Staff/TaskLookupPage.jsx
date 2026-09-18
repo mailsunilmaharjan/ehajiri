@@ -46,7 +46,17 @@ const TaskLookupPage = ({ title, endpoint, withColor = false }) => {
       if (editId) await api.put(`/settings/${endpoint}/${editId}`, payload);
       else        await api.post(`/settings/${endpoint}`, payload);
       showToast(editId ? 'Updated' : 'Added');
-      setModal(false);
+      if (editId) {
+        // Editing an existing entry — done, close as before.
+        setModal(false);
+      } else {
+        // Adding — stay on the form, cleared, ready for the next entry
+        // instead of closing, so entering several categories/priorities in
+        // a row never needs reopening the modal between each one.
+        setName('');
+        setColor('#1a56db');
+        setEditId(null);
+      }
       load();
     } catch (e) {
       setError(e.message || 'Save failed');

@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import { formatNepalTime, getNepalTodayISO } from '../../utils/dateUtils.js';
 import { CHECKOUT_STATUS_LABEL } from './FieldVisitJourneyPanel.jsx';
 
@@ -152,8 +153,7 @@ const StaffTrackFlowModal = ({ onClose }) => {
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Date</label>
               {settings.defaultCalendar === 'np'
                 ? <NepaliDatePicker value={date} onChange={setDate} maxToday />
-                : <input type="date" value={date} max={getNepalTodayISO()} onChange={e => setDate(e.target.value)}
-                    style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13, boxSizing: 'border-box' }} />}
+                : <EnglishDatePicker value={date} onChange={setDate} maxToday />}
             </div>
           </div>
 

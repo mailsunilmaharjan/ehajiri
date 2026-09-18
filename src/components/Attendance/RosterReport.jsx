@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_EN, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import StaffDropdown    from '../Common/StaffDropdown.jsx';
 import MultiCheckSelect from '../Common/MultiCheckSelect.jsx';
 import Avatar           from '../Common/Avatar.jsx';
@@ -21,11 +22,7 @@ const DateInput = ({ value, onChange, min }) => {
   if (settings.defaultCalendar === 'np') {
     return <NepaliDatePicker value={value} onChange={onChange} />;
   }
-  return (
-    <input type="date" value={value} min={min} onChange={e => onChange(e.target.value)}
-      style={{ height: 34, width: '100%', border: '1px solid #d1d5db', borderRadius: 7,
-        padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} minDate={min} />;
 };
 
 /* ── Post short-name lookup (matches DutyRosterDeptWise.jsx's convention) ── */

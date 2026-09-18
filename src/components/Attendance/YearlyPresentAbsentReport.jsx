@@ -30,7 +30,11 @@ const abbrev = (name) => {
 /* ── Status colors ── */
 const STATUS = {
   P  : { bg:'#d1fae5', color:'#065f46', label:'P',  title:'Present' },
-  PP : { bg:'#fef08a', color:'#713f12', label:'P',  title:'Present on Public Holiday' },
+  P1 : { bg:'#d1fae5', color:'#0369a1', label:'P¹', title:'Present – single punch' },
+  PP : { bg:'#fef08a', color:'#713f12', label:'H.P', title:'Present on Public Holiday' },
+  PP1: { bg:'#fef08a', color:'#713f12', label:'H.P¹', title:'Present on Public Holiday – single punch' },
+  WP : { bg:'#ccfbf1', color:'#0f766e', label:'W.P', title:'Present on Weekend' },
+  WP1: { bg:'#ccfbf1', color:'#0f766e', label:'W.P¹', title:'Present on Weekend – single punch' },
   AB : { bg:'#fee2e2', color:'#991b1b', label:'AB', title:'Absent' },
   H  : { bg:'#f3f4f6', color:'#9ca3af', label:'W',  title:'Weekend' },
   DO : { bg:'#f3f4f6', color:'#6b7280', label:'DO', title:'Day Off' },
@@ -45,7 +49,8 @@ const STATUS = {
 // stay as universal abbreviations regardless of language, same convention as
 // every other attendance report.
 const STATUS_TITLE_NP = {
-  P: 'उपस्थित', PP: 'सार्वजनिक बिदामा उपस्थित', AB: 'अनुपस्थित', H: 'विकेन्ड',
+  P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', PP1: 'सार्वजनिक बिदामा उपस्थित – एकल पन्च',
+  WP: 'सप्ताहान्तमा उपस्थित', WP1: 'सप्ताहान्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित', H: 'विकेन्ड',
   DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा',
 };
 const statusTitle = (st, language) => {
@@ -309,7 +314,7 @@ const YearlyPresentAbsentReport = () => {
         return { dayNum, dateStr, st, dayKey };
       });
       // counts for totals
-      const P  = days.filter(d=>d.st==='P'||d.st==='PP').length;
+      const P  = days.filter(d=>d.st==='P'||d.st==='P1'||d.st==='PP'||d.st==='PP1'||d.st==='WP'||d.st==='WP1').length;
       const AB = days.filter(d=>d.st==='AB').length;
       const L2 = days.filter(d=>d.st==='L').length;
       const PH = days.filter(d=>d.st==='PH').length;
@@ -332,7 +337,7 @@ const YearlyPresentAbsentReport = () => {
     matrix.forEach(m => m.days.forEach(d => {
       if (!d.dateStr) return;
       total++;
-      if (d.st==='P'||d.st==='PP') present++;
+      if (d.st==='P'||d.st==='P1'||d.st==='PP'||d.st==='PP1'||d.st==='WP'||d.st==='WP1') present++;
       else if (d.st==='AB') absent++;
       else if (d.st==='L')  leave++;
       else if (d.st==='OV') ov++;
@@ -385,7 +390,8 @@ const YearlyPresentAbsentReport = () => {
           <button
             onClick={() => {
               if (!matrix.length || !selectedEmp) return;
-              const ST = { P:'#065f46,#d1fae5', PP:'#713f12,#fef08a', AB:'#991b1b,#fee2e2',
+              const ST = { P:'#065f46,#d1fae5', P1:'#0369a1,#d1fae5', PP:'#713f12,#fef08a', PP1:'#713f12,#fef08a',
+                           WP:'#0f766e,#ccfbf1', WP1:'#0f766e,#ccfbf1', AB:'#991b1b,#fee2e2',
                            H:'#9ca3af,#f3f4f6', L:'#5b21b6,#ede9fe', OV:'#1e40af,#dbeafe',
                            PH:'#92400e,#fef3c7' };
               const cellStyle = (st) => {
@@ -393,7 +399,7 @@ const YearlyPresentAbsentReport = () => {
                 const [c,bg] = (ST[st]||ST.AB).split(',');
                 return `background:${bg};color:${c};font-weight:800;border-radius:3px;`;
               };
-              const cellLabel = (st) => ({ P:'P',PP:'P',AB:'AB',H:'W',L:'L',OV:'OV',PH:'PH' }[st]||'');
+              const cellLabel = (st) => ({ P:'P',P1:'P¹',PP:'H.P',PP1:'H.P¹',WP:'W.P',WP1:'W.P¹',AB:'AB',H:'W',L:'L',OV:'OV',PH:'PH' }[st]||'');
 
               // Build matrix rows HTML
               let matrixRows = matrix.map((row, ri) => {

@@ -211,20 +211,23 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
   /* IN row — status badges when no punch */
   if (rowKey === 'in' && !day?.timeIn) {
     let badge = null;
-    if (day?.leave) {
-      badge = (
-        <span title={day.leave.name}
-          style={{ background:'#ede9fe', color:'#5b21b6', borderRadius:4,
-            padding:'1px 5px', fontSize:10, fontWeight:800, cursor:'help' }}>
-          {leaveAbbrev(day.leave.name)}
-        </span>
-      );
-    } else if (isHoliday) {
+    // Public Holiday takes priority over a same-day Leave record — it
+    // isn't a working day to begin with regardless of the leave
+    // application (see attendance.js's identical status precedence).
+    if (isHoliday) {
       badge = (
         <span title={holidayName || LL('सार्वजनिक बिदा','Public Holiday')}
           style={{ background:'#fef3c7', color:'#92400e', borderRadius:4,
             padding:'1px 5px', fontSize:10, fontWeight:800, cursor:'help' }}>
           {LL('साबि','PH')}
+        </span>
+      );
+    } else if (day?.leave) {
+      badge = (
+        <span title={day.leave.name}
+          style={{ background:'#ede9fe', color:'#5b21b6', borderRadius:4,
+            padding:'1px 5px', fontSize:10, fontWeight:800, cursor:'help' }}>
+          {leaveAbbrev(day.leave.name)}
         </span>
       );
     } else if (day?.visit) {
@@ -861,8 +864,8 @@ const MonthlyInOutReport = () => {
                             rowKey={row.key}
                             day={emp.days[date]}
                             isWeekend={emp.days?.[date]?.isWeekend ?? isWeekend}
-                            isHoliday={isHoliday}
-                            holidayName={holidayName}
+                            isHoliday={emp.days?.[date]?.isHoliday ?? isHoliday}
+                            holidayName={emp.days?.[date]?.holidayName ?? holidayName}
                             isLast={isLast}
                             language={language}
                           />

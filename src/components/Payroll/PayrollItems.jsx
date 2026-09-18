@@ -89,7 +89,17 @@ const PayrollItems = () => {
       if (editId) await api.put(`/settings/payrollItems/${editId}`, payload);
       else        await api.post('/settings/payrollItems', payload);
       showToast(editId ? 'Updated' : 'Added');
-      setModal(false);
+      if (editId) {
+        // Editing an existing item — done, close as before.
+        setModal(false);
+      } else {
+        // Adding — stay on the form, cleared, ready for the next item
+        // instead of closing (matches the Setup section's behavior), so
+        // entering a whole payroll structure in one sitting never needs
+        // reopening the modal between each item.
+        setForm(emptyForm);
+        setEditId(null);
+      }
       load();
     } catch (e) {
       setError(e.message || 'Save failed');

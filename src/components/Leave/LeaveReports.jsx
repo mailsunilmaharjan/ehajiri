@@ -8,6 +8,7 @@ import useRecoApproval from '../../hooks/useRecoApproval.js';
 import useLeaveOpening from '../../hooks/useLeaveOpening.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import Avatar from '../Common/Avatar.jsx';
+import HoverCard from '../Common/HoverCard.jsx';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 import { LeaveAdvancedFilter, DEFAULT_ADV_FILTERS, GridPager, shortOf, LeaveReportsTab } from './LeaveCalculation.jsx';
 import { branchAbbr } from '../../utils/branchUtils.js';
@@ -163,6 +164,34 @@ const LeaveReports = () => {
   };
   const getLeaveLabel = (code) => ltConfigs.find(lt => lt.shortName === code)?.name || code;
 
+  // Avatar + hover (photo, name, post) for exactly one person — the
+  // Recommendator/Approval columns below show only whoever this specific
+  // application actually names (recommendedBy/approvedBy once someone has
+  // acted, otherwise the recoId/approvalId the applicant picked at apply
+  // time — see migration 142), NOT namesFor's full configured-candidate
+  // list above (still used for the printable signature block, where every
+  // possible signer is genuinely relevant). Same avatar+tooltip convention
+  // as TaskList.jsx's Assigned To/Seen By avatars.
+  const personHoverCell = (empId) => {
+    if (!empId) return <span style={{ color: '#d1d5db' }}>—</span>;
+    const emp = getEmployeeById(empId);
+    const name = getEmployeeName(empId);
+    return (
+      <HoverCard
+        trigger={<Avatar photo={emp?.profilePhoto} name={name} size={24} preview={false} />}
+        content={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Avatar photo={emp?.profilePhoto} name={name} size={40} preview={false} />
+            <div>
+              <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 12.5 }}>{name}</div>
+              <div style={{ color: '#6b7280', fontSize: 11, marginTop: 1 }}>{emp?.position || '—'}</div>
+            </div>
+          </div>
+        }
+        side="right" arrow minWidth={180} />
+    );
+  };
+
   const recordCols = [
     { field: 'staffId', header: 'Staff ID', width: 90, render: (_, row) => (
         <span style={{ color: '#6b7280' }}>{getEmployeeById(row.employeeId)?.employeeId || '—'}</span>
@@ -189,10 +218,10 @@ const LeaveReports = () => {
     { field: 'status', header: L('स्थिति', 'Status'), width: 100, render: () => (
         <span className="badge badge-success">{L('स्वीकृत', 'Approved')}</span>
       ) },
-    { field: 'recommendatorNames', header: L('सिफारिसकर्ता', 'Recommendator'), width: 150, sortable: false, filterable: false,
-      render: (_, row) => <span style={{ fontSize: 12, color: '#6b7280' }}>{namesFor(row.employeeId, 'reco')}</span> },
-    { field: 'approvalNames', header: L('स्वीकृतिकर्ता', 'Approval'), width: 150, sortable: false, filterable: false,
-      render: (_, row) => <span style={{ fontSize: 12, color: '#6b7280' }}>{namesFor(row.employeeId, 'approval')}</span> },
+    { field: 'recommendatorNames', header: L('सिफारिसकर्ता', 'Recommendator'), width: 90, align: 'center', sortable: false, filterable: false,
+      render: (_, row) => personHoverCell(row.recommendedBy || row.recoId) },
+    { field: 'approvalNames', header: L('स्वीकृतिकर्ता', 'Approval'), width: 90, align: 'center', sortable: false, filterable: false,
+      render: (_, row) => personHoverCell(row.approvedBy || row.approvalId) },
   ];
 
   /* ── Tab 2: leave balance report — one row per (employee × leave type),

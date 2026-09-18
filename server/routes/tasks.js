@@ -527,6 +527,19 @@ router.put('/:id', async (req, res) => {
     await notifyAssignees(id, newTitle, assigneeIds.filter(uid => !prevAssigneeIds.has(uid)), before.createdBy, assigneeIds, req.user.id, fieldVisit);
 
     if (status && status !== before.status) {
+      // Same reasoning as PATCH /:id/status above — the full Edit Task form
+      // is another way to mark a field-visit task completed outside the
+      // Field Visit journey panel's own Check Out flow, which is otherwise
+      // the only thing that closes a field_visit_stops row.
+      if (fieldVisit && status === 'completed') {
+        await pool.query(
+          `UPDATE field_visit_stops s SET check_out_at = NOW(), check_out_work_progress = 'work_done'
+           FROM field_visit_sessions fs
+           WHERE s.session_id = fs.id AND s.task_id = $1 AND fs.status = 'active'
+             AND s.check_in_at IS NOT NULL AND s.check_out_at IS NULL`,
+          [id]
+        );
+      }
       if (status === 'completed') await notifyOnCompletion(id, newTitle, before.createdBy, assigneeIds, req.user.id, fieldVisit);
       else await notifyStatusChanged(id, newTitle, status, before.createdBy, assigneeIds, req.user.id, fieldVisit);
     }
@@ -567,6 +580,26 @@ router.patch('/:id/status', async (req, res) => {
       [status, id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Task not found' });
+    // Completing a field-visit task through this generic status endpoint
+    // (the grid's own complete checkbox, or this "Completed" dropdown) is a
+    // different path than the Field Visit journey panel's own "Check Out"
+    // button (server/routes/fieldVisit.js) — that route is the only other
+    // place a field_visit_stops row's check_out_at gets set, and only it
+    // syncs the task status FROM the visit. Going the other direction with
+    // no matching sync left a stop checked-in-but-never-checked-out forever
+    // once its task was completed this way, which permanently blocked that
+    // employee's Field Visit page (getActiveSessionFull always finds that
+    // same stuck stop) — no GPS to record here since this path never
+    // collects any, unlike a real Check Out click.
+    if (rows[0].isFieldVisit && status === 'completed') {
+      await pool.query(
+        `UPDATE field_visit_stops s SET check_out_at = NOW(), check_out_work_progress = 'work_done'
+         FROM field_visit_sessions fs
+         WHERE s.session_id = fs.id AND s.task_id = $1 AND fs.status = 'active'
+           AND s.check_in_at IS NOT NULL AND s.check_out_at IS NULL`,
+        [id]
+      );
+    }
     const { rows: assigneeRows } = await pool.query('SELECT user_id FROM task_assignees WHERE task_id=$1', [id]);
     const assigneeIds = assigneeRows.map(r => r.user_id);
     if (status === 'completed') {

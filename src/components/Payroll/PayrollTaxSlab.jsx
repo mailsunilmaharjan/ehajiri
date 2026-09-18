@@ -8,20 +8,17 @@ import SaveButton from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 
 // Same calendar-aware date field every apply/settings form in the app uses
 // (see e.g. TaskList.jsx's own DateInput) — Settings → Official Setting's
-// Default Calendar decides which one shows: Nepali (BS picker) or English
-// (plain styled <input type="date">). Both always store/emit a plain AD
-// ISO string, so the rest of the form never needs to know which one rendered.
+// Default Calendar decides which one shows: Nepali or English, both custom
+// popup calendars. Both always store/emit a plain AD ISO string, so the
+// rest of the form never needs to know which one rendered.
 const DateInput = ({ value, onChange, error }) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') return <NepaliDatePicker value={value} onChange={onChange} error={error} />;
-  return (
-    <input type="date" value={value} onChange={e => onChange(e.target.value)}
-      style={{ height: 36, width: '100%', border: `1px solid ${error ? '#dc2626' : '#d1d5db'}`, borderRadius: 7,
-        padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} />;
 };
 
 /* Settings → Payroll Tax Slab (Payroll → Settings → Payroll Tax Slab) —
@@ -91,7 +88,16 @@ const PayrollTaxSlab = () => {
       if (editId) await api.put(`/settings/payrollTaxSlabs/${editId}`, payload);
       else        await api.post('/settings/payrollTaxSlabs', payload);
       showToast(editId ? 'Updated' : 'Added');
-      setModal(false);
+      if (editId) {
+        // Editing an existing slab — done, close as before.
+        setModal(false);
+      } else {
+        // Adding — stay on the form, cleared, ready for the next slab
+        // instead of closing, so entering a whole tax bracket table in one
+        // sitting never needs reopening the modal between each slab.
+        setForm(emptyForm);
+        setEditId(null);
+      }
       load();
     } catch (e) {
       setError(e.message || 'Save failed');

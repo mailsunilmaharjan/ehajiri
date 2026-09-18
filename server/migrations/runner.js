@@ -2964,6 +2964,72 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 142,
+    description: 'leaves/office_visits: add reco_id + approval_id — the specific recommender/approver the applicant picked at apply time (from Staff Detail → Set Recommendator & Approval\'s configured candidates), distinct from recommended_by/approved_by (who has actually acted, still null until then) and from the full configured candidate list (which can have more than one name). Previously this selection was only ever used to address the apply-notification email, then discarded — the Leave/Office Visit Management grid\'s Recommendator/Approval columns had no per-application selection to show, so they fell back to listing every configured candidate instead of just the one the applicant chose. Existing rows stay NULL (that selection was never captured for them); the grid falls back to recommended_by/approved_by once one is set.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE leaves        ADD COLUMN IF NOT EXISTS reco_id     INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        ALTER TABLE leaves        ADD COLUMN IF NOT EXISTS approval_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        ALTER TABLE office_visits ADD COLUMN IF NOT EXISTS reco_id     INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        ALTER TABLE office_visits ADD COLUMN IF NOT EXISTS approval_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      `);
+    },
+  },
+  {
+    version    : 143,
+    description: 'One-time data fix: close any field_visit_stops row left permanently checked-in (check_in_at set, check_out_at null) because its task was marked Completed through some path OTHER than the Field Visit journey panel\'s own Check Out button — the Task grid\'s complete checkbox, its Followup History "Completed" status dropdown, and the full Edit Task form all set tasks.status directly and, until server/routes/tasks.js\'s PATCH /:id/status and PUT /:id were fixed alongside this migration, never touched field_visit_stops. Since GET /field-visit/session/active always returns an employee\'s single active session\'s LATEST stop regardless of which task it belongs to, one such orphaned stop permanently blocked that employee from starting or continuing ANY field visit — every checkpoint action in FieldVisitJourneyPanel.jsx dead-ended on "finish that stop before starting a new one" with no button to resolve it. Only touches a stop whose task is already completed and whose session is still active — a stop still legitimately open (task not completed) is left untouched.',
+    up: async (client) => {
+      await client.query(`
+        UPDATE field_visit_stops s SET check_out_at = NOW(), check_out_work_progress = 'work_done'
+        FROM tasks t, field_visit_sessions fs
+        WHERE s.task_id = t.id AND s.session_id = fs.id
+          AND s.check_in_at IS NOT NULL AND s.check_out_at IS NULL
+          AND t.status = 'completed' AND fs.status = 'active';
+      `);
+    },
+  },
+  {
+    version    : 144,
+    description: 'zkteco_commands — add return_code so a device-rejected command (POST /devicecmd Return=<negative>) records WHY, not just that it failed. Previously the code was only console.warn\'d and discarded, so the admin UI could only ever show a generic "device rejected the command" with no way to tell a permanent hardware/firmware rejection (e.g. Return=-1003 = unsupported command/field, seen historically when ENROLL_BIO for face is sent to a fingerprint-only model with no camera) from a transient one worth retrying.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_commands ADD COLUMN IF NOT EXISTS return_code INTEGER
+      `);
+    },
+  },
+  {
+    version    : 145,
+    description: 'zkteco_face_templates — new table, mirrors zkteco_fingerprints (device_sn/pin/face_id/template_size/valid/template_data). Per ZKTeco\'s official Attendance PUSH Communication Protocol (2025-04-29) §11.10, a device reports an enrolled face template back to the server as an OPERLOG line starting with "FACE " (FACE PIN=X FID=Y SIZE=Z VALID=W TMP=<base64>) — classifyLines() in routes/zkteco.js had no case for that prefix, so every such line fell into the plain-attendance catch-all: parseAttlog() tried to read the face template as a punch-in record (corrupting attendance_logs) and the actual template was silently discarded. This table gives the new FACE-line handler somewhere to persist it, matching how fingerprint templates already work.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS zkteco_face_templates (
+          id            SERIAL       PRIMARY KEY,
+          device_sn     VARCHAR(100) NOT NULL,
+          pin           VARCHAR(50)  NOT NULL,
+          face_id       SMALLINT     DEFAULT 0,
+          template_size INTEGER,
+          valid         SMALLINT     DEFAULT 1,
+          template_data TEXT         DEFAULT NULL,
+          enrolled_at   TIMESTAMPTZ  DEFAULT NOW(),
+          UNIQUE(device_sn, pin, face_id)
+        );
+      `);
+    },
+  },
+  {
+    version    : 146,
+    description: 'One-time data fix: backfill zkteco_users.area_id from each row\'s own device\'s current zkteco_devices.area_id. That column (added migration 19, purely so "Sync Area" could look up "everyone in this Area") was never actually set anywhere it\'s written — saveDeviceUser\'s INSERT omitted it entirely — so every existing row has area_id=NULL and syncAreaToDevice\'s "WHERE area_id=$1" query has always silently matched zero users, regardless of how many people are really in that Area. saveDeviceUser now sets it going forward; this backfills every row that already exists. Only touches rows currently NULL, from devices that do have an area assigned — never overwrites a row that (for whatever reason) already has one.',
+    up: async (client) => {
+      await client.query(`
+        UPDATE zkteco_users u SET area_id = d.area_id
+        FROM zkteco_devices d
+        WHERE u.device_sn = d.serial_number
+          AND u.area_id IS NULL
+          AND d.area_id IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

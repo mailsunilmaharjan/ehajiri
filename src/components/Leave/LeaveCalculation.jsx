@@ -9,6 +9,7 @@ import useDateFormat   from '../../hooks/useDateFormat.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import StaffDropdown   from '../Common/StaffDropdown.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import MultiCheckSelect from '../Common/MultiCheckSelect.jsx';
 import SaveButton      from '../Common/SaveButton.jsx';
 import Avatar          from '../Common/Avatar.jsx';
@@ -353,13 +354,13 @@ export const LeaveAdvancedFilter = ({
                 <label className="form-label">{L('मिति देखि','From Date')}</label>
                 {settings?.defaultCalendar === 'np'
                   ? <NepaliDatePicker value={tempF.fromDate} onChange={v => setTF('fromDate', v)} maxToday={false} minToday={false} />
-                  : <input type="date" className="form-control" style={{ fontSize:13 }} value={tempF.fromDate || ''} onChange={e => setTF('fromDate', e.target.value)} />}
+                  : <EnglishDatePicker value={tempF.fromDate} onChange={v => setTF('fromDate', v)} maxToday={false} minToday={false} />}
               </div>
               <div className="form-group" style={{ marginBottom:0 }}>
                 <label className="form-label">{L('मिति सम्म','To Date')}</label>
                 {settings?.defaultCalendar === 'np'
                   ? <NepaliDatePicker value={tempF.toDate} onChange={v => setTF('toDate', v)} maxToday={false} minToday={false} />
-                  : <input type="date" className="form-control" style={{ fontSize:13 }} value={tempF.toDate || ''} onChange={e => setTF('toDate', e.target.value)} />}
+                  : <EnglishDatePicker value={tempF.toDate} onChange={v => setTF('toDate', v)} maxToday={false} minToday={false} />}
               </div>
             </div>
           )}

@@ -30,12 +30,23 @@ router.get('/', async (req, res) => {
     const idArr  = empIds ? [empIds] : [];
     const idAnd  = (col) => empIds ? ` AND ${col} = ANY($1::int[])` : '';
 
+    /* ── 0. Fiscal years (Settings → Fiscal Year) — the "Yearly" trend
+       charts below bucket by these instead of the calendar year: an inner
+       JOIN against this table both labels each bar with the company's own
+       FY name (e.g. "FY 2082/083") and drops any join/exit date that falls
+       outside every configured FY range — typically bad/placeholder data
+       (e.g. bulk-import rows defaulted to an arbitrary date) rather than a
+       real hire, so excluding it is the fix, not a display nicety. */
+    const fiscalYearsQ = pool.query(
+      `SELECT id, name, start_date, end_date FROM fiscal_years ORDER BY start_date`);
+
     /* ── 1. Onboarding (joining) trend ───────────────────────────────── */
     const onboardYearlyQ = pool.query(
-      `SELECT EXTRACT(YEAR FROM join_date)::int AS year, COUNT(*)::int AS count
-       FROM users
-       WHERE join_date IS NOT NULL AND ${REAL_STAFF}${idAnd('id')}
-       GROUP BY 1 ORDER BY 1`, idArr);
+      `SELECT fy.id AS fy_id, COUNT(*)::int AS count
+       FROM users u
+       JOIN fiscal_years fy ON u.join_date BETWEEN fy.start_date AND fy.end_date
+       WHERE u.join_date IS NOT NULL AND u.${REAL_STAFF}${idAnd('u.id')}
+       GROUP BY fy.id`, idArr);
 
     const onboardMonthlyQ = pool.query(
       `SELECT EXTRACT(YEAR FROM join_date)::int AS year,
@@ -46,6 +57,14 @@ router.get('/', async (req, res) => {
        GROUP BY 1,2 ORDER BY 1,2`, idArr);
 
     /* ── 2. Offboarding / attrition trend ────────────────────────────── */
+    const offboardYearlyRawQ = pool.query(
+      `SELECT fy.id AS fy_id, COUNT(*)::int AS offboarded
+       FROM staff_official_changes soc
+       JOIN employee_statuses es ON es.name = soc.to_value
+       JOIN fiscal_years fy ON soc.effective_date BETWEEN fy.start_date AND fy.end_date
+       WHERE soc.field = 'status' AND es.status_type = 'Not Working'${idAnd('soc.user_id')}
+       GROUP BY fy.id`, idArr);
+
     const offboardMonthlyQ = pool.query(
       `SELECT EXTRACT(YEAR FROM soc.effective_date)::int AS year,
               EXTRACT(MONTH FROM soc.effective_date)::int AS month,
@@ -127,47 +146,48 @@ router.get('/', async (req, res) => {
        GROUP BY u.department`, idArr);
 
     const [
+      fiscalYears,
       onboardYearly, onboardMonthly,
-      offboardMonthly, empLifecycle,
+      offboardYearlyRaw, offboardMonthly, empLifecycle,
       diversity,
       mobilityAgg, mobilityRecent,
       otByDept, leaveByDept,
     ] = await Promise.all([
+      fiscalYearsQ,
       onboardYearlyQ, onboardMonthlyQ,
-      offboardMonthlyQ, empLifecycleQ,
+      offboardYearlyRawQ, offboardMonthlyQ, empLifecycleQ,
       diversityQ,
       mobilityAggQ, mobilityRecentQ,
       otByDeptQ, leaveByDeptQ,
     ]);
 
-    /* ── Assemble onboarding ── */
+    /* ── Assemble onboarding — one bar per configured Fiscal Year, in FY
+       order (not calendar-year order, which won't generally match since a
+       Nepali FY spans two calendar years). Any join_date outside every FY
+       range was already dropped by the JOIN above. ── */
+    const onboardByFy = new Map(onboardYearly.rows.map(r => [r.fy_id, r.count]));
+    const offboardByFy = new Map(offboardYearlyRaw.rows.map(r => [r.fy_id, r.offboarded]));
+
     const onboarding = {
-      yearly: onboardYearly.rows,
+      yearly: fiscalYears.rows.map(fy => ({ year: fy.name, count: onboardByFy.get(fy.id) || 0 })),
       monthlyByYear: groupByYear(onboardMonthly.rows),
       seasonality: seasonality(onboardMonthly.rows),
     };
 
-    /* ── Assemble offboarding + attrition rate ── */
-    const years = [...new Set([
-      ...onboardYearly.rows.map(r => r.year),
-      ...offboardMonthly.rows.map(r => r.year),
-    ])].sort((a, b) => a - b);
-
-    const headcountAt = (dateStr) => empLifecycle.rows.filter(e => {
-      const joined = e.join_date && new Date(e.join_date) < new Date(dateStr);
-      const stillIn = !e.exit_date || new Date(e.exit_date) >= new Date(dateStr);
+    /* ── Assemble offboarding + attrition rate, per Fiscal Year ── */
+    const headcountAt = (date) => empLifecycle.rows.filter(e => {
+      const joined = e.join_date && new Date(e.join_date) < date;
+      const stillIn = !e.exit_date || new Date(e.exit_date) >= date;
       return joined && stillIn;
     }).length;
 
-    const offboardYearly = years.map(year => {
-      const offboarded = offboardMonthly.rows
-        .filter(r => r.year === year)
-        .reduce((s, r) => s + r.count, 0);
-      const headcountStart = headcountAt(`${year}-01-01`);
+    const offboardYearly = fiscalYears.rows.map(fy => {
+      const offboarded = offboardByFy.get(fy.id) || 0;
+      const headcountStart = headcountAt(new Date(fy.start_date));
       const attritionRate = headcountStart > 0
         ? Math.round((offboarded / headcountStart) * 1000) / 10
         : null;
-      return { year, offboarded, headcountStart, attritionRate };
+      return { year: fy.name, offboarded, headcountStart, attritionRate };
     });
 
     const offboarding = {

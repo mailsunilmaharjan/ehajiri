@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import api, { apiUrl } from '../../api/client.js';
@@ -248,7 +248,12 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth:560, maxHeight:'92vh', overflowY:'auto' }}
+      {/* Wide enough for the Device Info group's action cards to sit on one
+          line at their natural size instead of being squeezed toward their
+          100px floor — the other two groups (many more items, meant to wrap
+          across rows) also benefit from the extra room, just don't depend
+          on it the way this one does. */}
+      <div className="modal" style={{ maxWidth:900, maxHeight:'92vh', overflowY:'auto' }}
            onClick={e=>e.stopPropagation()}>
 
         {/* Header */}
@@ -355,8 +360,11 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
               </div>
             )}
 
-            {/* Card grid — horizontal */}
-            <div style={{ display:'flex', flexWrap:'wrap', gap:10 }}>
+            {/* Card grid — nowrap (unlike the other two groups' item
+                containers below, which intentionally wrap across rows for
+                their much longer lists) — only 4 items here, meant to
+                always read as one row now that the modal has the width for it. */}
+            <div style={{ display:'flex', flexWrap:'nowrap', gap:10 }}>
               <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="time" icon="⏰" label="Sync Time to Now"
                 desc={`SET OPTION ServerLocalTime=${new Date().toLocaleString()} (guide §14)`}
                 onClick={()=>run('time',()=>api.post(`/zkteco/devices/${id}/set-time`,{}),'✅ Time sync queued — SET OPTION ServerLocalTime=...')} />
@@ -1025,8 +1033,6 @@ const ZKTecoDeviceSettings = () => {
   const [linkModal,     setLinkModal]     = useState(null);  // device user row being linked
   const [staffList,     setStaffList]     = useState([]);
   const [fingerprints,  setFingerprints]  = useState([]);
-  const [copyTarget,    setCopyTarget]    = useState('');   // selected target device id, Fingerprints tab
-  const [copyingPin,    setCopyingPin]    = useState(null); // pin currently being copied (row-level spinner)
   const [selectedFpIds, setSelectedFpIds] = useState([]);   // checked rows in Biometrics grid (own selection, separate from Device Users tab's)
   const [fpActionsOpen, setFpActionsOpen] = useState(false);
   const [transferModal, setTransferModal] = useState(null); // null | { mode: 'copy'|'moveDelete' }
@@ -1142,9 +1148,15 @@ const ZKTecoDeviceSettings = () => {
   // whichever staff are already checked in the Biometrics grid, but only if
   // they all came from the same device (a mixed-device selection can't map
   // to a single "Transfer From" device, so it opens empty instead).
+  // selectedFpIds holds PINs now (the Biometrics grid's rowKey, since it's
+  // merged to one row per person — see mergedBioUsers), so this matches
+  // against devUsers' pin, not its per-device-row id; a checked person
+  // enrolled on more than one device makes uniqueSns.length > 1, which
+  // already falls through to the same "opens empty" case as a mixed-device
+  // selection always did.
   const openTransferModal = (mode) => {
     setFpActionsOpen(false);
-    const checkedRows = devUsers.filter(u => selectedFpIds.includes(u.id));
+    const checkedRows = devUsers.filter(u => selectedFpIds.includes(u.pin));
     const uniqueSns = [...new Set(checkedRows.map(u => u.device_sn))];
     setTransferModal({
       mode,
@@ -1155,25 +1167,6 @@ const ZKTecoDeviceSettings = () => {
   };
 
   const showToast = (msg,type='success') => { setToast({ msg,type }); setTimeout(()=>setToast(null),4000); };
-
-  // Copy one staff member's fingerprint(s) + face photo from the device this
-  // row came from onto whichever device is selected in the "Copy to" dropdown.
-  // Queues DATA UPDATE commands on the target — since ADMS is push-based, the
-  // target device picks these up on its next check-in, not instantly.
-  const copyUserToDevice = async (row) => {
-    const sourceDevice = devices.find(d => d.serial_number === row.device_sn);
-    if (!sourceDevice || !copyTarget) return;
-    if (String(sourceDevice.id) === String(copyTarget)) {
-      showToast('❌ Source and target device are the same', 'error');
-      return;
-    }
-    setCopyingPin(row.pin);
-    try {
-      const r = await api.post(`/zkteco/devices/${copyTarget}/copy-user/${sourceDevice.id}`, { pin: row.pin });
-      showToast(`✅ Copied — ${r.fingerprintCount} fingerprint(s)${r.facePushed ? ' + face' : ''} queued for the target device`, 'success');
-    } catch (err) { showToast(`❌ ${err.message}`, 'error'); }
-    finally { setCopyingPin(null); }
-  };
 
   // Bulk submit for the Transfer modal — one request covering every checked
   // staff member; deleteAfter (Delete & Transfer mode) removes each one from
@@ -1747,26 +1740,72 @@ const ZKTecoDeviceSettings = () => {
     );
   };
 
+  // devUsers is one row per (device_sn, pin) — the same person enrolled on
+  // 2+ devices (the normal case for anyone in an Area with multiple
+  // terminals) showed up as that many separate, identical-looking rows here.
+  // This view is meant to answer "do we have this person's samples backed
+  // up anywhere", not "what does each device individually report", so it's
+  // merged down to one row per PIN — the union of fingerprint slots across
+  // every device (a slot counts as backed up if ANY device has it), the
+  // highest face-template count seen, and the first non-empty card/password/
+  // name found. _deviceSns is kept so the Devices column can show exactly
+  // which terminals contributed. Other consumers of the raw `devUsers` state
+  // (e.g. the Transfer Samples modal, which needs "who's on THIS specific
+  // source device") are untouched — this merge only feeds this one grid.
+  const mergedBioUsers = useMemo(() => {
+    const byPin = new Map();
+    for (const u of devUsers) {
+      const prev = byPin.get(u.pin);
+      if (!prev) {
+        byPin.set(u.pin, {
+          ...u,
+          fp_slots: Array.isArray(u.fp_slots) ? u.fp_slots.slice() : [],
+          face_count: parseInt(u.face_count) || 0,
+          _deviceSns: [u.device_sn],
+        });
+        continue;
+      }
+      prev._deviceSns.push(u.device_sn);
+      // Union fingerprint slots by fid — a slot already marked backed up on
+      // one device stays backed up even if another device reports it empty.
+      const slotMap = new Map(prev.fp_slots.map(s => [s.fid, s]));
+      for (const s of (u.fp_slots || [])) {
+        const existing = slotMap.get(s.fid);
+        if (!existing || (!existing.has_template && s.has_template)) slotMap.set(s.fid, s);
+      }
+      prev.fp_slots = [...slotMap.values()];
+      prev.fp_slots_count = prev.fp_slots.length;
+      prev.face_count = Math.max(prev.face_count, parseInt(u.face_count) || 0);
+      if ((!prev.card_no || prev.card_no === '0') && u.card_no && u.card_no !== '0') prev.card_no = u.card_no;
+      if (!prev.passwd && u.passwd) prev.passwd = u.passwd;
+      if (!prev.name && u.name) prev.name = u.name;
+      if (!prev.employee_name && u.employee_name) prev.employee_name = u.employee_name;
+      if (new Date(u.last_sync || 0) > new Date(prev.last_sync || 0)) prev.last_sync = u.last_sync;
+    }
+    for (const row of byPin.values()) row.fp_slots_count = row.fp_slots.length;
+    return [...byPin.values()];
+  }, [devUsers]);
+
   const fpColumns = [
-    { field:'pin', header:'PIN',
+    { field:'pin', header:'PIN', width:70,
       render: v => <strong style={{ fontFamily:'monospace', color:'#1a56db' }}>{v}</strong>,
     },
-    { field:'name', header:L('नाम','Name'),
+    { field:'name', header:L('नाम','Name'), width:130,
       render: v => <span style={{ fontWeight:600 }}>{v && v !== '—' ? v : <span style={{ color:'#d1d5db' }}>—</span>}</span>,
     },
-    { field:'employee_name', header:L('Staff','Staff'),
+    { field:'employee_name', header:L('Staff','Staff'), width:150,
       render: v => v
         ? <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 9px', fontSize:11, fontWeight:700 }}>🔗 {v}</span>
         : <span style={{ color:'#9ca3af', fontSize:11 }}>Not linked</span>,
     },
     {
-      field:'fp_slots', header:L('औँठाछाप','Fingerprints'), sortable:false,
+      field:'fp_slots', header:L('औँठाछाप','Fingerprints'), width:190, sortable:false,
       // Use fp_slots_count (from SQL COUNT) as fallback over fp_count (from USER row)
       render: (v, row) => <FingerDots slots={v || []} slotsCount={row.fp_slots_count || row.fp_count || 0} />,
     },
     {
       // Face column: show face icon + count when face templates exist on device
-      field:'face_count', header:L('अनुहार','Face'), align:'center',
+      field:'face_count', header:L('अनुहार','Face'), width:80, align:'center',
       render: v => {
         const count = parseInt(v) || 0;
         if (count <= 0) return <span style={{ color:'#d1d5db' }}>—</span>;
@@ -1783,7 +1822,7 @@ const ZKTecoDeviceSettings = () => {
     },
     {
       // RFID Card: show the actual card number when registered
-      field:'card_no', header:L('RFID कार्ड','RFID Card'),
+      field:'card_no', header:L('RFID कार्ड','RFID Card'), width:120,
       render: v => {
         const card = (v || '').toString().trim();
         if (!card || card === '0') return <span style={{ color:'#d1d5db' }}>—</span>;
@@ -1800,7 +1839,7 @@ const ZKTecoDeviceSettings = () => {
     },
     {
       // Password/PIN: show actual value (device PIN used as keypad access)
-      field:'passwd', header:L('पासवर्ड/PIN','Password / PIN'),
+      field:'passwd', header:L('पासवर्ड/PIN','Password / PIN'), width:130,
       render: v => {
         if (!v || v.toString().trim() === '') return <span style={{ color:'#d1d5db' }}>—</span>;
         return (
@@ -1815,25 +1854,28 @@ const ZKTecoDeviceSettings = () => {
       },
     },
     {
-      field:'last_sync', header:L('सिंक','Synced'),
-      render: v => v ? <span style={{ fontSize:11, color:'#6b7280' }}>{new Date(v).toLocaleDateString()}</span> : '—',
-    },
-    {
-      // Copy this one staff member's fingerprint(s) + face onto whichever
-      // device is picked in the "Copy to device" dropdown above the grid.
-      field:'copy', header:L('प्रतिलिपि','Copy'), sortable:false, filterable:false, align:'center',
-      render: (_, row) => {
-        const hasBiometrics = (row.fp_slots_count || row.fp_count || 0) > 0 || parseInt(row.face_count) > 0;
-        const disabled = !copyTarget || !hasBiometrics || copyingPin === row.pin;
+      // Which terminal(s) this person's samples are actually backed up
+      // from — the point of merging duplicate per-device rows down to one
+      // per PIN is to answer "is this person backed up somewhere", so it
+      // has to still say where. Capped width + horizontal scroll (not wrap)
+      // — someone enrolled on many devices was wrapping to several lines and
+      // blowing out that one row's height far past every other row's.
+      field:'_deviceSns', header:L('डिभाइसहरू','Devices'), width:210, sortable:false,
+      render: (sns, row) => {
+        const names = (sns || [row.device_sn]).map(sn => devices.find(d => d.serial_number === sn)?.name || sn);
         return (
-          <button className="btn btn-outline btn-sm" disabled={disabled}
-            title={!hasBiometrics ? 'No fingerprint/face to copy' : !copyTarget ? 'Pick a target device above first' : `Copy to ${devices.find(d=>String(d.id)===String(copyTarget))?.name||'target device'}`}
-            style={{ fontSize:11, padding:'3px 9px', opacity: disabled ? .5 : 1 }}
-            onClick={() => copyUserToDevice(row)}>
-            {copyingPin === row.pin ? '⏳' : '📤'} {L('प्रतिलिपि','Copy')}
-          </button>
+          <div style={{ display:'flex', gap:4, flexWrap:'nowrap', overflowX:'auto', maxWidth:200, paddingBottom:2 }}>
+            {names.map((n, i) => (
+              <span key={i} style={{ fontSize:10, fontWeight:600, color:'#374151', background:'#f3f4f6',
+                border:'1px solid #e5e7eb', borderRadius:8, padding:'1px 7px', whiteSpace:'nowrap', flexShrink:0 }}>{n}</span>
+            ))}
+          </div>
         );
       },
+    },
+    {
+      field:'last_sync', header:L('सिंक','Synced'), width:90,
+      render: v => v ? <span style={{ fontSize:11, color:'#6b7280' }}>{new Date(v).toLocaleDateString()}</span> : '—',
     },
   ];
 
@@ -1900,9 +1942,23 @@ const ZKTecoDeviceSettings = () => {
           contextMenu={[
             { label:'Edit',                       icon:'✏️', onClick: row => openEdit(row) },
             { label:'Download Logs',              icon:'📋', onClick: row => runDeviceCmd(row, 'Download Logs', () => api.post(`/zkteco/devices/${row.id}/sync`,{})) },
+            { label:'Download All Users',         icon:'👥', onClick: row => runDeviceCmd(row, 'Download All Users', () => api.post(`/zkteco/devices/${row.id}/get-users`,{})) },
             { label:'USB Upload',                 icon:'💾', onClick: row => openControlAt(row, 'data-ops', 'usb-upload') },
             { label:'Set Timezone Nepal (+5:45)', icon:'🌐', onClick: row => runDeviceCmd(row, 'Set Timezone', () => api.post(`/zkteco/devices/${row.id}/set-timezone`,{})) },
+            { label:'Sync Area',                  icon:'🗺️', onClick: row => runDeviceCmd(row, 'Sync Area', () => api.post(`/zkteco/devices/${row.id}/sync-area`,{})) },
             { label:'Clear Admin',                icon:'🚫', onClick: row => runDeviceCmd(row, 'Clear Admin', () => api.post(`/zkteco/devices/${row.id}/clear-admin`,{})) },
+            // Same guide-§17 warning as the Device Control modal's own Restart
+            // button — restarting wipes FP templates from device RAM.
+            { label:'Restart the Device',         icon:'🔁', className:'danger', onClick: row => {
+                if (!window.confirm(
+                  '⚠️ WARNING (ZKTeco ADMS Guide §17):\n\n' +
+                  '"Never send RESTART — restarting the device wipes all\n' +
+                  'fingerprint templates from device RAM."\n\n' +
+                  'Stored templates will auto-restore on next handshake.\n\n' +
+                  'Continue?'
+                )) return;
+                runDeviceCmd(row, 'Restart Device', () => api.post(`/zkteco/devices/${row.id}/reboot`,{}));
+              } },
           ]}
           toolbar={(() => {
             // Resolve the selected device object
@@ -2364,31 +2420,6 @@ const ZKTecoDeviceSettings = () => {
               </span>
             </div>
             <div style={{ display:'flex',gap:8,alignItems:'center',flexWrap:'wrap' }}>
-              {/* Copy to device — pick a target once, then use "📤 Copy" on any row below to
-                  push that one staff member's fingerprint(s) + face photo onto it */}
-              <span style={{ fontSize:12,fontWeight:600,color:'#374151' }}>
-                📤 {L('डिभाइसमा प्रतिलिपि गर्नुहोस्','Copy to device')}:
-              </span>
-              <select className="form-control" style={{ width:'auto',minWidth:160,fontSize:12,padding:'5px 8px' }}
-                value={copyTarget} onChange={e=>setCopyTarget(e.target.value)}>
-                <option value="">{L('लक्षित डिभाइस छान्नुहोस्','Select target device')}</option>
-                {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-              {/* Export — downloads JSON with users+FP templates for any device */}
-              {devUsers.length > 0 && (() => {
-                const sns = [...new Set(devUsers.map(u=>u.device_sn).filter(Boolean))];
-                return sns.map(sn => {
-                  const devName = devices.find(d=>d.serial_number===sn)?.name || sn;
-                  return (
-                    <button key={sn} className="btn btn-outline btn-sm"
-                      style={{ color:'#059669', borderColor:'#6ee7b7' }}
-                      title={`Export all users + FP templates for ${devName} as JSON file (for migration to another device)`}
-                      onClick={() => window.open(apiUrl(`/zkteco/export-users?sn=${encodeURIComponent(sn)}`), '_blank')}>
-                      📥 Export {devName}
-                    </button>
-                  );
-                });
-              })()}
               <button className="btn btn-outline btn-sm" onClick={()=>loadDevUsers(false)}>
                 🔃 {L('रिफ्रेस','Refresh')}
               </button>
@@ -2426,16 +2457,16 @@ const ZKTecoDeviceSettings = () => {
 
           {devUsers.length > 0 && (
             <DataGrid
+              className="zk-biometric-grid"
               columns={fpColumns}
-              data={devUsers}
-              rowKey="id"
+              data={mergedBioUsers}
+              rowKey="pin"
               defaultPageSize={20}
               showSearch
               compact={false}
               loading={usersLoading}
               showCheckbox={true}
               onSelectionChange={setSelectedFpIds}
-              autoWidth={true}
               toolbar={
                 <div ref={fpActionsRef} style={{ position:'relative' }}>
                   <button className="btn btn-outline btn-sm" onClick={()=>setFpActionsOpen(p=>!p)}>
@@ -2907,18 +2938,36 @@ const ZKTecoDeviceSettings = () => {
         const targetDevices = devices.filter(d => d.serial_number !== sourceSn);
 
         const staffColumns = [
-          { field:'pin', header:'PIN', width:70, render:v=><span style={{ fontFamily:'monospace', color:'#1a56db', fontWeight:700 }}>{v}</span> },
-          { field:'name', header:'Name', render:(v,row)=>v || row.employee_name || '—' },
+          { field:'pin', header:'PIN', width:60, render:v=><span style={{ fontFamily:'monospace', color:'#1a56db', fontWeight:700 }}>{v}</span> },
+          // Capped + wrap:true (with autoWidth below) instead of stretching to
+          // fill whatever's left — a handful of long names used to blow this
+          // column out to fill the whole panel width, leaving nothing else to
+          // balance it and reading as "not stable".
+          { field:'name', header:'Name', width:150, wrap:true, render:(v,row)=>v || row.employee_name || '—' },
+          // Distinct from Name above (the raw device-reported label) — this is
+          // the officially linked employee's real name/post/branch, blank for
+          // an unlinked PIN the same way the main Biometrics grid's own
+          // "Staff" column is.
+          { field:'employee_name', header:'Staff Name', width:150, wrap:true, render:v=>v || <span style={{ color:'#d1d5db' }}>—</span> },
+          { field:'staff_post',    header:'Post',        width:130, wrap:true, render:v=>v || <span style={{ color:'#d1d5db' }}>—</span> },
+          { field:'staff_branch',  header:'Branch',       width:130, wrap:true, render:v=>v || <span style={{ color:'#d1d5db' }}>—</span> },
         ];
         const targetColumns = [
           {
-            field:'_selected', header:'', width:36, sortable:false, filterable:false, align:'center',
-            render:(_,row) => String(row.id)===String(targetId)
-              ? <span style={{ color:'#1a56db', fontSize:16 }}>●</span>
-              : <span style={{ color:'#d1d5db', fontSize:16 }}>○</span>,
+            field:'_selected', header:'', width:28, sortable:false, filterable:false, align:'center',
+            // A real checkbox, not the dot — the dot read as a radio button
+            // (implying only one is ever pickable, which is true, but a
+            // checkbox is the more familiar affordance for "this one's
+            // selected"). onChange mirrors the row's own onRowClick below.
+            render:(_,row) => (
+              <input type="checkbox" checked={String(row.id)===String(targetId)}
+                onChange={()=>setTransferModal(p=>({ ...p, targetId: String(row.id) }))}
+                onClick={e=>e.stopPropagation()}
+                style={{ width:13, height:13, cursor:'pointer' }} />
+            ),
           },
-          { field:'area_name', header:'Area', width:130, render:v=>v || <span style={{ color:'#d1d5db' }}>—</span> },
-          { field:'serial_number', header:'Serial No.', render:(v,row)=>(
+          { field:'area_name', header:'Area', width:110, wrap:true, render:v=>v || <span style={{ color:'#d1d5db' }}>—</span> },
+          { field:'serial_number', header:'Serial No.', width:190, wrap:true, render:(v,row)=>(
             <span>
               <span style={{ fontFamily:'monospace', fontWeight:700 }}>{v || '—'}</span>
               {row.location && <span style={{ color:'#6b7280' }}> | {row.location}</span>}
@@ -2926,9 +2975,27 @@ const ZKTecoDeviceSettings = () => {
           ) },
         ];
 
+        // "Transfer To" usually has only a handful of devices (comment below
+        // already notes it's "not something worth paginating"), but shared
+        // the left panel's flat 420px height regardless — with 1-3 devices
+        // that left a large dead empty box under the list, which is what
+        // actually read as "unstable"/broken, not just "too small". Sized to
+        // content instead, capped at the same max so a large device list
+        // still aligns with the left panel rather than towering over it.
+        const targetPanelHeight = Math.min(420, Math.max(140, targetDevices.length * 44 + 60));
+
+        const allStaffSelected = sourceStaff.length > 0 && sourceStaff.every(s => checkedPins.includes(s.pin));
+
         return (
           <div className="modal-overlay">
-            <div className="modal" style={{ width:'min(1040px,97%)' }} onClick={e=>e.stopPropagation()}>
+            {/* Sized to fit its actual content (autoWidth grids below, each
+                capped at a sane column width) rather than a flat wide number
+                — that's what previously left a large blank strip to the
+                right of the "Transfer To" panel, whose 3 short columns never
+                needed anywhere near as much room as an even fr-split gave it.
+                Widened from 920 to fit staffColumns' 3 added columns (Staff
+                Name/Post/Branch). */}
+            <div className="modal" style={{ width:'min(1180px,97%)' }} onClick={e=>e.stopPropagation()}>
               <div className="modal-header">
                 <h2>{isDelete ? '🗑️➡️ Delete & Transfer Samples' : '📤 Copy / Transfer Samples'}</h2>
                 <button className="modal-close" onClick={()=>setTransferModal(null)}>✕</button>
@@ -2939,10 +3006,26 @@ const ZKTecoDeviceSettings = () => {
                     ⚠️ Each staff member checked below is copied to the target device, then <strong>deleted from the source device</strong> only once their own copy succeeds.
                   </div>
                 )}
-                <div style={{ display:'grid', gridTemplateColumns:'1.3fr 1fr', gap:16 }}>
+                {/* "Transfer To" is `auto` (sized to its own autoWidth table,
+                    3 short columns) instead of splitting available space by
+                    fr, which is what left it much wider than its content
+                    needed. "Transfer From" takes whatever's left. */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:16 }}>
                   {/* Transfer From */}
-                  <div>
-                    <label className="form-label">Transfer From</label>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
+                      <label className="form-label" style={{ marginBottom:0 }}>Transfer From</label>
+                      {sourceSn && sourceStaff.length > 0 && (
+                        <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'#374151', cursor:'pointer', userSelect:'none' }}>
+                          <input type="checkbox" checked={allStaffSelected}
+                            onChange={e => setTransferModal(p => ({
+                              ...p, checkedPins: e.target.checked ? sourceStaff.map(s => s.pin) : [],
+                            }))}
+                            style={{ width:13, height:13, cursor:'pointer' }} />
+                          Select all ({sourceStaff.length})
+                        </label>
+                      )}
+                    </div>
                     <select className="form-control" value={sourceSn}
                       onChange={e=>setTransferModal(p=>({ ...p, sourceSn:e.target.value, checkedPins:[] }))}>
                       <option value="">Select source device</option>
@@ -2957,13 +3040,18 @@ const ZKTecoDeviceSettings = () => {
                             No staff with fingerprint/face samples on this device
                           </div>
                         ) : (
-                          <div className="dg-fixed-height" style={{ height: 360 }}>
+                          <div className="dg-fixed-height" style={{ height: 420 }}>
+                            {/* Select-all header checkbox from showCheckbox only
+                                covers the current page (see the one above,
+                                which covers all ${sourceStaff.length} regardless
+                                of pagination) — kept anyway for per-row toggling. */}
                             <DataGrid
                               columns={staffColumns}
                               data={sourceStaff}
                               rowKey="pin"
                               defaultPageSize={8}
                               compact={true}
+                              autoWidth={true}
                               showCheckbox={true}
                               showFilterButton={false}
                               initialSelected={checkedPins}
@@ -2978,11 +3066,11 @@ const ZKTecoDeviceSettings = () => {
                   <div>
                     <label className="form-label">Transfer To</label>
                     {targetDevices.length === 0 ? (
-                      <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:12, border:'1px solid #e5e7eb', borderRadius:8 }}>
+                      <div style={{ padding:20, textAlign:'center', color:'#9ca3af', fontSize:12, border:'1px solid #e5e7eb', borderRadius:8, minWidth:280 }}>
                         No other devices available
                       </div>
                     ) : (
-                      <div className="dg-fixed-height" style={{ height: 360 }}>
+                      <div className="dg-fixed-height" style={{ height: targetPanelHeight }}>
                         <DataGrid
                           columns={targetColumns}
                           data={targetDevices}
@@ -2993,6 +3081,7 @@ const ZKTecoDeviceSettings = () => {
                           // footer (and its page-forward control) hidden.
                           defaultPageSize={500}
                           compact={true}
+                          autoWidth={true}
                           showCheckbox={false}
                           showFilterButton={false}
                           showSearch={false}

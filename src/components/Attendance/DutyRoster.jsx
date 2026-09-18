@@ -8,6 +8,7 @@ import { useData }     from '../../context/DataContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import Avatar          from '../Common/Avatar.jsx';
 import NepaliDatePicker, { adToISO } from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import StaffDropdown   from '../Common/StaffDropdown.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import { adToBS, bsToAD, getBSDays, getNepalNow, getNepalTodayISO, BS_MONTHS_EN, toNepaliDigits } from '../../utils/dateUtils.js';
@@ -45,15 +46,7 @@ const DateInput = ({ value, onChange }) => {
   if (settings.defaultCalendar === 'np') {
     return <NepaliDatePicker value={value} onChange={onChange} />;
   }
-  return (
-    <input
-      type="date"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7,
-        padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
-    />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} />;
 };
 
 /* ── Enter key → Tab navigation inside modals ── */

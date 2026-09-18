@@ -8,6 +8,7 @@ import { makeDateFormatter, getNepalTodayISO, formatNepalDateTime } from '../../
 import { staffRankCompare } from '../../utils/branchUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import LastSavedBy from '../Common/LastSavedBy.jsx';
@@ -18,6 +19,7 @@ import useLeaveOpening from '../../hooks/useLeaveOpening.js';
 import LeaveApproval from './LeaveApproval.jsx';
 import OfficeVisitApproval from '../OfficeVisit/OfficeVisitApproval.jsx';
 import { LeaveAdvancedFilter, DEFAULT_ADV_FILTERS } from './LeaveCalculation.jsx';
+import { isHolidayForEmployee } from '../../utils/holidayScope.js';
 
 /* date picker that respects settings.defaultCalendar and settings.leaveBackdateEnabled —
    allowPast overrides the block regardless of that setting, for Admin Manual Posting
@@ -27,12 +29,7 @@ const LeaveDateInput = ({ value, onChange, error, settings, allowPast }) => {
   if (settings.defaultCalendar === 'np') {
     return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
   }
-  return (
-    <input type="date" className={`form-control ${error ? 'error' : ''}`}
-      value={value} min={blockPast ? getNepalTodayISO() : undefined}
-      onChange={e => onChange(e.target.value)}
-      style={{ fontSize:13 }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
 };
 
 /* ─────────── shared badge — language-aware ─────────── */
@@ -380,6 +377,16 @@ const LeavePanel = () => {
     return ids.length ? ids.map(id => getEmployeeName(id)).join(', ') : '—';
   };
 
+  // Avatar + name for exactly one person — the grid's Recommendator/Approval
+  // columns show only whoever this one application actually names, not
+  // every configured candidate (see the column definitions' own comment).
+  const personCellForLeave = (id) => id ? (
+    <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+      <Avatar photo={getEmployeeById(id)?.profilePhoto} name={getEmployeeName(id)} size={20} />
+      <span style={{ fontSize:12, color:'#374151' }}>{getEmployeeName(id)}</span>
+    </span>
+  ) : <span style={{ color:'#d1d5db', fontSize:12 }}>—</span>;
+
   // Whether the current user is configured as recommender/approver for
   // ANYONE at all — gates the "Pending for Approvals" link to Leave
   // Approval below, alongside isManager. Without this, someone individually
@@ -470,12 +477,17 @@ const LeavePanel = () => {
     return ws.map(d => map[d]).filter(d => d !== undefined);
   }, [settings.defaultWeekends]);
 
-  /* public holiday date strings */
-  const holidaySet = useMemo(() => {
-    const s = new Set();
-    (settings.publicHolidays || []).forEach(h => { if (h.date) s.add(h.date.split('T')[0]); });
-    return s;
-  }, [settings.publicHolidays]);
+  // Public holidays are stored as a startDate→endDate range (there is no
+  // `h.date` field — this used to build an always-empty set, so
+  // "Reduce Public Holiday" never actually deducted anything), and can be
+  // scoped to a Gender/Branch/Department/Religion/Handicapped subset — so
+  // this checks currentUser (this page is always self-service, employeeId
+  // is always currentUser.id — see addLeave calls below) against each
+  // holiday's own scope via isHolidayForEmployee, same as every report now does.
+  const isHoliday = useCallback(
+    (ds) => isHolidayForEmployee(settings, ds, currentUser),
+    [settings, currentUser]
+  );
 
   /* reco/approval — live from the API (useRecoApproval above) */
   const getMyRecoApproval = useCallback(() => ({
@@ -499,11 +511,11 @@ const LeavePanel = () => {
     for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
       if (selectedLtConfig?.reduceWeekend && weekendDays.includes(d.getDay())) continue;
       const ds = d.toISOString().split('T')[0];
-      if (selectedLtConfig?.reducePublicHoliday && holidaySet.has(ds)) continue;
+      if (selectedLtConfig?.reducePublicHoliday && isHoliday(ds)) continue;
       count++;
     }
     return count;
-  }, [applyForm.fromDate, applyForm.toDate, applyForm.halfDay, selectedLtConfig, weekendDays, holidaySet]);
+  }, [applyForm.fromDate, applyForm.toDate, applyForm.halfDay, selectedLtConfig, weekendDays, isHoliday]);
 
   /* service period check — how many times this leave has been taken */
   const timesAlreadyTaken = useMemo(() => {
@@ -700,10 +712,16 @@ const LeavePanel = () => {
     { field: 'days',          header: t('Days'),         width: 45, minWidth: 45, align:'center', render: v => <strong style={{ color:'#1a56db' }}>{(isNaN(Number(v)) || v === null || v === undefined) ? '—' : v}</strong> },
     { field: 'appliedDate',   header: t('Applied Date'), width: 110, render: v => fd(v) },
     { field: 'status',        header: t('Status'),       width: 110, render: v => <StatusBadge status={v} /> },
+    // Shows only the one recommender/approver this specific application
+    // actually names — recommendedBy/approvedBy once someone has acted,
+    // otherwise the recoId/approvalId the applicant picked at apply time
+    // (see migration 142) — NOT recoApprovalNamesForLeave's full configured
+    // candidate list (used elsewhere, e.g. the printable pending-approval
+    // slip, where every possible signer is genuinely relevant).
     { field: 'recommendatorNames', header: 'Recommendator', width: 150, sortable:false, filterable:false,
-      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForLeave(row.employeeId, 'reco')}</span> },
+      render: (_, row) => personCellForLeave(row.recommendedBy || row.recoId) },
     { field: 'approvalNames', header: 'Approval', width: 150, sortable:false, filterable:false,
-      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForLeave(row.employeeId, 'approval')}</span> },
+      render: (_, row) => personCellForLeave(row.approvedBy || row.approvalId) },
   ];
 
   /* ── Rejection notifications ── */
@@ -2277,6 +2295,15 @@ const VisitPanel = () => {
     return ids.length ? ids.map(id => getEmployeeName(id)).join(', ') : '—';
   };
 
+  // Avatar + name for exactly one person — see personCellForLeave's
+  // identical comment above.
+  const personCellForVisit = (id) => id ? (
+    <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+      <Avatar photo={getEmployeeById(id)?.profilePhoto} name={getEmployeeName(id)} size={20} />
+      <span style={{ fontSize:12, color:'#374151' }}>{getEmployeeName(id)}</span>
+    </span>
+  ) : <span style={{ color:'#d1d5db', fontSize:12 }}>—</span>;
+
   // Same "Pending for Approvals" visibility fix as the Leave section above —
   // see hasAnyRecoAssignmentLeave's comment.
   const hasAnyRecoAssignmentVisit = Object.entries(visitRecoConfig).some(([key, cfg]) => {
@@ -2435,10 +2462,12 @@ const VisitPanel = () => {
     { field: 'toDate',      header: t('To Date'),       width: 110, render: v => fd(v) },
     { field: 'appliedDate', header: t('Applied Date'),  width: 110, render: v => fd(v) },
     { field: 'status',      header: t('Status'),        width: 110, render: v => <StatusBadge status={v} /> },
+    // Only the one recommender/approver this application actually names —
+    // see the identical Leave columns' comment above.
     { field: 'recommendatorNames', header: 'Recommendator', width: 150, sortable:false, filterable:false,
-      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForVisit(row.employeeId, 'reco')}</span> },
+      render: (_, row) => personCellForVisit(row.recommendedBy || row.recoId) },
     { field: 'approvalNames', header: 'Approval', width: 150, sortable:false, filterable:false,
-      render: (_, row) => <span style={{ fontSize:12, color:'#6b7280' }}>{recoApprovalNamesForVisit(row.employeeId, 'approval')}</span> },
+      render: (_, row) => personCellForVisit(row.approvedBy || row.approvalId) },
   ];
 
   /* ── OV rejection notifications ── */

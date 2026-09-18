@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
@@ -49,6 +49,16 @@ const LeaveApproval = ({ embedded = false } = {}) => {
   const [actionModal, setActionModal] = useState(null); // { id, type: 'approve'|'reject'|'recommend', leave }
   const [comment,     setComment]     = useState('');
   const [toast,       setToast]       = useState(null);
+  // Reason is truncated in the grid itself (see the reason column's render
+  // below) so the table fits the screen without a horizontal scrollbar —
+  // the full text shows in the panel below the grid instead. selectedReason
+  // is "sticky" (set by clicking a row, defaults to the first row) so
+  // there's always something there; hoverReason is a temporary override
+  // while the pointer is over a row's Reason cell, falling back to the
+  // selection once it leaves. Same convention as Missing Attendance
+  // Requests' identical Reason column.
+  const [selectedReason, setSelectedReason] = useState(null);
+  const [hoverReason,    setHoverReason]    = useState(null);
 
   /* ── Load reco config ── */
   const { assignments: recoConfig } = useRecoApproval();
@@ -119,6 +129,26 @@ const LeaveApproval = ({ embedded = false } = {}) => {
   const pendingLeaves  = myLeaves.filter(l => l.status === 'pending');
   const allLeaves      = [...myLeaves].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));
 
+  // Default selection is the first row, so the Reason panel below the grid
+  // is never empty on load — re-applied whenever the underlying data
+  // changes (e.g. after an approve/reject reloads it).
+  useEffect(() => {
+    setSelectedReason(allLeaves.length ? allLeaves[0].reason : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allLeaves[0]?.id, allLeaves.length]);
+
+  // Truncated inline, full text shown in the panel below the grid — keeps
+  // the Reason column narrow enough that the table fits the screen width
+  // instead of needing a horizontal scrollbar.
+  const reasonCell = (v) => v ? (
+    <span
+      onMouseEnter={() => setHoverReason(v)}
+      onMouseLeave={() => setHoverReason(null)}
+      style={{ display: 'block', maxWidth: 'clamp(140px, 18vw, 320px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default' }}>
+      {v}
+    </span>
+  ) : <span style={{ color: '#d1d5db' }}>—</span>;
+
   /* ── Grid columns ── */
   const columns = [
     { field:'employeeId',    header:t('Name'),         width:150, render:v=><span style={{ fontWeight:600, color:'#111827' }}>{getEmployeeName(v)}</span> },
@@ -131,7 +161,7 @@ const LeaveApproval = ({ embedded = false } = {}) => {
     { field:'fromDate',    header:t('From Date'),    width:110, render:v=>fd(v) },
     { field:'toDate',      header:t('To Date'),      width:110, render:v=>fd(v) },
     { field:'days',        header:t('Days'),         width:60,  align:'center', render:v=><strong style={{ color:'#1a56db' }}>{v}</strong> },
-    { field:'reason',      header:t('Reason'),       width:140 },
+    { field:'reason',      header:t('Reason'),       width:220, sortable:false, render:v=>reasonCell(v) },
     { field:'appliedDate', header:t('Applied Date'), width:110, render:v=>fd(v) },
     { field:'status',      header:t('Status'),       width:120, render:(v, row)=>(
       <div>
@@ -154,11 +184,16 @@ const LeaveApproval = ({ embedded = false } = {}) => {
           return <span style={{ fontSize:12, color:'#9ca3af' }}>{row.status==='approved'?'✅':'❌'} {getEmployeeName(row.approvedBy)}</span>;
         }
         return (
-          <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-            {/* Recommend button */}
+          <div style={{ display:'flex', gap:4, flexWrap:'nowrap' }}>
+            {/* Recommend button — width/height:auto overrides .dg-action-btn's
+                fixed 22x20 square (sized for the icon-only ✓/✗ buttons below),
+                which was clipping this button's actual text ("👍 Reco") down
+                to a sliver. Previously invisible only because the Reason
+                column's old unbounded width pushed this whole column off
+                the visible area, forcing a horizontal scroll to even see it. */}
             {amReco && !alreadyReco && (
               <button className="dg-action-btn" title="Recommend"
-                style={{ background:'#059669', color:'white', border:'none', fontSize:12, padding:'3px 8px', borderRadius:4, cursor:'pointer' }}
+                style={{ width:'auto', height:'auto', background:'#059669', color:'white', border:'none', fontSize:12, padding:'3px 8px', borderRadius:4, cursor:'pointer' }}
                 onClick={e => { e.stopPropagation(); setActionModal({ id:row.id, type:'recommend', leave:row }); setComment(''); }}>
                 👍 Reco
               </button>
@@ -306,7 +341,25 @@ const LeaveApproval = ({ embedded = false } = {}) => {
 
       {/* Full grid */}
       <DataGrid columns={columns} data={allLeaves} defaultPageSize={10}
-        showSearch={true} searchPlaceholder={t('Search')+'...'} title={t('Leave Applications')} compact={true} />
+        showSearch={true} searchPlaceholder={t('Search')+'...'} title={t('Leave Applications')} compact={true}
+        onRowClick={row => setSelectedReason(row.reason)} />
+
+      {/* Full Reason text — the grid's own Reason column is truncated to keep
+          the table from needing a horizontal scrollbar. Clicking a row
+          "selects" it (defaults to the first row so this is never empty);
+          hovering any row's Reason cell temporarily previews that row's
+          text here instead, reverting to the selection once the pointer
+          leaves. Same convention as Missing Attendance Requests. */}
+      {(() => {
+        const shown = hoverReason ?? selectedReason;
+        return (
+          <div style={{ marginTop: 12, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+            padding: '10px 14px', minHeight: 40, fontSize: 13, color: shown ? '#374151' : '#9ca3af' }}>
+            <strong style={{ color: '#374151', marginRight: 6 }}>{t('Reason')}:</strong>
+            {shown || t('No applications to show.')}
+          </div>
+        );
+      })()}
 
       {/* Action Modal */}
       {actionModal && (

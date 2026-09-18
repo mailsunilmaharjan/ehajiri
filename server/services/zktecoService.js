@@ -140,9 +140,23 @@ export async function recoverGapIfNeeded(sn, previousLastSeen) {
 }
 
 export async function getNextCommand(deviceSn) {
+  // Bulk template restores (DATA UPDATE FINGERTMP / BIOPHOTO) carry a full
+  // base64 template per row and are the known cause of multi-minute FIFO
+  // clogs (e.g. autoRestoreTemplates() after a reboot can queue 50+ of
+  // these — "Get All Logs takes 25+ min" per the note above). A device only
+  // pulls one command per poll cycle, so a live admin waiting on ENROLL_FP/
+  // ENROLL_BIO would otherwise sit behind that whole backlog. Sink those two
+  // bulky types to the back of this device's queue; everything else
+  // (enroll, user upload/delete, unlock, etc.) still runs oldest-first.
   const { rows } = await pool.query(
     `SELECT id, command_payload FROM zkteco_commands
-     WHERE device_sn=$1 AND status='PENDING' ORDER BY created_at ASC LIMIT 1`,
+     WHERE device_sn=$1 AND status='PENDING'
+     ORDER BY
+       CASE WHEN command_payload LIKE 'C:%:DATA UPDATE FINGERTMP%'
+              OR command_payload LIKE 'C:%:DATA UPDATE BIOPHOTO%'
+            THEN 1 ELSE 0 END,
+       created_at ASC
+     LIMIT 1`,
     [deviceSn]
   );
   return rows[0] || null;
@@ -398,10 +412,22 @@ export async function saveDeviceUser(deviceSn, kv) {
   const empRes    = await pool.query('SELECT id FROM users WHERE device_id=$1 LIMIT 1', [pin]);
   const employeeId = empRes.rows[0]?.id || null;
 
+  // zkteco_users.area_id was added (migration 19) purely so syncAreaToDevice
+  // could look up "everyone in this Area" — but this INSERT never set it, so
+  // every row's area_id stayed NULL forever and that WHERE area_id=$1 query
+  // matched nothing, silently. Same-Area devices could drift indefinitely
+  // (an on-device walk-up enrollment cascades to siblings once via
+  // cascadeToAreaSiblings — see below — but if a device joined the Area
+  // *after* another already had users, no "new row" event ever fires for
+  // that pre-existing gap, and "Sync Area" was the intended manual backfill
+  // for exactly that case, except it always found zero users).
+  const devRes  = await pool.query('SELECT area_id FROM zkteco_devices WHERE serial_number=$1', [deviceSn]);
+  const areaId  = devRes.rows[0]?.area_id || null;
+
   const { rows } = await pool.query(
     `INSERT INTO zkteco_users
-       (device_sn, pin, name, privilege, card_no, fp_count, face_count, passwd, employee_id, last_sync)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+       (device_sn, pin, name, privilege, card_no, fp_count, face_count, passwd, employee_id, area_id, last_sync)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
      ON CONFLICT (device_sn, pin) DO UPDATE SET
        name        = EXCLUDED.name,
        privilege   = EXCLUDED.privilege,
@@ -410,9 +436,10 @@ export async function saveDeviceUser(deviceSn, kv) {
        face_count  = EXCLUDED.face_count,
        passwd      = EXCLUDED.passwd,
        employee_id = COALESCE(EXCLUDED.employee_id, zkteco_users.employee_id),
+       area_id     = COALESCE(EXCLUDED.area_id, zkteco_users.area_id),
        last_sync   = NOW()
      RETURNING (xmax = 0) AS is_new_row`,
-    [deviceSn, pin, name, privilege, card, fpCount, faceCount, passwd, employeeId]
+    [deviceSn, pin, name, privilege, card, fpCount, faceCount, passwd, employeeId, areaId]
   );
 
   // Only for a genuinely new person on this device — an enrollment done
@@ -513,6 +540,10 @@ async function cascadeToAreaSiblings(originSn, pin) {
     'SELECT * FROM zkteco_fingerprints WHERE pin=$1 AND template_data IS NOT NULL ORDER BY finger_id',
     [pin]
   );
+  const { rows: faceTmps } = await pool.query(
+    'SELECT * FROM zkteco_face_templates WHERE pin=$1 AND template_data IS NOT NULL ORDER BY face_id',
+    [pin]
+  );
 
   const uParams = `PIN=${pin}\tName=${u.name || ''}\tPri=${u.privilege || 0}\tPasswd=${u.passwd || ''}\tCard=${u.card_no || ''}\tGrp=1\tTZ=0000000000000000\tVerify=0`;
   for (const sib of siblings) {
@@ -520,6 +551,9 @@ async function cascadeToAreaSiblings(originSn, pin) {
     for (const fp of fps) {
       const fpParams = `PIN=${fp.pin}\tFID=${fp.finger_id}\tSize=${fp.template_size}\tValid=${fp.valid || 1}\tTMP=${fp.template_data}`;
       await queueCommand(sib.serial_number, 'DATA UPDATE FINGERTMP', fpParams);
+    }
+    for (const face of faceTmps) {
+      await pushFaceTemplateToDevice(sib.serial_number, face.pin, face.face_id, face.template_size, face.valid || 1, face.template_data);
     }
     await recordPushedUserLocally(sib.serial_number,
       { pin, name: u.name, privilege: u.privilege, cardNo: u.card_no, employeeId: u.employee_id, facePhoto: u.face_photo },
@@ -578,6 +612,62 @@ export async function saveFingerprintRecord(deviceSn, kv) {
     await cascadeToAreaSiblings(deviceSn, pin).catch(err =>
       console.error(`[ZK Area] cascadeToAreaSiblings (new fingerprint) failed for PIN=${pin}:`, err.message || err));
   }
+}
+
+/**
+ * Mirrors saveFingerprintRecord above, for face templates. Per the official
+ * Attendance PUSH Communication Protocol (2025-04-29) §11.10, a device
+ * reports an enrolled/updated face template back as an OPERLOG line
+ * "FACE PIN=X FID=Y SIZE=Z VALID=W TMP=<base64>" — previously unhandled by
+ * classifyLines() in routes/zkteco.js, so every such line fell into the
+ * plain-attendance catch-all (parseAttlog misread it as a punch-in record,
+ * corrupting attendance_logs) and the template itself was just discarded.
+ */
+export async function saveFaceTemplateRecord(deviceSn, kv) {
+  const pin     = kv.PIN;
+  const faceId  = parseInt(kv.FID)  || 0;
+  const size    = parseInt(kv.Size) || 0;
+  const valid   = parseInt(kv.Valid) ?? 1;
+  const tmpData = kv.TMP || null;
+
+  if (!pin) return;
+
+  let realSize = size;
+  if (tmpData) {
+    try { realSize = Buffer.byteLength(tmpData, 'base64'); } catch { realSize = size; }
+  }
+
+  const existing = await pool.query(
+    'SELECT template_data FROM zkteco_face_templates WHERE device_sn=$1 AND pin=$2 AND face_id=$3',
+    [deviceSn, pin, faceId]
+  );
+  const hadTemplate = !!existing.rows[0]?.template_data;
+
+  await pool.query(
+    `INSERT INTO zkteco_face_templates (device_sn,pin,face_id,template_size,valid,template_data,enrolled_at)
+     VALUES ($1,$2,$3,$4,$5,$6,NOW())
+     ON CONFLICT (device_sn,pin,face_id) DO UPDATE SET
+       template_size = EXCLUDED.template_size,
+       valid         = EXCLUDED.valid,
+       template_data = COALESCE(EXCLUDED.template_data, zkteco_face_templates.template_data),
+       enrolled_at   = NOW()`,
+    [deviceSn, pin, faceId, realSize, valid, tmpData]
+  );
+
+  if (tmpData && !hadTemplate) {
+    await cascadeToAreaSiblings(deviceSn, pin).catch(err =>
+      console.error(`[ZK Area] cascadeToAreaSiblings (new face template) failed for PIN=${pin}:`, err.message || err));
+  }
+}
+
+/**
+ * Push a face template to a device — Guide §12.1.1.4 DATA UPDATE FACE.
+ * NOTE the field order differs from FINGERTMP: Valid comes before Size here.
+ */
+export async function pushFaceTemplateToDevice(deviceSn, pin, faceId, templateSize, valid, templateData) {
+  return queueCommand(deviceSn, 'DATA UPDATE FACE',
+    `PIN=${pin}\tFID=${faceId}\tValid=${valid ?? 1}\tSize=${templateSize}\tTMP=${templateData}`
+  );
 }
 
 // ── Device info ────────────────────────────────────────────────────────────
@@ -736,16 +826,6 @@ export async function cancelAlarm(deviceSn) {
 }
 
 /**
- * Java: enrollFingerprint(deviceSN, userPin, userName, fingerId, retry, overwrite)
- * Guide §5: ENROLL_FP
- */
-export async function enrollFingerprint(deviceSn, pin, name = '', fingerId = 0, retry = 3, overwrite = 1) {
-  return queueCommand(deviceSn, 'ENROLL_FP',
-    `PIN=${pin}\tName=${name}\tFID=${fingerId}\tRETRY=${retry}\tOVERWRITE=${overwrite}`
-  );
-}
-
-/**
  * Java: enrollCard(deviceSN, userPin, retry)
  * Card enrollment command (some firmware supports ENROLL_ID)
  */
@@ -788,14 +868,28 @@ export function buildInitResponse(sn, stamp = null, tzOffset = 345) {
     `ATTPHOTOStamp=0`,
     `IDCARDStamp=0`,
     `ERRORLOGStamp=0`,
-    `ErrorDelay=60`,
-    `Delay=5`,
+    // ErrorDelay: seconds before the device retries after a network
+    // disconnect/error. Was 60 — the "Brief Analysis of TA Push Protocol"
+    // reference doc's own example uses 10; any transient network blip was
+    // costing a full extra minute of the device looking "stuck" before it
+    // even retried, on top of normal poll latency.
+    `ErrorDelay=10`,
+    `Delay=5`, // heartbeat interval — doc recommends 1-5s; already at that range's ceiling
     `TimeZone=${tzOffset}`,
     `transTimes=00:00;14:05`, // lowercase 't' — CRITICAL per guide
     `TransInterval=1`,
-    // TransFlag=1111000000 per guide (bits 1-4 = AttLog, OpLog, AttPhoto, EnrollFP)
-    // 1111000000 ensures ENROLL_FP returns templates; extra bits ignored on most firmware
-    `TransFlag=1111000000`,
+    // TransFlag is a 12-position bitmask (doc: 1=attlog 2=oplog 3=attphoto
+    // 4=new-fingerprint 5=new-user 6=fingerprint-picture 7=modify-user
+    // 8=modify-fingerprint 9=new-face 10=user-photo 11=workcode 12=biophoto).
+    // Was "1111000000" — only 10 digits, with positions 8 and 9 (modify
+    // fingerprint / newly registered FACE) both off. That means a face or a
+    // re-enrolled/overwritten fingerprint captured on the device — including
+    // via this app's own Enroll Face / Enroll FP (OVERWRITE=1) commands —
+    // was never proactively reported back via OPERLOG; only a manual
+    // "Get All Users" pull would ever pick it up. All 12 on, matching the
+    // doc's own reference value, so every enrollment/modification type
+    // reaches the server on its own.
+    `TransFlag=111111111111`,
     `Realtime=1`,
     `Encrypt=None`,  // guide §1 specifies Encrypt=None
     `ServerVer=2.4.1`,

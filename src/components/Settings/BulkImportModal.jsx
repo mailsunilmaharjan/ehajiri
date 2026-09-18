@@ -27,9 +27,14 @@ const BulkImportModal = ({ open, onClose, title, hasShortName, nextRankingOrder,
   const [text,   setText]   = useState('');
   const [result, setResult] = useState(null); // { added, skipped } once imported
 
-  if (!open) return null;
-
+  // Hooks must run on every render regardless of `open` — this component
+  // stays mounted the whole time and only toggles `open`, so an early
+  // `return null` before a hook call would skip that hook on closed renders
+  // and throw "Rendered more hooks than during the previous render" (React
+  // error #310) the moment it opens.
   const rows = useMemo(() => parsePaste(text, hasShortName, nextRankingOrder), [text, hasShortName, nextRankingOrder]);
+
+  if (!open) return null;
 
   const handleClose = () => { setText(''); setResult(null); onClose(); };
   const handleImport = () => {

@@ -91,14 +91,18 @@ const MissingAttendanceRequests = () => {
     finally { setBusy(false); }
   };
 
-  // Truncated inline, full text shown in the panel below the grid on hover —
-  // keeps the Reason column narrow enough that the table fits the screen
-  // width instead of needing a horizontal scrollbar.
+  // Truncated inline, full text shown in the panel below the grid on hover.
+  // The column itself is `fill: true` below so it stretches to soak up
+  // whatever width the other (fixed-width) columns don't need instead of
+  // leaving blank space to the right of the grid — the truncation point
+  // here scales with the viewport (clamp'd between a floor and ceiling)
+  // to roughly track that, same convention as Daily Attendance Report's
+  // Remarks column.
   const reasonCell = (v) => v ? (
     <span
       onMouseEnter={() => setHoverReason(v)}
       onMouseLeave={() => setHoverReason(null)}
-      style={{ display: 'block', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default' }}>
+      style={{ display: 'block', maxWidth: 'clamp(140px, 18vw, 320px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default' }}>
       {v}
     </span>
   ) : <span style={{ color: '#d1d5db' }}>—</span>;
@@ -118,7 +122,7 @@ const MissingAttendanceRequests = () => {
     { field: 'date',         header: 'Date',       width: 110, render: v => fd(v) },
     { field: 'checkIn',      header: 'Check In',   width: 90 },
     { field: 'checkOut',     header: 'Check Out',  width: 90 },
-    { field: 'reason',       header: 'Reason',     width: 140, render: v => reasonCell(v) },
+    { field: 'reason',       header: 'Reason',     width: 140, fill: true, render: v => reasonCell(v) },
     { field: 'recommendedByName', header: 'Recommendator', width: 140, render: (v, r) => v || (r.recommendedBy ? getEmpName(r.recommendedBy) : '—') },
     { field: 'approvedByName',    header: 'Approver',      width: 140, render: (v, r) => v || (r.approvedBy ? getEmpName(r.approvedBy) : '—') },
     { field: 'status',       header: 'Status',     width: 110, render: v => <StatusBadge status={v} /> },
@@ -158,7 +162,7 @@ const MissingAttendanceRequests = () => {
     { field: 'date',     header: 'Date',      width: 110, render: v => fd(v) },
     { field: 'checkIn',  header: 'Check In',  width: 90 },
     { field: 'checkOut', header: 'Check Out', width: 90 },
-    { field: 'reason',   header: 'Reason',    width: 140, render: v => reasonCell(v) },
+    { field: 'reason',   header: 'Reason',    width: 140, fill: true, render: v => reasonCell(v) },
     { field: 'recommendedByName', header: 'Recommendator', width: 140, render: (v, r) => v || (r.recommendedBy ? getEmpName(r.recommendedBy) : '—') },
     { field: 'approvedByName',    header: 'Approver',      width: 140, render: (v, r) => v || (r.approvedBy ? getEmpName(r.approvedBy) : '—') },
     { field: 'status',   header: 'Status',    width: 110, render: v => <StatusBadge status={v} /> },

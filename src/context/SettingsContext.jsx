@@ -79,8 +79,8 @@ const DEFAULT_SETTINGS = {
 
   /* ── Leave Type Configuration ── */
   leaveTypeConfigs: [
-    { id:1, name:'Annual Leave', shortName:'AL', daysPerYear:20, reduceWeekend:false, reducePublicHoliday:false, provideOnlyOnBalance:false, genderFor:['All'], modeFor:['All'], carryForward:true, maxAccumulateDays:30, isServicePeriod:false, timesPerService:null, autoAccumulate:true },
-    { id:2, name:'Sick Leave',   shortName:'SL', daysPerYear:12, reduceWeekend:false, reducePublicHoliday:false, provideOnlyOnBalance:true,  genderFor:['All'], modeFor:['All'], carryForward:false,maxAccumulateDays:null,isServicePeriod:false, timesPerService:null, autoAccumulate:true },
+    { id:1, name:'Annual Leave', shortName:'AL', daysPerYear:20, reduceWeekend:false, reducePublicHoliday:false, provideOnlyOnBalance:false, genderFor:['All'], modeFor:['All'], carryForward:true, maxAccumulateDays:30, isServicePeriod:false, timesPerService:null, autoAccumulate:false },
+    { id:2, name:'Sick Leave',   shortName:'SL', daysPerYear:12, reduceWeekend:false, reducePublicHoliday:false, provideOnlyOnBalance:true,  genderFor:['All'], modeFor:['All'], carryForward:false,maxAccumulateDays:null,isServicePeriod:false, timesPerService:null, autoAccumulate:false },
     { id:3, name:'Casual Leave', shortName:'CL', daysPerYear:6,  reduceWeekend:false, reducePublicHoliday:false, provideOnlyOnBalance:true,  genderFor:['All'], modeFor:['All'], carryForward:false,maxAccumulateDays:null,isServicePeriod:false, timesPerService:null, autoAccumulate:false },
   ],
 

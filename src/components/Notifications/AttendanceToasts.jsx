@@ -2,11 +2,11 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
-import { useBeepAlert } from '../../hooks/useBeepAlert.js';
+import { useBeepAlert, useTaskAssignedBeepAlert } from '../../hooks/useBeepAlert.js';
 import api, { apiUrl } from '../../api/client.js';
 
 /* ── Notification Context ──────────────────────────────────── */
-const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {}, taskCount: 0, clearTaskCount: () => {}, fieldVisitTaskCount: 0, clearFieldVisitTaskCount: () => {}, refreshTaskCounts: () => {} });
+const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {}, taskCount: 0, clearTaskCount: () => {}, fieldVisitTaskCount: 0, clearFieldVisitTaskCount: () => {}, refreshTaskCounts: () => {}, clearTaskAlert: () => {} });
 export const useNotifications = () => useContext(NotiCtx);
 
 /* ── Attendance Toast Card ─────────────────────────────────── */
@@ -125,10 +125,22 @@ const TASK_EVENT_META = {
 
 const TaskToast = ({ noti, onClose }) => {
   const navigate = useNavigate();
+  const { refreshTaskCounts, clearTaskAlert } = useNotifications();
   const meta = TASK_EVENT_META[noti.event] || TASK_EVENT_META.assigned;
   const detail = noti.event === 'status_changed' && noti.status
     ? `Marked ${noti.status.replace('_', ' ')} by `
     : `${meta.verb} by `;
+  // Closing this popup at all — ✕, Dismiss, or View — counts as "seen it",
+  // same as opening the task itself in TaskList.jsx (see markTaskRead there).
+  // Without this, dismissing the popup left the underlying notification
+  // unread server-side, so the nav badge and the beep alert (driven by
+  // newTaskAlertIds, see the provider below) kept going even after every
+  // popup the user could see had already been closed.
+  const dismiss = () => {
+    onClose(noti.id);
+    clearTaskAlert(noti.taskId);
+    api.post(`/tasks/${noti.taskId}/notifications/read`).then(refreshTaskCounts).catch(() => {});
+  };
   return (
     <div style={{
       width: 320, background: 'white',
@@ -145,7 +157,7 @@ const TaskToast = ({ noti, onClose }) => {
         <span style={{ fontSize:11, fontWeight:700, color: meta.color, flex:1 }}>
           {meta.label}
         </span>
-        <button onClick={() => onClose(noti.id)}
+        <button onClick={dismiss}
           style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 4px',
             color:'#9ca3af', fontSize:16, lineHeight:1 }}>✕</button>
       </div>
@@ -156,13 +168,13 @@ const TaskToast = ({ noti, onClose }) => {
         </div>
       </div>
       <div style={{ padding:'0 14px 12px', display:'flex', gap:8 }}>
-        <button onClick={() => onClose(noti.id)}
+        <button onClick={dismiss}
           style={{ flex:1, padding:'6px 0', border:'1px solid #e5e7eb',
             borderRadius:7, background:'white', color:'#374151', fontSize:12, fontWeight:600, cursor:'pointer' }}>
           Dismiss
         </button>
         <button onClick={() => {
-            onClose(noti.id);
+            dismiss();
             // A brand-new assignment opens straight into the Task form itself
             // (nothing to follow up on yet); every other event — completed,
             // status/description changed, a new followup logged — opens the
@@ -260,6 +272,21 @@ export function AttendanceNotificationProvider({ children }) {
   // field-visit task's notification increments only this one, never both),
   // mirroring GET /tasks/notifications/count's own count/fieldVisitCount split.
   const [fieldVisitTaskCount, setFieldVisitTaskCount] = useState(0);
+  // Task ids with a live, still-unseen "assigned" or "new followup" event —
+  // the only two task events that beep (see useTaskAssignedBeepAlert below);
+  // completed/status/description-change events still toast + badge, just
+  // silently. Only ever populated by the SSE handler below (never seeded
+  // from the notifications/count fetch on mount), so a reload doesn't
+  // re-trigger sound for something that arrived in an earlier session.
+  const [newTaskAlertIds, setNewTaskAlertIds] = useState(() => new Set());
+  const clearTaskAlert = useCallback((taskId) => {
+    setNewTaskAlertIds(prev => {
+      if (!prev.has(String(taskId))) return prev;
+      const next = new Set(prev);
+      next.delete(String(taskId));
+      return next;
+    });
+  }, []);
   const esRef = useRef(null);
 
   // useAuth is available here because AuthProvider wraps everything above Layout
@@ -355,16 +382,14 @@ export function AttendanceNotificationProvider({ children }) {
   // Keeps beeping every few seconds while there's at least one unseen broadcast
   // message — stops the instant msgCount is cleared (user opens the inbox).
   useBeepAlert(msgCount > 0);
-  // Same "keeps beeping until seen" behavior for task notifications (assigned/
-  // completed/status/description changed) — stops the instant taskCount is
-  // cleared, which happens when the user actually opens the Task page (see
-  // clearTaskCount() in TaskList.jsx), not just from dismissing one popup —
-  // same convention as the message beep above.
-  useBeepAlert(taskCount > 0);
-  // Field Visit notifications beep on their own — a field-visit task's event
-  // only ever increments fieldVisitTaskCount (never taskCount, see the SSE
-  // handler below), so without this they'd be silent.
-  useBeepAlert(fieldVisitTaskCount > 0);
+  // Task notifications use the less-naggy assignment cadence instead (5
+  // beeps, then 2 every 5 minutes) — see useTaskAssignedBeepAlert and
+  // newTaskAlertIds above. Covers both the regular Task badge and the Field
+  // Visit badge alike (isFieldVisit is just which counter/badge a task's
+  // event goes to, not a different sound), stopping per-task the instant
+  // clearTaskAlert(taskId) runs (task opened/dismissed — see TaskList.jsx
+  // and TaskToast above).
+  useTaskAssignedBeepAlert(newTaskAlertIds.size > 0);
 
   useEffect(() => {
     const connect = () => {
@@ -399,6 +424,13 @@ export function AttendanceNotificationProvider({ children }) {
               // Mutually exclusive with taskCount, matching GET /tasks/notifications/count's split.
               if (data.isFieldVisit) setFieldVisitTaskCount(c => c + 1);
               else setTaskCount(c => c + 1);
+              // Only these two events are worth an audible alert (see
+              // useTaskAssignedBeepAlert) — a brand-new assignment or a new
+              // followup on one of your tasks. Status/completion/description
+              // changes still toast + badge above, just silently.
+              if (data.event === 'assigned' || data.event === 'followup_added') {
+                setNewTaskAlertIds(prev => new Set(prev).add(String(data.taskId)));
+              }
               if ('Notification' in window && Notification.permission === 'granted') {
                 const meta = TASK_EVENT_META[data.event] || TASK_EVENT_META.assigned;
                 const verb = data.event === 'status_changed' && data.status
@@ -408,7 +440,14 @@ export function AttendanceNotificationProvider({ children }) {
                   icon: '/favicon.ico',
                   tag: `task-${data.taskId}-${data.event}`,
                 });
-                n.onclick = () => { window.focus(); n.close(); };
+                // Same "seen it" convention as the in-app toast's dismiss/View
+                // (see TaskToast above) — otherwise clicking the OS-level
+                // notification alone (tab not focused) leaves the beep going.
+                n.onclick = () => {
+                  window.focus(); n.close();
+                  clearTaskAlert(data.taskId);
+                  api.post(`/tasks/${data.taskId}/notifications/read`).then(refreshTaskCounts).catch(() => {});
+                };
               }
             }
           }
@@ -421,7 +460,7 @@ export function AttendanceNotificationProvider({ children }) {
   }, [add, currentUser?.id]);
 
   return (
-    <NotiCtx.Provider value={{ add, remove, msgCount, clearMsgCount, taskCount, clearTaskCount, fieldVisitTaskCount, clearFieldVisitTaskCount, refreshTaskCounts }}>
+    <NotiCtx.Provider value={{ add, remove, msgCount, clearMsgCount, taskCount, clearTaskCount, fieldVisitTaskCount, clearFieldVisitTaskCount, refreshTaskCounts, clearTaskAlert }}>
       {children}
       <ToastContainer notifications={notifications} onClose={remove} />
     </NotiCtx.Provider>

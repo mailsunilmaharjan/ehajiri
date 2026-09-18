@@ -92,6 +92,8 @@ const toVisit = r => ({
   recommendedDate: r.recommended_date,
   recommendedAt  : r.recommended_at,
   recommendComment: r.recommend_comment,
+  recoId         : r.reco_id,
+  approvalId     : r.approval_id,
   isManual      : !!r.is_manual,
   updatedBy     : r.updated_by,
   updatedAt     : r.updated_at,
@@ -143,16 +145,21 @@ router.post('/', async (req, res) => {
   const finalAppBy   = isPrivileged && finalStatus !== 'pending' ? (approvedBy   || null) : null;
   const finalAppDate = isPrivileged && finalStatus !== 'pending' ? (approvedDate || new Date().toISOString().split('T')[0]) : null;
   const finalIsManual = isPrivileged && isManual === true;
+  // The specific recommender/approver the applicant picked from Set
+  // Recommendator & Approval's configured candidates — see leaves.js's POST
+  // for the identical reasoning (migration 142).
+  const recoId     = Array.isArray(reco)     ? (reco[0]     || null) : (reco     || null);
+  const approvalId = Array.isArray(approval) ? (approval[0] || null) : (approval || null);
 
   try {
     if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
     const { rows } = await pool.query(
       `INSERT INTO office_visits
-         (employee_id,purpose,visit_type,country,location,from_date,from_time,to_date,to_time,description,status,recommended_by,recommended_date,approved_by,approved_date,is_manual,updated_by,updated_at,updated_device)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),$18) RETURNING *`,
+         (employee_id,purpose,visit_type,country,location,from_date,from_time,to_date,to_time,description,status,recommended_by,recommended_date,approved_by,approved_date,is_manual,reco_id,approval_id,updated_by,updated_at,updated_device)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),$20) RETURNING *`,
       [employeeId,purpose,visitType || 'National',visitType === 'International' ? (country || null) : null,location,fromDate,fromTime,toDate,toTime,description,
        finalStatus, finalRecoBy, finalRecoDate, finalAppBy, finalAppDate, finalIsManual,
-       req.user.id, deviceInfo || null]
+       recoId, approvalId, req.user.id, deviceInfo || null]
     );
     const visit = toVisit(rows[0]);
     if (finalStatus === 'pending') notifyVisitApplication({ ...visit, reco, approval });

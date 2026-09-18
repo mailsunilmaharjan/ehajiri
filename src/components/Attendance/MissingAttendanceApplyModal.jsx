@@ -5,21 +5,19 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useMissingAttendanceApply } from '../../context/MissingAttendanceApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import api from '../../api/client.js';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 
-const DateInput = ({ value, onChange, max }) => {
+const DateInput = ({ value, onChange }) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') {
     return <NepaliDatePicker value={value} onChange={onChange} maxToday={true} />;
   }
-  return (
-    <input type="date" className="form-control" value={value} max={max}
-      onChange={e => onChange(e.target.value)} style={{ fontSize: 13 }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} maxToday={true} />;
 };
 
 const TimeInput = ({ value, onChange }) => (
@@ -252,7 +250,7 @@ const MissingAttendanceApplyModal = () => {
 
               <div className="form-group">
                 <Lbl required>Date</Lbl>
-                <DateInput value={form.date} max={today} onChange={v => handleChange('date', v)} />
+                <DateInput value={form.date} onChange={v => handleChange('date', v)} />
                 <Err msg={errors.date} />
               </div>
 

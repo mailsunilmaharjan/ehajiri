@@ -13,6 +13,7 @@ import Avatar          from '../Common/Avatar.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import ViewMonthlyBtn    from './ViewMonthlyBtn.jsx';
+import SearchableSelect  from '../Common/SearchableSelect.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
@@ -219,18 +220,34 @@ const StaffLedger = () => {
     .filter(e => staffStatus === 'notworking' ? e.active === false : e.active !== false)
     .sort((a,b) => staffRankCompare(a, b, settings));
 
-  /* ── Auto-select default employee once the list is available ── */
+  /* ── Branch filter — checkbox multi-select, default "All" ──
+     Options come from `sortedEmps` (already role-scoped by AuthContext's
+     filterByRole: Admin sees every branch, Branch Manager/Dept Head only
+     their own, Branch Area Manager/Dept Incharge their covered set), so
+     this naturally offers each role only the branches it could already
+     see — no separate role-check needed here. Hidden entirely for Employee
+     logins (isStaffLogin), who are locked to their own record regardless. */
+  const [branchFilter, setBranchFilter] = useState([]); // [] = All
+  const branchOptions = [...new Set(sortedEmps.map(e => e.branch).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  const branchFilteredEmps = branchFilter.length
+    ? sortedEmps.filter(e => branchFilter.includes(e.branch))
+    : sortedEmps;
+
+  /* ── Auto-select default employee once the list is available, and
+     re-pick whenever the branch filter narrows the current selection out ── */
   useEffect(() => {
-    if (empId || !sortedEmps.length) return;   // already selected or list not ready
     if (isStaffLogin) {
-      // Staff login → find and show their own record
-      const own = sortedEmps.find(e => String(e.id) === String(currentUser?.id));
-      if (own) setEmpId(String(own.id));
-    } else {
-      // Admin / Manager → show the first employee in ranking order
-      setEmpId(String(sortedEmps[0].id));
+      // Staff login → always their own record, branch filter doesn't apply
+      if (!empId) {
+        const own = sortedEmps.find(e => String(e.id) === String(currentUser?.id));
+        if (own) setEmpId(String(own.id));
+      }
+      return;
     }
-  }, [sortedEmps.length]);   // run once after employees load
+    if (empId && branchFilteredEmps.some(e => String(e.id) === String(empId))) return; // still valid
+    setEmpId(branchFilteredEmps.length ? String(branchFilteredEmps[0].id) : '');
+  }, [sortedEmps.length, branchFilter]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Compute EXACT AD date range ── */
   const getDateRange = useCallback(() => {
@@ -324,10 +341,10 @@ const StaffLedger = () => {
   const summary = data?.summary || {};
   const period  = data?.period  || {};
 
-  /* ── Staff navigation ── */
-  const currentIdx = empId ? sortedEmps.findIndex(e => String(e.id) === String(empId)) : -1;
+  /* ── Staff navigation (respects the branch filter) ── */
+  const currentIdx = empId ? branchFilteredEmps.findIndex(e => String(e.id) === String(empId)) : -1;
   const navTo = (idx) => {
-    if (idx >= 0 && idx < sortedEmps.length) setEmpId(String(sortedEmps[idx].id));
+    if (idx >= 0 && idx < branchFilteredEmps.length) setEmpId(String(branchFilteredEmps[idx].id));
   };
 
   /* ── DataGrid columns (no Staff/Post/Dept/Branch — in header card) ── */
@@ -681,6 +698,28 @@ const StaffLedger = () => {
 
       {/* ── Selectors bar ── */}
       <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap',justifyContent:'flex-end' }}>
+        {/* Branch filter — checkbox multi-select, default "All". Options are
+            whatever branches this role's already-scoped employee list
+            touches (see branchOptions above), so it self-adjusts per role
+            without any role check here. Hidden for Employee logins, same as
+            the Staff selector below. Sits immediately left of the Year
+            selector, in the same right-aligned cluster as the rest. */}
+        {!isStaffLogin && branchOptions.length > 0 && (
+          <div style={{ display:'flex',alignItems:'center',gap:8,flexShrink:0 }}>
+            <span style={{ fontSize:13,fontWeight:600,color:'#374151',whiteSpace:'nowrap' }}>
+              🏪 {L('शाखा','Branch')} :
+            </span>
+            <div style={{ width:260 }}>
+              <SearchableSelect
+                multiple
+                value={branchFilter}
+                onChange={setBranchFilter}
+                options={branchOptions.map(b => ({ value:b, label:b }))}
+                placeholder={L('सबै शाखा','All Branches')}
+              />
+            </div>
+          </div>
+        )}
         {/* Year */}
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
           value={year} onChange={e=>setYear(+e.target.value)}>
@@ -743,7 +782,7 @@ const StaffLedger = () => {
               Staff :
             </span>
             <div style={{ width:280, flexShrink:0 }}>
-              <StaffSelect employees={sortedEmps} value={empId} onChange={setEmpId} />
+              <StaffSelect employees={branchFilteredEmps} value={empId} onChange={setEmpId} />
             </div>
           </>
         )}
@@ -762,7 +801,7 @@ const StaffLedger = () => {
       )}
 
       {/* ── Empty state — only shown when there are staff to pick but none selected ── */}
-      {!empId && !loading && sortedEmps.length > 0 && (
+      {!empId && !loading && branchFilteredEmps.length > 0 && (
         <div style={{ textAlign:'center',padding:'60px 20px',color:'#9ca3af' }}>
           <div style={{ fontSize:48,marginBottom:12 }}>📒</div>
           <div style={{ fontWeight:600,fontSize:15,color:'#374151',marginBottom:6 }}>
@@ -829,10 +868,13 @@ const StaffLedger = () => {
                 { label:L('उपस्थित','Present'),        value:summary.presentCount,           c:'#d1fae5', tc:'#065f46' },
                 { label:L('अनुपस्थित','Absent'),        value:summary.absentCount,            c:'#fee2e2', tc:'#991b1b' },
                 { label:L('बिदा','Leave'),              value:summary.leaveCount,             c:'#ede9fe', tc:'#5b21b6' },
+                { label:L('कार्यालय भ्रमण','Office Visit'), value:summary.visitCount||0,       c:'#dbeafe', tc:'#1e40af' },
                 { label:L('ढिलो','Late'),                value:summary.lateCount,              c:'#fef3c7', tc:'#92400e' },
                 { label:L('चाँडो गएको','OUT Issues'),   value:summary.earlyCount,             c:'#fef3c7', tc:'#92400e' },
                 { label:L('उपस्थिति दर','Att. Rate'),   value:`${summary.attendanceRate}%`,    c:'#eff6ff', tc:'#1a56db' },
+                { label:L('सार्वजनिक बिदा','Public Holiday'), value:days.filter(r=>r.isPublicHoliday).length, c:'#fef3c7', tc:'#92400e' },
                 { label:L('बिदामा उपस्थित','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
+                { label:L('विकेन्ड','Weekend'), value:days.filter(r=>r.isWeekend).length, c:'#f3f4f6', tc:'#6b7280' },
                 { label:L('विकेन्डमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
                 ...(emp?.eligibleForOt ? [
                   { label:L('जम्मा ओटी','Total OT'), value:summary.otApprovedFormatted || '0:00', c:'#d1fae5', tc:'#059669' },
@@ -850,7 +892,7 @@ const StaffLedger = () => {
 
         {/* Navigation panel — right of the staff card, single horizontal line */}
         {/* Hidden for staff-role users — they're locked to their own record */}
-        {!isStaffLogin && sortedEmps.length > 1 && (
+        {!isStaffLogin && branchFilteredEmps.length > 1 && (
           <div style={{ display:'flex', flexDirection:'row', alignItems:'center', justifyContent:'center',
             gap:8, background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10,
             padding:'10px 16px', flexShrink:0 }}>
@@ -868,16 +910,16 @@ const StaffLedger = () => {
             <span style={{ fontSize:12, fontWeight:700, color:'#374151',
               background:'white', borderRadius:7, padding:'5px 14px',
               border:'1px solid #e2e8f0', whiteSpace:'nowrap' }}>
-              Staff: {currentIdx >= 0 ? currentIdx + 1 : '—'} / {sortedEmps.length}
+              Staff: {currentIdx >= 0 ? currentIdx + 1 : '—'} / {branchFilteredEmps.length}
             </span>
             <button
-              disabled={currentIdx < 0 || currentIdx >= sortedEmps.length - 1}
+              disabled={currentIdx < 0 || currentIdx >= branchFilteredEmps.length - 1}
               onClick={() => navTo(currentIdx + 1)}
               style={{ display:'inline-flex', alignItems:'center', gap:4,
                 padding:'6px 14px', border:'1px solid #86efac', borderRadius:8,
-                background: (currentIdx < 0 || currentIdx >= sortedEmps.length-1) ? '#f1f5f9' : '#dcfce7',
-                color: (currentIdx < 0 || currentIdx >= sortedEmps.length-1) ? '#cbd5e1' : '#15803d',
-                cursor: (currentIdx < 0 || currentIdx >= sortedEmps.length-1) ? 'not-allowed' : 'pointer',
+                background: (currentIdx < 0 || currentIdx >= branchFilteredEmps.length-1) ? '#f1f5f9' : '#dcfce7',
+                color: (currentIdx < 0 || currentIdx >= branchFilteredEmps.length-1) ? '#cbd5e1' : '#15803d',
+                cursor: (currentIdx < 0 || currentIdx >= branchFilteredEmps.length-1) ? 'not-allowed' : 'pointer',
                 fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
               {L('अर्को','Next')} →
             </button>

@@ -18,6 +18,7 @@ import { ensureLicenseTable } from './routes/license.js';
 import { startStandaloneBridge, stopStandaloneBridge } from './services/standaloneBridgeLauncher.js';
 import { startStandaloneScheduler, stopStandaloneScheduler } from './services/standaloneScheduler.js';
 import { startAttendanceNotificationScheduler, stopAttendanceNotificationScheduler } from './services/attendanceNotificationScheduler.js';
+import { startBirthdayNotificationScheduler, stopBirthdayNotificationScheduler } from './services/birthdayNotificationScheduler.js';
 import { requireModuleEnabled } from './middleware/moduleGuard.js';
 import { getModuleFlags, FLAG_KEYS } from './utils/moduleFlags.js';
 
@@ -255,6 +256,7 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
     }
 
     startAttendanceNotificationScheduler();
+    startBirthdayNotificationScheduler();
 
     if (process.env.ENABLE_TENANT_RESOLVE === 'true') {
       routingCache.start();
@@ -302,9 +304,9 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
   }
 })();
 
-process.on('exit', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); });
-process.on('SIGINT', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); process.exit(0); });
-process.on('SIGTERM', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); process.exit(0); });
+process.on('exit', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); });
+process.on('SIGINT', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); process.exit(0); });
+process.on('SIGTERM', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); process.exit(0); });
 
 /* ── Bug Finder — catch crashes that happen outside any request (e.g. a
    scheduler tick, a stray promise) so they still show up in the DB list

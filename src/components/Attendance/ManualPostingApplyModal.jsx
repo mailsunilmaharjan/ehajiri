@@ -5,6 +5,7 @@ import { useData } from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useManualPostingApply } from '../../context/ManualPostingApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
@@ -29,10 +30,7 @@ const TimeInput = ({ value, onChange }) => (
 const DateInput = ({ value, onChange }) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') return <NepaliDatePicker value={value} onChange={onChange} />;
-  return (
-    <input type="date" value={value} onChange={e => onChange(e.target.value)}
-      style={{ height:36, width:'100%', border:'1px solid #d1d5db', borderRadius:7, padding:'0 10px', fontSize:13, boxSizing:'border-box', outline:'none' }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} />;
 };
 
 const field = (label, required, err, children) => (

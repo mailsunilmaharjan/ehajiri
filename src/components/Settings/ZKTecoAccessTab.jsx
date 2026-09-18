@@ -14,6 +14,7 @@ import api from '../../api/client.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import KeyboardMultiSelect from '../Common/KeyboardMultiSelect.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 
@@ -1339,13 +1340,13 @@ const ZKTecoAccessTab = ({ L, language, showToast, areas }) => {
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
                 <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label" style={{ fontSize:12 }}>Start Date *</label>
-                  <input type="date" className="form-control" value={hlForm.startDate}
-                    onChange={e=>setHlForm(p=>({...p,startDate:e.target.value}))} />
+                  <EnglishDatePicker value={hlForm.startDate}
+                    onChange={v=>setHlForm(p=>({...p,startDate:v}))} />
                 </div>
                 <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label" style={{ fontSize:12 }}>End Date *</label>
-                  <input type="date" className="form-control" value={hlForm.endDate}
-                    onChange={e=>setHlForm(p=>({...p,endDate:e.target.value}))} />
+                  <EnglishDatePicker value={hlForm.endDate}
+                    onChange={v=>setHlForm(p=>({...p,endDate:v}))} />
                 </div>
               </div>
               <Sel label="Time Zone (holiday access)" value={hlForm.timezoneId} allLabel="— Default (UID 1) —"

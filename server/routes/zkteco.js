@@ -24,6 +24,8 @@ import {
   parseKeyValueLine,
   saveDeviceUser,
   saveFingerprintRecord,
+  saveFaceTemplateRecord,
+  pushFaceTemplateToDevice,
   parseDeviceInfo,
   parseInfoString,
   saveDeviceInfo,
@@ -86,27 +88,33 @@ const clientIp = (req) => (
 
 /** Classify every line in a POST body by type (Java: parseDeviceData) */
 function classifyLines(body) {
-  const att = [], users = [], fps = [], info = [], cards = [], oplogs = [], biophotos = [];
+  const att = [], users = [], fps = [], faces = [], info = [], cards = [], oplogs = [], biophotos = [];
   for (const raw of body.replace(/\r/g, '').split('\n')) {
     const line = raw.trim();
     if (!line) continue;
     const upper = line.toUpperCase();
     if      (line.startsWith('~'))           info.push(line);
     else if (upper.startsWith('USER'))       users.push(line);
+    // Guide §11.10 — a device reports an enrolled face template as an
+    // OPERLOG line starting with "FACE " (previously unhandled here, so it
+    // fell into the att catch-all below and got misread as a punch-in record).
+    else if (upper.startsWith('FACE'))       faces.push(line);
     else if (upper.startsWith('FP'))         fps.push(line);
     else if (upper.startsWith('CARD'))       cards.push(line);
     else if (upper.startsWith('OPLOG'))      oplogs.push(line);
     else if (upper.startsWith('BIOPHOTO'))   biophotos.push(line);
-    // BIODATA rows (biometric enrollment metadata, "BIODATA Pin=X\t...") don't
-    // match any category above and used to fall through to the `att` catch-all
-    // — parseAttlog would then treat "BIODATA Pin=X" as a literal ATTLOG PIN
-    // (its first tab-separated field), inserting a garbage attendance_logs row
-    // that can never match a real employee. Not currently acted on, just kept
-    // out of the attendance bucket.
+    // BIODATA rows (Unified Templates — Guide §11.12, used by newer devices
+    // for face/palm/etc via a Type field) don't match any category above and
+    // used to fall through to the `att` catch-all — parseAttlog would then
+    // treat "BIODATA Pin=X" as a literal ATTLOG PIN (its first tab-separated
+    // field), inserting a garbage attendance_logs row that can never match a
+    // real employee. Not currently acted on (would need its own Type-aware
+    // storage, unlike the single-purpose FACE/FP rows above), just kept out
+    // of the attendance bucket.
     else if (upper.startsWith('BIODATA'))    continue;
     else                                     att.push(line);
   }
-  return { att, users, fps, cards, info, oplogs, biophotos };
+  return { att, users, fps, faces, cards, info, oplogs, biophotos };
 }
 
 /** Deduplicate PENDING queue on reconnect (prevents flooding) */
@@ -300,8 +308,8 @@ async function handleZkteco(req, res) {
             if (retCode != null && retCode < 0) {
               console.warn(`[ZK] CMD FAILED on ${sn} (Return=${retCode}) CmdID=${cmdId}`);
               await pool.query(
-                `UPDATE zkteco_commands SET status='ERROR' WHERE id=$1`,
-                [parseInt(cmdId)]
+                `UPDATE zkteco_commands SET status='ERROR', return_code=$2 WHERE id=$1`,
+                [parseInt(cmdId), retCode]
               ).catch(()=>{});
             } else {
               console.log(`[ZK] CMD DONE ${sn} CmdID=${cmdId} Return=${retCode}`);
@@ -382,7 +390,7 @@ async function handleZkteco(req, res) {
 
         // Classify all body lines regardless of ?table= param
         // (Java does the same: loops all lines checking line prefix)
-        const { att, users, fps, cards, info, biophotos } = classifyLines(body);
+        const { att, users, fps, faces, cards, info, biophotos } = classifyLines(body);
 
         // ── Attendance logs (ATTLOG) ────────────────────────────────────
         let attInserted = 0;
@@ -460,6 +468,27 @@ async function handleZkteco(req, res) {
             }
           } else {
             console.warn(`[ZK] FP row missing PIN: ${line.substring(0, 80)}`);
+          }
+        }
+
+        // ── FACE rows (face templates from OPERLOG — Guide §11.10) ───────
+        // Previously fell into the `att` catch-all (see classifyLines) and
+        // was silently corrupted/discarded; now saved like FP rows above.
+        for (const line of faces) {
+          // Unlike FP rows below (space between "FP" and "PIN=", so a raw
+          // parse yields a joined "FP PIN" key), the FACE prefix is stripped
+          // first here so kv.PIN is always available directly.
+          const kv = parseKeyValueLine(line.replace(/^FACE[\s\t]+/i, ''));
+          const pin = kv.PIN;
+          if (pin) {
+            await saveFaceTemplateRecord(sn, kv);
+            console.log(`[ZK] FACE enrolled SN=${sn} PIN=${pin} FID=${kv.FID} Size=${kv.Size}`);
+            if (kv.TMP) {
+              const faceId = kv.FID || 0, size = kv.Size || 0, valid = kv.Valid ?? 1, tmp = kv.TMP;
+              await pushTemplateToAreaSiblings(sn, (siblingSn) => pushFaceTemplateToDevice(siblingSn, pin, faceId, size, valid, tmp));
+            }
+          } else {
+            console.warn(`[ZK] FACE row missing PIN: ${line.substring(0, 80)}`);
           }
         }
 

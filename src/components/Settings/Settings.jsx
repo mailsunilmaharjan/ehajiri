@@ -21,6 +21,7 @@ import useDateFormat from '../../hooks/useDateFormat.js';
 import { downloadBlob } from '../../utils/printHelper.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SaveButton from '../Common/SaveButton.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useNewShortcut from '../../hooks/useNewShortcut.js';
@@ -109,10 +110,11 @@ const renderFormField = (field, form, setForm, errors, L, fd, calendar) => {
       );
     }
     return (
-      <input type="date"
-        className={`form-control ${errors[field.key] ? 'error' : ''}`}
+      <EnglishDatePicker
         value={val ?? ''}
-        onChange={e => setForm(p => ({ ...p, [field.key]: e.target.value }))}
+        onChange={newVal => setForm(p => ({ ...p, [field.key]: newVal }))}
+        error={!!errors[field.key]}
+        maxToday={false}
       />
     );
   }
@@ -1002,16 +1004,14 @@ const ShiftInlineSection = () => {
                   <label className="form-label">{L('शीतकाल सुरु मिति','Winter Start Date')}</label>
                   {settings.defaultCalendar === 'np'
                     ? <NepaliDatePicker value={winterTemp.startDate||''} onChange={v => hwc('startDate', v)} maxToday={false} />
-                    : <input type="date" className="form-control" value={winterTemp.startDate||''}
-                        onChange={e => hwc('startDate', e.target.value)} />
+                    : <EnglishDatePicker value={winterTemp.startDate||''} onChange={v => hwc('startDate', v)} maxToday={false} />
                   }
                 </div>
                 <div className="form-group">
                   <label className="form-label">{L('शीतकाल अन्त मिति','Winter End Date')}</label>
                   {settings.defaultCalendar === 'np'
                     ? <NepaliDatePicker value={winterTemp.endDate||''} onChange={v => hwc('endDate', v)} maxToday={false} />
-                    : <input type="date" className="form-control" value={winterTemp.endDate||''}
-                        onChange={e => hwc('endDate', e.target.value)} />
+                    : <EnglishDatePicker value={winterTemp.endDate||''} onChange={v => hwc('endDate', v)} maxToday={false} />
                   }
                 </div>
               </div>
@@ -1278,13 +1278,19 @@ const LeaveTypeSection = () => {
       ? data.map(d => d.id === editId ? { ...d, ...form, id: editId } : d)
       : [...data, { ...form, id: Date.now() }];
     updateSetupList('leaveTypeConfigs', next);
-    // Stay on the form (cleared, back to Add mode) instead of closing — lets
-    // someone entering several leave types in a row keep going without
-    // reopening the modal each time.
-    setForm({ ...defaultLeaveForm });
-    setErrors({});
-    setEditId(null);
-    showToast(L('सुरक्षित भयो','Saved'), 'success');
+
+    if (editId) {
+      // Editing an existing leave type — done, close as before.
+      setModal(false);
+      showToast(L('सुरक्षित भयो','Saved'), 'success');
+    } else {
+      // Adding — stay on the form (cleared, back to Add mode) instead of
+      // closing — lets someone entering several leave types in a row keep
+      // going without reopening the modal each time.
+      setForm({ ...defaultLeaveForm });
+      setErrors({});
+      showToast(L('सुरक्षित भयो','Saved'), 'success');
+    }
   };
   useSaveShortcut(modal, handleSave);
 
@@ -1521,13 +1527,19 @@ const OfficeVisitTypeSection = () => {
       ? data.map(d => d.id===editId ? { ...d, ...form } : d)
       : [...data, { ...form, id:Date.now() }];
     updateSetupList('officeVisitTypes', next);
-    // Stay on the form (cleared, back to Add mode) instead of closing — lets
-    // someone entering several visit types in a row keep going without
-    // reopening the modal each time.
-    setForm({ name:'', shortName:'' });
-    setErrors({});
-    setEditId(null);
-    showToast(L('सुरक्षित भयो','Saved'), 'success');
+
+    if (editId) {
+      // Editing an existing visit type — done, close as before.
+      setModal(false);
+      showToast(L('सुरक्षित भयो','Saved'), 'success');
+    } else {
+      // Adding — stay on the form (cleared, back to Add mode) instead of
+      // closing — lets someone entering several visit types in a row keep
+      // going without reopening the modal each time.
+      setForm({ name:'', shortName:'' });
+      setErrors({});
+      showToast(L('सुरक्षित भयो','Saved'), 'success');
+    }
   };
   useSaveShortcut(modal, handleSave);
 
@@ -1645,6 +1657,9 @@ const PublicHolidaySection = () => {
   const [errors,    setErrors]    = useState({});
   const [delId,     setDelId]     = useState(null);
   const [dupAlert,  setDupAlert]  = useState(null); // { name, date }
+  const [toast,     setToast]     = useState(null);
+  const nameFieldRef = useRef(null);
+  const showToast = (msg, type='success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
   const set = (k, v) => setForm(p => {
     const next = { ...p, [k]: v };
@@ -1690,10 +1705,41 @@ const PublicHolidaySection = () => {
       ? allHolidays.map(d => d.id===editId ? { ...d, ...form } : d)
       : [...allHolidays, { ...form, id:Date.now() }];
     updateSetupList('publicHolidays', next);
-    setModal(false);
+
+    if (editId) {
+      // Editing an existing holiday — done, close as before.
+      setModal(false);
+    } else {
+      // Adding — stay on the same form, cleared, ready for the next entry
+      // instead of closing (matches Setup section's Ctrl+N/Ctrl+S behavior),
+      // so entering a whole year's worth of holidays never needs reopening
+      // the modal between each one.
+      setForm({ ...defaultHolidayForm });
+      setErrors({});
+      showToast(L('छुट्टी थपियो','Holiday added'));
+      setTimeout(() => nameFieldRef.current?.focus(), 0);
+    }
   };
 
   const handleDelete = (id) => { updateSetupList('publicHolidays', allHolidays.filter(d => d.id!==id)); setDelId(null); };
+
+  // Ctrl+S saves the open Add/Edit form.
+  useSaveShortcut(modal, handleSave);
+
+  // Esc closes whichever layer is on top — the duplicate-date alert if it's
+  // showing (it stacks over the still-open form), else the delete confirm,
+  // else the Add/Edit form itself.
+  useEffect(() => {
+    if (!modal && !delId && !dupAlert) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (dupAlert) setDupAlert(null);
+      else if (delId) setDelId(null);
+      else if (modal) setModal(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [modal, delId, dupAlert]);
 
   const calendar = settings.defaultCalendar || 'en';
 
@@ -1721,8 +1767,7 @@ const PublicHolidaySection = () => {
       <label className="form-label">{label}{required && <span style={{ color:'#ef4444', marginLeft:2 }}>*</span>}</label>
       {calendar === 'np'
         ? <NepaliDatePicker value={form[field]||''} onChange={v => set(field, v)} error={!!errors[field]} maxToday={false} />
-        : <input type="date" className={`form-control${errors[field]?' error':''}`}
-            value={form[field]||''} onChange={e => set(field, e.target.value)} />
+        : <EnglishDatePicker value={form[field]||''} onChange={v => set(field, v)} error={!!errors[field]} maxToday={false} />
       }
       {errors[field] && <div className="form-error">{errors[field]}</div>}
     </div>
@@ -1780,6 +1825,11 @@ const PublicHolidaySection = () => {
         onDeleteKey={row=>setDelId(row.id)}
         onDeleteSelected={ids=>updateSetupList('publicHolidays',allHolidays.filter(d=>!ids.includes(d.id)))}
         toolbar={<button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>}
+        contextMenu={[
+          { label:L('नयाँ थप्नुस','Add New'), icon:'+',  onClick: () => openAdd() },
+          { label:L('सम्पादन','Edit'),        icon:'✏️', onClick: row => openEdit(row) },
+          { label:L('मेटाउनुस','Delete'),     icon:'🗑️', className:'danger', onClick: row => setDelId(row.id) },
+        ]}
       />
 
       {modal && (
@@ -1794,7 +1844,7 @@ const PublicHolidaySection = () => {
               {/* Holiday Name */}
               <div className="form-group" style={{ marginBottom:14 }}>
                 <label className="form-label">{L('छुट्टीको नाम','Holiday Name')} <span style={{ color:'#ef4444' }}>*</span></label>
-                <input type="text" className={`form-control${errors.name?' error':''}`}
+                <input type="text" ref={nameFieldRef} className={`form-control${errors.name?' error':''}`}
                   placeholder={L('दशैं','Dashain')} value={form.name}
                   onChange={e=>set('name',e.target.value)} />
                 {errors.name && <div className="form-error">{errors.name}</div>}
@@ -1866,7 +1916,7 @@ const PublicHolidaySection = () => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setModal(false)}>{L('रद्द','Cancel')}</button>
-              <button className="btn btn-primary" onClick={handleSave}>💾 {L('सुरक्षित','Save')}</button>
+              <SaveButton onClick={handleSave} label={L('सुरक्षित','Save')} />
             </div>
           </div>
         </div>
@@ -1916,6 +1966,12 @@ const PublicHolidaySection = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast-${toast.type}`}><span>{toast.type==='success'?'✅':'❌'}</span><span>{toast.msg}</span></div>
         </div>
       )}
     </div>
@@ -2170,8 +2226,9 @@ const EmailSetupTab = ({ showToast }) => {
           missingAttendance: true, manualPosting: true,
           lateEarlyNotification: true, absentNotification: true,
           leaveStatusUpdate: true, officeVisitStatusUpdate: true,
-          taskAssignedCompleted: true,
+          taskAssignedCompleted: true, birthdayNotification: true,
         },
+        birthdayAlertDays: 2,
       });
       setEmailLoaded(true);
     }).catch(() => setEmailLoaded(true));
@@ -2215,6 +2272,7 @@ const EmailSetupTab = ({ showToast }) => {
     { key: 'officeVisitStatusUpdate', label: L('भ्रमण स्वीकृति/अस्वीकृति','Office Visit Status Update'),      desc: L('जब कार्यालय भ्रमण आवेदन स्वीकृत वा अस्वीकृत हुन्छ — कर्मचारीलाई सूचित गरिन्छ','When an office visit application is approved or rejected — notifies the employee') },
     { key: 'lateEarlyNotification',   label: L('ढिलो/चाँडो सूचना','Late In / Early Out Notification'),       desc: L('शिफ्ट सुरु भएको ३० मिनेट पछि (ढिलो) र शिफ्ट सकिएको १५ मिनेट पछि (चाँडो) — कर्मचारी, विभाग प्रमुख, शाखा प्रबन्धक र एडमिनलाई सूचित गर्छ','Checked per shift — Late In a set number of minutes after that shift starts, Early Out a set number of minutes after it ends — notifies the staff member, their Dept. Head, Branch Manager, and Admins') },
     { key: 'absentNotification',      label: L('अनुपस्थिति सूचना','Absent Notification'),                    desc: L('शिफ्ट सुरु भएको १ घण्टा पछि — कर्मचारी, विभाग प्रमुख र एडमिनलाई सूचित गर्छ','Checked a set number of minutes after each shift starts — notifies the staff member, their Dept. Head, and Admins') },
+    { key: 'birthdayNotification',   label: L('जन्मदिन सूचना','Birthday Notification'),                    desc: L('जन्मदिन हुनुभन्दा केही दिन अगाडि — विभाग प्रमुख, शाखा प्रबन्धक र एडमिनलाई सूचित गर्छ','A set number of days before a staff member\'s birthday — notifies their Dept. Head, Branch Manager, and Admins') },
     { key: 'staffCreated',           label: L('कर्मचारी खाता सिर्जना','Staff Account Created'),             desc: L('जब नयाँ कर्मचारीको खाता सिर्जना गरिन्छ','When a new staff account is created — sends login credentials') },
     { key: 'taskAssignedCompleted',  label: L('कार्य तोकिँदा/पूरा हुँदा','Task Assigned / Completed'),       desc: L('जब कार्य तोकिन्छ — तोकिएको कर्मचारीलाई; कार्य पूरा हुँदा — सिर्जनाकर्ता, एडमिन र विभाग प्रमुखलाई सूचित गर्छ','When a task is assigned — notifies the assignee; when marked completed — notifies the creator, Admins, and the Department Head') },
   ];
@@ -2285,6 +2343,12 @@ const EmailSetupTab = ({ showToast }) => {
               <input type="number" min="1" style={fieldStyle} value={emailCfg.earlyOutGraceMinutes ?? 15}
                 onChange={e => set('earlyOutGraceMinutes', parseInt(e.target.value) || 15)} />
               <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('शिफ्ट सकिएको यति मिनेट पछि जाँच गरिन्छ','Minutes after each shift\'s end time before checking who left Early')}</div>
+            </div>
+            <div>
+              <label style={labelStyle}>{L('जन्मदिन सूचना (दिन अगाडि)','Birthday Alert (days ahead)')}</label>
+              <input type="number" min="1" style={fieldStyle} value={emailCfg.birthdayAlertDays ?? 2}
+                onChange={e => set('birthdayAlertDays', parseInt(e.target.value) || 2)} />
+              <div style={{ fontSize:11, color:'#9ca3af', marginTop:3 }}>{L('कर्मचारीको जन्मदिन हुनुभन्दा यति दिन अगाडि सूचना पठाइन्छ','How many days before a staff member\'s birthday to send the heads-up')}</div>
             </div>
           </div>
           <div style={{ marginTop:16, display:'flex', gap:10 }}>
@@ -2753,8 +2817,15 @@ const Settings = () => {
         showToast(L('सप्ताहन्त सफलतापूर्वक परिवर्तन भयो','Weekend updated successfully'));
       }
       setLocal(p => ({ ...p, defaultWeekends: wForm.weekends, weekendStartDate: wForm.effectiveDate }));
-      setWeekendModal(false);
-      setWeekendEditId(null);
+      if (weekendEditId) {
+        // Editing an existing history entry — done, close as before.
+        setWeekendModal(false);
+        setWeekendEditId(null);
+      } else {
+        // Adding — stay on the same form, ready for the next entry instead
+        // of closing (matches Setup section's Ctrl+N/Ctrl+S behavior).
+        setWForm({ weekends:[...wForm.weekends], effectiveDate:'', reason:'' });
+      }
     } catch (e) {
       // Save failed — leave the modal open so the user can retry, instead of
       // showing success for a change that never reached the database.
@@ -4451,8 +4522,7 @@ const Settings = () => {
                 </label>
                 {settings.defaultCalendar === 'np'
                   ? <NepaliDatePicker value={wForm.effectiveDate} onChange={v => setWForm(p=>({...p, effectiveDate:v}))} maxToday={false} />
-                  : <input type="date" className="form-control" value={wForm.effectiveDate}
-                      onChange={e => setWForm(p=>({...p, effectiveDate:e.target.value}))} />
+                  : <EnglishDatePicker value={wForm.effectiveDate} onChange={v => setWForm(p=>({...p, effectiveDate:v}))} maxToday={false} />
                 }
                 <div style={{ marginTop:5, fontSize:12, color:'#6b7280' }}>
                   {wForm.effectiveDate ? fd(wForm.effectiveDate) : ''}

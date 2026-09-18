@@ -13,6 +13,7 @@ import Avatar          from '../Common/Avatar.jsx';
 import HoverCard        from '../Common/HoverCard.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import { branchAbbr } from '../../utils/branchUtils.js';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
@@ -499,7 +500,7 @@ const DailyAttendanceReport = () => {
       },
     },
     {
-      field:'remarks', header:L('कैफियत','Remarks'), sortable:false,
+      field:'remarks', header:L('कैफियत','Remarks'), sortable:false, fill:true,
       render: (v, row) => {
         // Capped to a fraction of the viewport width (clamp'd between a
         // floor and ceiling) instead of a bare pixel value, so the column
@@ -775,9 +776,7 @@ const DailyAttendanceReport = () => {
           <div style={{ minWidth:155 }}>
             {settings.defaultCalendar === 'np'
               ? <NepaliDatePicker value={date} onChange={setDate} maxToday={false} />
-              : <input type="date" className="form-control" value={date}
-                  onChange={e => setDate(e.target.value)}
-                  style={{ height:34, borderRadius:6, fontSize:13 }} />
+              : <EnglishDatePicker value={date} onChange={setDate} maxToday={false} />
             }
           </div>
 

@@ -87,7 +87,7 @@ const StaffAnalyticsReport = () => {
   }, [data]);
 
   const offboardCols = [
-    { field: 'year', header: L('वर्ष', 'Year'), width: 90 },
+    { field: 'year', header: L('आर्थिक वर्ष', 'Fiscal Year'), width: 130 },
     { field: 'offboarded', header: L('अवकाश', 'Left'), width: 90 },
     { field: 'headcountStart', header: L('सुरुको जनशक्ति', 'Headcount Start'), width: 150 },
     { field: 'attritionRate', header: L('अवकाश दर', 'Attrition Rate'), width: 130,
@@ -164,8 +164,8 @@ const StaffAnalyticsReport = () => {
 
       {/* ── 1. Joining Staff Analysis ── */}
       <div className="sar-grid2">
-        <Card title={L('भर्ती प्रवृत्ति — वार्षिक', 'Joining Trend — Yearly')}
-          sub={L('स्टाफको सामेल हुने मितिबाट गणना गरिएको', 'Computed from staff join dates')}>
+        <Card title={L('भर्ती प्रवृत्ति — आर्थिक वर्षअनुसार', 'Joining Trend — By Fiscal Year')}
+          sub={L('Settings → Fiscal Year मा तोकिएका आर्थिक वर्षहरू अनुसार', 'Grouped by the Fiscal Years configured in Settings → Fiscal Year')}>
           {onboardYearlyBars.length
             ? <MiniBarChart data={onboardYearlyBars} height={140} />
             : <Empty L={L} />}
@@ -194,8 +194,8 @@ const StaffAnalyticsReport = () => {
 
       {/* ── 2. Offboarding/Attrition Analysis ── */}
       <div className="sar-grid2">
-        <Card title={L('अवकाश प्रवृत्ति — वार्षिक', 'Offboarding Trend — Yearly')}
-          sub={L('स्थिति परिवर्तन इतिहासबाट (राजीनामा/बर्खास्ती/आदि)', 'From status-change history (resignation/termination/etc.)')}>
+        <Card title={L('अवकाश प्रवृत्ति — आर्थिक वर्षअनुसार', 'Offboarding Trend — By Fiscal Year')}
+          sub={L('स्थिति परिवर्तन इतिहासबाट (राजीनामा/बर्खास्ती/आदि) — Settings → Fiscal Year अनुसार', 'From status-change history (resignation/termination/etc.), grouped by Settings → Fiscal Year')}>
           {offboardYearlyBars.length
             ? <MiniBarChart data={offboardYearlyBars} height={140} />
             : <Empty L={L} />}

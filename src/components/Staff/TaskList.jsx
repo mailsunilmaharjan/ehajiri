@@ -7,6 +7,7 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import { useModuleFlags } from '../../context/ModuleFlagsContext.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import DateTimePicker from '../Common/DateTimePicker.jsx';
 import NepaliDateTimePicker from '../Common/NepaliDateTimePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
@@ -378,10 +379,7 @@ const LocationPin = ({ lat, lng, label }) => {
 const DateInput = ({ value, onChange }) => {
   const { settings } = useSettings();
   if (settings.defaultCalendar === 'np') return <NepaliDatePicker value={value} onChange={onChange} />;
-  return (
-    <input type="date" value={value} onChange={e => onChange(e.target.value)}
-      style={{ height: 36, width: '100%', border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} />;
 };
 
 // Same Default Calendar switch as DateInput above, for a date+time field
@@ -426,7 +424,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { canManageSystem, currentUser, isAdmin, isSuperAdmin, isBranchManager, isDeptHead } = useAuth();
   const { employees, filteredEmployees } = useData();
-  const { refreshTaskCounts } = useNotifications();
+  const { refreshTaskCounts, clearTaskAlert } = useNotifications();
   const { flags: moduleFlags } = useModuleFlags();
   const { settings } = useSettings();
   const fd = useDateFormat();
@@ -459,6 +457,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // only re-syncs the aggregate nav badge, not each row's own flag.
   const markTaskRead = (taskId) => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, hasUnreadNotification: false } : t));
+    clearTaskAlert(taskId);
     api.post(`/tasks/${taskId}/notifications/read`).then(refreshTaskCounts).catch(() => {});
   };
 
@@ -1506,10 +1505,10 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             it has a new task the viewer hasn't opened yet. Only on the
             regular Task page; Field Visit's own page stays uncluttered. */}
         {!fieldVisitOnly && (
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden' }}>
             <button onClick={() => setQuickCategoryId('')}
-              style={{ height: 28, padding: '0 10px', borderRadius: 5, cursor: 'pointer', fontSize: 12.5, fontWeight: 500,
-                border: 'none',
+              style={{ flexShrink: 0, height: 26, padding: '0 9px', borderRadius: 5, cursor: 'pointer', fontSize: 11.5, fontWeight: 500,
+                border: 'none', whiteSpace: 'nowrap',
                 background: !quickCategoryId ? '#dbeafe' : '#f1f5f9', color: !quickCategoryId ? '#1a56db' : '#374151' }}>
               All
             </button>
@@ -1520,8 +1519,8 @@ const TaskList = ({ fieldVisitOnly = false }) => {
               const hasUnseenNew = !!stat?.hasUnseenNew;
               return (
                 <button key={c.id} onClick={() => setQuickCategoryId(on ? '' : String(c.id))}
-                  style={{ position: 'relative', height: 28, padding: '0 10px', borderRadius: 5, cursor: 'pointer',
-                    fontSize: 12.5, fontWeight: 500, border: 'none',
+                  style={{ position: 'relative', flexShrink: 0, height: 26, padding: '0 9px', borderRadius: 5, cursor: 'pointer',
+                    fontSize: 11.5, fontWeight: 500, border: 'none',
                     background: on ? '#dbeafe' : '#f1f5f9', color: on ? '#1a56db' : '#374151', whiteSpace: 'nowrap' }}>
                   {c.name}
                   {(count > 0 || hasUnseenNew) && (

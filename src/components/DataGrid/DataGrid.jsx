@@ -337,7 +337,14 @@ const DataGrid = ({
             // instead as "claim 100% of the container on top of whatever the
             // other columns already need", which is what was overflowing the
             // table past its container and forcing a horizontal scrollbar.
-            ? (hasFillColumn ? { tableLayout:'auto', width:'100%' } : { tableLayout:'auto' })
+            // minWidth (same 600px floor the non-auto-width table always
+            // has, see .dg-table in DataGrid.css) keeps the OTHER, fixed/
+            // nowrap columns from being squeezed illegibly on a narrow
+            // screen once the fill column is pushing the table to fill
+            // 100% width — below that floor .dg-scroll-wrapper's own
+            // overflow-x:auto takes over and shows a horizontal scrollbar
+            // instead of squashing every column.
+            ? (hasFillColumn ? { tableLayout:'auto', width:'100%', minWidth:600 } : { tableLayout:'auto' })
             : {}
           }>
           <thead>

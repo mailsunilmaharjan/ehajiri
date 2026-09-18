@@ -7,6 +7,7 @@ import { useData }     from '../../context/DataContext.jsx';
 import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
@@ -593,11 +594,7 @@ const OvertimePage = () => {
 
   const DateInput = ({ value, onChange }) => {
     if (useNP) return <NepaliDatePicker value={value} onChange={onChange} maxToday={false} />;
-    return (
-      <input type="date" className="form-control" value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{ fontSize:13, height:36 }} />
-    );
+    return <EnglishDatePicker value={value} onChange={onChange} maxToday={false} />;
   };
 
   const canAct = isManager || canApprove;

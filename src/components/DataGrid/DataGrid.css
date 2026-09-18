@@ -136,6 +136,20 @@
 .dg-table.auto-width .dg-th,
 .dg-table.auto-width .dg-td { white-space: nowrap; }
 
+/* Scoped opt-in (via the className prop) for a wide, many-column table that
+   should never grow past its container, matching the per-column `width`
+   hints already on its columns — the default (neither auto-width nor this)
+   mode leaves table-layout at the browser's own default (auto), which lets
+   a table with enough unconstrained columns render WIDER than width:100%
+   and overflow the page instead of respecting it, needing a horizontal
+   scrollbar even on a wide monitor. table-layout:fixed makes the browser
+   actually honor those widths as proportional shares of 100%, shrinking
+   instead of overflowing; text-overflow:ellipsis keeps anything that no
+   longer fits legible instead of visually spilling into the next cell. */
+.zk-biometric-grid .dg-table { table-layout: fixed; width: 100%; }
+.zk-biometric-grid .dg-th,
+.zk-biometric-grid .dg-td { overflow: hidden; text-overflow: ellipsis; }
+
 /* .compact used to set its own (larger) th/td/action-btn sizing here, but
    that's now just what .dg-th/.dg-td default to app-wide — nothing left
    to override. The className stays on existing call sites harmlessly. */

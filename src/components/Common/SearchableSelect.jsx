@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { createPortal } from 'react-dom';
 import Avatar from './Avatar.jsx';
 
@@ -32,7 +32,7 @@ import Avatar from './Avatar.jsx';
  *                  autoOpen for the same pattern).
  *   className, style, disabled
  */
-const SearchableSelect = ({
+const SearchableSelect = forwardRef(({
   value       = '',
   onChange,
   options     = [],
@@ -44,7 +44,7 @@ const SearchableSelect = ({
   renderOption = null,
   showAvatar   = false,
   autoOpen     = false,
-}) => {
+}, ref) => {
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
   const [rect,   setRect]   = useState(null);
@@ -53,6 +53,10 @@ const SearchableSelect = ({
   const searchRef  = useRef(null);
   const dropRef    = useRef(null);
   const itemRefs   = useRef([]);
+
+  // Lets a parent (e.g. a keyboard-shortcut handler) focus this control
+  // imperatively — value/onChange alone gives no DOM node to focus.
+  useImperativeHandle(ref, () => ({ focus: () => triggerRef.current?.focus() }));
 
   /* normalise value to array for multi mode */
   const selectedArr = multiple
@@ -196,8 +200,9 @@ const SearchableSelect = ({
           background: disabled ? '#f3f4f6' : '#fff',
           color: (multiple ? selectedArr.length > 0 : value) ? '#1f2937' : '#9ca3af',
           fontSize: 13, fontFamily: 'inherit', padding: '6px 10px',
-          border: '1px solid #d1d5db', borderRadius: 6, outline: 'none', boxSizing: 'border-box',
-          ...(open ? { borderColor: '#1a56db', boxShadow: '0 0 0 2px rgba(26,86,219,.1)' } : {}),
+          borderWidth: 1, borderStyle: 'solid', borderColor: open ? '#1a56db' : '#d1d5db',
+          borderRadius: 6, outline: 'none', boxSizing: 'border-box',
+          boxShadow: open ? '0 0 0 2px rgba(26,86,219,.1)' : 'none',
         }}>
         {showAvatar && selectedOptions.length > 0 ? (
           <div style={{ display:'flex', alignItems:'center', flex:1, overflow:'hidden' }}>
@@ -342,6 +347,6 @@ const SearchableSelect = ({
       )}
     </div>
   );
-};
+});
 
 export default SearchableSelect;

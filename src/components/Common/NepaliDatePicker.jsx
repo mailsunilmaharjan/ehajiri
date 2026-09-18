@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, forwardRef, useImperativeHandle } from 'react';
 import { createPortal } from 'react-dom';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import {
@@ -22,7 +22,7 @@ export const adToISO = (d) =>
  *   maxToday   – (default false) disable future BS dates
  *   minToday   – (default false) disable past BS dates (yesterday or earlier)
  */
-const NepaliDatePicker = ({ value, onChange, error, maxToday = false, minToday = false }) => {
+const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false, minToday = false }, ref) => {
   const { settings } = useSettings();
   const useNp = settings.nepaliDigits;
   const fmt   = (n) => useNp ? toNepaliDigits(n) : String(n);
@@ -38,7 +38,12 @@ const NepaliDatePicker = ({ value, onChange, error, maxToday = false, minToday =
   const [panelH,    setPanelH]    = useState(0);
   const containerRef = useRef(); // trigger
   const panelRef      = useRef(); // portalled calendar panel
+  const inputRef      = useRef();
   const lastAD = useRef(value);
+
+  // The trigger input is readOnly (typing does nothing), so "focus" for a
+  // keyboard-shortcut jump means actually opening the calendar popup.
+  useImperativeHandle(ref, () => ({ focus: () => { inputRef.current?.focus(); setIsOpen(true); } }));
 
   useEffect(() => {
     if (value !== lastAD.current) {
@@ -159,6 +164,7 @@ const NepaliDatePicker = ({ value, onChange, error, maxToday = false, minToday =
     <div ref={containerRef} style={{ position:'relative' }}>
       {/* Trigger input */}
       <input
+        ref={inputRef}
         type="text"
         readOnly
         className={`form-control ${error ? 'error' : ''}`}
@@ -252,6 +258,6 @@ const NepaliDatePicker = ({ value, onChange, error, maxToday = false, minToday =
       )}
     </div>
   );
-};
+});
 
 export default NepaliDatePicker;

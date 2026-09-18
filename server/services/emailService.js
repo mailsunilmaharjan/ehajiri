@@ -227,6 +227,27 @@ export async function sendAbsentDigest({ to, fullName, isSelf, scopeLabel, date,
   });
 }
 
+/* rows: [{ name, detail }] — detail is the upcoming birthday date, e.g. "29-Magh" or an AD date string */
+export async function sendBirthdayAlert({ to, fullName, scopeLabel, rows }) {
+  const cfg = await getEmailConfig();
+  if (!cfg?.notifications?.birthdayNotification) return { skipped: true };
+  const intro = rows.length === 1
+    ? `<p>Hello <strong>${fullName}</strong>, a heads-up — <strong>${rows[0].name}</strong>'s birthday is coming up on <strong>${rows[0].detail}</strong> (in ${cfg?.birthdayAlertDays || 2} days).</p>`
+    : `<p>Hello <strong>${fullName}</strong>, a heads-up — the following staff in <strong>${scopeLabel}</strong> have birthdays coming up:</p>`;
+  return sendEmail({
+    to, subject: `eHajiri TMS — Upcoming Birthday${rows.length > 1 ? 's' : ''}`,
+    html: `<div style="font-family:sans-serif;padding:24px;max-width:520px">
+      <h2 style="color:#db2777">🎂 Upcoming Birthday${rows.length > 1 ? 's' : ''}</h2>
+      ${intro}
+      ${rows.length > 1 ? `<table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tr><th style="text-align:left;padding:5px 8px;background:#fdf2f8;color:#9d174d">Name</th>
+            <th style="text-align:left;padding:5px 8px;background:#fdf2f8;color:#9d174d">Date</th></tr>
+        ${digestRows(rows)}
+      </table>` : ''}
+    </div>`,
+  });
+}
+
 export async function sendLeaveStatusUpdate({ to, fullName, status, leaveType, fromDate, toDate, comment }) {
   const cfg = await getEmailConfig();
   if (!cfg?.notifications?.leaveStatusUpdate) return { skipped: true };

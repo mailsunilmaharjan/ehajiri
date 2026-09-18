@@ -5,6 +5,7 @@ import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 
@@ -121,13 +122,7 @@ const VisitDateInput = ({ value, onChange, error, settings }) => {
   if (settings.defaultCalendar === 'np') {
     return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
   }
-  return (
-    <input type="date"
-      className={`form-control ${error ? 'error' : ''}`}
-      value={value} min={blockPast ? getNepalTodayISO() : undefined}
-      onChange={e => onChange(e.target.value)}
-      style={{ fontSize: 13 }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
 };
 
 /* ── Label / Error helpers ── */

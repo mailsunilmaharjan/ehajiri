@@ -6,11 +6,13 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useLeaveApply } from '../../context/LeaveApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 import useLeaveOpening from '../../hooks/useLeaveOpening.js';
+import { isHolidayForEmployee } from '../../utils/holidayScope.js';
 
 /* ── Date input that respects calendar setting ── */
 const LeaveDateInput = ({ value, onChange, error, settings }) => {
@@ -18,12 +20,7 @@ const LeaveDateInput = ({ value, onChange, error, settings }) => {
   if (settings.defaultCalendar === 'np') {
     return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
   }
-  return (
-    <input type="date" className={`form-control ${error ? 'error' : ''}`}
-      value={value} min={blockPast ? getNepalTodayISO() : undefined}
-      onChange={e => onChange(e.target.value)}
-      style={{ fontSize: 13 }} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
 };
 
 /* ── Small helpers ── */
@@ -106,11 +103,16 @@ const LeaveApplyModal = () => {
     return ws.map(d => map[d]).filter(n => n !== undefined);
   }, [settings.defaultWeekends]);
 
-  const holidaySet = useMemo(() => {
-    const s = new Set();
-    (settings.publicHolidays || []).forEach(h => { if (h.date) s.add(h.date.split('T')[0]); });
-    return s;
-  }, [settings.publicHolidays]);
+  // Public holidays are stored as a startDate→endDate range (there is no
+  // `h.date` field — this used to build an always-empty set, so
+  // "Reduce Public Holiday" never actually deducted anything), and can be
+  // scoped to a Gender/Branch/Department/Religion/Handicapped subset — so
+  // this checks `activeUser` (the employee this leave is for) against each
+  // holiday's own scope via isHolidayForEmployee, same as every report now does.
+  const isHoliday = useCallback(
+    (ds) => isHolidayForEmployee(settings, ds, activeUser),
+    [settings, activeUser]
+  );
 
   /* ── Balance from Leave Calculation's saved opening figures, for current fiscal year ──
      prevYear + currYear - usedDays for each leave type config.
@@ -168,11 +170,11 @@ const LeaveApplyModal = () => {
     for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
       if (selectedLtConfig?.reduceWeekend && weekendDays.includes(d.getDay())) continue;
       const ds = d.toISOString().split('T')[0];
-      if (selectedLtConfig?.reducePublicHoliday && holidaySet.has(ds)) continue;
+      if (selectedLtConfig?.reducePublicHoliday && isHoliday(ds)) continue;
       count++;
     }
     return count;
-  }, [form.fromDate, form.toDate, form.halfDay, selectedLtConfig, weekendDays, holidaySet]);
+  }, [form.fromDate, form.toDate, form.halfDay, selectedLtConfig, weekendDays, isHoliday]);
 
   /* ── Service period check ── */
   const timesAlreadyTaken = useMemo(() => {

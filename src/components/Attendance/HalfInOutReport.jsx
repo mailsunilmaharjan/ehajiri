@@ -172,8 +172,10 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
   /* IN row — status badge when no punch */
   if (rowKey === 'in' && !day?.timeIn) {
     let badge = null;
-    if (day?.leave)       badge = <span title={day.leave.name} style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{leaveAbbrev(day.leave.name)}</span>;
-    else if (isHoliday)   badge = <span title={holidayName||LL('सार्वजनिक बिदा','Public Holiday')} style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('साबि','PH')}</span>;
+    // Public Holiday takes priority over a same-day Leave record — see
+    // attendance.js's identical status precedence reasoning.
+    if (isHoliday)        badge = <span title={holidayName||LL('सार्वजनिक बिदा','Public Holiday')} style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('साबि','PH')}</span>;
+    else if (day?.leave)  badge = <span title={day.leave.name} style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{leaveAbbrev(day.leave.name)}</span>;
     else if (day?.visit)  badge = <span title={LL('कार्यालय भ्रमण','Office Visit')} style={{ background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('भ्रमण','OV')}</span>;
     else if (offType)     badge = <span title={LL(offType==='Night Off'?'नाइट अफ':'डे अफ', offType)} style={{ background: offType==='Night Off' ? '#e0e7ff' : '#e5e7eb', color: offType==='Night Off' ? '#4338ca' : '#6b7280', borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{offType==='Night Off'?LL('रा.अ','NO'):LL('दि.अ','DO')}</span>;
     else if (isWeekend)   badge = <span title={LL('विकेन्ड','Weekend')} style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('ब','W')}</span>;
@@ -720,7 +722,8 @@ const HalfInOutReport = () => {
                         <DayCell key={date} rowKey={rowKey}
                           day={emp.days?.[date]}
                           isWeekend={emp.days?.[date]?.isWeekend ?? isWeekend}
-                          isHoliday={isHoliday} holidayName={holidayName} isLast={isLast} language={language} />
+                          isHoliday={emp.days?.[date]?.isHoliday ?? isHoliday}
+                          holidayName={emp.days?.[date]?.holidayName ?? holidayName} isLast={isLast} language={language} />
                       ))}
 
                       {/* Total OT — only shown in the OT row */}

@@ -10,8 +10,15 @@
  *   OLD: SET OPTION ServerLocalTime=...           →  SETTIME YYYY-MM-DD HH:MM:SS  (direct RTC write)
  *   OLD: DATA CLEAR tableName=attlog              →  CLEAR LOG
  *   OLD: RESTART                                  →  REBOOT
- *   OLD: ENROLL_FP PIN=X\tName=Y\tFID=Z...       →  ENROLL_FP PIN=X\tFID=Z...  (Name not in spec)
  *   OLD: DATA QUERY USERINFO USERINFO             →  DATA QUERY USERINFO  (extra param was wrong)
+ *   OLD: ENROLL_FP PIN=X\tName=Y\tFID=Z...       →  ENROLL_FP PIN=X\tFID=Z...  (Name not in spec)
+ *
+ * ENROLL_FP's Name field was briefly restored here on the strength of an
+ * unofficial reference doc showing PIN\tName\tFID\tRETRY\tOVERWRITE — but
+ * ZKTeco's own official, dated "Attendance PUSH Communication Protocol
+ * 2025-04-29" spec (§12.6.1) documents ENROLL_FP as PIN\tFID\tRETRY\t
+ * OVERWRITE only, no Name field at all. Reverted back to that: the official
+ * spec outranks the unofficial doc.
  */
 
 import express from 'express';
@@ -37,10 +44,10 @@ import {
   unlockDoor,
   rebootDevice,
   cancelAlarm,
-  enrollFingerprint,
   enrollCard,
   checkDevice,
   pushBioPhotoToDevice,
+  pushFaceTemplateToDevice,
   recordPushedUserLocally,
 } from '../services/zktecoService.js';
 
@@ -299,6 +306,26 @@ async function syncAreaToDevice(areaId, targetSn) {
       await queueCommand(targetSn, 'DATA UPDATE FINGERTMP', fpParams);
       cmdCount++;
     }
+    // Push face templates stored for this user (any device_sn) — mirrors the
+    // fingerprint block above; added alongside zkteco_face_templates itself.
+    const { rows: faceTmps } = await pool.query(
+      `SELECT * FROM zkteco_face_templates WHERE pin=$1 AND template_data IS NOT NULL ORDER BY face_id`,
+      [u.pin]
+    );
+    for (const face of faceTmps) {
+      await pushFaceTemplateToDevice(targetSn, face.pin, face.face_id, face.template_size, face.valid || 1, face.template_data);
+      cmdCount++;
+    }
+    // Same reason as pushOneUserToDevice: the target device applies these
+    // commands fine but doesn't reliably echo them back as an OPERLOG report,
+    // so without this the target's zkteco_users/zkteco_fingerprints (and the
+    // Devices grid's DB count) never catch up even though the push landed.
+    // No face photo here — unlike pushOneUserToDevice, this function never
+    // queues one, so recording one locally would claim data that was never
+    // actually pushed to this target.
+    await recordPushedUserLocally(targetSn,
+      { pin: u.pin, name: u.name, privilege: u.privilege, cardNo: u.card_no, employeeId: u.employee_id },
+      fps);
   }
   console.log(`[ZK Area] syncAreaToDevice: area=${areaId} → device=${targetSn} — ${cmdCount} commands`);
   return { cmdCount, userCount: users.length };
@@ -1494,6 +1521,8 @@ router.get('/device-users', async (req, res) => {
              e.full_name       AS employee_name,
              e.employee_id     AS staff_code,
              e.department      AS staff_dept,
+             e.position        AS staff_post,
+             e.branch          AS staff_branch,
              e.device_id       AS staff_device_id,
              e.access_expires  AS access_expires,
              e.access_expiry_mode AS access_expiry_mode,
@@ -1520,7 +1549,7 @@ router.get('/device-users', async (req, res) => {
       LEFT   JOIN zkteco_fingerprints f
                ON f.device_sn = zu.device_sn AND f.pin = zu.pin
       ${cond}
-      GROUP  BY zu.id, e.full_name, e.employee_id, e.department, e.device_id,
+      GROUP  BY zu.id, e.full_name, e.employee_id, e.department, e.position, e.branch, e.device_id,
                 e.access_expires, e.access_expiry_mode, e.access_valid_from, e.access_valid_to, e.access_valid_count,
                 zd.id, zd.name, zd.location
       ORDER  BY zu.device_sn,

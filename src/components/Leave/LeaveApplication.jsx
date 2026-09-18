@@ -5,6 +5,7 @@ import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData } from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
 
 /* ── Date input that respects calendar setting — mirrors LeaveApplyModal.jsx ── */
@@ -13,11 +14,7 @@ const LeaveDateInput = ({ value, onChange, error, settings }) => {
   if (settings.defaultCalendar === 'np') {
     return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
   }
-  return (
-    <input type="date" className={`form-control ${error ? 'error' : ''}`}
-      value={value} min={blockPast ? getNepalTodayISO() : undefined}
-      onChange={e => onChange(e.target.value)} />
-  );
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
 };
 
 const LeaveApplication = () => {

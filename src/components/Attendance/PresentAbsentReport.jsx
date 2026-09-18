@@ -10,7 +10,7 @@ import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
-import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
+import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 
@@ -24,7 +24,10 @@ const DOW_NP = { Sun:'आइत', Mon:'सोम', Tue:'मंगल', Wed:'ब�
 const STATUS = {
   P  : { color:'#059669', main:'P',   sup:null,  title:'Present'                   },
   P1 : { color:'#0369a1', main:'P',   sup:'1P',  title:'Present – single punch'    },
-  PP : { color:'#ca8a04', main:'PH',  sup:null,  title:'Present on Public Holiday' },
+  PP : { color:'#ca8a04', main:'H.P', sup:null,  title:'Present on Public Holiday' },
+  PP1: { color:'#ca8a04', main:'H.P', sup:'1P',  title:'Present on Public Holiday – single punch' },
+  WP : { color:'#0f766e', main:'W.P', sup:null,  title:'Present on Weekend'        },
+  WP1: { color:'#0f766e', main:'W.P', sup:'1P',  title:'Present on Weekend – single punch' },
   AB : { color:'#dc2626', main:'AB',  sup:null,  title:'Absent'                    },
   H  : { color:'#111827', main:'W',   sup:null,  title:'Weekend'                   },
   DO : { color:'#6b7280', main:'DO',  sup:null,  title:'Day Off'                   },
@@ -41,7 +44,8 @@ const STATUS = {
 // regardless of who opens it). The on-screen grid instead resolves through
 // STATUS_NP/statusDisplay below when the app is in Nepali — see StatusCell.
 const STATUS_TITLE_NP = {
-  P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', AB: 'अनुपस्थित',
+  P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', PP1: 'सार्वजनिक बिदामा उपस्थित – एकल पन्च',
+  WP: 'सप्ताहान्तमा उपस्थित', WP1: 'सप्ताहान्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित',
   H: 'विकेन्ड', DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', LH: 'आधा दिन बिदा',
   OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा', PLH: 'उपस्थित + आधा दिन बिदा',
 };
@@ -49,6 +53,9 @@ const STATUS_NP = {
   P:  { main:'उ',    sup:null },
   P1: { main:'उ',    sup:'१'  },
   PP: { main:'उसा',  sup:null },
+  PP1:{ main:'उसा',  sup:'१'  },
+  WP: { main:'उस',   sup:null },
+  WP1:{ main:'उस',   sup:'१'  },
   AB: { main:'अनु',  sup:null },
   H:  { main:'स',    sup:null },
   DO: { main:'दि.अ', sup:null },
@@ -326,17 +333,44 @@ const PresentAbsentReport = () => {
 
   const activeParam = filters.status !== 'notworking';
 
+  // Staff dropdown options for the toolbar's own selector — same shape/style
+  // as the Advance Search modal's Staff field (searchable, avatar, checkbox).
+  const staffOpts = React.useMemo(() => {
+    const activeFlag = activeParam;
+    return allEmployees
+      .filter(e => (e.active !== false) === activeFlag)
+      .sort((a,b) => (a.fullName||'').localeCompare(b.fullName||''))
+      .map(e => ({
+        value: String(e.id),
+        label: e.fullName || `Staff ${e.id}`,
+        sub: [e.employeeId, e.position].filter(Boolean).join(' - '),
+        photo: e.profilePhoto,
+      }));
+  }, [allEmployees, activeParam]);
+
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      let apiYear = year, apiMonth = month;
+      let apiUrl;
       if (useNP) {
-        const ad = bsToAD(year, month, 15);
-        if (ad) { apiYear = ad.getFullYear(); apiMonth = ad.getMonth() + 1; }
+        // Convert the BS half's own start/end days to AD — BS months don't
+        // line up with AD months, so deriving an AD year/month from the
+        // BS month's midpoint (day 15) and re-applying `half` to THAT AD
+        // month, like this used to, could land the whole date range (and
+        // every day-of-week in the calendar) several days off. Same fix as
+        // HalfSummaryReport.jsx's load().
+        const startBSDay = half === 1 ? 1 : 16;
+        const endBSDay   = half === 1 ? 15 : getBSDays(year, month);
+        const startAD    = bsToAD(year, month, startBSDay);
+        const endAD      = bsToAD(year, month, endBSDay);
+        if (startAD && endAD) {
+          const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          apiUrl = `/attendance/present-absent?startDate=${iso(startAD)}&endDate=${iso(endAD)}&half=${half}`;
+        }
       }
-      setData(await api.get(
-        `/attendance/present-absent?year=${apiYear}&month=${apiMonth}&half=${half}&active=${activeParam}&orgScope=1`
-      ));
+      if (!apiUrl) apiUrl = `/attendance/present-absent?year=${year}&month=${month}&half=${half}`;
+      apiUrl += `&active=${activeParam}&orgScope=1`;
+      setData(await api.get(apiUrl));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
   }, [year, month, half, activeParam, useNP]);
@@ -345,6 +379,13 @@ const PresentAbsentReport = () => {
 
   const period    = data?.period;
   const dates     = data?.dates     || [];
+  // The backend's own `dayNum` is the AD calendar day-of-month — correct
+  // for the AD calendar, but meaningless in BS mode since the half's AD
+  // date range rarely starts on an AD month boundary. BS days run
+  // consecutively with no gaps, so the half's own start day (1 or 16)
+  // plus the column's index gives the real BS day number.
+  const bsHalfStartDay = half === 1 ? 1 : 16;
+  const dispDayNum = (dayNum, idx) => useNP ? (bsHalfStartDay + idx) : dayNum;
   const allRows = (data?.employees || []).map(emp => {
     const newDays = { ...emp.days };
     Object.keys(newDays).forEach(dateStr => {
@@ -403,7 +444,7 @@ const PresentAbsentReport = () => {
     let p=0, ab=0, l=0, ov=0;
     employees.forEach(e => {
       const st = e.days[date];
-      if      (st==='P'||st==='PP'||st==='P1') p++;
+      if      (st==='P'||st==='PP'||st==='PP1'||st==='WP'||st==='WP1'||st==='P1') p++;
       else if (st==='AB')                       ab++;
       else if (st==='L'||st==='LH')             l++;
       else if (st==='OV')                        ov++;
@@ -457,7 +498,7 @@ const PresentAbsentReport = () => {
 
   const handlePrint = () => {
     if (!employees.length) return;
-    const dayHeaders = dates.map(d => `<th style="padding:3px 4px;border:1px solid #dedede;background:#efefef;font-size:10px">${d.dayNum}<br/>${d.dayKey.slice(0,3)}</th>`).join('');
+    const dayHeaders = dates.map((d, idx) => `<th style="padding:3px 4px;border:1px solid #dedede;background:#efefef;font-size:10px">${dispDayNum(d.dayNum, idx)}<br/>${d.dayKey.slice(0,3)}</th>`).join('');
     const dataRows = employees.map((e,i) => {
       const dayCells = dates.map(d => {
         const lbl = statusText(e.days[d.date]);
@@ -509,7 +550,7 @@ const PresentAbsentReport = () => {
     const companyPhone = settings.companyPhone ? `Tel: ${settings.companyPhone}` : '';
 
     const FIXED_COLS = ['SN', 'Staff', 'Post', 'Dept', 'Branch'];
-    const dayCols = dates.map(d => d.dayNum);
+    const dayCols = dates.map((d, idx) => dispDayNum(d.dayNum, idx));
     const dayDows = dates.map(d => d.dayKey.slice(0, 3));
     const dayIsWeekendHoliday = dates.map(d => d.isWeekend || d.isHoliday);
     const lastCol = FIXED_COLS.length + dayCols.length + 3; // + P, AB, OT
@@ -712,14 +753,11 @@ const PresentAbsentReport = () => {
         <span style={{ fontSize:13,fontWeight:600,color:'#374151',whiteSpace:'nowrap' }}>
           {L('कर्मचारी','Staff')} :
         </span>
-        <select className="form-control" style={{ width:220,height:36,fontSize:13 }}
-          value={filters.staffId}
-          onChange={e => setFilters(p => ({ ...p, staffId: e.target.value }))}>
-          <option value="">— {L('सबै कर्मचारी','All Staff')} —</option>
-          {allRows.map(e => (
-            <option key={e.id} value={String(e.id)}>{e.fullName}</option>
-          ))}
-        </select>
+        <div style={{ width:240 }}>
+          <SearchableCheckSelect options={staffOpts} value={filters.staffId} showAvatar
+            onChange={v => setFilters(p => ({ ...p, staffId: v }))}
+            allLabel={L('सबै कर्मचारी','All Staff')} />
+        </div>
 
         {/* Advance Search button */}
         <button onClick={() => setShowSearch(true)}
@@ -770,12 +808,12 @@ const PresentAbsentReport = () => {
                 <th style={{ ...thBase, minWidth:60 }}>{L('विभाग','Dept.')}</th>
                 <th style={{ ...thBase, minWidth:52 }}>{L('शाखा','Branch')}</th>
 
-                {dates.map(({ date, dayNum, isWeekend, isHoliday }) => (
+                {dates.map(({ date, dayNum, isWeekend, isHoliday }, idx) => (
                   <th key={date} style={{
                     ...(isWeekend ? thWeekend : isHoliday ? thHoliday : thBase),
                     minWidth:32, fontSize:11,
                   }}>
-                    {dayNum}
+                    {dispDayNum(dayNum, idx)}
                   </th>
                 ))}
                 <th style={{ ...thTotalP,  minWidth:38 }}>P</th>
@@ -936,7 +974,8 @@ const PresentAbsentReport = () => {
               { st:'PLH',desc:L('उपस्थित + आधा दिन बिदा','Present + Half-day Leave') },
               { st:'OV', desc:L('कार्यालय भ्रमण','Office Visit')       },
               { st:'PH', desc:L('सार्वजनिक बिदा','Public Holiday')     },
-              { st:'PP', desc:L('सार्वजनिक बिदामा उपस्थित','Present on Public Holiday') },
+              { st:'PP', desc:L('सार्वजनिक बिदामा उपस्थित (H.P)','Present on Public Holiday (H.P)') },
+              { st:'WP', desc:L('सप्ताहान्तमा उपस्थित (W.P)','Present on Weekend (W.P)') },
             ].map(({ st, desc }) => {
               const s = STATUS[st];
               const disp = statusDisplay(st, language);

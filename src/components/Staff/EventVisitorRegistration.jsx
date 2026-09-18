@@ -9,6 +9,7 @@ import DataGrid from '../DataGrid/DataGrid.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import HoverCard from '../Common/HoverCard.jsx';
 import ContactFormModal, { CONTACT_EMPTY } from './ContactFormModal.jsx';
+import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 
 const FOLLOWUP_MEDIA_OPTIONS = ['Call', 'WhatsApp', 'Email', 'SMS', 'In-Person', 'Other'];
 const FOLLOWUP_STATUS_OPTIONS = [
@@ -3381,8 +3382,8 @@ const EventVisitorRegistration = () => {
           </Field>
           <div style={{ display:'flex', gap:12 }}>
             <Field label="Event Date">
-              <input type="date" className="form-control" value={modal.form.eventDate}
-                onChange={e => setModal(m => ({ ...m, form:{ ...m.form, eventDate:e.target.value } }))} />
+              <EnglishDatePicker value={modal.form.eventDate}
+                onChange={v => setModal(m => ({ ...m, form:{ ...m.form, eventDate:v } }))} />
             </Field>
             <Field label="Venue">
               <input className="form-control" value={modal.form.venue}

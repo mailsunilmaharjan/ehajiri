@@ -112,10 +112,74 @@ const loadPublicHolidays = async () => {
   } catch { return []; }
 };
 
-// Returns holiday name if dateStr falls within any configured public holiday, else null
-const makeHolidayChecker = (holidays) => (dateStr) => {
-  const h = holidays.find(ph => ph.startDate && ph.endDate && dateStr >= ph.startDate && dateStr <= ph.endDate);
-  return h?.name || null;
+// Case/whitespace-insensitive match against a Public Holiday's scope array
+// (Settings → Public Holiday's Gender/Branch/Department/Religion/Handicapped
+// dropdowns) — an empty array or the special 'All' entry means unscoped,
+// i.e. matches every employee. `empValue` may be null (no employee given, or
+// the employee has no value for that field), which only matches an unscoped
+// entry. `idToNameMap` (Map<string,string>) resolves a scope entry that's a
+// lookup-table id to its name before comparing — the Branch/Department/
+// Religion dropdowns in Settings → Public Holiday save the record's id, not
+// its name (see PublicHolidaySection's branchOpts/deptOpts/religionOpts in
+// Settings.jsx), while users.branch/department/religion store the name —
+// without resolving through this map, a holiday scoped to any specific
+// branch/department/religion (anything other than "All") could never match
+// anyone. Omit it for scope fields that are already plain label values
+// (Gender, Handicapped) — there's no id to resolve.
+const holidayScopeMatches = (scopeArr, empValue, idToNameMap = null) => {
+  if (!scopeArr || !scopeArr.length || scopeArr.includes('All')) return true;
+  if (empValue == null || empValue === '') return false;
+  const norm = (v) => String(v).toLowerCase().trim();
+  const resolved = idToNameMap ? scopeArr.map(v => idToNameMap.get(String(v)) || v) : scopeArr;
+  return resolved.some(v => norm(v) === norm(empValue));
+};
+
+// Cheap in-process cache for the Branch/Department/Religion id→name lookups
+// holidayScopeMatches needs above — these lookup lists rarely change, so a
+// short TTL avoids 3 extra queries on every single report request.
+let _holidayScopeLookupCache   = null;
+let _holidayScopeLookupCacheAt = 0;
+const loadHolidayScopeLookups = async () => {
+  if (_holidayScopeLookupCache && (Date.now() - _holidayScopeLookupCacheAt) < 60_000) {
+    return _holidayScopeLookupCache;
+  }
+  const [bRes, dRes, rRes] = await Promise.all([
+    pool.query('SELECT id, name FROM branches'),
+    pool.query('SELECT id, name FROM departments'),
+    pool.query('SELECT id, name FROM religions'),
+  ]);
+  const toMap = (rows) => new Map(rows.map(r => [String(r.id), r.name]));
+  _holidayScopeLookupCache = {
+    branchNameById:   toMap(bRes.rows),
+    deptNameById:     toMap(dRes.rows),
+    religionNameById: toMap(rRes.rows),
+  };
+  _holidayScopeLookupCacheAt = Date.now();
+  return _holidayScopeLookupCache;
+};
+
+// Returns holiday name if dateStr falls within a configured public holiday
+// AND `emp` is within that holiday's scope, else null. Each scope field
+// defaults to ['All'] (everyone) in Settings → Public Holiday, so an
+// unscoped holiday still matches every employee same as before — only a
+// holiday scoped to e.g. Gender=Female now excludes everyone else. `emp` is
+// optional: {gender, branch, department, religion, handicapped}; omitting it
+// (no employee in view yet) only matches fully-unscoped holidays. Async —
+// loads the id→name lookups once (cached) — so every call site now does
+// `await makeHolidayChecker(publicHolidays)` instead of a plain call.
+const makeHolidayChecker = async (holidays) => {
+  const { branchNameById, deptNameById, religionNameById } = await loadHolidayScopeLookups();
+  return (dateStr, emp = null) => {
+    const h = holidays.find(ph => {
+      if (!ph.startDate || !ph.endDate || dateStr < ph.startDate || dateStr > ph.endDate) return false;
+      return holidayScopeMatches(ph.gender,      emp?.gender)
+          && holidayScopeMatches(ph.branch,      emp?.branch,     branchNameById)
+          && holidayScopeMatches(ph.department,  emp?.department, deptNameById)
+          && holidayScopeMatches(ph.religion,    emp?.religion,   religionNameById)
+          && holidayScopeMatches(ph.handicapped, emp ? (emp.handicapped ? 'Yes' : 'No') : null);
+    });
+    return h?.name || null;
+  };
 };
 
 // â”€â”€ Duty roster rotation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -404,7 +468,11 @@ export async function computeDailyAttendance(date) {
       loadPublicHolidays(),
     ]);
     const weekends    = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday  = makeHolidayChecker(publicHolidays);
+    // Per-employee, not a single company-wide value — a holiday can be
+    // scoped to a gender/branch/department/religion/handicapped subset (see
+    // makeHolidayChecker), so this is resolved per row further down instead
+    // of once here.
+    const getHoliday  = await makeHolidayChecker(publicHolidays);
 
     const DOW_KEYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     // Use local interpretation of the date to avoid UTC-shift problems
@@ -412,7 +480,6 @@ export async function computeDailyAttendance(date) {
     const datObj     = new Date(Y, M - 1, D);
     const dayKey     = DOW_KEYS[datObj.getDay()];
     const isWeekend  = weekends.includes(dayKey);
-    const holidayName = getHoliday(date);  // null when not a PH
 
     // â”€â”€ 2. Main query: staff + shifts + leaves + visits (attendance punches
     //    are fetched + bucketed separately below — see step 2b — since a
@@ -437,6 +504,9 @@ export async function computeDailyAttendance(date) {
         u.mode,
         u.grade,
         u.eligible_for_ot,
+        u.gender,
+        u.religion,
+        u.handicapped,
 
         /* shift fields — roster shift > employee shift > default */
         COALESCE(rs.name,               s.name,               ds.name)               AS shift_name,
@@ -489,7 +559,7 @@ export async function computeDailyAttendance(date) {
         ov_reco.full_name AS visit_reco_name
 
       FROM   users u
-      CROSS  JOIN LATERAL (SELECT * FROM def_shift) ds
+      LEFT   JOIN LATERAL (SELECT * FROM def_shift) ds ON TRUE
       LEFT   JOIN shifts      s   ON s.code  = u.shift
       /* duty roster: entry covering this date, or most recent past entry as fallback.
          shift_id resolves through shift_ids (rotation: cycles through the selected
@@ -650,6 +720,11 @@ export async function computeDailyAttendance(date) {
         roster_off_days, roster_is_off, roster_shift_id, roster_has_entry, default_shift_id,
       } = r;
 
+      // Scoped to this employee's gender/branch/department/religion/handicapped —
+      // a holiday set up for e.g. Gender=Female only applies to female staff;
+      // everyone else treats the date as a normal working day.
+      const holidayName = getHoliday(date, r);
+
       // Winter Facilities Policy — swap in the shift's winter start/end/grace
       // when `date` falls inside the configured winter range.
       const { shiftStart: shift_start, shiftEnd: shift_end, graceStart: grace_start, graceEnd: grace_end } =
@@ -723,11 +798,20 @@ export async function computeDailyAttendance(date) {
       // generic "Weekend" label. roster_is_off is already gated to a roster
       // entry actually covering this date (never a stale fallback), so
       // shift_name from the same resolved roster shift is safe to trust here.
-      if (leave_id)             status = leave_type_name || 'Leave';
-      else if (roster_is_off)   status = r.shift_name || 'Weekend';
+      // Public Holiday takes priority over a same-day Leave record — the
+      // day doesn't count as leave taken (it isn't a working day to begin
+      // with regardless of the leave application), it's simply a holiday.
+      // Leave detail is still preserved in remarks below either way.
+      if (roster_is_off)        status = r.shift_name || 'Weekend';
       else if (isEmpWeekend)    status = 'Weekend';
       else if (time_in)         status = 'Present';
       else if (holidayName)     status = 'Public Holiday';
+      else if (leave_id)        status = leave_type_name || 'Leave';
+      // An approved Office Visit with no punch is its own outcome, not an
+      // absence — this used to fall through to the 'Absent' default even
+      // though `hasVisit` (below) was already correctly flagged, so the
+      // Absent tab/tile silently counted every visit day too.
+      else if (visit_id)        status = 'Office Visit';
 
       // â”€â”€ Remarks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const parts = [];
@@ -873,7 +957,7 @@ router.get('/staff-ledger', async (req, res) => {
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
@@ -1095,7 +1179,7 @@ router.get('/staff-ledger', async (req, res) => {
 
     // â”€â”€ Build per-day records — date-range iterator (works with any start/endDate) â”€â”€â”€
     const days = []; let totalWorkingDays=0;
-    let presentCount=0,absentCount=0,leaveCount=0,lateCount=0,earlyCount=0,otMins=0,totalMins=0;
+    let presentCount=0,absentCount=0,leaveCount=0,visitCount=0,lateCount=0,earlyCount=0,otMins=0,totalMins=0;
 
     // Iterate every calendar day in the range using Date objects
     let sn = 0;
@@ -1125,7 +1209,7 @@ router.get('/staff-ledger', async (req, res) => {
       const log        = logsByDay[dateStr];
       const leave      = leaveDates[dateStr];
       const visit      = visitDates[dateStr];
-      const phName     = getHoliday(dateStr);
+      const phName     = getHoliday(dateStr, emp);
 
       let status='Absent', timeIn=null, timeOut=null, lateMins=null,
           earlyMins=null, otMinDay=null, totalMinDay=null, remarks='';
@@ -1153,18 +1237,6 @@ router.get('/staff-ledger', async (req, res) => {
             if (worked > 0) { totalMinDay = worked; totalMins += worked; }
           }
         }
-      } else if (leave) {
-        isHalfDayLeave = !!leaveHalfDates[dateStr];
-        status = leave; leaveCount += isHalfDayLeave ? 0.5 : 1;
-        const leaveReco = leaveRecoMap[dateStr];
-        const lMeta = [];
-        if (leaveReco?.recoName) lMeta.push(`Recom. by ${leaveReco.recoName}`);
-        if (leaveReco?.apprName) lMeta.push(`App. by ${leaveReco.apprName}`);
-        const lParts = [];
-        if (lMeta.length) lParts.push(lMeta.join(', '));
-        lParts.push(`Leave: ${leave}${isHalfDayLeave ? ' (½ Half Day)' : ''}`);
-        if (phName) lParts.push(phName);
-        remarks = lParts.join(' | ');
       } else if (log?.time_in) {
         presentCount++;
         status='Present';
@@ -1236,21 +1308,42 @@ router.get('/staff-ledger', async (req, res) => {
         if (phName) remarks = remarks ? `${remarks} | ${phName}` : phName;
         if (empRemarksMap[dateStr]) remarks = remarks ? `${remarks} | ${empRemarksMap[dateStr]}` : `${empRemarksMap[dateStr]}`;
       } else if (phName) {
-        status  = 'Public Holiday';
-        remarks = phName;
+        // Public Holiday takes priority over a same-day Leave record — the
+        // day doesn't count as leave taken (a holiday isn't a working day
+        // to begin with), it's simply a holiday. If a leave was also
+        // recorded for it, note that in remarks instead of silently
+        // dropping it, but don't add it to leaveCount.
+        status = 'Public Holiday';
+        isHalfDayLeave = !!leaveHalfDates[dateStr];
+        remarks = leave ? `${phName} | Leave: ${leave}${isHalfDayLeave ? ' (½ Half Day)' : ''}` : phName;
+      } else if (leave) {
+        isHalfDayLeave = !!leaveHalfDates[dateStr];
+        status = leave; leaveCount += isHalfDayLeave ? 0.5 : 1;
+        const leaveReco = leaveRecoMap[dateStr];
+        const lMeta = [];
+        if (leaveReco?.recoName) lMeta.push(`Recom. by ${leaveReco.recoName}`);
+        if (leaveReco?.apprName) lMeta.push(`App. by ${leaveReco.apprName}`);
+        const lParts = [];
+        if (lMeta.length) lParts.push(lMeta.join(', '));
+        lParts.push(`Leave: ${leave}${isHalfDayLeave ? ' (½ Half Day)' : ''}`);
+        remarks = lParts.join(' | ');
+      } else if (visit) {
+        // An approved Office Visit is its own attendance outcome — it used
+        // to still fall into absentCount even though the status label below
+        // correctly said "Office Visit", so the Absent tile over-counted
+        // every visit day.
+        status = 'Office Visit';
+        visitCount++;
+        const vMeta = [];
+        if (visit.reco_name) vMeta.push(`Recom. by ${visit.reco_name}`);
+        if (visit.appr_name) vMeta.push(`App. by ${visit.appr_name}`);
+        const vParts = [];
+        if (vMeta.length) vParts.push(vMeta.join(', '));
+        if (visit.purpose)  vParts.push(`Office Visit: ${visit.purpose}`);
+        if (visit.location) vParts.push(visit.location);
+        remarks = vParts.join(' | ');
       } else {
         absentCount++;
-        if (visit) {
-          status = 'Office Visit';
-          const vMeta = [];
-          if (visit.reco_name) vMeta.push(`Recom. by ${visit.reco_name}`);
-          if (visit.appr_name) vMeta.push(`App. by ${visit.appr_name}`);
-          const vParts = [];
-          if (vMeta.length) vParts.push(vMeta.join(', '));
-          if (visit.purpose)  vParts.push(`Office Visit: ${visit.purpose}`);
-          if (visit.location) vParts.push(visit.location);
-          remarks = vParts.join(' | ');
-        }
       }
 
       // Total approved OT for this exact day — independent of the OUT-status
@@ -1311,7 +1404,7 @@ router.get('/staff-ledger', async (req, res) => {
     const otApprovedMinsSum = otApprovedSumMap.get(emp.id) || 0;
 
     const summary = {
-      totalWorkingDays, presentCount, absentCount, leaveCount,
+      totalWorkingDays, presentCount, absentCount, leaveCount, visitCount,
       lateCount, earlyCount, otMins, totalMins,
       attendanceRate: totalWorkingDays>0 ? Math.round((presentCount+leaveCount)/totalWorkingDays*100) : 0,
       otFormatted   : otMins>0 ? minsToHHMM(otMins) : '0:00',
@@ -1367,7 +1460,7 @@ router.get('/half-monthly', async (req, res) => {
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
     // â”€â”€ Build date lists by iterating startDate â†’ endDate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1407,7 +1500,8 @@ router.get('/half-monthly', async (req, res) => {
     // â”€â”€ All active employees (with per-employee shift info) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
-             u.department, u.position, u.branch, u.shift, u.eligible_for_ot,
+             u.department, u.position, u.branch, u.gender, u.religion, u.handicapped,
+             u.shift, u.eligible_for_ot,
              s.start_time AS shift_start, s.end_time AS shift_end,
              s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed,
              s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
@@ -1548,7 +1642,7 @@ router.get('/half-monthly', async (req, res) => {
       for (const { dateStr, dayKey } of allDatesHalf) {
         const roster   = getEmpRosterH(dateStr);
         const isEmpWkd = isRosterWeekend(roster, dayKey, weekends, defShift?.id);
-        const phName2  = getHoliday(dateStr);
+        const phName2  = getHoliday(dateStr, emp);
         if (!isEmpWkd && !phName2) {
           empWorkingDatesH.push({ dateStr, dayKey, roster });
           empTotalWorkingDays++;
@@ -1734,7 +1828,7 @@ router.get('/monthly', async (req, res) => {
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
     // Working days = non-weekend, non-public-holiday days in the period.
@@ -1758,7 +1852,8 @@ router.get('/monthly', async (req, res) => {
     const hmActiveParam = req.query.active !== 'false';
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
-             u.department, u.position, u.branch, u.shift, u.eligible_for_ot,
+             u.department, u.position, u.branch, u.gender, u.religion, u.handicapped,
+             u.shift, u.eligible_for_ot,
              s.start_time AS shift_start, s.end_time AS shift_end,
              s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed,
              s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
@@ -1873,7 +1968,7 @@ router.get('/monthly', async (req, res) => {
       for (const { dateStr, dayKey } of allDatesMon) {
         const roster   = getEmpRosterM(dateStr);
         const isEmpWkd = isRosterWeekend(roster, dayKey, weekends, defShift?.id);
-        const phName3  = getHoliday(dateStr);
+        const phName3  = getHoliday(dateStr, emp);
         if (!isEmpWkd && !phName3) {
           empWorkingDatesM.push({ dateStr, roster });
           empTotalWorkingDays++;
@@ -2031,7 +2126,7 @@ router.get('/half-in-out', async (req, res) => {
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW        = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
     // Build dates by iterating from startDate to endDate (works for both AD and BS modes)
@@ -2068,7 +2163,7 @@ router.get('/half-in-out', async (req, res) => {
                NULLIF(TRIM(COALESCE(p.short_name,'')), '')  AS "postShort",
                NULLIF(TRIM(COALESCE(dd.short_name,'')), '') AS "deptShort",
                NULLIF(TRIM(COALESCE(br.short_name,'')), '') AS "branchShort",
-               u.position, u.department, u.branch, u.eligible_for_ot,
+               u.position, u.department, u.branch, u.gender, u.religion, u.handicapped, u.eligible_for_ot,
                u.grade, u.mode, u.timing_type AS "timingType", u.shift
         FROM   users u
         LEFT JOIN posts       p  ON p.name  = u.position
@@ -2209,6 +2304,11 @@ router.get('/half-in-out', async (req, res) => {
         const offType = empRoster?.isOff
           ? (/night/i.test(empRoster.shiftName || '') ? 'Night Off' : 'Day Off')
           : null;
+        // Per-employee holiday override — same reasoning as empIsWeekend
+        // above: the shared dates[] holiday flag is unscoped (used only as a
+        // fallback), a holiday scoped to e.g. Gender=Female must not show for
+        // everyone else.
+        const empHolidayName = getHoliday(date, emp);
 
         days[date] = {
           timeIn:  rawIn,
@@ -2216,6 +2316,7 @@ router.get('/half-in-out', async (req, res) => {
           punches: log?.punches || 0,
           workedHrs, otHrs,
           isWeekend: empIsWeekend, offType,
+          isHoliday: !!empHolidayName, holidayName: empHolidayName || null,
           leave : empLeave[date] || null,
           visit : empVisit[date] || null,
         };
@@ -2280,7 +2381,7 @@ router.get('/half-late-early', async (req, res) => {
       pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW        = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const defShift   = defShiftRes.rows[0];
     const defShiftId = defShift?.id ?? null;
@@ -2300,6 +2401,7 @@ router.get('/half-late-early', async (req, res) => {
     const { scopeEmployeeId, isScoped } = resolveEmployeeScope(req);
     const empRes = await pool.query(`
       SELECT u.id, u.full_name AS "fullName", u.position, u.department, u.branch,
+             u.gender, u.religion, u.handicapped,
              u.shift AS "shiftCode", u.grade, u.mode, u.timing_type AS "timingType",
              NULLIF(TRIM(COALESCE(p.short_name,'')),  '') AS "postShort",
              NULLIF(TRIM(COALESCE(dd.short_name,'')), '') AS "deptShort",
@@ -2311,7 +2413,7 @@ router.get('/half-late-early', async (req, res) => {
              COALESCE(s.winter_policy_enabled, ds.winter_policy_enabled, FALSE) AS "winterEnabled",
              COALESCE(s.winter_policy,         ds.winter_policy)                AS "winterPolicy"
       FROM   users u
-      CROSS  JOIN LATERAL (SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1) ds
+      LEFT   JOIN LATERAL (SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1) ds ON TRUE
       LEFT JOIN shifts       s  ON s.code = u.shift
       LEFT JOIN posts        p  ON LOWER(TRIM(p.name))  = LOWER(TRIM(u.position))
       LEFT JOIN departments  dd ON LOWER(TRIM(dd.name)) = LOWER(TRIM(u.department))
@@ -2400,7 +2502,7 @@ router.get('/half-late-early', async (req, res) => {
 
       for (const { dateStr, dayKey } of allDatesLE) {
         const roster = getEmpRosterLE(dateStr);
-        if (isRosterWeekend(roster, dayKey, weekends, defShiftId) || getHoliday(dateStr)) continue;  // off day / holiday — skip
+        if (isRosterWeekend(roster, dayKey, weekends, defShiftId) || getHoliday(dateStr, emp)) continue;  // off day / holiday — skip
 
         const log = empLogs[dateStr];
         if (!log || !log.timeIn) continue;  // absent — skip
@@ -2488,7 +2590,7 @@ router.get('/present-absent', async (req, res) => {
       pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW        = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const defShift   = defShiftRes.rows[0];
     const defShiftId = defShift?.id ?? null;
@@ -2533,6 +2635,7 @@ router.get('/present-absent', async (req, res) => {
     const empRes = await pool.query(`
       SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName",
              u.branch, u.department, u.position, u.grade, u.mode,
+             u.gender, u.religion, u.handicapped,
              u.timing_type AS "timingType", u.shift, u.eligible_for_ot,
              NULLIF(TRIM(COALESCE(p.short_name,'')),  '') AS "postShort",
              NULLIF(TRIM(COALESCE(dd.short_name,'')), '') AS "deptShort",
@@ -2644,12 +2747,15 @@ router.get('/present-absent', async (req, res) => {
       let totalP=0, totalAB=0, totalL=0, totalOV=0, totalPH=0, totalH=0;
       const days = {};
 
-      for (const { date, dayKey, isHoliday } of dates) {
+      for (const { date, dayKey } of dates) {
         const log      = empLogs[date];
         const leave    = empLeave.has(date);
         const halfLeave= empHalfLeave.has(date);
         const visit    = empVisit.has(date);
         const punches  = log?.punches || 0;
+        // Per-employee, not the shared dates[] flag — a holiday scoped to
+        // e.g. Gender=Female must not mark everyone else's day as PH too.
+        const isHoliday = !!getHoliday(date, emp);
         let st;
 
         // Roster override: once a roster entry covers this date, it's
@@ -2659,17 +2765,30 @@ router.get('/present-absent', async (req, res) => {
 
         if (empIsWeekend) {
           // Distinguish the roster's own Day Off/Night Off from the plain
-          // company-wide weekend, same as the other reports.
-          st = roster?.isOff ? (/night/i.test(roster.shiftName || '') ? 'NO' : 'DO') : 'H';
+          // company-wide weekend, same as the other reports. A plain weekend
+          // day with an actual punch-in is "Present on Weekend" (WP), same
+          // idea as the isHoliday branch below — it used to be swallowed
+          // into the generic 'H' weekend code with no sign the staff showed up.
+          // WP1 flags a single punch (in, no out) the same way P1 does on a
+          // normal working day — still full present credit, just visibly
+          // incomplete.
+          if (log?.hasIn && !roster?.isOff) { st = punches === 1 ? 'WP1' : 'WP'; totalP++; }
+          else st = roster?.isOff ? (/night/i.test(roster.shiftName || '') ? 'NO' : 'DO') : 'H';
           totalH++;
         }
-        else if (leave)                  { st='L';  totalL++;    }
-        else if (halfLeave && log?.hasIn){ st='PLH'; totalL+=0.5; totalP+=0.5; }  // Present + half-day leave
-        else if (halfLeave)              { st='LH'; totalL+=0.5; }  // Half-day leave, no attendance
-        else if (log?.hasIn && isHoliday){ st='PP'; totalP++;  }  // Present on Public Holiday
+        // Punch-present cases first (unaffected by leave/holiday labeling —
+        // showing up is the most concrete fact about the day), THEN
+        // Public Holiday, THEN Leave — a holiday isn't a working day to
+        // begin with, so it takes priority over a same-day Leave record
+        // (no punch); the day no longer counts toward totalL either, same
+        // reasoning as computeDailyAttendance/staff-ledger above.
+        else if (log?.hasIn && isHoliday){ st = punches === 1 ? 'PP1' : 'PP'; totalP++; }  // Present on Public Holiday
+        else if (log?.hasIn && halfLeave){ st='PLH'; totalL+=0.5; totalP+=0.5; }  // Present + half-day leave
         else if (log?.hasIn && punches===1){ st='P1'; totalP++; }  // Single punch
         else if (log?.hasIn)             { st='P';  totalP++;  }
         else if (isHoliday)              { st='PH'; totalPH++; }
+        else if (leave)                  { st='L';  totalL++;    }
+        else if (halfLeave)              { st='LH'; totalL+=0.5; }  // Half-day leave, no attendance
         else if (visit)                  { st='OV'; totalOV++; }
         else                             { st='AB'; totalAB++; }
 
@@ -2726,7 +2845,7 @@ router.get('/trend', async (req, res) => {
       loadPublicHolidays(),
     ]);
     const weekends   = wkRes.rows[0]?.weekends || ['Sat'];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW        = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
     // Note: unlike computeDailyAttendance(), this uses only company-wide
@@ -2870,7 +2989,8 @@ router.get('/yearly-analytics', async (req, res) => {
       pool.query(`SELECT weekends, effective_date FROM weekend_history WHERE effective_date <= $1 ORDER BY effective_date ASC, id ASC`, [endDate]),
       loadPublicHolidays(),
       pool.query(`
-        SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName", u.department, u.position, u.shift, u.join_date AS "joinDate",
+        SELECT u.id, u.employee_id AS "empCode", u.full_name AS "fullName", u.department, u.position, u.branch,
+               u.gender, u.religion, u.handicapped, u.shift, u.join_date AS "joinDate",
                s.start_time AS shift_start, s.end_time AS shift_end,
                s.grace_period_start AS grace_st, s.grace_period_end AS grace_ed,
                s.winter_policy_enabled AS shift_winter_enabled, s.winter_policy AS shift_winter_policy
@@ -2892,7 +3012,7 @@ router.get('/yearly-analytics', async (req, res) => {
       if (ids) employees = employees.filter(emp => ids.includes(emp.id));
     }
     const defShift  = shiftRow.rows[0];
-    const getHoliday = makeHolidayChecker(publicHolidays);
+    const getHoliday = await makeHolidayChecker(publicHolidays);
     const DOW_KEYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
     // Build working-days list with per-day weekend awareness (weekend policy can change mid-year)
@@ -3031,7 +3151,9 @@ router.get('/yearly-analytics', async (req, res) => {
       // employee's own roster (if any) overriding the company-wide weekend
       // for each date — same override every other roster-aware report applies.
       const empWorkingDays = allYearDates
-        .filter(d => d.ds >= empStartDate && !d.isHoliday)
+        // d.isHoliday is the shared, unscoped flag — re-checked per employee
+        // here since a holiday can be limited to e.g. Gender=Female.
+        .filter(d => d.ds >= empStartDate && !getHoliday(d.ds, emp))
         .filter(d => {
           const roster = getEffectiveRoster(rosterMapYr, emp.id, d.ds);
           return !isRosterWeekend(roster, d.dow, getWeekends(d.ds), defShift?.id);

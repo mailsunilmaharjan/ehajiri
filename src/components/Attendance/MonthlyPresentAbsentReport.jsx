@@ -27,7 +27,10 @@ const DOW_NP = { Sun:'आइत', Mon:'सोम', Tue:'मंगल', Wed:'ब�
 const STATUS = {
   P  : { color:'#059669', main:'P',   sup:null,  title:'Present'                   },
   P1 : { color:'#0369a1', main:'P',   sup:'1P',  title:'Present – single punch'    },
-  PP : { color:'#ca8a04', main:'PH',  sup:null,  title:'Present on Public Holiday' },
+  PP : { color:'#ca8a04', main:'H.P', sup:null,  title:'Present on Public Holiday' },
+  PP1: { color:'#ca8a04', main:'H.P', sup:'1P',  title:'Present on Public Holiday – single punch' },
+  WP : { color:'#0f766e', main:'W.P', sup:null,  title:'Present on Weekend'        },
+  WP1: { color:'#0f766e', main:'W.P', sup:'1P',  title:'Present on Weekend – single punch' },
   AB : { color:'#dc2626', main:'AB',  sup:null,  title:'Absent'                    },
   H  : { color:'#111827', main:'W',   sup:null,  title:'Weekend'                   },
   DO : { color:'#6b7280', main:'DO',  sup:null,  title:'Day Off'                   },
@@ -44,7 +47,8 @@ const STATUS = {
 // regardless of who opens it). The on-screen grid instead resolves through
 // STATUS_NP/statusDisplay below when the app is in Nepali — see StatusCell.
 const STATUS_TITLE_NP = {
-  P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', AB: 'अनुपस्थित',
+  P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', PP1: 'सार्वजनिक बिदामा उपस्थित – एकल पन्च',
+  WP: 'सप्ताहान्तमा उपस्थित', WP1: 'सप्ताहान्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित',
   H: 'विकेन्ड', DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', LH: 'आधा दिन बिदा',
   OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा', PLH: 'उपस्थित + आधा दिन बिदा',
 };
@@ -52,6 +56,9 @@ const STATUS_NP = {
   P:  { main:'उ',    sup:null },
   P1: { main:'उ',    sup:'१'  },
   PP: { main:'उसा',  sup:null },
+  PP1:{ main:'उसा',  sup:'१'  },
+  WP: { main:'उस',   sup:null },
+  WP1:{ main:'उस',   sup:'१'  },
   AB: { main:'अनु',  sup:null },
   H:  { main:'स',    sup:null },
   DO: { main:'दि.अ', sup:null },
@@ -395,7 +402,7 @@ const MonthlyPresentAbsentReport = () => {
     let p=0, ab=0, l=0, ov=0;
     employees.forEach(e => {
       const st = e.days[date];
-      if      (st==='P'||st==='PP'||st==='P1') p++;
+      if      (st==='P'||st==='PP'||st==='PP1'||st==='WP'||st==='WP1'||st==='P1') p++;
       else if (st==='AB')                       ab++;
       else if (st==='L'||st==='LH')             l++;
       else if (st==='OV')                        ov++;
@@ -476,7 +483,7 @@ const MonthlyPresentAbsentReport = () => {
     const dataRows = employees.map((e,i) => {
       const dayCells = dates.map(d => {
         const lbl = statusText(e.days[d.date]);
-        const bg = e.days[d.date]==='AB'?'#fff0f0':e.days[d.date]==='P'||e.days[d.date]==='PP'||e.days[d.date]==='PLH'?'#f0fff4':
+        const bg = e.days[d.date]==='AB'?'#fff0f0':e.days[d.date]==='P'||e.days[d.date]==='PP'||e.days[d.date]==='PP1'||e.days[d.date]==='WP'||e.days[d.date]==='WP1'||e.days[d.date]==='PLH'?'#f0fff4':
                    e.days[d.date]==='H'?'#f9fafb':e.days[d.date]==='PH'?'#fffbeb':'white';
         const col = STATUS[e.days[d.date]]?.color || '#374151';
         return `<td style="padding:1px 2px;border:1px solid #e5e7eb;text-align:center;font-size:9px;font-weight:800;color:${col};background:${bg}">${lbl}</td>`;
@@ -995,7 +1002,8 @@ const MonthlyPresentAbsentReport = () => {
               { st:'PLH',desc:L('उपस्थित + आधा दिन बिदा','Present + Half-day Leave') },
               { st:'OV', desc:L('कार्यालय भ्रमण','Office Visit')       },
               { st:'PH', desc:L('सार्वजनिक बिदा','Public Holiday')     },
-              { st:'PP', desc:L('सार्वजनिक बिदामा उपस्थित','Present on Public Holiday') },
+              { st:'PP', desc:L('सार्वजनिक बिदामा उपस्थित (H.P)','Present on Public Holiday (H.P)') },
+              { st:'WP', desc:L('सप्ताहान्तमा उपस्थित (W.P)','Present on Weekend (W.P)') },
             ].map(({ st, desc }) => {
               const s = STATUS[st];
               const disp = statusDisplay(st, language);
