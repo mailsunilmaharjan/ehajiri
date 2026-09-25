@@ -10,6 +10,7 @@ import useDateFormat from '../../hooks/useDateFormat.js';
 import ViewMonthlyBtn from './ViewMonthlyBtn.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
+import { leaveShort, inRowPrintHtml, inRowExcelText } from '../../utils/inOutStatus.js';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
@@ -28,14 +29,6 @@ const fmtTime = (iso) => {
   if (!iso) return null;
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-};
-
-/* Leave abbreviation: "Sick Leave"→"SL", "Leave"→"L" */
-const leaveAbbrev = (name) => {
-  if (!name) return 'L';
-  const words = name.trim().split(/\s+/);
-  if (words.length > 1) return words.map(w => w[0].toUpperCase()).join('');
-  return name.slice(0, 2).toUpperCase();
 };
 
 /* ── Advance Search ── */
@@ -227,7 +220,7 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
         <span title={day.leave.name}
           style={{ background:'#ede9fe', color:'#5b21b6', borderRadius:4,
             padding:'1px 5px', fontSize:10, fontWeight:800, cursor:'help' }}>
-          {leaveAbbrev(day.leave.name)}
+          {leaveShort(day.leave)}
         </span>
       );
     } else if (day?.visit) {
@@ -276,6 +269,10 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
   // the time as usual, with the leave type + "1/2" underneath instead of no
   // indication at all that leave was taken that day.
   const halfLeave = rowKey === 'in' && day?.leave?.halfDay ? day.leave : null;
+  // A punch on a day that's also a configured Public Holiday — otherwise this
+  // just renders as an ordinary time-in with no sign the staff actually came
+  // in on a holiday (relevant for comp-off/extra-pay eligibility).
+  const presentOnHoliday = rowKey === 'in' && isHoliday && !!day?.timeIn;
 
   return (
     <td style={{ background:bg, borderRight:bdRight, borderBottom:bdBottom,
@@ -291,7 +288,13 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
             </span>
             {halfLeave && (
               <span title={halfLeave.name} style={{ fontSize:9, fontWeight:800, color:'#5b21b6', marginTop:1 }}>
-                {leaveAbbrev(halfLeave.name)} 1/2
+                {leaveShort(halfLeave)} 1/2
+              </span>
+            )}
+            {presentOnHoliday && (
+              <span title={holidayName || LL('सार्वजनिक बिदामा हाजिर','Present on Public Holiday')}
+                style={{ fontSize:9, fontWeight:800, color:'#92400e', marginTop:1 }}>
+                {LL('हा-साबि','P-PH')}
               </span>
             )}
           </div>
@@ -493,7 +496,10 @@ const MonthlyInOutReport = () => {
         const dayCells = dates.map(d => {
           const day = e.days[d.date];
           let value = '';
-          if (rowDef.key === 'in')  value = fmtTime(day?.timeIn)  || '';
+          // IN row carries the same status short names as the screen
+          // (leave code, PH, OV, DO/NO, W) when there's no punch.
+          if (rowDef.key === 'in')  value = inRowPrintHtml(fmtTime(day?.timeIn), day,
+            day?.isWeekend ?? d.isWeekend, day?.isHoliday ?? d.isHoliday, L);
           if (rowDef.key === 'out') value = fmtTime(day?.timeOut) || '';
           if (rowDef.key === 'wh')  value = day?.workedHrs || '';
           if (rowDef.key === 'ot')  value = day?.otHrs || '';
@@ -604,7 +610,8 @@ const MonthlyInOutReport = () => {
           rIdx === 0 ? i + 1 : '', rIdx === 0 ? staffCell : '', rowDef.label,
           ...dates.map(d => {
             const day = e.days[d.date];
-            if (rowDef.key === 'in')  return fmtTime(day?.timeIn)  || '';
+            if (rowDef.key === 'in')  return inRowExcelText(fmtTime(day?.timeIn), day,
+              day?.isWeekend ?? d.isWeekend, day?.isHoliday ?? d.isHoliday, L);
             if (rowDef.key === 'out') return fmtTime(day?.timeOut) || '';
             if (rowDef.key === 'wh')  return day?.workedHrs || '';
             if (rowDef.key === 'ot')  return day?.otHrs || '';
@@ -898,6 +905,7 @@ const MonthlyInOutReport = () => {
           ))}
           <span><span style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('ब','W')}</span> = {L('विकेन्ड','Weekend')}</span>
           <span><span style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('साबि','PH')}</span> = {L('सार्वजनिक बिदा','Public Holiday')}</span>
+          <span><span style={{ background:'#fde68a',color:'#78350f',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('हा-साबि','P-PH')}</span> = {L('सार्वजनिक बिदामा हाजिर','Present on Public Holiday')}</span>
           <span><span style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>SL</span> = {L('बिदा','Leave')}</span>
           <span><span style={{ background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('भ्रमण','OV')}</span> = {L('कार्यालय भ्रमण','Office Visit')}</span>
           <span><strong style={{ color:'#d97706' }}>⚠</strong> = {L('एकल पन्च','Single punch')}</span>

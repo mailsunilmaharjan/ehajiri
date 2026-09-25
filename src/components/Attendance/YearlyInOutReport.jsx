@@ -10,6 +10,7 @@ import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
+import { leaveShort } from '../../utils/inOutStatus.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -212,6 +213,7 @@ const YearlyInOutReport = () => {
           workedHrs: d2.workedHrs||null,
           otHrs:     d2.otHrs||null,
           punches:   d2.punches||0,
+          leave:     d2.leave||null,
           isWeekend: meta.isWeekend||false,
           // Prefer this employee's own scoped holiday flag (a holiday can be
           // limited to e.g. Gender=Female) — meta.isHoliday is the shared,
@@ -232,6 +234,13 @@ const YearlyInOutReport = () => {
   /* Cell value */
   const getCellValue = (d, rowKey) => {
     if (!d.dateStr) return null;
+    // Full-day leave with no punch — show the leave type's short name (its
+    // code, e.g. SL/CL) like the Monthly/Half IN & OUT reports do. Public
+    // Holiday still wins over a same-day leave (same precedence as there).
+    if (d.leave && !d.timeIn && !d.isHoliday) {
+      if (rowKey==='in') return { text:leaveShort(d.leave), color:'#5b21b6', bg:'#ede9fe', mono:false, isLeave:true, title:d.leave.name };
+      return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'white', mono:false };
+    }
     if (d.isWeekend) {
       if (rowKey==='ot') return { text:'—', color:'#e5e7eb', bg:'#faf5ff', mono:false };
       return { text:'W', color:'#9ca3af', bg:'#f3f4f6', mono:false };
@@ -240,7 +249,8 @@ const YearlyInOutReport = () => {
       if (rowKey==='in') return { text:(d.holidayName||'PH').slice(0,8), color:'#92400e', bg:'#fef3c7', mono:false, small:true };
       return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'#fef9e7', mono:false };
     }
-    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:'#1a56db',bg:'white',   mono:true} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
+    // Half-day leave still has a real punch — show the time with "SL 1/2" under it.
+    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:'#1a56db',bg:'white',   mono:true, sub: d.leave?.halfDay ? `${leaveShort(d.leave)} 1/2` : null} :{text:'—',color:'#e5e7eb',bg:'white',   mono:false};
     if (rowKey==='out') return d.timeOut   ? {text:d.timeOut,   color:'#059669',bg:'white',   mono:true} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
     if (rowKey==='wh')  return d.workedHrs ? {text:d.workedHrs, color:'#374151',bg:'#fafafa', mono:true} : {text:'—',color:'#e5e7eb',bg:'#fafafa', mono:false};
     if (rowKey==='ot')  return d.otHrs     ? {text:d.otHrs,     color:'#7c3aed',bg:'#faf5ff', mono:true} : {text:'—',color:'#e5e7eb',bg:'#faf5ff', mono:false};
@@ -297,7 +307,9 @@ const YearlyInOutReport = () => {
                 const rows = rowKeys.map(rk => {
                   const cells = m.days.map(d => {
                     const v = getCellValue(d, rk);
-                    return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:9px">${v?v.text:''}</td>`;
+                    return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:9px">${!v ? '' : v.isLeave
+                      ? `<span style="font-weight:800;color:${v.color}">${v.text}</span>`
+                      : `${v.text}${v.sub ? `<br/><span style="font-size:6.5px;font-weight:800;color:#5b21b6">${v.sub}</span>` : ''}`}</td>`;
                   });
                   return `<tr>
                     <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:10px;font-weight:700">${rowLabels[rk]}</td>
@@ -473,10 +485,14 @@ const YearlyInOutReport = () => {
                               {!cell ? <span style={{ color:'#f0f0f0',fontSize:9 }}>·</span>
                                 : cell.text==='—'||cell.text==='W'
                                   ? <span style={{ color:cell.color,fontSize:cell.text==='W'?11:10,fontWeight:600 }}>{cell.text}</span>
-                                  : <span style={{ fontFamily:cell.mono?'monospace':'inherit',
-                                      fontSize:cell.small?9:12,fontWeight:700,color:cell.color }}>
-                                      {cell.text}
-                                    </span>
+                                  : <div style={{ display:'flex',flexDirection:'column',alignItems:'center',lineHeight:1.15 }}>
+                                      <span title={cell.title||''} style={{ fontFamily:cell.mono?'monospace':'inherit',
+                                        fontSize:cell.small?9:12,fontWeight:cell.isLeave?800:700,color:cell.color,
+                                        cursor:cell.title?'help':undefined }}>
+                                        {cell.text}
+                                      </span>
+                                      {cell.sub && <span style={{ fontSize:9,fontWeight:800,color:'#5b21b6',marginTop:1 }}>{cell.sub}</span>}
+                                    </div>
                               }
                             </td>
                           );
@@ -498,6 +514,7 @@ const YearlyInOutReport = () => {
             {ROWS.map(r=><span key={r.key}><strong style={{ color:r.color,fontFamily:'monospace' }}>HH:MM</strong> = {rowLabel(r.key, language, r.label)}</span>)}
             <span style={{ background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:4,padding:'1px 7px',color:'#9ca3af',fontWeight:700 }}>W</span>= {L('विकेन्ड','Weekend')}
             <span style={{ background:'#fef3c7',border:'1px solid #fde68a',borderRadius:4,padding:'1px 7px',color:'#92400e',fontWeight:700 }}>PH</span>= {L('सार्वजनिक बिदा','Public Holiday')}
+            <span style={{ background:'#ede9fe',border:'1px solid #ddd6fe',borderRadius:4,padding:'1px 7px',color:'#5b21b6',fontWeight:700 }}>SL</span>= {L('बिदा (बिदा प्रकारको कोड)','Leave (leave type code)')}
           </div>
         </>
       )}

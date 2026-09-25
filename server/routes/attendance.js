@@ -1658,6 +1658,12 @@ router.get('/half-monthly', async (req, res) => {
 
       for (const { dateStr, roster } of empWorkingDatesH) {
         if (empLeave.has(dateStr)) { leaveDays += empHalfLeave.has(dateStr) ? 0.5 : 1; continue; }
+        // Approved office visit — already counted in officialVisitDays below;
+        // without this check a visit day with no punch fell through to the
+        // absent branch just below, double-counting it as both a visit AND
+        // an absence (this is what previously made absentDays == officialVisitDays
+        // whenever every "absence" was actually a sanctioned visit).
+        if (empVisit.has(dateStr)) continue;
 
         const log = empLogs[dateStr];
         if (!log || !log.timeIn) { absentDays++; continue; }
@@ -1718,6 +1724,13 @@ router.get('/half-monthly', async (req, res) => {
         branch       : emp.branch     || '—',
         eligibleForOt: !!emp.eligible_for_ot,
         totalWorkingDays: empTotalWorkingDays,
+        // Full calendar days in the period (Weekend + Holiday + Leave +
+        // Official Visit + Present + Absent all add up to this) — distinct
+        // from totalWorkingDays (excludes weekend/holiday), which several
+        // other reports sharing this endpoint still rely on for their own
+        // "Total" meaning and for the attendanceRate denominator above, so
+        // this is added alongside it rather than replacing it.
+        totalCalendarDays: allDatesHalf.length,
         presentDays,
         absentDays,
         leaveDays,
@@ -2174,7 +2187,7 @@ router.get('/half-in-out', async (req, res) => {
         ORDER  BY br.ranking_order ASC NULLS LAST, u.ranking_order ASC NULLS LAST, u.full_name ASC
       `, effectiveEmployeeId ? [effectiveEmployeeId] : orgScopeIds ? [orgScopeIds] : []),
       pool.query(`
-        SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.half_day
+        SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.leave_type_code, l.half_day
         FROM   leaves l LEFT JOIN leave_types lt ON lt.code = l.leave_type_code
         WHERE  l.status='approved' AND l.from_date <= $2 AND l.to_date >= $1
                ${effectiveEmployeeId ? 'AND l.employee_id = $3' : ''}
@@ -2197,7 +2210,7 @@ router.get('/half-in-out', async (req, res) => {
       for (let d = new Date(from); d <= to; d.setDate(d.getDate()+1)) {
         const ds = d.toISOString().split('T')[0];
         if (ds >= startDate && ds <= endDate) {
-          leaveMap[l.employee_id][ds] = { name: l.leave_type || 'Leave', halfDay: !!l.half_day };
+          leaveMap[l.employee_id][ds] = { name: l.leave_type || 'Leave', code: l.leave_type_code || null, halfDay: !!l.half_day };
         }
       }
     }
