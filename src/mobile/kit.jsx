@@ -135,7 +135,7 @@ Object.assign(NP, {
   'Leave Application': 'बिदाको निवेदन', 'Apply Leave': 'बिदाको निवेदन',
   'Office Visit Application': 'काज तथा भ्रमणको निवेदन', 'Office Visit': 'काज भ्रमण निवेदन',
   'Pending': 'प्रक्रियारत', 'My requests': 'मेरो निवेदन', 'My Request': 'मेरो निवेदन',
-  'Late In / Early Out': 'ढिला आउने / चाडो जाने निवेदन', 'Late / Early': 'ढिला आउने / चाडो जाने निवेदन',
+  'Late In / Early Out': 'ढिला/चाडो निवेदन', 'Late / Early': 'ढिला/चाडो निवेदन',
   'Late in and Early out': 'ढिलो आएको / चाडो गएको', 'Late in': 'ढिलो आएको', 'Early out': 'चाडो गएको',
   'IN & OUT': 'आएको - गएको', 'Staff': 'कर्मचारी विवरण',
 });

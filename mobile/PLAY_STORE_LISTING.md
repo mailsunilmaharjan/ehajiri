@@ -3,7 +3,7 @@
 App id: `com.zkattendance.ehajiri` · version 1.1.0 (code 2) · permissions: INTERNET, FINE/COARSE LOCATION, POST_NOTIFICATIONS
 Plugins: biometric auth + secure storage, geolocation, push notifications.
 
-Replace `[COMPANY NAME]`, `[SUPPORT EMAIL]`, `[POLICY URL]` before use. Host the privacy policy on a public web page and paste its URL in Play Console.
+Replace `[COMPANY NAME]`, `[SUPPORT EMAIL]`, `https://attend.zkattendance.com/privacy` before use. Host the privacy policy on a public web page and paste its URL in Play Console.
 
 ---
 

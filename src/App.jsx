@@ -8,6 +8,7 @@ import { isMobileMode } from './utils/native.js';
 import Login         from './components/Auth/Login.jsx';
 import SsoLogin      from './components/Auth/SsoLogin.jsx';
 import GuestCheckin  from './components/Public/GuestCheckin.jsx';
+import PrivacyPolicy from './components/Public/PrivacyPolicy.jsx';
 import ResetPassword from './components/Auth/ResetPassword.jsx';
 import LicenseWarningModal from './components/Auth/LicenseWarningModal.jsx';
 import BroadcastPopup from './components/Common/BroadcastPopup.jsx';
@@ -226,6 +227,7 @@ const App = () => {
       <Route path="/reset-password" element={<ResetPassword />} />
       {/* Public — scanned from a "Scan to Check In" QR, no eHajiri login */}
       <Route path="/checkin/:token" element={<GuestCheckin />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
 
       <Route path="/dashboard" element={
         isMobileMode() ? <Navigate to="/m/home" replace /> : <Protected><Dashboard /></Protected>
