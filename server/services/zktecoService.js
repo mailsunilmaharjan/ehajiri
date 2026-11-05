@@ -52,6 +52,32 @@ export async function upsertDevice(sn, ipAddress, opts = {}) {
   return rows[0];
 }
 
+/**
+ * The device's OWN LAN address (e.g. 192.168.1.201). The address a request
+ * arrives from is only the router/gateway (or 127.0.0.1 behind the relay), so
+ * the real one has to come from what the device reports about itself: the INFO
+ * CSV on every poll, or an IPAddress= field in its info report. Picks the first
+ * private-range IPv4 found, ignoring firmware-version-looking tokens.
+ */
+export function findLanIp(text) {
+  if (!text) return null;
+  const re = /(?<![\d.])((?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2,3})(?![\d.])/g;
+  for (const m of String(text).matchAll(re)) {
+    const octets = m[1].split('.').map(Number);
+    if (octets.length === 4 && octets.every(o => o >= 0 && o <= 255)) return m[1];
+  }
+  return null;
+}
+
+export async function saveLanIp(sn, text) {
+  const lan = findLanIp(text);
+  if (!lan) return;
+  await pool.query(
+    `UPDATE zkteco_devices SET lan_ip=$1 WHERE serial_number=$2 AND lan_ip IS DISTINCT FROM $1`,
+    [lan, sn]
+  );
+}
+
 export async function getDevice(sn) {
   const { rows } = await pool.query('SELECT * FROM zkteco_devices WHERE serial_number=$1', [sn]);
   return rows[0] || null;
@@ -535,6 +561,10 @@ async function cascadeToAreaSiblings(originSn, pin) {
   );
   const u = userRows[0];
   if (!u) return;
+
+  // Validity / Expiry has run out → keep them off every device (enforceAccessValidity).
+  const { rows: [exp] } = await pool.query(`SELECT 1 FROM users WHERE device_id=$1 AND access_blocked=TRUE`, [pin]);
+  if (exp) return;
 
   const { rows: fps } = await pool.query(
     'SELECT * FROM zkteco_fingerprints WHERE pin=$1 AND template_data IS NOT NULL ORDER BY finger_id',

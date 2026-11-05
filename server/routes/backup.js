@@ -3,12 +3,63 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { logAudit } from '../services/auditLog.js';
+import bcrypt from 'bcryptjs';
+import { rateLimit } from '../middleware/security.js';
+import { validateBody } from '../middleware/validate.js';
 import pool from '../db.js';
 import { APP_VERSION, DB_VERSION } from '../version.js';
 import { migrateBackupData, runMigrations } from '../migrations/runner.js';
 import { ensureLicenseTable } from './license.js';
 
 const router = Router();
+
+// Every export / save / restore is a full-database operation — record who ran
+// it (only when it actually succeeded) in the audit log.
+router.use((req, res, next) => {
+  if (req.method === 'GET' && !/\/(sql|)$/.test(req.path)) return next();
+  res.on('finish', () => {
+    if (res.statusCode < 400 && !/^\/(default-path|version)$/.test(req.path)) {
+      logAudit({ actor: req.user, action: 'backup.' + req.method.toLowerCase(), entity: 'backup', entityId: req.path, after: { ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress } });
+    }
+  });
+  next();
+});
+
+// ── Password re-entry for export / save / restore ──────────────────────────
+// A stolen session (or an unattended logged-in browser) must not be enough to
+// pull or replace the whole database. POST /unlock verifies the caller's own
+// password and opens a 10-minute window for that user; every other route here
+// requires an open window. Enforced when BACKUP_REQUIRE_PASSWORD=true (turn on
+// together with the frontend build that sends /unlock).
+const BACKUP_UNLOCK_MS = 10 * 60_000;
+const backupUnlocked = new Map(); // userId -> expiry ms
+const backupRequired = () => process.env.BACKUP_REQUIRE_PASSWORD === 'true';
+const isUnlocked = (uid) => (backupUnlocked.get(Number(uid)) || 0) > Date.now();
+
+router.get('/unlock-status', (req, res) => {
+  res.json({ required: backupRequired(), unlocked: !backupRequired() || isUnlocked(req.user?.id) });
+});
+
+router.post('/unlock', rateLimit({ windowMs: 5 * 60_000, max: 8, key: (r) => 'bk|' + (r.user?.id || '') }), validateBody({ password: { required: true, max: 256 } }), async (req, res) => {
+  try {
+    const pw = String(req.body?.password || '');
+    const { rows } = await pool.query('SELECT password FROM users WHERE id=$1 AND active=TRUE', [req.user.id]);
+    const stored = rows[0]?.password || '';
+    const ok = stored.startsWith('$2') ? await bcrypt.compare(pw, stored) : (stored !== '' && stored === pw);
+    logAudit({ actor: req.user, action: ok ? 'backup.unlock' : 'backup.unlock-failed', entity: 'backup', entityId: 'unlock' });
+    if (!ok) return res.status(403).json({ error: 'Incorrect password' });
+    backupUnlocked.set(Number(req.user.id), Date.now() + BACKUP_UNLOCK_MS);
+    res.json({ ok: true, minutes: BACKUP_UNLOCK_MS / 60000 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.use((req, res, next) => {
+  if (!backupRequired()) return next();
+  if (['/default-path', '/version', '/unlock', '/unlock-status'].includes(req.path)) return next();
+  if (isUnlocked(req.user?.id)) return next();
+  return res.status(403).json({ error: 'Re-enter your password to continue', needsPassword: true });
+});
 
 async function buildJsonBackup(by) {
   const [
@@ -88,10 +139,21 @@ function backupStamp() {
 }
 
 function resolveBackupDir(dir) {
-  const bad = (msg) => { const e = new Error(msg); e.statusCode = 400; return e; };
+  const bad = (msg, code = 400) => { const e = new Error(msg); e.statusCode = code; return e; };
   if (typeof dir !== 'string' || !dir.trim()) throw bad('Backup path is required');
   const abs = dir.trim();
   if (!path.isAbsolute(abs)) throw bad(`Backup path must be a full path (e.g. D:\\eHajiri Backups), got: ${abs}`);
+  // Writing to an arbitrary folder only makes sense in the desktop app, where
+  // the server runs on the user's own machine. On a hosted instance it would
+  // let any tenant admin drop a full DB dump (password hashes included) into
+  // any directory the service account can reach — confine to BACKUP_ROOT, or
+  // refuse (the Download button still works).
+  if (process.env.ELECTRON !== 'true') {
+    const root = process.env.BACKUP_ROOT;
+    if (!root) throw bad('Saving backups to a server folder is disabled on this hosted instance — use Download instead.', 403);
+    const rel = path.relative(path.resolve(root), path.resolve(abs));
+    if (rel.startsWith('..') || path.isAbsolute(rel)) throw bad('Backup path must be inside the configured backup folder.', 403);
+  }
   try { fs.mkdirSync(abs, { recursive: true }); }
   catch (e) { throw bad(`Cannot create backup folder "${abs}": ${e.message}`); }
   return abs;
@@ -236,6 +298,10 @@ async function reinsertRows(client, table, rows, jsonbCols = []) {
   await client.query(`DELETE FROM ${table}`);
   for (const row of rows) {
     const cols = Object.keys(row).filter((c) => c !== 'id'); // let SERIAL ids reassign
+    // Column names are interpolated below — only plain identifiers allowed.
+    if (!/^[a-z_][a-z0-9_]*$/i.test(table) || cols.some((c) => !/^[a-z_][a-z0-9_]*$/i.test(c))) {
+      throw new Error('Refusing to restore: invalid table or column name in snapshot');
+    }
     const vals = cols.map((c) => jsonbCols.includes(c) && row[c] != null ? JSON.stringify(row[c]) : row[c]);
     const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
     await client.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`, vals);

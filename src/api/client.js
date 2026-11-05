@@ -13,6 +13,27 @@ const BASE = `${getTenantPrefix()}/api`;
 // plain href) — same BASE, so they stay correctly tenant-prefixed too.
 export const apiUrl = (path) => `${BASE}${path}`;
 
+// URL for the /attendance/live SSE stream. EventSource can't send headers, so
+// instead of putting the long-lived JWT in the query string this asks the
+// server for a 60 s single-use ticket. Falls back to ?token= against an older
+// server that doesn't have /auth/stream-ticket yet. Returns null if signed out.
+export async function liveStreamUrl() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const r = await fetch(`${BASE}/auth/stream-ticket`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: '{}',
+    });
+    if (r.ok) {
+      const { ticket } = await r.json();
+      if (ticket) return `${BASE}/attendance/live?ticket=${encodeURIComponent(ticket)}`;
+    }
+  } catch { /* fall through */ }
+  return `${BASE}/attendance/live?token=${encodeURIComponent(token)}`;
+}
+
 const TOKEN_KEY = 'auth_token';
 
 export const getToken = () => {

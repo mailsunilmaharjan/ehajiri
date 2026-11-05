@@ -464,6 +464,8 @@ export const DEFAULT_ADV_FILTERS = {
 };
 
 const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingLoaded }) => {
+  const { canEdit } = useAuth();
+  const canEditOpening = canEdit('leaveCalculation');
   const defaultFY = (settings.fiscalYears||[]).find(f=>f.isDefault) || (settings.fiscalYears||[])[0];
   const ltConfigs = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
 
@@ -490,19 +492,37 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
      otherwise fire before that fetch resolves and freeze editVals at the
      still-empty {} it started with — every saved value would look missing
      until something else (e.g. switching tabs and back) remounted the
-     component after the fetch had already completed. */
+     component after the fetch had already completed.
+     Also re-runs when `employees`/`ltConfigs`/`opening` change: those come
+     from separate async fetches (DataContext, SettingsContext) and whichever
+     landed LAST after openingLoaded used to leave the grid blank — random
+     per page load, hence "shows only after 2-3 refreshes" — and a Save on
+     that blank grid then deleted every saved opening for the FY. Cells the
+     user has edited but not yet saved (dirtyRef) are kept as-is. */
+  const dirtyRef = useRef(new Set());
+  const markDirty = (keys) => keys.forEach(k => dirtyRef.current.add(k));
+
+  useEffect(() => { dirtyRef.current = new Set(); setHeaderVals({}); }, [fyId]);
+
+  // Settings (fiscalYears) may arrive after mount — pick up the default FY then.
   useEffect(() => {
-    const init = {};
-    (employees||[]).filter(e=>e.active).forEach(emp => {
-      ltConfigs.forEach(lt => {
-        const saved = opening[fyId]?.[emp.id]?.[lt.shortName];
-        init[`${emp.id}_${lt.shortName}`] = saved ?? '';
+    if (!fyId && defaultFY?.id) setFyId(defaultFY.id);
+  }, [fyId, defaultFY?.id]);
+
+  useEffect(() => {
+    setEditVals(prev => {
+      const init = {};
+      (employees||[]).filter(e=>e.active).forEach(emp => {
+        ltConfigs.forEach(lt => {
+          const key = `${emp.id}_${lt.shortName}`;
+          init[key] = dirtyRef.current.has(key)
+            ? prev[key]
+            : (opening[fyId]?.[emp.id]?.[lt.shortName] ?? '');
+        });
       });
+      return init;
     });
-    setEditVals(init);
-    setHeaderVals({});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fyId, openingLoaded]);
+  }, [fyId, openingLoaded, opening, employees, ltConfigs]);
 
   const showToast = (msg, type='success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 2500);
@@ -531,11 +551,11 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
       return;
     }
     const n = Number(val);
+    const keys = (employees||[]).filter(e=>e.active).map(emp => `${emp.id}_${lt.shortName}`);
+    markDirty(keys);
     setEditVals(p => {
       const next = { ...p };
-      (employees||[]).filter(e=>e.active).forEach(emp => {
-        next[`${emp.id}_${lt.shortName}`] = n;
-      });
+      keys.forEach(k => { next[k] = n; });
       return next;
     });
     showToast(`${lt.name} → ${n} days applied to all staff`);
@@ -543,6 +563,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
 
   /* single cell change with validation */
   const handleCellChange = (empId, code, val, lt) => {
+    markDirty([`${empId}_${code}`]);
     if (val !== '' && !validate(val, lt.name, lt.daysPerYear)) {
       setEditVals(p => ({ ...p, [`${empId}_${code}`]: lt.daysPerYear }));
       return;
@@ -551,8 +572,19 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
   };
 
   /* save all current editVals to opening state + localStorage */
-  const handleSave = () => {
-    const fyData = {};
+  const handleSave = async () => {
+    // Never save before the saved figures have loaded — the grid would still
+    // be blank and saving it would delete every existing opening for this FY.
+    if (!openingLoaded || !fyId || !(employees||[]).length || !ltConfigs.length) {
+      showToast(L('डाटा लोड हुँदैछ, कृपया पर्खनुहोस्', 'Data is still loading — please wait and try again'), 'error');
+      return;
+    }
+    // `employees` is the viewer's org-scoped list (a branch manager only sees
+    // their own school) but `opening` holds EVERY staff member's figures.
+    // Start from the existing FY data so staff outside this grid are kept —
+    // replacing the whole FY with just the visible staff made the diff in
+    // useLeaveOpening.saveOpening delete everyone else's saved openings.
+    const fyData = { ...(opening[fyId] || {}) };
     (employees||[]).filter(e=>e.active).forEach(emp => {
       const empData = {};
       ltConfigs.forEach(lt => {
@@ -565,8 +597,13 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
       fyData[emp.id] = empData;
     });
     const next = { ...opening, [fyId]: fyData };
-    setOpening(next, [fyId]);
-    showToast(L('बिदा प्रारम्भिक सुरक्षित भयो', 'Current Year Leave Opening saved successfully'));
+    try {
+      await setOpening(next, [fyId]);
+      dirtyRef.current = new Set();
+      showToast(L('बिदा प्रारम्भिक सुरक्षित भयो', 'Current Year Leave Opening saved successfully'));
+    } catch (e) {
+      showToast(L('सुरक्षित हुन सकेन', 'Save failed') + (e?.message ? `: ${e.message}` : ''), 'error');
+    }
   };
 
   /* Ctrl+S saves — this tab only exists while it's the active tab */
@@ -578,6 +615,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
     (employees||[]).filter(e=>e.active).forEach(emp => {
       ltConfigs.forEach(lt => { init[`${emp.id}_${lt.shortName}`] = lt.daysPerYear ?? 0; });
     });
+    markDirty(Object.keys(init));
     setEditVals(init);
     setHeaderVals({});
     showToast(L('डिफल्ट दिन सेट भयो', 'Default days applied'));
@@ -731,10 +769,12 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
               value={search} onChange={e => setSearch(e.target.value)} />
             {search && <button className="dg-search-clear" onClick={() => setSearch('')}>✕</button>}
           </div>
-          <button className="btn btn-outline" onClick={handleSetDefault}>
-            ✨ {L('सबैलाई डिफल्ट','Set All to Default')}
-          </button>
-          <SaveButton onClick={handleSave} label={L('सबै सुरक्षित','Save All')} />
+          {canEditOpening && (
+            <button className="btn btn-outline" onClick={handleSetDefault}>
+              ✨ {L('सबैलाई डिफल्ट','Set All to Default')}
+            </button>
+          )}
+          {canEditOpening && <SaveButton onClick={handleSave} label={L('सबै सुरक्षित','Save All')} />}
         </div>
       </div>
 
@@ -789,6 +829,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
                         type="text" inputMode="numeric" pattern="[0-9.]*"
                         placeholder="Fill all: 0"
                         value={headerVals[lt.shortName] ?? ''}
+                        disabled={!canEditOpening}
                         onChange={e => {
                           const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
                           setHeaderVals(p => ({ ...p, [lt.shortName]: v }));
@@ -838,6 +879,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
                             data-leave-cell
                             type="text" inputMode="numeric" pattern="[0-9.]*"
                             value={getVal(row.id, lt.shortName)}
+                            disabled={!canEditOpening}
                             onChange={e => {
                               const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
                               handleCellChange(row.id, lt.shortName, v, lt);
@@ -850,6 +892,8 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
                               ...numInput,
                               border: `1px solid ${getVal(row.id, lt.shortName) > 0 ? '#a7f3d0' : '#d1d5db'}`,
                               color:  getVal(row.id, lt.shortName) > 0 ? '#065f46' : '#6b7280',
+                              cursor: canEditOpening ? 'text' : 'not-allowed',
+                              background: canEditOpening ? 'white' : '#f3f4f6',
                             }}
                           />
                         </td>
@@ -1472,6 +1516,8 @@ const buildPrintHeader = (settings, reportTitle, filters = []) => {
 };
 
 const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, settings, L, fd, opening, setOpening }) => {
+  const { canEdit } = useAuth();
+  const canEditBalance = canEdit('leaveCalculation');
   const ltConfigs  = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
   // Server-side credits (e.g. OT-to-leave grants from the Overtime Approval
   // page) live in leave_balances, separate from the opening/used math below.
@@ -1800,7 +1846,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
 
         <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
           {/* Transfer Accumulated Leave button */}
-          {nextFY && (
+          {nextFY && canEditBalance && (
             <button onClick={handleTransferAccLeave}
               style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px',
                 background: transferDone ? '#059669' : 'linear-gradient(135deg,#7e3af2,#6d28d9)',

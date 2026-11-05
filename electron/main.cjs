@@ -481,6 +481,26 @@ function stopPostgresViaPgCtl() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Server lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
+// Per-install random secrets, generated once and persisted in userData. The
+// server refuses to start without JWT_SECRET/SSO_SECRET (no source-embedded
+// defaults), and nothing here is shared between machines.
+function getDesktopSecrets() {
+  const file = path.join(app.getPath('userData'), 'secrets.json');
+  let data = {};
+  try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first run */ }
+  let changed = false;
+  for (const k of ['JWT_SECRET', 'SSO_SECRET']) {
+    if (!data[k] || data[k].length < 32) {
+      data[k] = require('crypto').randomBytes(48).toString('base64url');
+      changed = true;
+    }
+  }
+  if (changed) {
+    try { fs.writeFileSync(file, JSON.stringify(data), { mode: 0o600 }); } catch (e) { console.error('[secrets]', e.message); }
+  }
+  return data;
+}
+
 function startServer() {
   const serverScript = isDev
     ? path.join(__dirname, '..', 'server', 'index.js')
@@ -503,6 +523,7 @@ function startServer() {
     env: {
       ...process.env,
       ...dbEnv,
+      ...getDesktopSecrets(),
       ...(pgDumpPath    ? { PG_DUMP_PATH: pgDumpPath }       : {}),
       ...(pgRestorePath ? { PG_RESTORE_PATH: pgRestorePath } : {}),
       PORT    : String(SERVER_PORT),

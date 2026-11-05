@@ -39,7 +39,7 @@ const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
 // translate for display when Nepali is active (module-level so it can't call
 // the component's own L(), which needs `language` from context).
 const STATUS_LABEL_NP = {
-  Present: 'उपस्थित', Absent: 'अनुपस्थित', Weekend: 'विकेन्ड',
+  Present: 'उपस्थित', Absent: 'अनुपस्थित', Weekend: 'सप्ताहन्त',
   'Day Off': 'डे अफ', 'Night Off': 'नाइट अफ', Leave: 'बिदा',
   'Public Holiday': 'सार्वजनिक बिदा', 'Office Visit': 'कार्यालय भ्रमण',
 };
@@ -90,7 +90,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
   const statusOpts = [
     { value:'Present',      label: L('उपस्थित','Present')       },
     { value:'Absent',       label: L('अनुपस्थित','Absent')      },
-    { value:'Weekend',      label: L('विकेन्ड','Weekend')        },
+    { value:'Weekend',      label: L('सप्ताहन्त','Weekend')        },
     { value:'Day Off',      label: L('डे अफ','Day Off')          },
     { value:'Night Off',    label: L('नाइट अफ','Night Off')      },
     { value:'Leave',        label: L('बिदा','Leave')             },
@@ -419,7 +419,7 @@ const DailyAttendanceReport = () => {
       render: v => <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v||'—'}</span>,
     },
     {
-      field:'timeIn', header:L('आउने','Time In'), align:'center',
+      field:'timeIn', header:L('आएको','Time In'), align:'center',
       render: (v, row) => {
         if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         const warn = row.punchCount === 1;
@@ -433,7 +433,7 @@ const DailyAttendanceReport = () => {
       },
     },
     {
-      field:'timeOut', header:L('जाने','Time Out'), align:'center',
+      field:'timeOut', header:L('गएको','Time Out'), align:'center',
       render: (v, row) => {
         if (!v) {
           if (row.timeIn) {
@@ -577,7 +577,7 @@ const DailyAttendanceReport = () => {
             {data?.isWeekend && (
               <span style={{ marginLeft:8, background:'#f3f4f6', color:'#6b7280',
                 borderRadius:6, padding:'1px 8px', fontSize:11, fontWeight:600 }}>
-                {L('विकेन्ड','Weekend')}
+                {L('सप्ताहन्त','Weekend')}
               </span>
             )}
           </h1>
@@ -600,7 +600,7 @@ const DailyAttendanceReport = () => {
                 [`"Date: ${displayDate}  |  Day: ${dayLabel}${data?.isWeekend?' (Weekend)':''}"`],
                 [`"Total: ${se.total}  |  Present: ${se.present}  |  Absent: ${se.absent}  |  Leave: ${se.leave}  |  Office Visit: ${se.visit||0}  |  Weekend: ${se.weekend}  |  Late In: ${se.late}  |  Early Out: ${se.early}"`],
                 [''],
-                ['"SN","Staff","Post","Dept.","Branch","Date","Day","Shift","Time In","Time Out","Total Hrs","OT","IN Status","OUT Status","Status","Remarks"'],
+                [`"SN","Staff","Post","Dept.","Branch","Date","Day","Shift","${L('आएको','Time In')}","${L('गएको','Time Out')}","Total Hrs","OT","IN Status","OUT Status","Status","Remarks"`],
               ].map(r => Array.isArray(r) ? r.join(',') : r);
 
               quickRows.forEach((r, i) => {
@@ -640,7 +640,7 @@ const DailyAttendanceReport = () => {
                 [L('अनुपस्थित','Absent'),     s.absent,  '#991b1b'],
                 [L('बिदा','Leave'),           s.leave,   '#5b21b6'],
                 [L('कार्यालय भ्रमण','Office Visit'), s.visit, '#1e40af'],
-                [L('विकेन्ड','Weekend'),      s.weekend, '#6b7280'],
+                [L('सप्ताहन्त','Weekend'),      s.weekend, '#6b7280'],
                 [L('ढिलो आएको','Late In'),    s.late,    '#dc2626'],
                 [L('चाँडो गएको','Early Out'), s.early,   '#d97706'],
               ].map(([l,v,c])=>`<span>${l}: <strong style="color:${c}">${v}</strong></span>`).join(' &nbsp;·&nbsp; ');
@@ -721,7 +721,7 @@ const DailyAttendanceReport = () => {
       <th style="width:22px;">SN</th>
       <th style="text-align:left;">Staff</th>
       <th>Post</th><th>Dept</th><th>Branch</th>
-      <th>Shift</th><th>In</th><th>Out</th><th>Hrs</th><th>OT</th>
+      <th>Shift</th><th>${L('आएको','In')}</th><th>${L('गएको','Out')}</th><th>Hrs</th><th>OT</th>
       <th>IN Status</th><th>OUT Status</th><th>Status</th>
       <th style="text-align:left;">Remarks</th>
     </tr>
@@ -804,7 +804,7 @@ const DailyAttendanceReport = () => {
               { key:'Absent',  label:L('अनुपस्थित','Absent'),          value:summary.absent,  numColor:'#dc2626', bg:'#fef2f2' },
               { key:'Leave',   label:L('बिदा','Leave'),                value:summary.leave,   numColor:'#7c3aed', bg:'#faf5ff' },
               { key:'Visit',   label:L('कार्यालय भ्रमण','Office Visit'), value:summary.visit,   numColor:'#0369a1', bg:'#f0f9ff' },
-              { key:'Weekend', label:L('विकेन्ड','Weekend'),           value:summary.weekend, numColor:'#6b7280', bg:'white'   },
+              { key:'Weekend', label:L('सप्ताहन्त','Weekend'),           value:summary.weekend, numColor:'#6b7280', bg:'white'   },
               { key:'__late',  label:L('ढिलो','Late'),                 value:summary.late,    numColor:'#d97706', bg:'#fffbeb' },
               { key:'__early', label:L('चाँडो','Early'),               value:summary.early,   numColor:'#b45309', bg:'#fef3c7' },
             ].map((s, i, arr) => {

@@ -1,0 +1,37 @@
+{
+  "appId": "com.zkattendance.ehajiri",
+  "appName": "eHajiri",
+  "webDir": "www",
+  "server": {
+    "url": "https://attend.zkattendance.com",
+    "cleartext": false,
+    "errorPath": "offline.html",
+    "allowNavigation": [
+      "attend.zkattendance.com",
+      "*.zkattendance.com",
+      "zkattendance.com"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#1a56db"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#1a56db",
+      "showSpinner": false
+    },
+    "PushNotifications": {
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
+    },
+    "SystemBars": {
+      "insetsHandling": "native",
+      "style": "DARK"
+    }
+  }
+}

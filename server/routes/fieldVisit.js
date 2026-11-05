@@ -3,6 +3,7 @@ import pool from '../db.js';
 import { userCanAccessTask, notifyOnCompletion, notifyStatusChanged } from './tasks.js';
 import { estimateBikeTrip } from '../utils/geoUtils.js';
 import { resolveEmployeeScope } from './attendanceScope.js';
+import { reverseGeocode } from '../services/geocode.js';
 
 const router = Router();
 
@@ -25,6 +26,21 @@ const router = Router();
 const CHECKOUT_STATUS = ['work_done', 'pending_next_day', 'cancelled'];
 const CHECKOUT_STATUS_TO_TASK_STATUS = { work_done: 'completed', pending_next_day: 'in_progress' };
 
+// Readable place name for a GPS fix, filled in after the response (never blocks or fails a punch).
+function savePlaceLater(table, column, id, lat, lng) {
+  reverseGeocode(lat, lng).then(place => {
+    if (place) return pool.query(`UPDATE ${table} SET ${column}=$1 WHERE id=$2`, [place, id]);
+  }).catch(() => {});
+}
+// Keep the company's Office Location on record: the first real Office Out / Office In GPS fix fills it in when
+// Settings > Company Information has none yet. Later fixes are kept on each trip (see office_out_* / office_in_*).
+function rememberOfficeLocation(lat, lng) {
+  pool.query(
+    `UPDATE app_settings
+        SET value = jsonb_set(jsonb_set(value::jsonb, '{officeLatitude}', to_jsonb($1::float8)), '{officeLongitude}', to_jsonb($2::float8))
+      WHERE key='main' AND COALESCE(value::jsonb->>'officeLatitude', '') = ''`, [lat, lng]).catch(() => {});
+}
+
 const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
 const NEPAL_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function nepalDateTimeLabel(d = new Date()) {
@@ -34,9 +50,9 @@ function nepalDateTimeLabel(d = new Date()) {
 
 const SESSION_SEL = `
   fs.id, fs.employee_id AS "employeeId",
-  fs.office_out_at AS "officeOutAt",
+  fs.office_out_at AS "officeOutAt", fs.office_out_lat AS "officeOutLat", fs.office_out_lng AS "officeOutLng", fs.office_out_place AS "officeOutPlace",
   fs.office_in_at AS "officeInAt", fs.office_in_lat AS "officeInLat", fs.office_in_lng AS "officeInLng",
-  fs.office_in_accuracy AS "officeInAccuracy",
+  fs.office_in_accuracy AS "officeInAccuracy", fs.office_in_place AS "officeInPlace",
   fs.travel_km AS "travelKm", fs.travel_minutes AS "travelMinutes", fs.estimated_minutes AS "estimatedMinutes",
   fs.status, fs.created_at AS "createdAt"
 `;
@@ -51,6 +67,7 @@ const STOP_SEL = `
   s.check_out_at AS "checkOutAt", s.check_out_lat AS "checkOutLat", s.check_out_lng AS "checkOutLng",
   s.check_out_accuracy AS "checkOutAccuracy", s.check_out_work_progress AS "checkOutWorkProgress",
   s.check_out_remarks AS "checkOutRemarks",
+  s.check_in_place AS "checkInPlace", s.check_out_place AS "checkOutPlace",
   s.created_at AS "createdAt",
   t.title AS "taskTitle",
   COALESCE(c.company_name, c.person_name) AS "customerName",
@@ -108,6 +125,8 @@ router.get('/session/active', async (req, res) => {
 
 router.post('/session/start', async (req, res) => {
   const taskId = parseInt(req.body.taskId);
+  const { lat, lng, accuracy, deviceInfo } = req.body;
+  const hasFix = lat != null && lng != null && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
   if (!Number.isInteger(taskId)) return res.status(400).json({ error: 'taskId is required' });
   const client = await pool.connect();
   try {
@@ -125,9 +144,11 @@ router.post('/session/start', async (req, res) => {
       return res.status(409).json({ error: 'You already have an active field visit trip — check out from your current client or move to office first.' });
     }
     const { rows: sessionRows } = await client.query(
-      `INSERT INTO field_visit_sessions (employee_id) VALUES ($1) RETURNING id`,
-      [req.user.id]
+      `INSERT INTO field_visit_sessions (employee_id, office_out_lat, office_out_lng, office_out_accuracy, office_out_device)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [req.user.id, hasFix ? Number(lat) : null, hasFix ? Number(lng) : null, hasFix ? (accuracy ?? null) : null, String(deviceInfo || '').slice(0, 500) || null]
     );
+    if (hasFix) { savePlaceLater('field_visit_sessions', 'office_out_place', sessionRows[0].id, Number(lat), Number(lng)); rememberOfficeLocation(Number(lat), Number(lng)); }
     await client.query(`INSERT INTO field_visit_stops (session_id, task_id) VALUES ($1,$2)`, [sessionRows[0].id, taskId]);
     await client.query('COMMIT');
     res.status(201).json(await getActiveSessionFull(req.user.id));
@@ -206,6 +227,7 @@ router.post('/stops/:id/check-in', async (req, res) => {
       await client.query(`UPDATE staff_contacts SET latitude=$1, longitude=$2, updated_at=NOW() WHERE id=$3`, [lat, lng, existing[0].contactId]);
     }
     await client.query('COMMIT');
+    savePlaceLater('field_visit_stops', 'check_in_place', id, lat, lng);
     res.json(await getActiveSessionFull(req.user.id, client));
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
@@ -269,6 +291,7 @@ router.post('/stops/:id/check-out', async (req, res) => {
       assigneeIds = assigneeRows.map(r => r.user_id);
     }
     await client.query('COMMIT');
+    savePlaceLater('field_visit_stops', 'check_out_place', id, lat, lng);
 
     // Notifications happen after COMMIT — no reason to hold the transaction
     // open (and a connection tied up) while sending email/pushes.
@@ -366,6 +389,8 @@ router.post('/sessions/:id/office-in', async (req, res) => {
        WHERE id=$9`,
       [officeInAt, lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), travelKm, travelMinutes, estimatedMinutes, id]
     );
+    savePlaceLater('field_visit_sessions', 'office_in_place', id, lat, lng);
+    rememberOfficeLocation(lat, lng);
     res.json({ success: true, officeInAt, travelKm, travelMinutes, estimatedMinutes });
   } catch (e) {
     res.status(500).json({ error: e.message });

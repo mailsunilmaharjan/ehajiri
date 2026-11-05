@@ -1,0 +1,12 @@
+node_modules/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/capacitor-cordova-android-plugins/build/
+# signing material — never commit
+*.keystore
+*.jks
+keystore.properties
+# Firebase config is per-organisation; add your own file here
+android/app/google-services.json

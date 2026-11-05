@@ -10,6 +10,8 @@ import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
+import ExcelJS from 'exceljs';
+import { downloadBlob } from '../../utils/printHelper.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const BS_MONTHS_SHORT  = ['Baisakh','Jestha','Asadh','Shrawan','Bhadra','Ashwin',
@@ -28,7 +30,7 @@ const abbrev = (name) => {
 };
 
 /* ── Status colors ── */
-const STATUS = {
+const STATUS_BASE = {
   P  : { bg:'#d1fae5', color:'#065f46', label:'P',  title:'Present' },
   P1 : { bg:'#d1fae5', color:'#0369a1', label:'P¹', title:'Present – single punch' },
   PP : { bg:'#fef08a', color:'#713f12', label:'H.P', title:'Present on Public Holiday' },
@@ -42,16 +44,32 @@ const STATUS = {
   L  : { bg:'#ede9fe', color:'#5b21b6', label:'L',  title:'Leave' },
   OV : { bg:'#dbeafe', color:'#1e40af', label:'OV', title:'Office Visit' },
   PH : { bg:'#fef3c7', color:'#92400e', label:'PH', title:'Public Holiday' },
+  // Before the staff's Attendance Date — not counted as Present or Absent.
+  NA : { bg:'#ffffff', color:'#d1d5db', label:'—',  title:'Before Attendance Date' },
 };
 
 // STATUS's own `title` is display-only English (a hover tooltip + the legend
 // text below) — the on-screen `label` short codes (P/AB/W/L/OV/PH/DO/NO)
 // stay as universal abbreviations regardless of language, same convention as
 // every other attendance report.
+// A tenant's own off shift arrives as 'OFF:<label>' (e.g. 'OFF:Due D/O') — shown with that label, like the roster.
+const STATUS = new Proxy(STATUS_BASE, {
+  get: (t, k) => (typeof k === 'string' && k.startsWith('OFF:'))
+    ? { bg:'#f3f4f6', color:'#6b7280', label:k.slice(4), title:k.slice(4).split('D/O').join('Day Off').split('N/O').join('Night Off') }
+    : t[k],
+});
+
 const STATUS_TITLE_NP = {
   P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', PP1: 'सार्वजनिक बिदामा उपस्थित – एकल पन्च',
-  WP: 'सप्ताहान्तमा उपस्थित', WP1: 'सप्ताहान्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित', H: 'विकेन्ड',
+  WP: 'सप्ताहन्तमा उपस्थित', WP1: 'सप्ताहन्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित', H: 'सप्ताहन्त',
   DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा',
+};
+// Nepali-view short code overrides (Weekend → स), same convention as the
+// Monthly/Half Present Absent reports' STATUS_NP. Excel export stays English.
+const STATUS_LABEL_NP = { H: 'स' };
+const statusLabel = (st, language) => {
+  const s = STATUS[st] || STATUS.AB;
+  return language === 'np' ? (STATUS_LABEL_NP[st] || s.label) : s.label;
 };
 const statusTitle = (st, language) => {
   const s = STATUS[st] || STATUS.AB;
@@ -63,13 +81,13 @@ const StatusCell = ({ st, dayKey, language }) => {
   const s = STATUS[st] || STATUS.AB;
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
+      {/* Coloured text only — no tinted box behind it (same in Print/Excel). */}
       <div style={{
-        background:s.bg, color:s.color,
-        border: `1px solid ${s.color}33`,
-        borderRadius:4, padding:'2px 5px', fontSize:12,
+        color:s.color,
+        padding:'2px 5px', fontSize:12,
         fontWeight:800, textAlign:'center', minWidth:26,
       }} title={statusTitle(st, language)}>
-        {s.label}
+        {statusLabel(st, language)}
       </div>
       {dayKey && (
         <span style={{ fontSize:9, color:'#9ca3af', fontWeight:600, lineHeight:1 }}>
@@ -350,6 +368,110 @@ const YearlyPresentAbsentReport = () => {
     };
   }, [matrix, yearStats]);
 
+  /* ── Export to Excel (.xlsx via ExcelJS, same approach as the Monthly
+     Present Absent Report). Status cells are coloured TEXT only — no fill —
+     matching the on-screen grid and Print. Each month is two rows: the
+     statuses, then the weekday names in small grey text. ── */
+  const [exporting, setExporting] = useState(false);
+  const exportExcel = async () => {
+    if (!matrix.length || !selectedEmp || exporting) return;
+    setExporting(true);
+    try {
+      const companyName = language === 'np'
+        ? (settings.companyNameNp || settings.companyNameEn || '')
+        : (settings.companyNameEn || settings.companyNameNp || '');
+      const companyAddr = language === 'np'
+        ? (settings.companyAddressNp || settings.companyAddressEn || '')
+        : (settings.companyAddressEn || settings.companyAddressNp || '');
+      const argb = (hex) => 'FF' + String(hex || '#374151').replace('#', '').toUpperCase();
+      const lastCol = 2 + maxDays + 3; // SN, Month, days…, P, AB, L
+
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Yearly Present Absent');
+      const thin = { style: 'thin', color: { argb: 'FFDEDEDE' } };
+
+      const yearLabel = useNP ? `${year} BS` : String(year);
+      const staffLine = [selectedEmp.fullName, selectedEmp.employeeId,
+        selectedEmp.position && `Post: ${selectedEmp.position}`,
+        selectedEmp.department && `Department: ${selectedEmp.department}`].filter(Boolean).join('   ');
+      const summaryLine = [
+        `Total Days: ${yearSummary.total}`, `Present: ${yearSummary.present}`, `Absent: ${yearSummary.absent}`,
+        `Leave: ${yearSummary.leave}`, `Office Visit: ${yearSummary.ov}`, `Holiday: ${yearSummary.ph}`,
+        `Weekend: ${yearSummary.weekend}`, `Late In: ${yearSummary.lateIn}`, `Early Out: ${yearSummary.earlyOut}`,
+      ].join('   ');
+      [companyName, companyAddr, 'Yearly Present Absent Report', `${yearLabel}  —  ${staffLine}`, summaryLine, '']
+        .forEach((text, i) => {
+          const row = ws.addRow([text]);
+          ws.mergeCells(row.number, 1, row.number, lastCol);
+          row.getCell(1).font = i === 0 ? { bold: true, size: 13 } : i === 2 ? { bold: true, size: 12 } : { size: 10, color: { argb: 'FF6B7280' } };
+          row.getCell(1).alignment = { horizontal: 'center' };
+        });
+      const headerRow = ws.rowCount + 1;
+
+      const hdr = ws.addRow(['SN', 'Month', ...Array.from({ length: maxDays }, (_, i) => i + 1), 'P', 'AB', 'L']);
+      hdr.eachCell({ includeEmpty: true }, (cell) => {
+        cell.font = { bold: true, size: 10.5, color: { argb: 'FF374151' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = { right: thin, bottom: { style: 'medium', color: { argb: 'FFDEDEDE' } } };
+      });
+
+      matrix.forEach((m, mi) => {
+        const days = Array.from({ length: maxDays }, (_, i) => m.days[i]);
+        const stRow = ws.addRow([mi + 1, m.label,
+          ...days.map(d => (d?.st ? (STATUS[d.st] || STATUS.AB).label : '')), m.P, m.AB, m.L]);
+        const dowRow = ws.addRow(['', '', ...days.map(d => d?.dayKey || ''), '', '', '']);
+        ws.mergeCells(stRow.number, 1, dowRow.number, 1);
+        ws.mergeCells(stRow.number, 2, dowRow.number, 2);
+        ws.mergeCells(stRow.number, lastCol - 2, dowRow.number, lastCol - 2);
+        ws.mergeCells(stRow.number, lastCol - 1, dowRow.number, lastCol - 1);
+        ws.mergeCells(stRow.number, lastCol,     dowRow.number, lastCol);
+        stRow.eachCell({ includeEmpty: true }, (cell, c) => {
+          cell.alignment = { horizontal: c === 2 ? 'left' : 'center', vertical: 'middle' };
+          cell.border = { right: thin };
+          const d = days[c - 3];
+          if (c >= 3 && c < lastCol - 2 && d?.st) {
+            cell.font = { bold: true, color: { argb: argb((STATUS[d.st] || STATUS.AB).color) } };
+          }
+        });
+        stRow.getCell(2).font = { bold: true };
+        stRow.getCell(lastCol - 2).font = { bold: true, color: { argb: 'FF065F46' } };
+        stRow.getCell(lastCol - 1).font = { bold: true, color: { argb: m.AB > 0 ? 'FF991B1B' : 'FFD1D5DB' } };
+        stRow.getCell(lastCol).font     = { bold: true, color: { argb: m.L > 0 ? 'FF5B21B6' : 'FFD1D5DB' } };
+        dowRow.eachCell({ includeEmpty: true }, (cell) => {
+          cell.font = { size: 8, color: { argb: 'FF9CA3AF' } };
+          cell.alignment = { horizontal: 'center', vertical: 'top' };
+          cell.border = { right: thin, bottom: thin };
+        });
+      });
+
+      const tot = ws.addRow(['', 'Total', ...Array.from({ length: maxDays }, () => ''), grandP, grandAB, grandL]);
+      tot.eachCell({ includeEmpty: true }, (cell, c) => {
+        cell.font = { bold: true, color: { argb: c === lastCol - 2 ? 'FF065F46' : c === lastCol - 1 ? 'FF991B1B' : c === lastCol ? 'FF5B21B6' : 'FF374151' } };
+        cell.alignment = { horizontal: c === 2 ? 'left' : 'center', vertical: 'middle' };
+        cell.border = { top: { style: 'medium', color: { argb: 'FFD1D5DB' } }, right: thin };
+      });
+
+      // Legend — coloured text, same as on screen
+      ws.addRow([]);
+      const leg = ws.addRow(['Legend: ' + Object.entries(STATUS).map(([, s]) => `${s.label} = ${s.title}`).join('   ')]);
+      ws.mergeCells(leg.number, 1, leg.number, lastCol);
+      leg.getCell(1).font = { size: 9, color: { argb: 'FF6B7280' } };
+
+      ws.columns = [{ width: 5 }, { width: 11 }, ...Array.from({ length: maxDays }, () => ({ width: 5.5 })),
+        { width: 6 }, { width: 6 }, { width: 6 }];
+      ws.views = [{ state: 'frozen', xSplit: 2, ySplit: headerRow }];
+
+      const buffer = await wb.xlsx.writeBuffer();
+      downloadBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+        `YearlyPresentAbsent_${(selectedEmp.employeeId || selectedEmp.id)}_${year}.xlsx`);
+    } catch (err) {
+      setError(`Export failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   /* ── Table header/cell styles ── */
   const TH = {
     background:'#efefef', color:'#374151', fontWeight:700, fontSize:12.5,
@@ -390,16 +512,13 @@ const YearlyPresentAbsentReport = () => {
           <button
             onClick={() => {
               if (!matrix.length || !selectedEmp) return;
-              const ST = { P:'#065f46,#d1fae5', P1:'#0369a1,#d1fae5', PP:'#713f12,#fef08a', PP1:'#713f12,#fef08a',
-                           WP:'#0f766e,#ccfbf1', WP1:'#0f766e,#ccfbf1', AB:'#991b1b,#fee2e2',
-                           H:'#9ca3af,#f3f4f6', L:'#5b21b6,#ede9fe', OV:'#1e40af,#dbeafe',
-                           PH:'#92400e,#fef3c7' };
+              // Coloured text only, no tinted box — matches the on-screen grid.
+              // Colours/labels come from the same STATUS map (so DO/NO print too).
               const cellStyle = (st) => {
                 if (!st) return 'color:#e5e7eb;';
-                const [c,bg] = (ST[st]||ST.AB).split(',');
-                return `background:${bg};color:${c};font-weight:800;border-radius:3px;`;
+                return `color:${(STATUS[st]||STATUS.AB).color};font-weight:800;`;
               };
-              const cellLabel = (st) => ({ P:'P',P1:'P¹',PP:'H.P',PP1:'H.P¹',WP:'W.P',WP1:'W.P¹',AB:'AB',H:'W',L:'L',OV:'OV',PH:'PH' }[st]||'');
+              const cellLabel = (st) => (st ? statusLabel(st, language) : '');
 
               // Build matrix rows HTML
               let matrixRows = matrix.map((row, ri) => {
@@ -432,7 +551,7 @@ const YearlyPresentAbsentReport = () => {
                 [L('कुल दिन','Total Days'),yearSummary.total,'#374151'],[L('उपस्थित','Present'),yearSummary.present,'#065f46'],
                 [L('अनुपस्थित','Absent'),yearSummary.absent,'#991b1b'],[L('बिदा','Leave'),yearSummary.leave,'#5b21b6'],
                 [L('कार्यालय भ्रमण','Office Visit'),yearSummary.ov,'#1e40af'],[L('सार्वजनिक बिदा','Holiday'),yearSummary.ph,'#92400e'],
-                [L('विकेन्ड','Weekend'),yearSummary.weekend,'#6b7280'],[L('ढिलो आएको','Late In'),yearSummary.lateIn,'#dc2626'],
+                [L('सप्ताहन्त','Weekend'),yearSummary.weekend,'#6b7280'],[L('ढिलो आएको','Late In'),yearSummary.lateIn,'#dc2626'],
                 [L('चाँडो गएको','Early Out'),yearSummary.earlyOut,'#d97706'],
               ].map(([l,v,c])=>`<span>${l}: <strong style="color:${c}">${v}</strong></span>`).join(' &nbsp;·&nbsp; ');
 
@@ -578,6 +697,14 @@ ${footerHtml}
               background:'#eff6ff',border:'1px solid #93c5fd',color:'#1d4ed8',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
             🖨️ Print
+          </button>
+          <button onClick={exportExcel} disabled={!matrix.length || !selectedEmp || exporting}
+            style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
+              background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
+              borderRadius:8,fontSize:13,fontWeight:600,
+              cursor: (!matrix.length || !selectedEmp || exporting) ? 'not-allowed' : 'pointer',
+              opacity: (!matrix.length || !selectedEmp || exporting) ? .6 : 1 }}>
+            📥 {exporting ? L('निर्यात हुँदैछ…','Exporting…') : L('निर्यात','Export')}
           </button>
           <ViewYearlyBtn year={year} useNP={useNP} currentPath="/attendance/reports/yearly/present-absent" />
         </div>
@@ -769,7 +896,7 @@ ${footerHtml}
               { label:L('बिदा','Leave'),              value:yearSummary.leave,    color:'#5b21b6'  },
               { label:L('कार्यालय भ्रमण','Office Visit'), value:yearSummary.ov,   color:'#1e40af'  },
               { label:L('सार्वजनिक बिदा','Holiday'),  value:yearSummary.ph,       color:'#92400e'  },
-              { label:L('विकेन्ड','Weekend'),         value:yearSummary.weekend,  color:'#6b7280'  },
+              { label:L('सप्ताहन्त','Weekend'),         value:yearSummary.weekend,  color:'#6b7280'  },
               { label:L('ढिलो आएको','Late In'),       value:yearSummary.lateIn,   color:'#dc2626'  },
               { label:L('चाँडो गएको','Early Out'),    value:yearSummary.earlyOut, color:'#d97706'  },
             ].map((s, i, arr) => (
@@ -935,8 +1062,7 @@ ${footerHtml}
             <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
             {Object.entries(STATUS).map(([k,s])=>(
               <span key={k} style={{ display:'inline-flex',alignItems:'center',gap:4 }}>
-                <span style={{ background:s.bg,color:s.color,border:`1px solid ${s.color}44`,
-                  borderRadius:3,padding:'1px 5px',fontSize:10,fontWeight:800 }}>{s.label}</span>
+                <span style={{ color:s.color,padding:'1px 2px',fontSize:10,fontWeight:800 }}>{statusLabel(k, language)}</span>
                 <span>= {statusTitle(k, language)}</span>
               </span>
             ))}

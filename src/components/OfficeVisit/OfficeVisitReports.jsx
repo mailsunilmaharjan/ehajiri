@@ -145,7 +145,11 @@ const OfficeVisitReports = () => {
     const name = getEmployeeName(empId);
     return (
       <HoverCard
-        trigger={<Avatar photo={emp?.profilePhoto} name={name} size={24} preview={false} />}
+        trigger={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+            <Avatar photo={emp?.profilePhoto} name={name} size={24} preview={false} />
+            <span>{name}</span>
+          </span>}
         content={
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Avatar photo={emp?.profilePhoto} name={name} size={40} preview={false} />
@@ -176,9 +180,9 @@ const OfficeVisitReports = () => {
     { field: 'status', header: L('स्थिति', 'Status'), width: 100, render: () => (
         <span className="badge badge-success">{L('स्वीकृत', 'Approved')}</span>
       ) },
-    { field: 'recommendatorNames', header: L('सिफारिसकर्ता', 'Recommendator'), width: 90, align: 'center', sortable: false, filterable: false,
+    { field: 'recommendatorNames', header: L('सिफारिसकर्ता', 'Recommendator'), width: 200, sortable: false, filterable: false,
       render: (_, row) => personHoverCell(row.recommendedBy || row.recoId) },
-    { field: 'approvalNames', header: L('स्वीकृतिकर्ता', 'Approval'), width: 90, align: 'center', sortable: false, filterable: false,
+    { field: 'approvalNames', header: L('स्वीकृतिकर्ता', 'Approval'), width: 200, sortable: false, filterable: false,
       render: (_, row) => personHoverCell(row.approvedBy || row.approvalId) },
   ];
 

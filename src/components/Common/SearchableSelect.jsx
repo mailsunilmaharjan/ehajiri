@@ -30,8 +30,30 @@ import Avatar from './Avatar.jsx';
  *                  mount, e.g. a picker that's the obvious first thing to
  *                  fill in a freshly-opened modal (see StaffDropdown's own
  *                  autoOpen for the same pattern).
+ *   openUp       — bool (default false) — always render the dropdown above
+ *                  the trigger instead of the usual "flip up only if the
+ *                  browser viewport is short on room below" heuristic. For
+ *                  a field known to sit at the bottom of a tall, centered
+ *                  modal — there the viewport itself may have plenty of
+ *                  room below the trigger (the empty backdrop past the
+ *                  modal's own edge), so the normal check never flips,
+ *                  leaving the dropdown to render past the visible modal
+ *                  card.
  *   className, style, disabled
  */
+/* Focus the tabbable element `step` positions away from `el`, searching the
+   enclosing modal (or the whole document when not inside one). */
+const TABBABLE = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+const focusNeighbour = (el, step) => {
+  if (!el) return;
+  const scope = el.closest('.modal') || document;
+  const list = Array.from(scope.querySelectorAll(TABBABLE))
+    .filter(n => n.tabIndex >= 0 && n.offsetParent !== null);
+  const idx = list.indexOf(el);
+  const next = idx >= 0 ? list[idx + step] : null;
+  (next || el).focus();
+};
+
 const SearchableSelect = forwardRef(({
   value       = '',
   onChange,
@@ -44,6 +66,7 @@ const SearchableSelect = forwardRef(({
   renderOption = null,
   showAvatar   = false,
   autoOpen     = false,
+  openUp       = false,
 }, ref) => {
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
@@ -99,7 +122,7 @@ const SearchableSelect = forwardRef(({
     const r = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - r.bottom;
     const dropH = Math.min(280, filtered.length * 38 + 68);
-    const above = spaceBelow < dropH + 8 && r.top > dropH + 8;
+    const above = openUp || (spaceBelow < dropH + 8 && r.top > dropH + 8);
     setRect({ left: r.left, top: above ? r.top - dropH - 4 : r.bottom + 4, width: r.width, above });
     const idx = filtered.findIndex(o => isSelected(o.value));
     setActiveIndex(idx >= 0 ? idx : (filtered.length ? 0 : -1));
@@ -184,7 +207,12 @@ const SearchableSelect = forwardRef(({
       e.preventDefault();
       if (activeIndex >= 0 && filtered[activeIndex]) handleSelect(filtered[activeIndex].value);
     } else if (e.key === 'Tab') {
-      closeDrop(false); // let the browser's own Tab handling move focus on
+      // Focus is in the portaled search input at the end of <body>, so the
+      // browser's own Tab would jump out of the modal/page. Step to the
+      // field next to (or before, on Shift+Tab) the trigger instead.
+      e.preventDefault();
+      closeDrop(false);
+      focusNeighbour(triggerRef.current, e.shiftKey ? -1 : 1);
     }
   };
 

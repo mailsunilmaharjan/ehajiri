@@ -87,28 +87,36 @@ const OfficeVisitApproval = ({ embedded = false } = {}) => {
   const canShowApprove = (empId) => !(isRecoCompulsory && hasRecommenderFor(empId) && isRecommenderFor(empId));
 
   /* ── Handle action ── */
-  const handleAction = () => {
+  const handleAction = async () => {
     if (!actionModal) return;
     const { id, type } = actionModal;
-    if (type === 'recommend') {
-      recommendVisit(id, currentUser.id, comment);
-      showToast('Office visit recommended successfully', 'success');
-    } else if (type === 'approve') {
-      approveVisit(id, currentUser.id, comment);
-      showToast(t('Application approved'), 'success');
-    } else {
-      rejectVisit(id, currentUser.id, comment);
-      showToast(t('Application rejected'), 'danger');
-    }
     setActionModal(null);
     setComment('');
+    // See LeaveApproval.handleAction — show a server refusal, not a false success.
+    try {
+      if (type === 'recommend') {
+        await recommendVisit(id, currentUser.id, comment);
+        showToast('Office visit recommended successfully', 'success');
+      } else if (type === 'approve') {
+        await approveVisit(id, currentUser.id, comment);
+        showToast(t('Application approved'), 'success');
+      } else {
+        await rejectVisit(id, currentUser.id, comment);
+        showToast(t('Application rejected'), 'danger');
+      }
+    } catch (err) {
+      showToast(err?.message || 'Action failed', 'danger');
+    }
   };
 
   // Scope everything on this page to applications the current user is
   // actually the assigned recommender/approver for — the action buttons
   // already only appear for those (see amReco/amApprover below), so an
   // unfiltered org-wide list was mostly rows nobody here could act on.
-  const isMine  = (v) => isRecommenderFor(v.employeeId) || isApproverFor(v.employeeId);
+  // Never your own application (unless admin/superAdmin) — see LeaveApproval.
+  const isSelf  = (v) => String(v.employeeId) === String(currentUser.id)
+    && !['admin', 'superAdmin'].includes(currentUser.role);
+  const isMine  = (v) => !isSelf(v) && (isRecommenderFor(v.employeeId) || isApproverFor(v.employeeId));
   const myVisits = officeVisits.filter(isMine);
   const pending  = myVisits.filter(v => v.status === 'pending');
   const all      = [...myVisits].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));

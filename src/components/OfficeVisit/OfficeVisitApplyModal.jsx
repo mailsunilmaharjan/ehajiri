@@ -6,8 +6,12 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
+import SearchableSelect from '../Common/SearchableSelect.jsx';
+import Avatar from '../Common/Avatar.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
+import AlertPopup, { alertFromSaveError } from '../Common/AlertPopup.jsx';
+import { makeDateFormatter } from '../../utils/dateUtils.js';
 
 /* ── Searchable single-select dropdown ── */
 const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
@@ -116,12 +120,12 @@ const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
   );
 };
 
-const VisitDateInput = ({ value, onChange, error, settings }) => {
+const VisitDateInput = ({ value, onChange, error, settings, minDate }) => {
   const blockPast = settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
   }
-  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
 };
 
 const Lbl = ({ children, required }) => (
@@ -164,9 +168,10 @@ const OfficeVisitApplyModal = () => {
   const myReco     = getRecoIds(activeUser?.id);
   const myApproval = getApprovalIds(activeUser?.id);
 
-  const getEmpName = useCallback((id) =>
-    (employees || []).find(e => String(e.id) === String(id))?.fullName || `#${id}`,
+  const getEmp = useCallback((id) =>
+    (employees || []).find(e => String(e.id) === String(id)),
   [employees]);
+  const getEmpName = useCallback((id) => getEmp(id)?.fullName || `#${id}`, [getEmp]);
 
   const emptyForm = {
     officialVisit: '', visitType: 'National', country: '',
@@ -178,6 +183,12 @@ const OfficeVisitApplyModal = () => {
   const [errors,     setErrors]     = useState({});
   const [success,    setSuccess]    = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [selectedReco,     setSelectedReco]     = useState('');
+  const [selectedApproval, setSelectedApproval] = useState('');
+  // Server-refused save (e.g. "Already Posted leave on that day.") → popup.
+  // Must stay above the `if (!isOpen) return null` below — a hook after that
+  // early return only runs once the modal opens, crashing with React #310.
+  const [saveAlert, setSaveAlert] = useState(null);
 
   /* Reset form each time modal opens — then again once the reco/approval
      refetch resolves, in case this first pass read stale/empty data (this
@@ -188,7 +199,11 @@ const OfficeVisitApplyModal = () => {
     const resetForm = () => {
       const fromDate = prefillDates?.fromDate || today;
       const toDate   = prefillDates?.toDate   || fromDate;
-      setForm({ ...emptyForm, fromDate, toDate, reco: getRecoIds(activeUser?.id), approval: getApprovalIds(activeUser?.id) });
+      const reco     = getRecoIds(activeUser?.id);
+      const approval = getApprovalIds(activeUser?.id);
+      setForm({ ...emptyForm, fromDate, toDate, reco, approval });
+      setSelectedReco(reco.length === 1 ? String(reco[0]) : '');
+      setSelectedApproval(approval.length === 1 ? String(approval[0]) : '');
       setErrors({});
       setSuccess(false);
       setSubmitting(false);
@@ -201,7 +216,8 @@ const OfficeVisitApplyModal = () => {
   if (!isOpen || !activeUser) return null;
 
   const handleChange = (field, val) => {
-    setForm(p => ({ ...p, [field]: val }));
+    // picking From Date copies it into To Date
+    setForm(p => ({ ...p, [field]: val, ...(field === 'fromDate' ? { toDate: val } : {}) }));
     setErrors(p => ({ ...p, [field]: '' }));
   };
 
@@ -216,6 +232,11 @@ const OfficeVisitApplyModal = () => {
       e.toDate = 'To Date must be on or after From Date';
     if (form.visitType === 'International' && !form.country.trim())
       e.country = t('Required field');
+    if (form.reco.length > 1 && !selectedReco)         e.selectedReco     = 'Please select a Recommendator';
+    if (form.approval.length > 1 && !selectedApproval) e.selectedApproval = 'Please select an Approval Authority';
+    // Approval Authority is compulsory — an application with nobody to approve
+    // it just sits Pending forever (and shows a blank Approval column).
+    if (form.approval.length === 0) e.selectedApproval = 'No Approval Authority is set for you — ask Admin to set it (Staff Detail → Set Recommendator & Approval).';
     return e;
   };
 
@@ -224,21 +245,27 @@ const OfficeVisitApplyModal = () => {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSubmitting(true);
-    await addVisit({
-      employeeId:    activeUser.id,
-      purpose:       form.officialVisit,
-      officialVisit: form.officialVisit,
-      visitType:     form.visitType,
-      country:       form.visitType === 'International' ? form.country : '',
-      address:       form.address,
-      location:      form.address,
-      description:   form.description,
-      reason:        form.description,
-      fromDate:      form.fromDate,
-      toDate:        form.toDate,
-      reco:          form.reco,
-      approval:      form.approval,
-    });
+    try {
+      await addVisit({
+        employeeId:    activeUser.id,
+        purpose:       form.officialVisit,
+        officialVisit: form.officialVisit,
+        visitType:     form.visitType,
+        country:       form.visitType === 'International' ? form.country : '',
+        address:       form.address,
+        location:      form.address,
+        description:   form.description,
+        reason:        form.description,
+        fromDate:      form.fromDate,
+        toDate:        form.toDate,
+        reco:          selectedReco     ? [selectedReco]     : form.reco,
+        approval:      selectedApproval ? [selectedApproval] : form.approval,
+      }, { throwOnReject: true });
+    } catch (err) {
+      setSubmitting(false);
+      setSaveAlert(alertFromSaveError(err, makeDateFormatter(settings)));
+      return;
+    }
     setSubmitting(false);
     setSuccess(true);
     setTimeout(() => close(), 1800);
@@ -246,12 +273,13 @@ const OfficeVisitApplyModal = () => {
 
   return (
     <div className="modal-overlay" style={{ zIndex: 10000 }}>
+      <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
       <div className="modal modal-lg" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="modal-header" style={{ flexShrink: 0 }}>
-          <h2>🏢 {t('Apply for Visit')}</h2>
+          <h2>🏢 {t('Apply for Office Visit')}</h2>
           <button className="modal-close" onClick={close}>✕</button>
         </div>
 
@@ -375,14 +403,14 @@ const OfficeVisitApplyModal = () => {
             <div className="form-row">
               <div className="form-group">
                 <Lbl required>From Date</Lbl>
-                <VisitDateInput value={form.fromDate} min={today}
+                <VisitDateInput value={form.fromDate}
                   error={!!errors.fromDate} settings={settings}
                   onChange={v => handleChange('fromDate', v)} />
                 <Err msg={errors.fromDate} />
               </div>
               <div className="form-group">
                 <Lbl required>To Date</Lbl>
-                <VisitDateInput value={form.toDate} min={form.fromDate || today}
+                <VisitDateInput value={form.toDate} minDate={form.fromDate}
                   error={!!errors.toDate} settings={settings}
                   onChange={v => handleChange('toDate', v)} />
                 <Err msg={errors.toDate} />
@@ -391,39 +419,63 @@ const OfficeVisitApplyModal = () => {
 
             {/* Reco / Approval */}
             <div className="form-row" style={{ marginBottom: 14 }}>
+              {/* ── Recommendator ── */}
               <div className="form-group">
-                <Lbl>Recommendator</Lbl>
-                <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb',
-                  borderRadius: 8, padding: '9px 12px', minHeight: 40 }}>
-                  {form.reco.length > 0
-                    ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                        {form.reco.map(id => (
-                          <span key={id} style={{ background: '#eff6ff', color: '#1a56db',
-                            borderRadius: 10, padding: '2px 11px', fontSize: 13, fontWeight: 600 }}>
-                            {getEmpName(id)}
-                          </span>
-                        ))}
-                      </div>
-                    : <span style={{ fontSize: 13, color: '#9ca3af' }}>— Not configured —</span>
-                  }
-                </div>
+                <Lbl required={form.reco.length > 1}>Recommendator</Lbl>
+                {form.reco.length === 0 && (
+                  <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'9px 12px', minHeight:40 }}>
+                    <span style={{ fontSize:13, color:'#9ca3af' }}>— Not configured —</span>
+                  </div>
+                )}
+                {form.reco.length === 1 && (
+                  <div style={{ background:'#f0f9ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'9px 12px', minHeight:40, display:'flex', alignItems:'center' }}>
+                    <span style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 12px 2px 6px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                      <Avatar photo={getEmp(form.reco[0])?.profilePhoto} name={getEmpName(form.reco[0])} size={20} />
+                      {getEmpName(form.reco[0])}
+                    </span>
+                  </div>
+                )}
+                {form.reco.length > 1 && (
+                  <>
+                    <SearchableSelect value={selectedReco} onChange={setSelectedReco}
+                      className={`form-control ${errors.selectedReco ? 'error' : ''}`}
+                      options={form.reco.map(id => ({ value: String(id), label: getEmpName(id), sub: [getEmp(id)?.employeeId, getEmp(id)?.position].filter(Boolean).join(' - '), photo: getEmp(id)?.profilePhoto }))}
+                      placeholder="— Select Recommendator —"
+                      showAvatar
+                    />
+                    <Err msg={errors.selectedReco} />
+                  </>
+                )}
               </div>
+
+              {/* ── Approval Authority ── */}
               <div className="form-group">
-                <Lbl>Approval Authority</Lbl>
-                <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb',
-                  borderRadius: 8, padding: '9px 12px', minHeight: 40 }}>
-                  {form.approval.length > 0
-                    ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                        {form.approval.map(id => (
-                          <span key={id} style={{ background: '#d1fae5', color: '#065f46',
-                            borderRadius: 10, padding: '2px 11px', fontSize: 13, fontWeight: 600 }}>
-                            {getEmpName(id)}
-                          </span>
-                        ))}
-                      </div>
-                    : <span style={{ fontSize: 13, color: '#9ca3af' }}>— Not configured —</span>
-                  }
-                </div>
+                <Lbl required>Approval Authority</Lbl>
+                {form.approval.length === 0 && (
+                  <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'9px 12px', minHeight:40 }}>
+                    <span style={{ fontSize:13, color:'#9ca3af' }}>— Not configured —</span>
+                  </div>
+                )}
+                {form.approval.length === 0 && <Err msg={errors.selectedApproval} />}
+                {form.approval.length === 1 && (
+                  <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'9px 12px', minHeight:40, display:'flex', alignItems:'center' }}>
+                    <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 12px 2px 6px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>
+                      <Avatar photo={getEmp(form.approval[0])?.profilePhoto} name={getEmpName(form.approval[0])} size={20} />
+                      {getEmpName(form.approval[0])}
+                    </span>
+                  </div>
+                )}
+                {form.approval.length > 1 && (
+                  <>
+                    <SearchableSelect value={selectedApproval} onChange={setSelectedApproval}
+                      className={`form-control ${errors.selectedApproval ? 'error' : ''}`}
+                      options={form.approval.map(id => ({ value: String(id), label: getEmpName(id), sub: [getEmp(id)?.employeeId, getEmp(id)?.position].filter(Boolean).join(' - '), photo: getEmp(id)?.profilePhoto }))}
+                      placeholder="— Select Approval Authority —"
+                      showAvatar
+                    />
+                    <Err msg={errors.selectedApproval} />
+                  </>
+                )}
               </div>
             </div>
 

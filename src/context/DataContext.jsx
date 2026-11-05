@@ -168,7 +168,11 @@ export const DataProvider = ({ children }) => {
   const getShiftById     = (id)   => shifts.find(s => s.id   === id);
 
   /* ── Leaves ── */
-  const addLeave = async (leave) => {
+  // opts.throwOnReject: if the server REJECTS the save (a real HTTP error, not
+  // just unreachable), drop the optimistic local row and rethrow so the caller
+  // can show why — used by Manual Posting, where silently keeping a local row
+  // the server refused looked exactly like a successful save.
+  const addLeave = async (leave, opts = {}) => {
     /* Always save locally first so the record is never lost */
     const localId = Date.now();
     const today   = getNepalTodayISO();
@@ -198,12 +202,19 @@ export const DataProvider = ({ children }) => {
           ));
           return saved.id;
         }
-      } catch { /* API unavailable — local copy already saved */ }
+      } catch (err) {
+        if (opts.throwOnReject && err?.status) {
+          setLeaves(p => p.filter(x => x.id !== localId));
+          throw err;
+        }
+        /* API unavailable — local copy already saved */
+      }
     }
     return localId;
   };
   const recommendLeave = async (id, recommendedBy, recommendComment='') => {
     const today = getNepalTodayISO();
+    const before = leaves.find(x => String(x.id) === String(id));
     setLeaves(p => p.map(x => String(x.id) === String(id)
       ? { ...x, recommendedBy, recommendedDate: today, recommendComment }
       : x
@@ -212,27 +223,48 @@ export const DataProvider = ({ children }) => {
       try {
         const l = await api.patch(`/leaves/${id}/recommend`, { recommendedBy, comment: recommendComment });
         setLeaves(p => p.map(x => String(x.id) === String(id) ? { ...x, ...l } : x));
-      } catch {}
+      } catch (err) {
+        if (before) setLeaves(p => p.map(x => String(x.id) === String(id) ? before : x));
+        throw err;
+      }
     }
   };
-  const updateLeave = async (id, data) => {
+  // opts.throwOnReject — see addLeave: on a server rejection, restore the row
+  // as it was and rethrow so the caller can show why.
+  const updateLeave = async (id, data, opts = {}) => {
+    const before = leaves.find(l => String(l.id) === String(id));
     // Optimistic update immediately so the UI reflects the change even if the API call is slow
     setLeaves(p => p.map(l => String(l.id) === String(id) ? { ...l, ...data } : l));
     if (apiOk) {
       try {
         const l = await api.put(`/leaves/${id}`, data);
         setLeaves(p => p.map(x => String(x.id) === String(id) ? { ...x, ...l } : x));
-      } catch {
+      } catch (err) {
+        if (opts.throwOnReject && err?.status) {
+          if (before) setLeaves(p => p.map(x => String(x.id) === String(id) ? before : x));
+          throw err;
+        }
         // API failed (e.g. local-only ID not in DB) — optimistic update already applied, keep it
       }
     }
   };
+  /* delete / approve / reject / recommend: a server REJECTION (403 not your
+     record / not the configured approver, 400 already actioned, …) must never
+     look like success. Previously the error was swallowed after the optimistic
+     update, so the row vanished / showed Approved until the next reload
+     brought it straight back (LMCEdu, 2026-09-25). Now the row is restored and
+     the error rethrown for the caller to show. */
   const deleteLeave = async (id) => {
-    if (apiOk) try { await api.delete(`/leaves/${id}`); } catch {}
+    // Drop the row only once the server has really deleted it (404 = already gone).
+    if (apiOk) {
+      try { await api.delete(`/leaves/${id}`); }
+      catch (err) { if (err?.status !== 404) throw err; }
+    }
     setLeaves(p => p.filter(l => String(l.id) !== String(id)));
   };
   const approveLeave = async (id, approvedBy, comment='') => {
     const today = getNepalTodayISO();
+    const before = leaves.find(x => String(x.id) === String(id));
     // Optimistic update immediately so UI reflects the change even if API call is slow
     setLeaves(p => p.map(x => String(x.id) === String(id)
       ? { ...x, status:'approved', approvedBy, approvedDate:today, comment }
@@ -243,13 +275,15 @@ export const DataProvider = ({ children }) => {
         const l = await api.patch(`/leaves/${id}/approve`, { approvedBy, comment });
         // Merge API response (preserves local-only fields like isManual, recommendedBy)
         setLeaves(p => p.map(x => String(x.id) === String(id) ? { ...x, ...l } : x));
-      } catch {
-        // API failed (e.g. local-only ID not in DB) — optimistic update already applied, keep it
+      } catch (err) {
+        if (before) setLeaves(p => p.map(x => String(x.id) === String(id) ? before : x));
+        throw err;
       }
     }
   };
   const rejectLeave = async (id, approvedBy, comment='') => {
     const today = getNepalTodayISO();
+    const before = leaves.find(x => String(x.id) === String(id));
     // Optimistic update immediately
     setLeaves(p => p.map(x => String(x.id) === String(id)
       ? { ...x, status:'rejected', approvedBy, approvedDate:today, comment }
@@ -259,8 +293,9 @@ export const DataProvider = ({ children }) => {
       try {
         const l = await api.patch(`/leaves/${id}/reject`, { approvedBy, comment });
         setLeaves(p => p.map(x => String(x.id) === String(id) ? { ...x, ...l } : x));
-      } catch {
-        // API failed — optimistic update already applied, keep it
+      } catch (err) {
+        if (before) setLeaves(p => p.map(x => String(x.id) === String(id) ? before : x));
+        throw err;
       }
     }
   };
@@ -287,7 +322,8 @@ export const DataProvider = ({ children }) => {
   }, [leaves]);
 
   /* ── Office Visits ── */
-  const addVisit = async (visit) => {
+  // opts.throwOnReject — see addLeave.
+  const addVisit = async (visit, opts = {}) => {
     /* Always save locally first so the record is never lost */
     const localId = Date.now();
     const today   = getNepalTodayISO();
@@ -312,12 +348,19 @@ export const DataProvider = ({ children }) => {
           setOfficeVisits(p => p.map(x => x.id === localId ? { ...x, ...saved } : x));
           return saved.id;
         }
-      } catch { /* API unavailable — local copy already saved */ }
+      } catch (err) {
+        if (opts.throwOnReject && err?.status) {
+          setOfficeVisits(p => p.filter(x => x.id !== localId));
+          throw err;
+        }
+        /* API unavailable — local copy already saved */
+      }
     }
     return localId;
   };
   const recommendVisit = async (id, recommendedBy, recommendComment='') => {
     const today = getNepalTodayISO();
+    const before = officeVisits.find(x => String(x.id) === String(id));
     setOfficeVisits(p => p.map(x => String(x.id) === String(id)
       ? { ...x, recommendedBy, recommendedDate: today, recommendComment }
       : x
@@ -326,27 +369,44 @@ export const DataProvider = ({ children }) => {
       try {
         const v = await api.patch(`/visits/${id}/recommend`, { recommendedBy, comment: recommendComment });
         setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? { ...x, ...v } : x));
-      } catch {}
+      } catch (err) {
+        if (before) setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? before : x));
+        throw err;
+      }
     }
   };
-  const updateVisit = async (id, data) => {
+  // opts.throwOnReject — see updateLeave.
+  const updateVisit = async (id, data, opts = {}) => {
+    const before = officeVisits.find(v => String(v.id) === String(id));
     // Optimistic update immediately so the UI reflects the change even if the API call is slow
     setOfficeVisits(p => p.map(v => String(v.id)===String(id) ? { ...v, ...data } : v));
     if (apiOk) {
       try {
         const v = await api.put(`/visits/${id}`, data);
         setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? { ...x, ...v } : x));
-      } catch {
+      } catch (err) {
+        if (opts.throwOnReject && err?.status) {
+          if (before) setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? before : x));
+          throw err;
+        }
         // API failed (e.g. local-only ID not in DB) — optimistic update already applied, keep it
       }
     }
   };
   const deleteVisit = async (id) => {
-    if (apiOk) await api.delete(`/visits/${id}`);
+    // See deleteLeave — 404 means already gone, anything else is a real refusal.
+    if (apiOk) {
+      try { await api.delete(`/visits/${id}`); }
+      catch (err) { if (err?.status !== 404) throw err; }
+    }
     setOfficeVisits(p => p.filter(v => String(v.id) !== String(id)));
+  };
+  const refreshOfficeVisits = async () => {
+    try { setOfficeVisits(await api.get('/visits')); } catch { /* keep existing */ }
   };
   const approveVisit = async (id, approvedBy, comment='') => {
     const today = getNepalTodayISO();
+    const before = officeVisits.find(x => String(x.id) === String(id));
     setOfficeVisits(p => p.map(x => String(x.id) === String(id)
       ? { ...x, status:'approved', approvedBy, approvedDate:today, comment }
       : x
@@ -355,11 +415,15 @@ export const DataProvider = ({ children }) => {
       try {
         const v = await api.patch(`/visits/${id}/approve`, { approvedBy, comment });
         setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? { ...x, ...v } : x));
-      } catch {}
+      } catch (err) {
+        if (before) setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? before : x));
+        throw err;
+      }
     }
   };
   const rejectVisit = async (id, approvedBy, comment='') => {
     const today = getNepalTodayISO();
+    const before = officeVisits.find(x => String(x.id) === String(id));
     setOfficeVisits(p => p.map(x => String(x.id) === String(id)
       ? { ...x, status:'rejected', approvedBy, approvedDate:today, comment }
       : x
@@ -368,7 +432,10 @@ export const DataProvider = ({ children }) => {
       try {
         const v = await api.patch(`/visits/${id}/reject`, { approvedBy, comment });
         setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? { ...x, ...v } : x));
-      } catch {}
+      } catch (err) {
+        if (before) setOfficeVisits(p => p.map(x => String(x.id) === String(id) ? before : x));
+        throw err;
+      }
     }
   };
 
@@ -390,7 +457,7 @@ export const DataProvider = ({ children }) => {
       leaveTypes, leaveBalances, getLeaveBalance, refreshLeaveBalances,
       leaves, addLeave, updateLeave, deleteLeave, approveLeave, rejectLeave, recommendLeave, getLeaveTypeName, getLeaveTypeColor, getApprovedLeaveForDate,
       filteredLeaves,
-      officeVisits, addVisit, updateVisit, deleteVisit, approveVisit, rejectVisit, recommendVisit,
+      officeVisits, addVisit, updateVisit, deleteVisit, approveVisit, rejectVisit, recommendVisit, refreshOfficeVisits,
       filteredVisits,
       stats, apiOk,
       rosterVersion, bumpRosterVersion,

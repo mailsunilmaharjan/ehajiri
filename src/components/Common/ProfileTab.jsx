@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import Avatar from './Avatar.jsx';
-import api from '../../api/client.js';
+import api, { setToken as setAuthToken } from '../../api/client.js';
 
 /** Downscale a picked image file to a small square-ish JPEG data URL so it
     can ship inline in every list/chat/message payload it appears in. */
@@ -96,7 +96,10 @@ const ProfileTab = ({ currentUser, showToast }) => {
     if (pwForm.new1 !== pwForm.new2) return showToast(L('नयाँ पासवर्ड मेल खाएन','New passwords do not match'), 'error');
     setPwSaving(true);
     try {
-      await api.post('/auth/change-password', { oldPassword: pwForm.old, newPassword: pwForm.new1 });
+      const r = await api.post('/auth/change-password', { oldPassword: pwForm.old, newPassword: pwForm.new1 });
+      // Server revokes every older session on a password change and returns a
+      // fresh token for this one — keep it so this device isn't logged out.
+      if (r?.token) setAuthToken(r.token);
       showToast(L('पासवर्ड सफलतापूर्वक परिवर्तन भयो','Password changed successfully'));
       setPwForm({ old:'', new1:'', new2:'' });
     } catch (e) {

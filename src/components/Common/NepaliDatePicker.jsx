@@ -21,8 +21,10 @@ export const adToISO = (d) =>
  *   error      – boolean, turns input border red
  *   maxToday   – (default false) disable future BS dates
  *   minToday   – (default false) disable past BS dates (yesterday or earlier)
+ *   minDate    – (optional) AD ISO string — disable dates before this one
+ *   maxDate    – (optional) AD ISO string — disable dates after this one
  */
-const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false, minToday = false }, ref) => {
+const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false, minToday = false, minDate, maxDate }, ref) => {
   const { settings } = useSettings();
   const useNp = settings.nepaliDigits;
   const fmt   = (n) => useNp ? toNepaliDigits(n) : String(n);
@@ -130,13 +132,16 @@ const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false,
     (viewYear === todayBs.year && viewMonth < todayBs.month) ||
     (viewYear === todayBs.year && viewMonth === todayBs.month && d < todayBs.day)
   );
+  const cellISO     = (d) => adToISO(bsToAD(viewYear, viewMonth, d));
+  const isBeforeMin = (d) => minDate && cellISO(d) < String(minDate).slice(0, 10);
+  const isAfterMax  = (d) => maxDate && cellISO(d) > String(maxDate).slice(0, 10);
   const isToday = (d) =>
     viewYear === todayBs.year && viewMonth === todayBs.month && d === todayBs.day;
   const isSel   = (d) =>
     selected && viewYear === selected.year && viewMonth === selected.month && d === selected.day;
 
   const selectDate = (d) => {
-    if (isFuture(d) || isPast(d)) return;
+    if (isFuture(d) || isPast(d) || isBeforeMin(d) || isAfterMax(d)) return;
     const ad = bsToAD(viewYear, viewMonth, d);
     if (!ad || isNaN(ad)) return;
     const iso = adToISO(ad);
@@ -172,6 +177,7 @@ const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false,
         placeholder="मिति छान्नुस् (BS)"
         value={displayText}
         onClick={() => setIsOpen(p => !p)}
+        onKeyDown={e => { if (e.key === 'Tab' || e.key === 'Enter') setIsOpen(false); }}
       />
 
       {/* Calendar popup */}
@@ -222,7 +228,7 @@ const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false,
               if (!d) return <div key={i} />;
               const future  = isFuture(d);
               const past    = isPast(d);
-              const blocked = future || past;
+              const blocked = future || past || isBeforeMin(d) || isAfterMax(d);
               const today  = isToday(d);
               const sel    = isSel(d);
               const dow    = (startDow + d - 1) % 7;

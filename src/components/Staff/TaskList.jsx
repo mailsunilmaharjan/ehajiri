@@ -422,7 +422,9 @@ const stripHtml = (html) => {
 const TaskList = ({ fieldVisitOnly = false }) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { canManageSystem, currentUser, isAdmin, isSuperAdmin, isBranchManager, isDeptHead } = useAuth();
+  const { canManageSystem, canEdit, canDelete, currentUser, isAdmin, isSuperAdmin, isBranchManager, isDeptHead } = useAuth();
+  const canEditTask   = canEdit('task');
+  const canDeleteTask = canDelete('task');
   const { employees, filteredEmployees } = useData();
   const { refreshTaskCounts, clearTaskAlert } = useNotifications();
   const { flags: moduleFlags } = useModuleFlags();
@@ -1019,7 +1021,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       setSaving(false);
     }
   };
-  useSaveShortcut(modal, save);
+  useSaveShortcut(modal && canEditTask, save);
 
   const remove = async (id) => {
     try {
@@ -1570,12 +1572,14 @@ const TaskList = ({ fieldVisitOnly = false }) => {
               )}
             </div>
           )}
-          <button onClick={openAdd}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 30, background: '#1a56db',
-              color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(26,86,219,.25)' }}>
-            + Add {fieldVisitOnly ? 'Field Visit' : 'Task'}
-          </button>
+          {canEditTask && (
+            <button onClick={openAdd}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 30, background: '#1a56db',
+                color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(26,86,219,.25)' }}>
+              + Add {fieldVisitOnly ? 'Field Visit' : 'Task'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1601,19 +1605,23 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 onRowClick={openFollowupPanel}
                 onFocusChange={openFollowupPanel}
                 onRowDoubleClick={openEdit}
-                onDeleteKey={(row) => setDeleteConfirm(row.id)}
-                onDeleteSelected={removeSelected}
+                onDeleteKey={canDeleteTask ? (row) => setDeleteConfirm(row.id) : undefined}
+                onDeleteSelected={canDeleteTask ? removeSelected : undefined}
                 contextMenu={[
-                  { label: 'Edit', icon: '✏️', onClick: (row) => openEdit(row) },
-                  { label: 'Edit Customer Contact', icon: '📇', onClick: (row) => openContactEdit(row) },
-                  { label: (row) => row.isFieldVisit ? 'Remove Field Visit' : 'Mark as Field Visit', icon: '🚗', onClick: (row) => toggleFieldVisit(row) },
-                  'divider',
+                  ...(canEditTask ? [
+                    { label: 'Edit', icon: '✏️', onClick: (row) => openEdit(row) },
+                    { label: 'Edit Customer Contact', icon: '📇', onClick: (row) => openContactEdit(row) },
+                    { label: (row) => row.isFieldVisit ? 'Remove Field Visit' : 'Mark as Field Visit', icon: '🚗', onClick: (row) => toggleFieldVisit(row) },
+                    'divider',
+                  ] : []),
                   { label: 'Notify via WhatsApp', icon: '💬', onClick: (row) => handleWhatsAppClick(row) },
                   ...(moduleFlags.smsGatewayEnabled
                     ? [{ label: 'Notify via SMS', icon: '📱', onClick: (row) => handleSmsClick(row) }]
                     : []),
-                  'divider',
-                  { label: 'Delete', icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
+                  ...(canDeleteTask ? [
+                    'divider',
+                    { label: 'Delete', icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
+                  ] : []),
                 ]}
               />
             </div>
@@ -2184,8 +2192,8 @@ const TaskList = ({ fieldVisitOnly = false }) => {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setModal(false)}>Cancel</button>
-              <SaveButton onClick={save} disabled={saving} icon={saving ? '⏳' : '💾'} label={saving ? 'Saving…' : 'Save'} />
+              <button className="btn btn-outline" onClick={() => setModal(false)}>{canEditTask ? 'Cancel' : 'Close'}</button>
+              {canEditTask && <SaveButton onClick={save} disabled={saving} icon={saving ? '⏳' : '💾'} label={saving ? 'Saving…' : 'Save'} />}
             </div>
           </div>
         </div>
@@ -2384,7 +2392,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button className="btn btn-danger" onClick={() => remove(deleteConfirm)}>🗑 Delete</button>
+              {canDeleteTask && <button className="btn btn-danger" onClick={() => remove(deleteConfirm)}>🗑 Delete</button>}
             </div>
           </div>
         </div>

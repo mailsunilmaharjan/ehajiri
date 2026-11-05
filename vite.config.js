@@ -3,6 +3,18 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // React/react-dom/react-router-dom into their own chunk — shared by
+        // every route, so it's downloaded once and cached, instead of being
+        // duplicated across the ~55 page chunks App.jsx now lazy-loads.
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
   server: {
     port: 4000,
     open: true,

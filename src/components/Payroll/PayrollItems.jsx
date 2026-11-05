@@ -21,12 +21,13 @@ const TYPE_OPTS = [
 const CALC_OPTS = [
   { value: 'fixed',            label: 'Fixed Amount' },
   { value: 'percent_of_basic', label: '% of Basic' },
+  { value: 'months_of_basic',  label: 'Months of Basic (e.g. 1 = one month\'s basic)' },
   { value: 'formula',          label: 'Formula' },
 ];
 const PAYMENT_MODE_OPTS = [
-  { value: 'monthly',    label: 'Monthly' },
-  { value: 'yearly',     label: 'Yearly' },
-  { value: 'need_basis', label: 'Need Basis' },
+  { value: 'monthly',    label: 'Monthly (every pay run)' },
+  { value: 'yearly',     label: 'Yearly (once a year, e.g. Festival Bonus)' },
+  { value: 'need_basis', label: 'Case basis (assigned per employee, e.g. Maternity)' },
 ];
 const PAYMENT_MODE_LABEL = Object.fromEntries(PAYMENT_MODE_OPTS.map(o => [o.value, o.label]));
 const TYPE_STYLE = {
@@ -34,7 +35,14 @@ const TYPE_STYLE = {
   deduction: { bg: '#fff5f5', color: '#991b1b', label: 'Deduction' },
 };
 
-const emptyForm = { name: '', type: 'earning', calcMethod: 'fixed', calcValue: '', formula: '', taxable: true, paymentMode: 'monthly' };
+const CATEGORY_OPTS = [{ value: 'allowance', label: 'Allowance' }, { value: 'bonus', label: 'Bonus' }];
+const GENDER_OPTS = [{ value: 'all', label: 'All employees' }, { value: 'female', label: 'Female only' }, { value: 'male', label: 'Male only' }];
+const PAYMENT_HINT = {
+  monthly: 'Added to every payroll run for employees this item is assigned to (Payroll → Salary Setup).',
+  yearly: 'Paid once per fiscal year, in the run where you tick it. The system blocks a second payment in the same year.',
+  need_basis: 'Not paid automatically. Assign it to an employee with dates under Payroll → Salary Setup → Cases (e.g. maternity allowance).',
+};
+const emptyForm = { name: '', type: 'earning', calcMethod: 'fixed', calcValue: '', formula: '', taxable: true, paymentMode: 'monthly', category: 'allowance', appliesGender: 'all', prorate: true };
 
 const PayrollItems = () => {
   const navigate = useNavigate();
@@ -66,6 +74,7 @@ const PayrollItems = () => {
       name: row.name || '', type: row.type || 'earning', calcMethod: row.calcMethod || 'fixed',
       calcValue: row.calcValue != null ? String(row.calcValue) : '', formula: row.formula || '',
       taxable: row.taxable !== false, paymentMode: row.paymentMode || 'monthly',
+      category: row.category || 'allowance', appliesGender: row.appliesGender || 'all', prorate: row.prorate !== false,
     });
     setError(''); setModal(true);
   };
@@ -83,6 +92,7 @@ const PayrollItems = () => {
       formula: form.calcMethod === 'formula' ? form.formula.trim() : null,
       taxable: form.taxable,
       paymentMode: form.paymentMode,
+      category: form.category, appliesGender: form.appliesGender, prorate: form.prorate,
       rankingOrder: editId ? undefined : items.length + 1,
     };
     try {
@@ -121,6 +131,7 @@ const PayrollItems = () => {
   const fmtCalc = (row) => {
     if (row.calcMethod === 'formula') return row.formula || '—';
     if (row.calcMethod === 'percent_of_basic') return `${row.calcValue ?? 0}% of Basic`;
+    if (row.calcMethod === 'months_of_basic') return `${row.calcValue ?? 0} month(s) of Basic`;
     return `Fixed: ${row.calcValue ?? 0}`;
   };
 
@@ -133,7 +144,10 @@ const PayrollItems = () => {
           return <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: s.bg, color: s.color }}>{s.label}</span>;
         } },
       { field: 'calcMethod', header: 'Calculation', minWidth: 160, render: (_, row) => fmtCalc(row) },
-      { field: 'paymentMode', header: 'Payment Mode', width: 120, render: v => PAYMENT_MODE_LABEL[v] || 'Monthly' },
+      { field: 'category', header: 'Category', width: 100, render: v => (v === 'bonus' ? 'Bonus' : 'Allowance') },
+      { field: 'paymentMode', header: 'Payment Mode', width: 130, render: v => ({ monthly: 'Monthly', yearly: 'Yearly (once)', need_basis: 'Case basis' }[v] || 'Monthly') },
+      { field: 'appliesGender', header: 'For', width: 90, render: v => ({ female: 'Female', male: 'Male' }[v] || 'All') },
+      { field: 'prorate', header: 'Prorated', width: 90, align: 'center', render: v => (v === false ? 'No' : 'Yes') },
       { field: 'taxable', header: 'Taxable', width: 90, align: 'center',
         render: v => v === false
           ? <span style={{ color: '#991b1b', fontWeight: 700, fontSize: 12 }}>No</span>
@@ -221,12 +235,31 @@ const PayrollItems = () => {
                 </div>
               </div>
 
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Category</label>
+                  <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                    style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                    {CATEGORY_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Applies to</label>
+                  <select value={form.appliesGender} onChange={e => setForm(f => ({ ...f, appliesGender: e.target.value }))}
+                    style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                    {GENDER_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Payment Mode</label>
-                <select value={form.paymentMode} onChange={e => setForm(f => ({ ...f, paymentMode: e.target.value }))}
+                <select value={form.paymentMode}
+                  onChange={e => { const v = e.target.value; setForm(f => ({ ...f, paymentMode: v, prorate: v === 'monthly' ? true : false })); }}
                   style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
                   {PAYMENT_MODE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+                <span style={{ fontSize: 11, color: '#6b7280' }}>{PAYMENT_HINT[form.paymentMode]}</span>
               </div>
 
               {form.calcMethod === 'formula' ? (
@@ -241,7 +274,7 @@ const PayrollItems = () => {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
-                    {form.calcMethod === 'percent_of_basic' ? 'Percentage (%)' : 'Amount'}<span style={{ color: '#dc2626' }}> *</span>
+                    {form.calcMethod === 'percent_of_basic' ? 'Percentage (%)' : form.calcMethod === 'months_of_basic' ? 'Number of months of Basic' : 'Amount'}<span style={{ color: '#dc2626' }}> *</span>
                   </label>
                   <input type="number" value={form.calcValue} onChange={e => setForm(f => ({ ...f, calcValue: e.target.value }))}
                     style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13 }} />
@@ -251,6 +284,11 @@ const PayrollItems = () => {
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
                 <input type="checkbox" checked={form.taxable} onChange={e => setForm(f => ({ ...f, taxable: e.target.checked }))} />
                 Taxable
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.prorate} onChange={e => setForm(f => ({ ...f, prorate: e.target.checked }))} />
+                Reduce for absent / unpaid-leave days
+                <span style={{ fontSize: 11, color: '#6b7280' }}>(untick for bonuses and fixed case allowances)</span>
               </label>
 
               {error && <span style={{ fontSize: 11, color: '#dc2626' }}>{error}</span>}

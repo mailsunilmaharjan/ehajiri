@@ -9,10 +9,33 @@ import crypto    from 'crypto';
 import bcrypt    from 'bcryptjs';
 import pool      from '../db.js';
 import { logError } from '../utils/logError.js';
+import { authGuard } from '../middleware/authGuard.js';
+import { safeEqual } from '../middleware/security.js';
+import { verifyEd25519 } from '../utils/licenseVerify.js';
+import { validateBody } from '../middleware/validate.js';
 
 const router = express.Router();
 
-const SECRET = 'EHAJIRI_LICENSE_SECRET_2024_v2';  // MUST match LicenseAdmin
+// Must match LicenseAdmin's LICENSE_SECRET. No source-embedded default on
+// hosted/server builds: the old literal was public in git and let anyone mint
+// valid keys. The legacy constant is kept ONLY for the packaged desktop app
+// (ELECTRON=true) so already-issued desktop keys keep verifying until
+// licensing moves to asymmetric signatures.
+const LEGACY_DESKTOP_SECRET = 'EHAJIRI_LICENSE_SECRET_2024_v2';
+const SECRET = process.env.LICENSE_SECRET
+  || (process.env.ELECTRON === 'true' ? LEGACY_DESKTOP_SECRET : null);
+if (!SECRET) logError('[license] LICENSE_SECRET is not set — license activation is disabled (fail closed)');
+
+// Mutating admin endpoints that no browser UI calls: LicenseAdmin (same host,
+// shared INTERNAL_API_KEY) or a logged-in superAdmin only.
+function internalOrSuperAdmin(req, res, next) {
+  const k = process.env.INTERNAL_API_KEY;
+  if (k && safeEqual(req.headers['x-internal-key'], k)) return next();
+  authGuard(req, res, () => {
+    if (req.user?.role === 'superAdmin') return next();
+    res.status(403).json({ error: 'Not permitted' });
+  });
+}
 
 // ── Ensure license table exists (called from index.js post-migration) ────────
 export async function ensureLicenseTable() {
@@ -50,6 +73,7 @@ export async function ensureLicenseTable() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function hmacSign(data) {
+  if (!SECRET) throw new Error('License signing secret not configured');
   return crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
 }
 
@@ -58,15 +82,30 @@ function decodeB64url(str) {
   return JSON.parse(Buffer.from(pad, 'base64').toString('utf8'));
 }
 
+// LICENSE_ALLOW_LEGACY=false rejects HMAC-signed EHAJ- keys entirely, leaving
+// only Ed25519 (EHAJ2-) keys, which cannot be forged without LicenseAdmin's
+// private key. Leave unset until every key in circulation has been re-issued.
+const ALLOW_LEGACY = process.env.LICENSE_ALLOW_LEGACY !== 'false';
+
 function parseLicenseKey(rawKey) {
+  if (rawKey && rawKey.startsWith('EHAJ2-')) {
+    const body = rawKey.slice(6);
+    const i = body.lastIndexOf('.');
+    if (i < 0) return null;
+    const encoded = body.slice(0, i), sig = body.slice(i + 1);
+    if (!verifyEd25519(encoded, sig)) return null;     // tampered / forged
+    try { return { encoded, sig, payload: decodeB64url(encoded) }; } catch { return null; }
+  }
+  if (!ALLOW_LEGACY) return null;
   if (!rawKey || !rawKey.startsWith('EHAJ-')) return null;
   const body   = rawKey.slice(5);
   const dotIdx = body.lastIndexOf('.');
   if (dotIdx < 0) return null;
   const encoded  = body.slice(0, dotIdx);
   const sig      = body.slice(dotIdx + 1);
-  const expected = hmacSign(encoded);
-  if (expected !== sig) return null;          // tampered
+  if (!SECRET) return null;
+  const a = Buffer.from(hmacSign(encoded)); const b = Buffer.from(sig);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;   // tampered
   const payload = decodeB64url(encoded);
   if (!payload) return null;
   return { encoded, sig, payload };
@@ -76,6 +115,9 @@ function parseLicenseKey(rawKey) {
 // Used by dealer-activate, which generates licenses locally rather than
 // fetching one from the LicenseAdmin portal.
 function signLicenseKey(payload) {
+  // No HMAC secret on this instance (hosted, legacy disabled): dealer-activate
+  // activates straight into this DB, so a signature is not needed — mark it local.
+  if (!SECRET) return `LOCAL-DEALER-${payload.id}`;
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `EHAJ-${encoded}.${hmacSign(encoded)}`;
 }
@@ -139,7 +181,7 @@ router.get('/status', async (_req, res) => {
 // phone/email changes — deliberately separate from /activate so updating
 // contact info never requires re-signing or re-activating the license
 // itself. No-ops (200, does nothing) if there's no active license row yet.
-router.post('/distributor', async (req, res) => {
+router.post('/distributor', internalOrSuperAdmin, validateBody({ name: { max: 255 }, contactName: { max: 255 }, phone: { max: 100 }, email: { max: 255 } }), async (req, res) => {
   const { name = '', contactName = '', phone = '', email = '' } = req.body;
   try {
     await pool.query(
@@ -155,7 +197,7 @@ router.post('/distributor', async (req, res) => {
 });
 
 // ── POST /activate ────────────────────────────────────────────────────────────
-router.post('/activate', async (req, res) => {
+router.post('/activate', validateBody({ key: { required: true, max: 8000 } }), async (req, res) => {
   const { key } = req.body;
   if (!key) return res.status(400).json({ error: 'License key is required' });
 
@@ -210,7 +252,7 @@ router.post('/activate', async (req, res) => {
 // (seeded by migration v29); on success a fresh annual license is generated
 // and self-signed with the same SECRET used to verify pasted keys, then
 // activated immediately.
-router.post('/dealer-activate', async (req, res) => {
+router.post('/dealer-activate', validateBody({ dealerName: { required: true, max: 200 }, username: { required: true, max: 200 }, password: { required: true, max: 256 } }), async (req, res) => {
   const { dealerName, username, password } = req.body;
   if (!dealerName?.trim() || !username?.trim() || !password) {
     return res.status(400).json({ error: 'Dealer name, username and password are all required' });
@@ -284,7 +326,7 @@ router.post('/dealer-activate', async (req, res) => {
 });
 
 // ── POST /deactivate ──────────────────────────────────────────────────────────
-router.post('/deactivate', async (_req, res) => {
+router.post('/deactivate', internalOrSuperAdmin, async (_req, res) => {
   try {
     await pool.query(`UPDATE license SET is_active = FALSE WHERE is_active = TRUE`);
     res.json({ success: true });

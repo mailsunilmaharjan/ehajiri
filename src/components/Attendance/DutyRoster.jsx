@@ -2457,13 +2457,15 @@ const DutyRoster = () => {
                   try {
                     const r = await api.delete('/duty-roster/clear', clearForm);
                     const deleted = r?.deleted ?? 0;
+                    const trimmed = r?.trimmed ?? 0;
                     const seeded  = r?.seeded  ?? 0;
                     setShowClearModal(false);
                     load();
                     bumpRosterVersion();
-                    const msg = deleted > 0
-                      ? `✅ Deleted ${deleted} roster record${deleted !== 1 ? 's' : ''}.`
-                      : '✅ No matching roster records found.';
+                    const parts = [];
+                    if (deleted > 0) parts.push(`Deleted ${deleted} roster record${deleted !== 1 ? 's' : ''}`);
+                    if (trimmed > 0) parts.push(`trimmed ${trimmed} longer roster${trimmed !== 1 ? 's' : ''} to outside the cleared dates`);
+                    const msg = parts.length ? `✅ ${parts.join('; ')}.` : '✅ No matching roster records found.';
                     alert(seeded > 0
                       ? `${msg}\n📋 Default shift assigned to ${seeded} staff member${seeded !== 1 ? 's' : ''}.`
                       : msg);

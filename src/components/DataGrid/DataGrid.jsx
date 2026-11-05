@@ -30,6 +30,7 @@ const DataGrid = ({
   filterButtonLabel = null,   // override label; null = default "Filter" / "फिल्टर"
   selectionActions = null,    // extra buttons rendered in the selection bar
   contextMenu = null,         // [{ label: string|(row)=>string, icon, onClick(row), className? }] — shown on right-click
+  searchOnlyExtraFields = false, // true = global search looks ONLY at extraSearchFields, not the columns
   extraSearchFields = [],     // extra row fields to include in global search (not shown as columns)
   className = '',             // extra class on the outer container, for scoping one-off style overrides
   showFooter = true,          // set false to hide the pagination/info footer (e.g. small fixed-size reports)
@@ -110,8 +111,8 @@ const DataGrid = ({
       // "John Doe" as one contiguous substring.
       const terms = globalSearch.toLowerCase().trim().split(/\s+/).filter(Boolean);
       result = result.filter(row => {
-        const rowText = columns
-          .filter(col => col.filterable !== false && col.field !== 'actions')
+        const rowText = (searchOnlyExtraFields ? [] : columns
+          .filter(col => col.filterable !== false && col.field !== 'actions'))
           .map(col => row[col.field])
           .concat(extraSearchFields.map(field => row[field]))
           .filter(v => v != null)
@@ -135,7 +136,7 @@ const DataGrid = ({
       });
     }
     return result;
-  }, [data, globalSearch, filters, sortField, sortDir, extraSearchFields]);
+  }, [data, globalSearch, filters, sortField, sortDir, extraSearchFields, searchOnlyExtraFields]);
 
   const processedData = processed;
   const isGrouped = typeof groupBy === 'function';

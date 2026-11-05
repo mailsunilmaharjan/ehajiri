@@ -49,6 +49,7 @@ import {
   pushBioPhotoToDevice,
   pushFaceTemplateToDevice,
   recordPushedUserLocally,
+  checkValidityWindow,
 } from '../services/zktecoService.js';
 
 const router = express.Router();
@@ -286,8 +287,12 @@ async function getSnById(id) {
  * Called when: (a) device is assigned to an area, (b) manual "Sync Area" trigger.
  */
 async function syncAreaToDevice(areaId, targetSn) {
+  // Staff whose Validity / Expiry has run out stay off the device (see
+  // enforceAccessValidity) — don't push them back in through an area sync.
   const { rows: users } = await pool.query(
-    'SELECT * FROM zkteco_users WHERE area_id=$1', [areaId]
+    `SELECT zu.* FROM zkteco_users zu
+     WHERE zu.area_id=$1
+       AND NOT EXISTS (SELECT 1 FROM users e WHERE e.device_id = zu.pin AND e.access_blocked = TRUE)`, [areaId]
   );
   let cmdCount = 0;
   for (const u of users) {
@@ -445,6 +450,130 @@ async function deleteUserFromAreaDevices(areaId, pin, excludeSn) {
   return deleted;
 }
 
+/** Refuse to take a new sample for someone whose Validity / Expiry has run out. */
+async function assertNotExpired(pin) {
+  const { rows: [emp] } = await pool.query(`SELECT id, access_expiry_mode FROM users WHERE device_id=$1`, [String(pin)]);
+  if (emp && Number(emp.access_expiry_mode) > 0 && !(await checkValidityWindow(emp.id, new Date()))) {
+    throw Object.assign(new Error('This staff member\'s Validity / Expiry has run out — extend the date (or set No Expiry) before taking a new sample.'), { status: 409 });
+  }
+}
+
+/**
+ * Makes the Validity / Expiry setting actually bite on the device.
+ *
+ * The Expires/EndDatetime sent with USERINFO is only honoured by some
+ * firmwares (others keep verifying an expired person and just push the punch),
+ * and nothing ever re-checked it once the end date passed. So, like
+ * ehajiriLite: once a staff member's validity has run out (end date passed, or
+ * use-count exhausted) they are taken OFF every device they are on — user and
+ * samples deleted there, templates archived (kept) in the DB — and when the
+ * expiry is extended or removed they are put back from those archived copies,
+ * no re-scan needed. users.access_blocked remembers which state they are in.
+ *
+ * Runs on a timer (so a date passing takes effect by itself) and right after
+ * any validity change is saved. Pass `onlyPin` to limit it to one staff.
+ */
+export async function enforceAccessValidity(onlyPin = null) {
+  const { rows: staff } = await pool.query(
+    `SELECT id, device_id, full_name, access_blocked, access_expiry_mode,
+            access_valid_from, access_valid_to, access_valid_count
+     FROM users
+     WHERE device_id IS NOT NULL AND device_id <> ''
+       AND (access_expiry_mode > 0 OR access_blocked = TRUE)
+       ${onlyPin ? 'AND device_id = $1' : ''}`,
+    onlyPin ? [String(onlyPin)] : []
+  );
+
+  let blocked = 0, restored = 0;
+  for (const s of staff) {
+    try {
+      const pin   = s.device_id;
+      const valid = await checkValidityWindow(s.id, new Date());
+
+      if (!valid) {
+        // Live (non-archived) templates still sitting for this PIN — on first
+        // block that's all of them; on later passes it's a walk-up enrolment
+        // done while expired, which must not stay on the device either.
+        const { rows: live } = await pool.query(
+          `SELECT DISTINCT device_sn FROM zkteco_fingerprints WHERE pin=$1 AND archived_at IS NULL AND template_data IS NOT NULL`,
+          [pin]
+        );
+        let targets = live.map(r => r.device_sn);
+        if (!s.access_blocked) {
+          const { rows: known } = await pool.query(
+            `SELECT DISTINCT d.serial_number AS device_sn FROM zkteco_users u
+             JOIN zkteco_devices d ON d.serial_number = u.device_sn
+             WHERE u.pin=$1 AND d.serial_number IS NOT NULL`,
+            [pin]
+          );
+          targets = [...new Set([...targets, ...known.map(r => r.device_sn)])];
+        }
+        if (targets.length) {
+          await pool.query(
+            `UPDATE zkteco_fingerprints SET archived_at=NOW() WHERE pin=$1 AND archived_at IS NULL`, [pin]);
+          for (const sn of targets) {
+            await queueCommand(sn, 'DATA DELETE USERINFO', `PIN=${pin}`);
+          }
+          console.log(`[ZK Validity] PIN=${pin} (${s.full_name}) expired — removed from ${targets.length} device(s)`);
+        }
+        if (!s.access_blocked) {
+          await pool.query(`UPDATE users SET access_blocked=TRUE WHERE id=$1`, [s.id]);
+          blocked++;
+        }
+        continue;
+      }
+
+      if (!s.access_blocked) continue;
+
+      // Valid again (extended / switched to No Expiry) → put back.
+      const mode = Number(s.access_expiry_mode) || 0;
+      const usesDate  = mode === 1 || mode === 3;
+      const usesCount = mode === 2 || mode === 3;
+      const validity = {
+        expires: mode,
+        startDatetime: usesDate && s.access_valid_from ? String(s.access_valid_from).slice(0, 10) + ' 00:00:00' : '2000-01-01 00:00:00',
+        endDatetime:   usesDate && s.access_valid_to   ? String(s.access_valid_to).slice(0, 10)   + ' 23:59:00' : '2099-12-31 23:59:00',
+        validCount: usesCount ? s.access_valid_count : null,
+      };
+      const grp = await resolveGrpForEmployee(s.id);
+      const { rows: archived } = await pool.query(
+        `SELECT device_sn, finger_id, template_size, valid, template_data FROM zkteco_fingerprints
+         WHERE pin=$1 AND archived_at IS NOT NULL AND template_data IS NOT NULL ORDER BY finger_id`, [pin]);
+      const { rows: faces } = await pool.query(
+        `SELECT * FROM zkteco_face_templates WHERE pin=$1 AND template_data IS NOT NULL ORDER BY face_id`, [pin]);
+      const { rows: devUsers } = await pool.query(
+        `SELECT u.device_sn, u.name, u.privilege, u.card_no, u.face_photo FROM zkteco_users u
+         JOIN zkteco_devices d ON d.serial_number = u.device_sn AND d.active = TRUE
+         WHERE u.pin=$1`, [pin]);
+
+      for (const du of devUsers) {
+        await queueCommand(du.device_sn, 'DATA UPDATE USERINFO', buildUserInfoParams({
+          pin, name: du.name || s.full_name || '', privilege: du.privilege || 0, card: du.card_no || '', grp, ...validity,
+        }));
+        // Prefer this device's own archived copy; fall back to any device's.
+        const own = archived.filter(f => f.device_sn === du.device_sn);
+        const fps = own.length ? own : archived.filter((f, i, a) => a.findIndex(x => x.finger_id === f.finger_id) === i);
+        for (const fp of fps) {
+          const binarySize = Buffer.byteLength(fp.template_data, 'base64');
+          await queueCommand(du.device_sn, 'DATA UPDATE FINGERTMP',
+            `PIN=${pin}\tFID=${fp.finger_id}\tSize=${binarySize}\tValid=${fp.valid || 1}\tTMP=${fp.template_data}`);
+        }
+        for (const face of faces) {
+          await pushFaceTemplateToDevice(du.device_sn, face.pin, face.face_id, face.template_size, face.valid || 1, face.template_data);
+        }
+        if (du.face_photo) await pushBioPhotoToDevice(du.device_sn, pin, du.face_photo);
+      }
+      await pool.query(`UPDATE zkteco_fingerprints SET archived_at=NULL WHERE pin=$1 AND archived_at IS NOT NULL`, [pin]);
+      await pool.query(`UPDATE users SET access_blocked=FALSE WHERE id=$1`, [s.id]);
+      restored++;
+      console.log(`[ZK Validity] PIN=${pin} (${s.full_name}) valid again — restored to ${devUsers.length} device(s)`);
+    } catch (err) {
+      console.error(`[ZK Validity] PIN=${s.device_id} failed:`, err.message);
+    }
+  }
+  return { checked: staff.length, blocked, restored };
+}
+
 // ═══════════════════════════════════════════════════════
 //  DEVICES
 // ═══════════════════════════════════════════════════════
@@ -467,7 +596,7 @@ router.get('/devices', async (_req, res) => {
     // (same fix as LicenseAdmin's tenantDeviceQuery.js — see its comment).
     const { rows } = await pool.query(`
       SELECT d.*,
-             di.user_count,   di.fp_count,     di.max_user,    di.max_fp,
+             di.user_count,   di.fp_count,     di.face_count,  di.max_user,    di.max_fp,
              di.device_name AS info_device_name,
              di.firmware_ver AS info_firmware,
              di.platform     AS info_platform,
@@ -718,12 +847,16 @@ router.post('/devices/:id/upload-user', canManageDevices, async (req, res) => {
       [sn, pin, name, privilege, card, areaId || null, emp?.id || null]
     );
 
+    let cascaded;
     if (areaId) {
       // Push to all other devices in the same area
-      const cascaded = await pushUserToAreaDevices(areaId, pin, name, privilege, card, sn, grp, { expires, startDatetime, endDatetime, validCount });
-      return res.json({ ok:true, sn, command:cmd.command_payload, areaCascaded:cascaded });
+      cascaded = await pushUserToAreaDevices(areaId, pin, name, privilege, card, sn, grp, { expires, startDatetime, endDatetime, validCount });
     }
-    res.json({ ok:true, sn, command:cmd.command_payload });
+    // Last, so it queues AFTER the user/templates above: an already-expired
+    // validity takes them straight back off the device(s), and an extended /
+    // removed one restores a person who was taken off earlier.
+    await enforceAccessValidity(pin);
+    res.json({ ok:true, sn, command:cmd.command_payload, ...(areaId ? { areaCascaded: cascaded } : {}) });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
@@ -747,19 +880,73 @@ router.post('/devices/:id/delete-user', canManageDevices, async (req, res) => {
       areaDeleted = await deleteUserFromAreaDevices(areaId, pin, sn);
     }
 
-    // Purge stored FP templates for this PIN on the affected devices — leaving
-    // them makes autoRestoreTemplates() re-push them after the device's next
-    // RESTART, and DATA UPDATE FINGERTMP for a nonexistent PIN recreates the
-    // "deleted" user on the device as a nameless entry.
+    // Archive (not delete) stored FP templates for this PIN on the affected
+    // devices — autoRestoreTemplates() already filters out archived rows, so
+    // this stops it re-pushing them after the device's next RESTART just like
+    // a hard delete would, but keeps the template data around so a rejoining
+    // staff member can be put back via /restore-user without re-scanning.
     const sns = [sn];
     if (areaId) {
       const { rows: sibs } = await pool.query(
         `SELECT serial_number FROM zkteco_devices WHERE area_id=$1 AND serial_number IS NOT NULL`, [areaId]);
       sibs.forEach(s => sns.push(s.serial_number));
     }
-    await pool.query(`DELETE FROM zkteco_fingerprints WHERE pin=$1 AND device_sn = ANY($2)`, [pin, sns]);
+    await pool.query(
+      `UPDATE zkteco_fingerprints SET archived_at=NOW() WHERE pin=$1 AND device_sn = ANY($2) AND archived_at IS NULL`,
+      [pin, sns]
+    );
 
     res.json({ ok:true, sn, command:cmd.command_payload, areaDeletedFrom:areaDeleted });
+  } catch (err) { res.status(err.status||500).json({ error:err.message }); }
+});
+
+// ── Restore a previously-deleted user + their fingerprint backup ─────────
+// Undoes /delete-user's archive step: re-pushes DATA UPDATE USERINFO (so the
+// device recognizes the PIN again) then DATA UPDATE FINGERTMP for every
+// archived template still on file, and un-archives them — no re-scan needed.
+// Typical use: a resigned staff member was deleted from the device, then
+// rejoins later and their status flips back to Working.
+router.post('/devices/:id/restore-user', canManageDevices, async (req, res) => {
+  const { pin } = req.body;
+  if (!pin) return res.status(400).json({ error:'pin is required' });
+  try {
+    const sn = await getSnById(req.params.id);
+
+    const { rows: archived } = await pool.query(
+      `SELECT finger_id, template_size, valid, template_data
+       FROM zkteco_fingerprints
+       WHERE device_sn=$1 AND pin=$2 AND archived_at IS NOT NULL AND template_data IS NOT NULL`,
+      [sn, pin]
+    );
+    if (!archived.length) {
+      return res.status(404).json({ error: 'No backed-up fingerprint found for this PIN on this device — they will need to re-enroll.' });
+    }
+
+    // Last-known name/privilege/card for this exact PIN+device, if that row
+    // is still around; otherwise fall back to the staff's current name in
+    // eHajiri (e.g. the Device Users row itself was also cleaned up since).
+    const { rows: [zu] }  = await pool.query(
+      `SELECT name, privilege, card_no FROM zkteco_users WHERE device_sn=$1 AND pin=$2`, [sn, pin]);
+    const { rows: [emp] } = await pool.query(`SELECT id, full_name FROM users WHERE device_id=$1`, [pin]);
+    const grp = await resolveGrpForEmployee(emp?.id);
+
+    const uParams = buildUserInfoParams({
+      pin, name: zu?.name || emp?.full_name || '', privilege: zu?.privilege || 0, card: zu?.card_no || '', grp,
+    });
+    await queueCommand(sn, 'DATA UPDATE USERINFO', uParams);
+
+    for (const fp of archived) {
+      const binarySize = fp.template_data ? Buffer.byteLength(fp.template_data, 'base64') : fp.template_size;
+      await queueCommand(sn, 'DATA UPDATE FINGERTMP',
+        `PIN=${pin}\tFID=${fp.finger_id}\tSize=${binarySize}\tValid=${fp.valid||1}\tTMP=${fp.template_data}`);
+    }
+
+    await pool.query(
+      `UPDATE zkteco_fingerprints SET archived_at=NULL WHERE device_sn=$1 AND pin=$2 AND archived_at IS NOT NULL`,
+      [sn, pin]
+    );
+
+    res.json({ ok:true, sn, restoredFingers: archived.length });
   } catch (err) { res.status(err.status||500).json({ error:err.message }); }
 });
 
@@ -830,11 +1017,18 @@ router.post('/devices/:targetId/copy-users/:sourceId', canManageDevices, async (
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
-// ── Enroll fingerprint — protocol format: ENROLL_FP PIN=X\tFID=Y\tRETRY=3\tOVERWRITE=1
+// ── Enroll fingerprint — protocol format: ENROLL_FP PIN=X\tFID=Y\tRETRY=1\tOVERWRITE=1
+// RETRY defaults to 1 (single scan per click) — on this hardware, RETRY=3
+// wasn't "3 presses then done": the device restarted its own multi-press
+// capture cycle per retry, so admins saw up to ~12 fingerprint prompts and a
+// ~2min wait from a single "Enroll FP" click. Lower RETRY trades away the
+// device's own on-device retry margin (a failed scan now just errors out
+// instead of the device trying again) for a fast, single-prompt enroll.
 router.post('/devices/:id/enroll-fp', canManageDevices, async (req, res) => {
-  const { pin, fingerId=0, retry=3, overwrite=1 } = req.body;
+  const { pin, fingerId=0, retry=1, overwrite=1 } = req.body;
   if (!pin) return res.status(400).json({ error:'pin is required' });
   try {
+    await assertNotExpired(pin);
     const sn     = await getSnById(req.params.id);
     // A user clicking "Enroll FP" again before the device has actually polled
     // and attempted the previous request just piles up duplicate commands
@@ -862,6 +1056,7 @@ router.post('/devices/:id/enroll-face', canManageDevices, async (req, res) => {
   const { pin, retry=3, overwrite=1 } = req.body;
   if (!pin) return res.status(400).json({ error:'pin is required' });
   try {
+    await assertNotExpired(pin);
     const sn     = await getSnById(req.params.id);
     await pool.query(
       `DELETE FROM zkteco_commands WHERE device_sn=$1 AND status='PENDING' AND command_payload LIKE $2`,
@@ -1587,11 +1782,15 @@ router.put('/device-users/:id', canManageDevices, async (req, res) => {
 
 router.delete('/device-users/:id', async (req, res) => {
   try {
-    // Purge this user's stored FP templates for the same device first — else
-    // autoRestoreTemplates() resurrects the user on the device after its next
-    // RESTART (see /devices/:id/delete-user).
+    // Archive (not delete) this user's stored FP templates for the same
+    // device first — else autoRestoreTemplates() resurrects the user on the
+    // device after its next RESTART (see /devices/:id/delete-user). Archiving
+    // instead of a hard delete keeps the template restorable via /restore-user.
     const { rows: [du] } = await pool.query('SELECT pin, device_sn FROM zkteco_users WHERE id=$1', [req.params.id]);
-    if (du) await pool.query('DELETE FROM zkteco_fingerprints WHERE pin=$1 AND device_sn=$2', [du.pin, du.device_sn]);
+    if (du) await pool.query(
+      'UPDATE zkteco_fingerprints SET archived_at=NOW() WHERE pin=$1 AND device_sn=$2 AND archived_at IS NULL',
+      [du.pin, du.device_sn]
+    );
     await pool.query('DELETE FROM zkteco_users WHERE id=$1',[req.params.id]);
     res.json({ ok:true });
   }
@@ -2128,7 +2327,7 @@ router.get('/access-levels/:id/members', async (req, res) => {
       JOIN   zkteco_access_levels al ON al.id = pa.access_level_id
       WHERE  pa.access_level_id = $1
          OR  al.group_id = (SELECT group_id FROM zkteco_access_levels WHERE id = $1)
-      ORDER  BY (SELECT b.ranking_order FROM branches b WHERE b.name = u.branch) ASC NULLS LAST,
+      ORDER  BY (SELECT MIN(b.ranking_order) FROM branches b WHERE b.name = u.branch) ASC NULLS LAST,
                u.ranking_order ASC NULLS LAST, u.full_name ASC
     `, [req.params.id]);
     res.json(rows);

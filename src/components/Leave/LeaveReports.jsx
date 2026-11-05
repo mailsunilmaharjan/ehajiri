@@ -76,6 +76,7 @@ const LeaveReports = () => {
   const [advTempF,     setAdvTempF]     = useState({ ...REPORT_DEFAULT_FILTERS });
   const [advFilterOpen, setAdvFilterOpen] = useState(false);
   const [viewLeave,    setViewLeave]    = useState(null);
+  const [monthFilter,  setMonthFilter]  = useState(null); // { key: 'year-month', label } — set by clicking a Summary row
 
   const setAdvTF = (key, val) => setAdvTempF(p => ({ ...p, [key]: val }));
   const openAdvFilter  = () => { setAdvTempF({ ...advFilters }); setAdvFilterOpen(true); };
@@ -178,7 +179,11 @@ const LeaveReports = () => {
     const name = getEmployeeName(empId);
     return (
       <HoverCard
-        trigger={<Avatar photo={emp?.profilePhoto} name={name} size={24} preview={false} />}
+        trigger={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+            <Avatar photo={emp?.profilePhoto} name={name} size={24} preview={false} />
+            <span>{name}</span>
+          </span>}
         content={
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Avatar photo={emp?.profilePhoto} name={name} size={40} preview={false} />
@@ -218,9 +223,9 @@ const LeaveReports = () => {
     { field: 'status', header: L('स्थिति', 'Status'), width: 100, render: () => (
         <span className="badge badge-success">{L('स्वीकृत', 'Approved')}</span>
       ) },
-    { field: 'recommendatorNames', header: L('सिफारिसकर्ता', 'Recommendator'), width: 90, align: 'center', sortable: false, filterable: false,
+    { field: 'recommendatorNames', header: L('सिफारिसकर्ता', 'Recommendator'), width: 200, sortable: false, filterable: false,
       render: (_, row) => personHoverCell(row.recommendedBy || row.recoId) },
-    { field: 'approvalNames', header: L('स्वीकृतिकर्ता', 'Approval'), width: 90, align: 'center', sortable: false, filterable: false,
+    { field: 'approvalNames', header: L('स्वीकृतिकर्ता', 'Approval'), width: 200, sortable: false, filterable: false,
       render: (_, row) => personHoverCell(row.approvedBy || row.approvalId) },
   ];
 
@@ -340,8 +345,20 @@ const LeaveReports = () => {
     return buckets;
   }, [summaryMonths, approvedLeaves, settings.defaultCalendar, MONTHS_BS, MONTHS]);
 
+  /* Leave Details rows — narrowed to one month when a Summary row was clicked (same fromDate→month bucketing as summaryRows) */
+  const recordRows = useMemo(() => {
+    if (!monthFilter) return approvedLeaves;
+    const useBS = settings.defaultCalendar === 'np';
+    return approvedLeaves.filter(l => {
+      let year, month;
+      if (useBS) { const bs = adToBS(l.fromDate); if (!bs) return false; year = bs.year; month = bs.month; }
+      else { const d = new Date(l.fromDate); year = d.getFullYear(); month = d.getMonth() + 1; }
+      return `${year}-${month}` === monthFilter.key;
+    });
+  }, [approvedLeaves, monthFilter, settings.defaultCalendar]);
+
   const summaryCols = [
-    { field: 'label', header: L('महिना', 'Month'), width: 150, render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
+    { field: 'label', header: L('महिना', 'Month'), fill: true, render: v => <span style={{ fontWeight: 600 }}>{v}</span> },
     { field: 'count', header: L('जम्मा बिदा संख्या', 'No. of Leave Taken'), width: 170 },
     { field: 'days',  header: L('जम्मा दिन', 'Total Days'), width: 130 },
   ];
@@ -370,7 +387,7 @@ const LeaveReports = () => {
       headers: ['SN', 'Staff ID', L('नाम', 'Name'), L('प्रकार', 'Type'), L('आवेदन प्रकार', 'App. Type'),
         L('मिति देखि', 'From Date'), L('मिति सम्म', 'To Date'), L('दिन', 'Days'), L('आवेदन मिति', 'Applied Date'),
         L('स्थिति', 'Status'), L('सिफारिसकर्ता', 'Recommendator'), L('स्वीकृतिकर्ता', 'Approval')],
-      rows: approvedLeaves.map((l, i) => [
+      rows: recordRows.map((l, i) => [
         i + 1, getEmployeeById(l.employeeId)?.employeeId || '', getEmployeeName(l.employeeId),
         getLeaveLabel(l.leaveTypeCode), l.isManual ? L('म्यानुअल', 'Manual') : L('आवेदन', 'Application'),
         fd(l.fromDate), fd(l.toDate), l.days, fd(l.appliedDate), L('स्वीकृत', 'Approved'),
@@ -600,10 +617,21 @@ const LeaveReports = () => {
       {/* Tab content */}
       <div style={{ background: 'white', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 var(--radius-md) var(--radius-md)', padding: 20 }}>
         {activeTab === 'records' && (
-          <DataGrid columns={recordCols} data={approvedLeaves} rowKey="id" defaultPageSize={20}
+          <>
+          {monthFilter && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, fontSize: 13 }}>
+              <span style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', borderRadius: 16, padding: '3px 6px 3px 12px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                📅 {L('महिना', 'Month')}: {monthFilter.label}
+                <button onClick={() => setMonthFilter(null)} title={L('हटाउनुहोस्', 'Clear')}
+                  style={{ border: 'none', background: '#dbeafe', color: '#1e40af', borderRadius: '50%', width: 20, height: 20, cursor: 'pointer', fontWeight: 800, lineHeight: 1 }}>×</button>
+              </span>
+            </div>
+          )}
+          <DataGrid columns={recordCols} data={recordRows} rowKey="id" defaultPageSize={20}
             showCheckbox={false} showFilterButton={false} searchPlaceholder={L('खोज्नुस...', 'Search...')}
             onRowClick={row => setViewLeave(v => v?.id === row.id ? null : row)}
             toolbar={toolbarContent} />
+          </>
         )}
         {activeTab === 'balance' && (() => {
           const thS = { padding: '4px 8px', textAlign: 'center', fontWeight: 700, fontSize: 12, color: '#374151',
@@ -707,6 +735,7 @@ const LeaveReports = () => {
           <DataGrid columns={summaryCols} data={summaryRows} rowKey="id"
             defaultPageSize={summaryRows.length || 12} pageSizeOptions={[summaryRows.length || 12]}
             showCheckbox={false} showFilterButton={false} showSearch={false} showFooter={false}
+            onRowClick={row => { setMonthFilter({ key: row.id, label: row.label }); setActiveTab('records'); }}
             toolbar={toolbarContent} />
         )}
       </div>

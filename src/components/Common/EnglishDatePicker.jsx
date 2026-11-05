@@ -162,6 +162,7 @@ const EnglishDatePicker = forwardRef(({ value, onChange, error, maxToday = false
         placeholder="Pick a date"
         value={displayText}
         onClick={() => setIsOpen(p => !p)}
+        onKeyDown={e => { if (e.key === 'Tab' || e.key === 'Enter') setIsOpen(false); }}
       />
 
       {isOpen && rect && createPortal(

@@ -32,8 +32,9 @@ const DEFAULT_SETTINGS = {
   companyLogo      : null,
   logoWidth        : null,
   logoHeight       : null,
-  liveAttendanceNotifications: true,
-  taskNotifications: true,
+  liveAttendanceNotifications: false, // Off by default for a fresh tenant/DB — Super Admin opts in (Company Edit modal)
+  taskNotifications: false, // Off by default for a fresh tenant/DB — Super Admin opts in (Company Edit modal)
+  timeOutMinGapMinutes: 0, // Company Edit modal — punches this close to the first one never count as Time Out (0 = off)
   defaultWeekends  : ['Sat'],
   weekendStartDate : _twoMonthsAgo,
   weekendHistory   : [{ id:1, weekends:['Sat'], effectiveDate:_twoMonthsAgo, changedDate:_today, changedBy:'System', reason:'Initial Setup' }],
@@ -179,7 +180,10 @@ export const SettingsProvider = ({ children }) => {
 
   const updateSettings = useCallback((patch) => persist(base => ({ ...base, ...patch })), [persist]);
 
-  const updateSetupList = useCallback((key, items) => persist(base => ({ ...base, [key]: items })), [persist]);
+  // `items` may be a function of the current (freshly refetched) list.
+  const updateSetupList = useCallback((key, items) => persist(base => ({
+    ...base, [key]: typeof items === 'function' ? items(base[key]) : items,
+  })), [persist]);
 
   // weekend_history is a dedicated table, not part of the generic app_settings
   // blob — every attendance report resolves weekends by querying it directly

@@ -40,6 +40,7 @@ const translations = {
 
   // Office Visit Submenu
   'Apply for Visit': 'भ्रमणको लागि आवेदन',
+  'Apply for Office Visit': 'कार्यालय भ्रमणको लागि आवेदन',
   'Visit Applications': 'भ्रमण आवेदनहरू',
   'Visit Approval': 'भ्रमण स्वीकृति',
   'Visit History': 'भ्रमण इतिहास',

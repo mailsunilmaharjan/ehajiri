@@ -277,6 +277,9 @@ const ManualPostings = () => {
         remark        : form.remark        || null,
         recommendedBy : form.recommendedBy ? Number(form.recommendedBy) : null,
         approvedBy    : form.approvedBy    ? Number(form.approvedBy)    : null,
+        // Marks this as the Manual Posting grid (vs the FAB's self-service
+        // "Inform Late In"), so a Branch Manager's entry lands Approved.
+        isManual      : true,
         deviceInfo    : getDeviceInfo(),
       };
       if (editId) {

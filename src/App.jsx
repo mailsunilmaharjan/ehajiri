@@ -1,71 +1,98 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import { ModuleFlagsProvider, useModuleFlags } from './context/ModuleFlagsContext.jsx';
 import useRecoApproval from './hooks/useRecoApproval.js';
 import Layout from './components/Layout/Layout.jsx';
+import { isMobileMode } from './utils/native.js';
 import Login         from './components/Auth/Login.jsx';
 import SsoLogin      from './components/Auth/SsoLogin.jsx';
 import GuestCheckin  from './components/Public/GuestCheckin.jsx';
 import ResetPassword from './components/Auth/ResetPassword.jsx';
 import LicenseWarningModal from './components/Auth/LicenseWarningModal.jsx';
+import BroadcastPopup from './components/Common/BroadcastPopup.jsx';
 import Dashboard from './components/Dashboard/Dashboard.jsx';
-import LeaveVisitPage from './components/Leave/LeaveVisitPage.jsx';
-import LeaveApplication from './components/Leave/LeaveApplication.jsx';
-import LeaveApproval from './components/Leave/LeaveApproval.jsx';
-import LeaveCalculation from './components/Leave/LeaveCalculation.jsx';
-import LeaveReports from './components/Leave/LeaveReports.jsx';
-import OfficeVisitApplication from './components/OfficeVisit/OfficeVisitApplication.jsx';
-import OfficeVisitApproval from './components/OfficeVisit/OfficeVisitApproval.jsx';
-import OfficeVisitReports from './components/OfficeVisit/OfficeVisitReports.jsx';
-import ShiftManagement        from './components/Shift/ShiftManagement.jsx';
-import UserManagement         from './components/Users/UserManagement.jsx';
-import StaffNotes             from './components/Staff/StaffNotes.jsx';
-import StaffContact           from './components/Staff/StaffContact.jsx';
-import EventVisitorRegistration from './components/Staff/EventVisitorRegistration.jsx';
-import StaffAnalyticsReport   from './components/Staff/StaffAnalyticsReport.jsx';
-import TaskList               from './components/Staff/TaskList.jsx';
-import TaskLookupPage         from './components/Staff/TaskLookupPage.jsx';
-import TaskDashboard          from './components/Staff/TaskDashboard.jsx';
-import PayrollDashboard       from './components/Payroll/PayrollDashboard.jsx';
-import PayrollItems           from './components/Payroll/PayrollItems.jsx';
-import PayrollTaxSlab         from './components/Payroll/PayrollTaxSlab.jsx';
-import PayrollReports         from './components/Payroll/PayrollReports.jsx';
-import TaskSettings           from './components/Staff/TaskSettings.jsx';
-import StaffMessage           from './components/Staff/StaffMessage.jsx';
-import ChatPage                from './components/Chat/ChatPage.jsx';
-import Settings               from './components/Settings/Settings.jsx';
-import LicensePage            from './components/Settings/LicensePage.jsx';
-import RoleManagement         from './components/Settings/RoleManagement.jsx';
-import DailyAttendanceReport    from './components/Attendance/DailyAttendanceReport.jsx';
-import HalfMonthlyReport       from './components/Attendance/HalfMonthlyReport.jsx';
-import MonthlyReport           from './components/Attendance/MonthlyReport.jsx';
-import StaffLedger             from './components/Attendance/StaffLedger.jsx';
-import PresentAbsentReport     from './components/Attendance/PresentAbsentReport.jsx';
-import HalfSummaryReport       from './components/Attendance/HalfSummaryReport.jsx';
-import HalfAbsentReport        from './components/Attendance/HalfAbsentReport.jsx';
-import HalfLateEarlyReport          from './components/Attendance/HalfLateEarlyReport.jsx';
-import MonthlyPresentAbsentReport   from './components/Attendance/MonthlyPresentAbsentReport.jsx';
-import MonthlySummaryReport         from './components/Attendance/MonthlySummaryReport.jsx';
-import MonthlyInOutReport           from './components/Attendance/MonthlyInOutReport.jsx';
-import MonthlyAbsentReport          from './components/Attendance/MonthlyAbsentReport.jsx';
-import MonthlyLateEarlyReport       from './components/Attendance/MonthlyLateEarlyReport.jsx';
-import HalfInOutReport         from './components/Attendance/HalfInOutReport.jsx';
-import YearlyReport                   from './components/Attendance/YearlyReport.jsx';
-import OvertimePage                   from './components/Attendance/OvertimePage.jsx';
-import YearlyPresentAbsentReport      from './components/Attendance/YearlyPresentAbsentReport.jsx';
-import YearlyInOutReport              from './components/Attendance/YearlyInOutReport.jsx';
-import YearlyAbsentReport             from './components/Attendance/YearlyAbsentReport.jsx';
-import YearlyLateEarlyReport          from './components/Attendance/YearlyLateEarlyReport.jsx';
-import DutyRoster                     from './components/Attendance/DutyRoster.jsx';
-import DutyRosterDeptWise             from './components/Attendance/DutyRosterDeptWise.jsx';
-import RosterDashboard                from './components/Attendance/RosterDashboard.jsx';
-import RosterReport                   from './components/Attendance/RosterReport.jsx';
-import ManualPostings                 from './components/Attendance/ManualPostings.jsx';
-import MissingAttendanceRequests      from './components/Attendance/MissingAttendanceRequests.jsx';
-import OnlineAttendanceApproval       from './components/Attendance/OnlineAttendanceApproval.jsx';
-import ProfilePage                    from './components/Profile/ProfilePage.jsx';
-import RecoApprovalPage               from './components/Users/RecoApprovalPage.jsx';
+// Every other page is code-split (React.lazy) — Login/Dashboard/Layout above
+// stay eager since they're needed for first paint regardless; everything
+// below is only fetched once its route is actually visited, instead of all
+// ~58 pages shipping in one bundle every user downloads up front (see the
+// "chunks are larger than 500 kB" build warning this was written to fix).
+const LeaveVisitPage = lazy(() => import('./components/Leave/LeaveVisitPage.jsx'));
+const LeaveApplication = lazy(() => import('./components/Leave/LeaveApplication.jsx'));
+const LeaveApproval = lazy(() => import('./components/Leave/LeaveApproval.jsx'));
+const LeaveCalculation = lazy(() => import('./components/Leave/LeaveCalculation.jsx'));
+const LeaveReports = lazy(() => import('./components/Leave/LeaveReports.jsx'));
+const OfficeVisitApplication = lazy(() => import('./components/OfficeVisit/OfficeVisitApplication.jsx'));
+const OfficeVisitApproval = lazy(() => import('./components/OfficeVisit/OfficeVisitApproval.jsx'));
+const OfficeVisitReports = lazy(() => import('./components/OfficeVisit/OfficeVisitReports.jsx'));
+const ShiftManagement        = lazy(() => import('./components/Shift/ShiftManagement.jsx'));
+const UserManagement         = lazy(() => import('./components/Users/UserManagement.jsx'));
+const StaffNotes             = lazy(() => import('./components/Staff/StaffNotes.jsx'));
+const StaffContact           = lazy(() => import('./components/Staff/StaffContact.jsx'));
+const EventVisitorRegistration = lazy(() => import('./components/Staff/EventVisitorRegistration.jsx'));
+const StaffAnalyticsReport   = lazy(() => import('./components/Staff/StaffAnalyticsReport.jsx'));
+const TaskList               = lazy(() => import('./components/Staff/TaskList.jsx'));
+const TaskLookupPage         = lazy(() => import('./components/Staff/TaskLookupPage.jsx'));
+const TaskDashboard          = lazy(() => import('./components/Staff/TaskDashboard.jsx'));
+const PayrollDashboard       = lazy(() => import('./components/Payroll/PayrollDashboard.jsx'));
+const PayrollItems           = lazy(() => import('./components/Payroll/PayrollItems.jsx'));
+const PayrollTaxSlab         = lazy(() => import('./components/Payroll/PayrollTaxSlab.jsx'));
+const PayrollReports         = lazy(() => import('./components/Payroll/PayrollReports.jsx'));
+const PayrollRates           = lazy(() => import('./components/Payroll/PayrollRates.jsx'));
+const PayrollSalary          = lazy(() => import('./components/Payroll/PayrollSalary.jsx'));
+const PayrollAdvances        = lazy(() => import('./components/Payroll/PayrollAdvances.jsx'));
+const PayrollRun             = lazy(() => import('./components/Payroll/PayrollRun.jsx'));
+const PayrollLedger          = lazy(() => import('./components/Payroll/PayrollLedger.jsx'));
+const PayrollScales          = lazy(() => import('./components/Payroll/PayrollScales.jsx'));
+const MobileLogin            = lazy(() => import('./mobile/MobileLogin.jsx'));
+const MobileHome             = lazy(() => import('./mobile/MobileHome.jsx'));
+const MobileAttendance       = lazy(() => import('./mobile/MobileAttendance.jsx'));
+const MobileLeave            = lazy(() => import('./mobile/MobileLeave.jsx'));
+const MobileInbox            = lazy(() => import('./mobile/MobileInbox.jsx'));
+const MobileMore             = lazy(() => import('./mobile/MobileMore.jsx'));
+const MobilePayslips         = lazy(() => import('./mobile/MobilePayslips.jsx'));
+import AppUpdate from './components/Common/AppUpdate.jsx';
+const MobileDevices = lazy(() => import('./mobile/MobileAdmin.jsx'));
+const MobileRoster           = lazy(() => import('./mobile/MobileRoster.jsx'));
+const MobileApprovals        = lazy(() => import('./mobile/MobileApprovals.jsx'));
+const MobileTasks            = lazy(() => import('./mobile/MobileTasks.jsx'));
+const MobileProfile          = lazy(() => import('./mobile/MobileProfile.jsx'));
+const MyPayslips             = lazy(() => import('./components/Payroll/MyPayslips.jsx'));
+const TaskSettings           = lazy(() => import('./components/Staff/TaskSettings.jsx'));
+const StaffMessage           = lazy(() => import('./components/Staff/StaffMessage.jsx'));
+const ChatPage                = lazy(() => import('./components/Chat/ChatPage.jsx'));
+const Settings               = lazy(() => import('./components/Settings/Settings.jsx'));
+const LicensePage            = lazy(() => import('./components/Settings/LicensePage.jsx'));
+const RoleManagement         = lazy(() => import('./components/Settings/RoleManagement.jsx'));
+const DailyAttendanceReport    = lazy(() => import('./components/Attendance/DailyAttendanceReport.jsx'));
+const HalfMonthlyReport       = lazy(() => import('./components/Attendance/HalfMonthlyReport.jsx'));
+const MonthlyReport           = lazy(() => import('./components/Attendance/MonthlyReport.jsx'));
+const StaffLedger             = lazy(() => import('./components/Attendance/StaffLedger.jsx'));
+const PresentAbsentReport     = lazy(() => import('./components/Attendance/PresentAbsentReport.jsx'));
+const HalfSummaryReport       = lazy(() => import('./components/Attendance/HalfSummaryReport.jsx'));
+const HalfAbsentReport        = lazy(() => import('./components/Attendance/HalfAbsentReport.jsx'));
+const HalfLateEarlyReport          = lazy(() => import('./components/Attendance/HalfLateEarlyReport.jsx'));
+const MonthlyPresentAbsentReport   = lazy(() => import('./components/Attendance/MonthlyPresentAbsentReport.jsx'));
+const MonthlySummaryReport         = lazy(() => import('./components/Attendance/MonthlySummaryReport.jsx'));
+const MonthlyInOutReport           = lazy(() => import('./components/Attendance/MonthlyInOutReport.jsx'));
+const MonthlyAbsentReport          = lazy(() => import('./components/Attendance/MonthlyAbsentReport.jsx'));
+const MonthlyLateEarlyReport       = lazy(() => import('./components/Attendance/MonthlyLateEarlyReport.jsx'));
+const HalfInOutReport         = lazy(() => import('./components/Attendance/HalfInOutReport.jsx'));
+const YearlyReport                   = lazy(() => import('./components/Attendance/YearlyReport.jsx'));
+const OvertimePage                   = lazy(() => import('./components/Attendance/OvertimePage.jsx'));
+const YearlyPresentAbsentReport      = lazy(() => import('./components/Attendance/YearlyPresentAbsentReport.jsx'));
+const YearlyInOutReport              = lazy(() => import('./components/Attendance/YearlyInOutReport.jsx'));
+const YearlyAbsentReport             = lazy(() => import('./components/Attendance/YearlyAbsentReport.jsx'));
+const YearlyLateEarlyReport          = lazy(() => import('./components/Attendance/YearlyLateEarlyReport.jsx'));
+const DutyRoster                     = lazy(() => import('./components/Attendance/DutyRoster.jsx'));
+const DutyRosterDeptWise             = lazy(() => import('./components/Attendance/DutyRosterDeptWise.jsx'));
+const RosterDashboard                = lazy(() => import('./components/Attendance/RosterDashboard.jsx'));
+const RosterReport                   = lazy(() => import('./components/Attendance/RosterReport.jsx'));
+const ManualPostings                 = lazy(() => import('./components/Attendance/ManualPostings.jsx'));
+const MissingAttendanceRequests      = lazy(() => import('./components/Attendance/MissingAttendanceRequests.jsx'));
+const OnlineAttendanceApproval       = lazy(() => import('./components/Attendance/OnlineAttendanceApproval.jsx'));
+const ProfilePage                    = lazy(() => import('./components/Profile/ProfilePage.jsx'));
+const RecoApprovalPage               = lazy(() => import('./components/Users/RecoApprovalPage.jsx'));
 
 // Wraps a requireManager page when the plain branchManager/admin role check
 // already failed — admits a user who is nonetheless individually configured
@@ -91,7 +118,11 @@ const RecoApproverGate = ({ children }) => {
     const approval = Array.isArray(cfg?.approval) ? cfg.approval : (cfg?.approval != null ? [cfg.approval] : []);
     return reco.map(String).includes(String(currentUser.id)) || approval.map(String).includes(String(currentUser.id));
   });
-  return isConfiguredRecoOrApprover ? children : <Navigate to="/dashboard" replace />;
+  if (!isConfiguredRecoOrApprover) return <Navigate to="/dashboard" replace />;
+  // children here can be a React.lazy() page (LeaveApproval/OfficeVisitApproval/
+  // ManualPostings, the only allowRecoApprover routes) — needs its own Suspense
+  // boundary since this return bypasses Protected's own one below.
+  return <Suspense fallback={<div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>}>{children}</Suspense>;
 };
 
 /*
@@ -124,16 +155,25 @@ const Protected = ({
   pageKey           = null,
   moduleKey         = null,
 }) => {
-  const { currentUser, isAdmin, isManager, canViewReports, canView } = useAuth();
+  const { currentUser, isAdmin, isManager, canViewReports, canView, permsLoaded } = useAuth();
   const { flags: moduleFlags, loading: moduleFlagsLoading } = useModuleFlags();
   if (!currentUser) return <Navigate to="/login" replace />;
+  // Don't decide page access from built-in defaults while the saved
+  // role/staff permissions are still being fetched from the server.
+  if (pageKey && !isAdmin && !permsLoaded) return null;
   if (requireAdmin   && !isAdmin)        return <Navigate to="/dashboard" replace />;
+  // pageKey may be a single key, or an array of keys where ANY granting view
+  // access is enough (e.g. a combined page reachable via either of two
+  // permissions — mirrors the equivalent OR check already used to decide
+  // whether to show its nav link).
+  const pageKeys = Array.isArray(pageKey) ? pageKey : (pageKey ? [pageKey] : []);
+  const hasPageAccess = !pageKeys.length || pageKeys.some(k => canView(k));
   if (requireManager && !isManager) {
-    if (allowRecoApprover) return <RecoApproverGate>{children}</RecoApproverGate>;
+    if (allowRecoApprover && hasPageAccess) return <RecoApproverGate>{children}</RecoApproverGate>;
     return <Navigate to="/dashboard" replace />;
   }
   if (requireReports && !canViewReports) return <Navigate to="/dashboard" replace />;
-  if (pageKey && !canView(pageKey))      return <Navigate to="/dashboard" replace />;
+  if (!hasPageAccess) return <Navigate to="/dashboard" replace />;
   if (moduleKey) {
     if (moduleFlagsLoading) return <Layout><div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div></Layout>;
     if (!moduleFlags[`${moduleKey}Enabled`]) {
@@ -153,8 +193,17 @@ const Protected = ({
       );
     }
   }
-  return <Layout>{children}</Layout>;
+  return (
+    <Layout>
+      <Suspense fallback={<div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>}>
+        {children}
+      </Suspense>
+    </Layout>
+  );
 };
+
+/* The /m/* phone screens exist only in the Android app (or a browser opened with ?mobile=1). Desktop users are sent to the normal dashboard. */
+const MobileOnly = ({ children }) => (isMobileMode() ? children : <Navigate to="/dashboard" replace />);
 
 const App = () => {
   const { currentUser } = useAuth();
@@ -162,9 +211,12 @@ const App = () => {
   return (
     <ModuleFlagsProvider>
     <LicenseWarningModal />
+    <AppUpdate />
+    <BroadcastPopup />
     <Routes>
       <Route path="/login" element={
-        currentUser ? <Navigate to="/dashboard" replace /> : <Login />
+        isMobileMode() ? <Suspense fallback={null}><MobileLogin /></Suspense> /* it redirects a signed-in user itself, so it can first ask about fingerprint sign-in */
+          : currentUser ? <Navigate to="/dashboard" replace /> : <Login />
       } />
       {/* Not gated on currentUser like /login — "Open Software (Admin)" vs
           "(Super Admin)" is an explicit choice of WHICH identity to become,
@@ -176,8 +228,16 @@ const App = () => {
       <Route path="/checkin/:token" element={<GuestCheckin />} />
 
       <Route path="/dashboard" element={
-        <Protected><Dashboard /></Protected>
+        isMobileMode() ? <Navigate to="/m/home" replace /> : <Protected><Dashboard /></Protected>
       } />
+      <Route path="/m/home" element={<MobileOnly><Protected><MobileHome /></Protected></MobileOnly>} />
+      <Route path="/m/attendance" element={<MobileOnly><Protected><MobileAttendance /></Protected></MobileOnly>} />
+      <Route path="/m/leave" element={<MobileOnly><Protected><MobileLeave /></Protected></MobileOnly>} />
+      <Route path="/m/devices" element={<MobileOnly><Protected><MobileDevices /></Protected></MobileOnly>} />
+      <Route path="/m/roster" element={<MobileOnly><Protected><MobileRoster /></Protected></MobileOnly>} />
+      <Route path="/m/approvals" element={<MobileOnly><Protected><MobileApprovals /></Protected></MobileOnly>} />
+      <Route path="/m/inbox" element={<MobileOnly><Protected><MobileInbox /></Protected></MobileOnly>} />
+      <Route path="/m/more" element={<MobileOnly><Protected><MobileMore /></Protected></MobileOnly>} />
 
       {/* Combined Leave + Office Visit page */}
       <Route path="/leave" element={
@@ -305,24 +365,24 @@ const App = () => {
         <Protected requireManager allowRecoApprover pageKey="manualPostings"><ManualPostings /></Protected>
       } />
       <Route path="/attendance/missing-requests" element={
-        <Protected><MissingAttendanceRequests /></Protected>
+        <Protected pageKey={['missingAttendanceRequests', 'missingAttendanceApply']}><MissingAttendanceRequests /></Protected>
       } />
       <Route path="/attendance/online/approval" element={
         <Protected requireManager pageKey="onlineAttendance"><OnlineAttendanceApproval /></Protected>
       } />
       <Route path="/profile" element={
-        <Protected><ProfilePage /></Protected>
+        <Protected>{isMobileMode() ? <MobileProfile /> : <ProfilePage />}</Protected>
       } />
 
       <Route path="/shift" element={
         <Protected requireAdmin><ShiftManagement /></Protected>
       } />
       <Route path="/users" element={
-        <Protected requireManager><UserManagement /></Protected>
+        <Protected pageKey="staffDetail"><UserManagement /></Protected>
       } />
       {/* Dedicated entry point for departmentHead/branchManager (or anyone
           granted the recoApprovalConfig permission) who shouldn't get the
-          full requireManager-gated /users page just for this one feature. */}
+          full staffDetail-gated /users page just for this one feature. */}
       <Route path="/staff/reco-approval" element={
         <Protected pageKey="recoApprovalConfig"><RecoApprovalPage /></Protected>
       } />
@@ -333,10 +393,10 @@ const App = () => {
         <Protected pageKey="task" moduleKey="task"><TaskDashboard /></Protected>
       } />
       <Route path="/staff/task" element={
-        <Protected pageKey="task" moduleKey="task"><TaskList /></Protected>
+        <Protected pageKey="task" moduleKey="task">{isMobileMode() ? <MobileTasks /> : <TaskList />}</Protected>
       } />
       <Route path="/staff/field-visit" element={
-        <Protected pageKey="task" moduleKey="task"><TaskList fieldVisitOnly /></Protected>
+        <Protected pageKey="task" moduleKey="task">{isMobileMode() ? <MobileTasks fieldVisitOnly /> : <TaskList fieldVisitOnly />}</Protected>
       } />
       <Route path="/staff/task/settings" element={
         <Protected pageKey="task" moduleKey="task"><TaskSettings /></Protected>
@@ -357,7 +417,31 @@ const App = () => {
         <Protected pageKey="payroll"><PayrollTaxSlab /></Protected>
       } />
       <Route path="/payroll/reports" element={
-        <Protected pageKey="payroll"><PayrollReports /></Protected>
+        <Protected pageKey="payroll" requireAdmin><PayrollReports /></Protected>
+      } />
+      <Route path="/payroll/rates" element={
+        <Protected pageKey="payroll" requireAdmin><PayrollRates /></Protected>
+      } />
+      <Route path="/payroll/salary" element={
+        <Protected pageKey="payroll" requireAdmin><PayrollSalary /></Protected>
+      } />
+      <Route path="/payroll/advances" element={
+        <Protected pageKey="payroll" requireAdmin><PayrollAdvances /></Protected>
+      } />
+      <Route path="/payroll/run" element={
+        <Protected pageKey="payroll" requireAdmin><PayrollRun /></Protected>
+      } />
+      <Route path="/payroll/run/:id" element={
+        <Protected pageKey="payroll" requireAdmin><PayrollRun /></Protected>
+      } />
+      <Route path="/payroll/scales" element={
+        <Protected pageKey="payroll" requireAdmin><PayrollScales /></Protected>
+      } />
+      <Route path="/payroll/ledger" element={
+        <Protected pageKey="payroll" requireAdmin><PayrollLedger /></Protected>
+      } />
+      <Route path="/payroll/my" element={
+        <Protected>{isMobileMode() ? <MobilePayslips /> : <MyPayslips />}</Protected>
       } />
       <Route path="/staff/contact" element={
         <Protected pageKey="staffContact"><StaffContact /></Protected>

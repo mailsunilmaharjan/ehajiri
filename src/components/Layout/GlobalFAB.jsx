@@ -49,7 +49,7 @@ const GlobalFAB = () => {
       action: () => { setOpen(false); openLeaveApply(); },
     },
     canView('officeVisitApply') && {
-      label:  'Apply Office Visit',
+      label:  'Apply for Office Visit',
       icon:   '🏢',
       color:  '#0d9488',
       bg:     '#ccfbf1',

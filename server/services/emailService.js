@@ -14,7 +14,10 @@ function createTransporter(cfg) {
     port: Number(cfg.smtpPort) || 587,
     secure: cfg.secure === true || cfg.secure === 'true' || Number(cfg.smtpPort) === 465,
     auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-    tls: { rejectUnauthorized: false },
+    // Verify the SMTP server's certificate (was disabled, which allowed a
+    // man-in-the-middle to read SMTP credentials and mail). A server with a
+    // self-signed/mismatched cert can opt out: SMTP_ALLOW_INSECURE_TLS=true.
+    tls: { rejectUnauthorized: process.env.SMTP_ALLOW_INSECURE_TLS !== 'true' && cfg.allowInsecureTls !== true },
   });
 }
 

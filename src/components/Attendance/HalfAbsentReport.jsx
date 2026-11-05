@@ -12,6 +12,7 @@ import { branchAbbr } from '../../utils/branchUtils.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
+import { makeOrgShortNames } from '../../utils/orgShortNames.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -268,6 +269,8 @@ const HalfAbsentReport = () => {
   const navigate       = useNavigate();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
+  // Post / Dept short names from Settings → Official Setting (grid, Print, Export).
+  const { postShortOf, deptShortOf } = makeOrgShortNames(settings);
   const { filteredEmployees: employees, shifts, getEmployeeById } = useData();
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
@@ -400,11 +403,11 @@ const HalfAbsentReport = () => {
     },
     {
       field:'postShort', header:L('पद','Post'),
-      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.position || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{postShortOf(row)}</span>,
     },
     {
       field:'deptShort', header:L('विभाग','Dept.'),
-      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.department || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{deptShortOf(row)}</span>,
     },
     {
       field:'branchShort', header:L('शाखा','Branch'),
@@ -481,8 +484,8 @@ const HalfAbsentReport = () => {
       return `<tr style="background:${bg}">
         <td style="${TD('center','#6b7280',600)}">${i+1}</td>
         <td style="${TD('left','#1f2937',700)}">${r.fullName}</td>
-        <td style="${TD('center','#0369a1',700)}">${r.postShort||'—'}</td>
-        <td style="${TD('center','#059669',700)}">${r.deptShort||'—'}</td>
+        <td style="${TD('center','#0369a1',700)}">${postShortOf(r)}</td>
+        <td style="${TD('center','#059669',700)}">${deptShortOf(r)}</td>
         <td style="${TD('center','#7c3aed',700)}">${r.branchShort||'—'}</td>
         <td style="${TD('center','#374151',600)}">${fd(r.date)||r.date}</td>
         <td style="${TD('center','#6b7280',500)}">${(DOW_FULL[r.dayKey]||r.dayKey).slice(0,3)}</td>
@@ -539,7 +542,7 @@ const HalfAbsentReport = () => {
     const headers = ['Name','Post','Dept.','Branch','Date','Day','Mobile','Email','Reason'];
     const dataRows = records.map(r => {
       const reason = savedReasons[`${r.id}-${r.date}`] || '';
-      return [r.fullName,r.postShort,r.deptShort,r.branchShort,r.date,
+      return [r.fullName,postShortOf(r), deptShortOf(r),r.branchShort,r.date,
         DOW_FULL[r.dayKey]||r.dayKey, r.phone||'', r.email||'', reason]
         .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
     }).join('\n');

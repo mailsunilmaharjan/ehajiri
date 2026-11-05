@@ -11,7 +11,8 @@ import pool from '../db.js';
 export async function standaloneSyncTokenGuard(req, res, next) {
   const header = req.headers.authorization || '';
   const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (!token) {
+  // Tokens are 64 hex chars (crypto.randomBytes(32)); anything else can't match.
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) {
     return res.status(401).json({ authError: true, error: 'Device sync token required' });
   }
   try {

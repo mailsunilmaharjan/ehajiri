@@ -30,7 +30,7 @@ import visitsRouter    from './routes/visits.js';
 import settingsRouter  from './routes/settings.js';
 import backupRouter    from './routes/backup.js';
 import zktecoRouter    from './routes/zkteco.js';
-import zktecoApiRouter from './routes/zktecoApi.js';
+import zktecoApiRouter, { enforceAccessValidity } from './routes/zktecoApi.js';
 import standaloneDevicesRouter from './routes/standaloneDevices.js';
 import standaloneSyncRouter    from './routes/standaloneSync.js';
 import attendanceRouter from './routes/attendance.js';
@@ -45,6 +45,7 @@ import eventsRouter       from './routes/events.js';
 import onlineAttendanceRouter from './routes/onlineAttendance.js';
 import guestCheckinRouter from './routes/guestCheckin.js';
 import tasksRouter        from './routes/tasks.js';
+import mobileReleaseRouter from './routes/mobileRelease.js';
 import fieldVisitRouter  from './routes/fieldVisit.js';
 import messagesRouter    from './routes/messages.js';
 import chatRouter        from './routes/chat.js';
@@ -52,13 +53,21 @@ import emailConfigRouter from './routes/emailConfig.js';
 import smsConfigRouter   from './routes/smsConfig.js';
 import smsRouter         from './routes/sms.js';
 import aiAnalysisRouter  from './routes/aiAnalysis.js';
+import supportLiveRouter from './routes/supportLive.js';
+import payrollRouter from './routes/payroll.js';
+import payrollRunsRouter from './routes/payrollRuns.js';
+import payrollScalesRouter from './routes/payrollScales.js';
+import pushRouter from './routes/push.js';
 import recoApprovalRouter from './routes/recoApproval.js';
 import coverageRouter    from './routes/coverage.js';
 import staffAnalyticsRouter from './routes/staffAnalytics.js';
 import bugReportsRouter  from './routes/bugReports.js';
+import broadcastRouter   from './routes/broadcast.js';
 import { logBugReport }  from './services/bugReportService.js';
 import { licenseGuard } from './middleware/licenseGuard.js';
 import { authGuard }    from './middleware/authGuard.js';
+import { securityHeaders, corsOptions, pickJsonLimit, rateLimit } from './middleware/security.js';
+import { bodySanity } from './middleware/validate.js';
 import { requireRole }  from './middleware/roleGuard.js';
 import { standaloneSyncTokenGuard } from './middleware/standaloneSyncTokenGuard.js';
 import { mountTenantPathProxy } from './middleware/tenantPathProxy.js';
@@ -87,8 +96,16 @@ const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '443');
 const hasTls     = fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH);
 
 /* ── Middleware ── */
-app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '50mb' }));
+app.disable('x-powered-by');
+app.use(securityHeaders);
+app.use(cors(corsOptions()));
+// Small cap on unauthenticated surfaces (auth/license/guest/bug-report), the
+// large cap only where authenticated uploads (photos, imports, restore) need it.
+const jsonSmall = express.json({ limit: '1mb' });
+const jsonLarge = express.json({ limit: '50mb' });
+app.use((req, res, next) => (pickJsonLimit(req) === '50mb' ? jsonLarge : jsonSmall)(req, res, next));
+
+app.use('/api', bodySanity);
 
 /* ── Bug Finder — auto-capture every 5xx response, regardless of which route
    produced it. Every route handler in this codebase catches its own errors
@@ -126,6 +143,7 @@ app.use('/api/bug-reports', licenseGuard, bugReportsRouter);
 app.use('/api/guest-checkin', licenseGuard, guestCheckinRouter);
 
 // All other routes require a valid active license AND an authenticated user
+app.use('/api/broadcast', licenseGuard, authGuard, broadcastRouter);
 app.use('/api/employees', licenseGuard, authGuard, employeesRouter);
 app.use('/api/shifts',    licenseGuard, authGuard, shiftsRouter);
 app.use('/api/leaves',    licenseGuard, authGuard, leavesRouter);
@@ -143,7 +161,7 @@ app.use('/api/standalone',licenseGuard, authGuard, requireRole('admin', 'superAd
 // Remote sync agent ingestion — an unattended process with no logged-in user,
 // so it authenticates with a per-device token (standaloneSyncTokenGuard)
 // instead of authGuard/requireRole. See routes/standaloneSync.js.
-app.use('/api/standalone-sync', licenseGuard, requireModuleEnabled(FLAG_KEYS.standaloneDevice, 'StandAlone Device'), standaloneSyncTokenGuard, standaloneSyncRouter);
+app.use('/api/standalone-sync', licenseGuard, rateLimit({ windowMs: 60_000, max: 120 }), requireModuleEnabled(FLAG_KEYS.standaloneDevice, 'StandAlone Device'), standaloneSyncTokenGuard, standaloneSyncRouter);
 app.use('/api/attendance',licenseGuard, authGuard, attendanceRouter);
 app.use('/api/overtime',    licenseGuard, authGuard, overtimeRouter);
 app.use('/api/duty-roster', licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.dutyRoster, 'Duty Roster'), dutyRosterRouter);
@@ -166,6 +184,11 @@ app.use('/api/email-config', licenseGuard, authGuard, requireRole('admin', 'supe
 app.use('/api/sms-config',  licenseGuard, authGuard, requireRole('admin', 'superAdmin'), requireModuleEnabled(FLAG_KEYS.smsGateway, 'SMS Gateway'), smsConfigRouter);
 app.use('/api/sms',         licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.smsGateway, 'SMS Gateway'), smsRouter);
 app.use('/api/ai',          licenseGuard, authGuard, aiAnalysisRouter);
+app.use('/api/support-live', licenseGuard, authGuard, supportLiveRouter);
+app.use('/api/payroll', licenseGuard, authGuard, payrollRouter);
+app.use('/api/payroll', licenseGuard, authGuard, payrollRunsRouter);
+app.use('/api/payroll', licenseGuard, authGuard, payrollScalesRouter);
+app.use('/api/push', licenseGuard, authGuard, pushRouter);
 app.use('/api/reco-approval', licenseGuard, authGuard, recoApprovalRouter);
 app.use('/api/coverage', licenseGuard, authGuard, coverageRouter);
 app.use('/api/staff-analytics', licenseGuard, authGuard, staffAnalyticsRouter);
@@ -175,6 +198,7 @@ app.use('/iclock',         requireModuleEnabled(FLAG_KEYS.attendanceDevice, 'Att
 /* ── Health check — also carries live DB schema info (no auth: the Electron
    tray monitor polls this to show version + last-migrated date without a
    login session) ── */
+app.use('/api/mobile', mobileReleaseRouter);   // public: the phone app's update check + APK download
 app.get('/api/health', async (_req, res) => {
   let dbApplied = null, dbAppliedAt = null;
   try {
@@ -257,6 +281,12 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
 
     startAttendanceNotificationScheduler();
     startBirthdayNotificationScheduler();
+
+    // Validity / Expiry: take staff whose end date has passed off the attendance
+    // devices (and put them back once extended) without anyone having to save
+    // anything — see enforceAccessValidity in routes/zktecoApi.js.
+    setInterval(() => enforceAccessValidity().catch(e => console.error('[ZK Validity] sweep failed:', e.message)), 5 * 60 * 1000).unref();
+    setTimeout(() => enforceAccessValidity().catch(e => console.error('[ZK Validity] sweep failed:', e.message)), 30 * 1000).unref();
 
     if (process.env.ENABLE_TENANT_RESOLVE === 'true') {
       routingCache.start();

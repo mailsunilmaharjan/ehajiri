@@ -12,15 +12,17 @@ import Avatar from '../Common/Avatar.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 import useLeaveOpening from '../../hooks/useLeaveOpening.js';
-import { isHolidayForEmployee } from '../../utils/holidayScope.js';
+import { countLeaveDays } from '../../utils/holidayScope.js';
+import AlertPopup, { alertFromSaveError } from '../Common/AlertPopup.jsx';
+import { makeDateFormatter } from '../../utils/dateUtils.js';
 
 /* ── Date input that respects calendar setting ── */
-const LeaveDateInput = ({ value, onChange, error, settings }) => {
+const LeaveDateInput = ({ value, onChange, error, settings, minDate }) => {
   const blockPast = settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
   }
-  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
 };
 
 /* ── Small helpers ── */
@@ -96,24 +98,6 @@ const LeaveApplyModal = () => {
     ltConfigs.find(lt => lt.shortName === form.leaveTypeCode),
   [ltConfigs, form.leaveTypeCode]);
 
-  /* ── Weekend & holiday sets ── */
-  const weekendDays = useMemo(() => {
-    const ws  = settings.defaultWeekends || ['Sat'];
-    const map = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
-    return ws.map(d => map[d]).filter(n => n !== undefined);
-  }, [settings.defaultWeekends]);
-
-  // Public holidays are stored as a startDate→endDate range (there is no
-  // `h.date` field — this used to build an always-empty set, so
-  // "Reduce Public Holiday" never actually deducted anything), and can be
-  // scoped to a Gender/Branch/Department/Religion/Handicapped subset — so
-  // this checks `activeUser` (the employee this leave is for) against each
-  // holiday's own scope via isHolidayForEmployee, same as every report now does.
-  const isHoliday = useCallback(
-    (ds) => isHolidayForEmployee(settings, ds, activeUser),
-    [settings, activeUser]
-  );
-
   /* ── Balance from Leave Calculation's saved opening figures, for current fiscal year ──
      prevYear + currYear - usedDays for each leave type config.
      Falls back to the old leaveBalances system if opening data is unavailable.        */
@@ -162,19 +146,8 @@ const LeaveApplyModal = () => {
   /* ── Day calculator ── */
   const calcDays = useCallback(() => {
     if (form.halfDay) return 0.5;
-    if (!form.fromDate || !form.toDate) return 0;
-    const from = new Date(form.fromDate + 'T00:00:00');
-    const to   = new Date(form.toDate   + 'T00:00:00');
-    if (to < from) return 0;
-    let count = 0;
-    for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-      if (selectedLtConfig?.reduceWeekend && weekendDays.includes(d.getDay())) continue;
-      const ds = d.toISOString().split('T')[0];
-      if (selectedLtConfig?.reducePublicHoliday && isHoliday(ds)) continue;
-      count++;
-    }
-    return count;
-  }, [form.fromDate, form.toDate, form.halfDay, selectedLtConfig, weekendDays, isHoliday]);
+    return countLeaveDays(settings, selectedLtConfig, form.fromDate, form.toDate, activeUser);
+  }, [form.fromDate, form.toDate, form.halfDay, selectedLtConfig, settings, activeUser]);
 
   /* ── Service period check ── */
   const timesAlreadyTaken = useMemo(() => {
@@ -201,6 +174,9 @@ const LeaveApplyModal = () => {
     if (form.reason.trim().length < 5) e.reason = 'Minimum 5 characters required';
     if (form.reco.length > 1 && !selectedReco)     e.selectedReco     = 'Please select a Recommendator';
     if (form.approval.length > 1 && !selectedApproval) e.selectedApproval = 'Please select an Approval Authority';
+    // Approval Authority is compulsory — an application with nobody to approve
+    // it just sits Pending forever (and shows a blank Approval column).
+    if (form.approval.length === 0) e.selectedApproval = 'No Approval Authority is set for you — ask Admin to set it (Staff Detail → Set Recommendator & Approval).';
     if (form.leaveTypeCode && days > 0) {
       if (selectedLtConfig?.provideOnlyOnBalance) {
         const avail = balance[form.leaveTypeCode] || 0;
@@ -219,13 +195,16 @@ const LeaveApplyModal = () => {
     setForm(p => {
       const next = { ...p, [field]: val };
       if (field === 'halfDay' && val) { next.fromDate = today; next.toDate = today; }
-      if (field === 'fromDate' && p.halfDay) { next.toDate = val; }
+      if (field === 'fromDate') next.toDate = val; // To Date follows From Date
       return next;
     });
     setErrors(p => ({ ...p, [field]: '', days: '' }));
   };
 
   /* ── Submit ── */
+  // Server-refused save (e.g. "Already Posted leave on that day.") → popup.
+  const [saveAlert, setSaveAlert] = useState(null);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const errs = validate();
@@ -235,17 +214,23 @@ const LeaveApplyModal = () => {
     const finalReco     = selectedReco     ? [selectedReco]     : form.reco;
     const finalApproval = selectedApproval ? [selectedApproval] : form.approval;
 
-    await addLeave({
-      employeeId:    activeUser.id,
-      leaveTypeCode: form.leaveTypeCode,
-      fromDate:      form.fromDate,
-      toDate:        form.toDate,
-      halfDay:       form.halfDay,
-      days:          calcDays(),
-      reason:        form.reason,
-      reco:          finalReco,
-      approval:      finalApproval,
-    });
+    try {
+      await addLeave({
+        employeeId:    activeUser.id,
+        leaveTypeCode: form.leaveTypeCode,
+        fromDate:      form.fromDate,
+        toDate:        form.toDate,
+        halfDay:       form.halfDay,
+        days:          calcDays(),
+        reason:        form.reason,
+        reco:          finalReco,
+        approval:      finalApproval,
+      }, { throwOnReject: true });
+    } catch (err) {
+      setSubmitting(false);
+      setSaveAlert(alertFromSaveError(err, makeDateFormatter(settings)));
+      return;
+    }
 
     /* capture reco/approval names for success message */
     setSubmittedInfo({
@@ -316,6 +301,7 @@ const LeaveApplyModal = () => {
 
   return (
     <div className="modal-overlay" style={{ zIndex: 10000 }}>
+      <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
       <div className="modal modal-lg"
         style={{ maxWidth: 680, maxHeight: '92vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}>
@@ -510,13 +496,13 @@ const LeaveApplyModal = () => {
                 <div className="form-group">
                   <Lbl required>From Date</Lbl>
                   <LeaveDateInput value={form.fromDate} error={!!errors.fromDate}
-                    min={today} settings={settings} onChange={v => handleChange('fromDate', v)} />
+                    settings={settings} onChange={v => handleChange('fromDate', v)} />
                   <Err msg={errors.fromDate} />
                 </div>
                 <div className="form-group">
                   <Lbl required>To Date</Lbl>
                   <LeaveDateInput value={form.toDate} error={!!errors.toDate}
-                    min={form.fromDate || today} settings={settings} onChange={v => handleChange('toDate', v)} />
+                    minDate={form.fromDate} settings={settings} onChange={v => handleChange('toDate', v)} />
                   <Err msg={errors.toDate} />
                 </div>
               </div>
@@ -582,12 +568,13 @@ const LeaveApplyModal = () => {
 
               {/* ── Approval Authority ── */}
               <div>
-                <Lbl required={form.approval.length > 1}>Approval Authority</Lbl>
+                <Lbl required>Approval Authority</Lbl>
                 {form.approval.length === 0 && (
                   <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 12px', minHeight:36 }}>
                     <span style={{ fontSize:13, color:'#9ca3af' }}>— Not configured —</span>
                   </div>
                 )}
+                {form.approval.length === 0 && <Err msg={errors.selectedApproval} />}
                 {form.approval.length === 1 && (
                   <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
                     <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 12px 2px 6px', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6 }}>

@@ -49,13 +49,16 @@ const OnlineAttendanceApplyModal = () => {
   // tapped it. 'checking' | 'ready' | 'error'.
   const [locStatus, setLocStatus] = useState('checking');
   const [locError, setLocError] = useState('');
+  const [place, setPlace] = useState('');   // readable name of where you are (reverse-geocoded by the server)
 
   const acquireLocation = async () => {
     setLocStatus('checking');
     setLocError('');
     try {
-      await getLocation();
+      const c = await getLocation();
       setLocStatus('ready');
+      setPlace('');
+      api.get(`/online-attendance/geocode?lat=${c.latitude}&lng=${c.longitude}`).then(r => setPlace(r?.place || '')).catch(() => {});
     } catch (err) {
       setLocError(err.message || 'Could not determine your location.');
       setLocStatus('error');
@@ -155,7 +158,7 @@ const OnlineAttendanceApplyModal = () => {
                 }}>
                   <span style={{ color: locStatus === 'ready' ? '#065f46' : locStatus === 'error' ? '#991b1b' : '#6b7280' }}>
                     {locStatus === 'checking' && '📍 Getting your location…'}
-                    {locStatus === 'ready' && '📍 Location ready'}
+                    {locStatus === 'ready' && (place ? `📍 ${place}` : '📍 Location ready')}
                     {locStatus === 'error' && `📍 ${locError}`}
                   </span>
                   {locStatus === 'error' && (

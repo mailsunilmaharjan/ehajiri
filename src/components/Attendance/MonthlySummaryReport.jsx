@@ -272,6 +272,22 @@ const MonthlySummaryReport = () => {
     });
     return m;
   }, [settings.branches]);
+  /* Post short name from Settings → Official Setting → Post, matched ignoring
+     case/extra spaces (a staff record saying "Electrician" must still find the
+     post saved as "Electrician "). Posts not set up there fall back to the
+     server's short name, then the full post name. */
+  const postShortMap = React.useMemo(() => {
+    const m = {};
+    (settings.posts||[]).forEach(p => {
+      const sn = (p.shortName || p.short_name || '').trim();
+      if (p.name && sn) m[p.name.toLowerCase().replace(/\s+/g,' ').trim()] = sn;
+    });
+    return m;
+  }, [settings.posts]);
+  const postShortOf = r =>
+    postShortMap[(r.position||'').toLowerCase().replace(/\s+/g,' ').trim()]
+    || (r.postShort && r.postShort !== '—' ? r.postShort : null)
+    || r.position || '—';
   const resolveShort = r =>
     branchShortMap[(r.branch||'').toLowerCase().trim()]
     || (r.branchShort && r.branchShort !== '—' ? r.branchShort : null)
@@ -324,10 +340,10 @@ const MonthlySummaryReport = () => {
     const dataRows = rows.map((r, i) => `<tr>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${i+1}</td>
       <td style="padding:4px 6px;border:1px solid #dedede">${r.fullName}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede">${(settings.posts||[]).find(p=>p.name===r.position)?.shortName||r.postShort||abbrev(r.position)}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede">${postShortOf(r)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede">${(settings.departments||[]).find(d=>d.name===r.department)?.shortName||r.deptShort||abbrev(r.department)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;color:#7c3aed;font-weight:700">${resolveShort(r)}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.totalWorkingDays}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.totalCalendarDays}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.weekendDays||0}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.weekendPresent||0}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.holidayDays||0}</td>
@@ -387,7 +403,7 @@ const MonthlySummaryReport = () => {
       } catch { /* bad/unsupported logo data — skip it, the rest of the header still renders */ }
     }
     [companyName, [companyAddr, companyPhone].filter(Boolean).join('  |  '), rptTitle,
-      rptSub() + (period ? `   (${period.startDate} to ${period.endDate})` : ''), ''
+      rptSub() + (period ? `   (${fd(period.startDate)} to ${fd(period.endDate)})` : ''), ''
     ].forEach((text, i) => {
       const row = ws.addRow([text]);
       ws.mergeCells(row.number, 1, row.number, lastCol);
@@ -425,11 +441,11 @@ const MonthlySummaryReport = () => {
     ws.getRow(headerOffset + 1).getCell(3).alignment = { horizontal: 'left', vertical: 'middle' };
 
     rows.forEach((r, i) => {
-      const post   = (settings.posts||[]).find(p=>p.name===r.position)?.shortName || r.postShort || r.position || '—';
+      const post   = postShortOf(r);
       const dept   = (settings.departments||[]).find(d=>d.name===r.department)?.shortName || r.deptShort || r.department || '—';
       const row = ws.addRow([
         i + 1, getEmployeeById(r.id)?.employeeId || '—', r.fullName, post, dept, resolveShort(r),
-        r.totalWorkingDays, r.weekendDays || 0, r.weekendPresent || 0, r.holidayDays || 0, r.holidayPresent || 0,
+        r.totalCalendarDays, r.weekendDays || 0, r.weekendPresent || 0, r.holidayDays || 0, r.holidayPresent || 0,
         r.leaveDays, r.officialVisitDays || 0, r.presentDays, r.absentDays,
         r.workedHrsFormatted || '0:00', r.lackHrsFormatted || '0:00',
         r.lateCount, r.earlyCount, `${r.attendanceRate}%`, r.otFormatted || '',
@@ -546,14 +562,26 @@ const MonthlySummaryReport = () => {
         <span style={{ fontSize:13,fontWeight:600,color:'#374151',whiteSpace:'nowrap' }}>
           {L('कर्मचारी','Staff')} :
         </span>
-        <select className="form-control" style={{ width:220,height:36,fontSize:13 }}
-          value={filters.staffId || ''}
-          onChange={e => setFilters(p => ({ ...p, staffId: e.target.value }))}>
-          <option value="">— {L('सबै कर्मचारी','All Staff')} —</option>
-          {(data?.employees || []).map(e => (
-            <option key={e.id} value={String(e.id)}>{e.fullName}</option>
-          ))}
-        </select>
+        {/* Searchable, same control as the Present Absent reports. Built from
+            allStats — this report's rows — not data.employees, which the
+            summary API doesn't return (the list used to be always empty). */}
+        <div style={{ width:240 }}>
+          <SearchableCheckSelect showAvatar
+            options={[...stats]
+              .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''))
+              .map(r => {
+                const emp = employees.find(x => String(x.id) === String(r.id)) || {};
+                return {
+                  value: String(r.id),
+                  label: r.fullName || emp.fullName || `Staff ${r.id}`,
+                  sub:   [emp.employeeId || r.employeeId, emp.position || r.position].filter(Boolean).join(' - '),
+                  photo: emp.profilePhoto,
+                };
+              })}
+            value={filters.staffId || ''}
+            onChange={v => setFilters(p => ({ ...p, staffId: v }))}
+            allLabel={L('सबै कर्मचारी','All Staff')} />
+        </div>
 
         {/* Advance Search button */}
         <button onClick={() => setShowSearch(true)}
@@ -618,7 +646,7 @@ const MonthlySummaryReport = () => {
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('विभाग','Dept.')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede', color:'#7c3aed' }}>{L('शाखा','Branch')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('कार्य दिन','Total')}</th>
-                <th colSpan={2} style={{ ...TH_WKD }}>{L('विकेन्ड','Weekend')}</th>
+                <th colSpan={2} style={{ ...TH_WKD }}>{L('सप्ताहन्त','Weekend')}</th>
                 <th colSpan={2} style={{ ...TH_HOL }}>{L('सार्वजनिक बिदा','Holiday')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede', background:'#faf5ff', color:'#5b21b6' }}>{L('बिदा','Leave')}</th>
                 <th rowSpan={2} style={{ ...TH_OV, borderBottom:'2px solid #dedede' }}>{L('कार्यालय भ्रमण','Official Visit')}</th>
@@ -666,7 +694,7 @@ const MonthlySummaryReport = () => {
                     </span>
                   </td>
                   <td style={{ ...TD_BASE, color:'#1f2937', textAlign:'left' }} title={r.position}>
-                    {(settings.posts||[]).find(p=>p.name===r.position)?.shortName || r.postShort || r.position || '—'}
+                    {postShortOf(r)}
                   </td>
                   <td style={{ ...TD_BASE, color:'#1f2937', textAlign:'left' }} title={r.department}>
                     {(settings.departments||[]).find(d=>d.name===r.department)?.shortName || r.deptShort || r.department || '—'}
@@ -674,7 +702,7 @@ const MonthlySummaryReport = () => {
                   <td style={{ ...TD_BASE, color:'#1f2937', textAlign:'left' }} title={r.branch}>
                     {resolveShort(r)}
                   </td>
-                  <td style={{ ...TD_BASE, fontWeight:700 }}>{r.totalWorkingDays}</td>
+                  <td style={{ ...TD_BASE, fontWeight:700 }}>{r.totalCalendarDays}</td>
                   <td style={{ ...TD_BASE, color:'#6b7280', fontWeight:700 }}>{r.weekendDays||0}</td>
                   <td style={TD_BASE}><Pill v={r.weekendPresent||0} bg="#f3f4f6" color="#374151" /></td>
                   <td style={{ ...TD_BASE, color:'#92400e', fontWeight:700 }}>{r.holidayDays||0}</td>

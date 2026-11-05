@@ -2,8 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
-import { useBeepAlert, useTaskAssignedBeepAlert } from '../../hooks/useBeepAlert.js';
-import api, { apiUrl } from '../../api/client.js';
+import { useBeepAlert, useTaskAssignedBeepAlert, playDing } from '../../hooks/useBeepAlert.js';
+import { isMobileMode } from '../../utils/native.js';
+import api, { apiUrl, liveStreamUrl } from '../../api/client.js';
 
 /* ── Notification Context ──────────────────────────────────── */
 const NotiCtx = createContext({ add: () => {}, remove: () => {}, msgCount: 0, clearMsgCount: () => {}, taskCount: 0, clearTaskCount: () => {}, fieldVisitTaskCount: 0, clearFieldVisitTaskCount: () => {}, refreshTaskCounts: () => {}, clearTaskAlert: () => {} });
@@ -381,7 +382,7 @@ export function AttendanceNotificationProvider({ children }) {
 
   // Keeps beeping every few seconds while there's at least one unseen broadcast
   // message — stops the instant msgCount is cleared (user opens the inbox).
-  useBeepAlert(msgCount > 0);
+  useBeepAlert(msgCount > 0 && !isMobileMode());   // the phone has its own unseen-alert (MobileFrame)
   // Task notifications use the less-naggy assignment cadence instead (5
   // beeps, then 2 every 5 minutes) — see useTaskAssignedBeepAlert and
   // newTaskAlertIds above. Covers both the regular Task badge and the Field
@@ -389,21 +390,22 @@ export function AttendanceNotificationProvider({ children }) {
   // event goes to, not a different sound), stopping per-task the instant
   // clearTaskAlert(taskId) runs (task opened/dismissed — see TaskList.jsx
   // and TaskToast above).
-  useTaskAssignedBeepAlert(newTaskAlertIds.size > 0);
+  useTaskAssignedBeepAlert(newTaskAlertIds.size > 0 && !isMobileMode());
 
   useEffect(() => {
-    const connect = () => {
-      // EventSource can't set an Authorization header, so the token rides along
-      // as a query param — authGuard accepts either.
-      const token = localStorage.getItem('auth_token');
-      if (!token) return;
-      const es = new EventSource(apiUrl(`/attendance/live?token=${encodeURIComponent(token)}`));
+    let closed = false;
+    const connect = async () => {
+      // EventSource can't set an Authorization header — liveStreamUrl() gets a
+      // short-lived single-use ticket instead of putting the JWT in the URL.
+      const url = await liveStreamUrl();
+      if (!url || closed) return;
+      const es = new EventSource(url);
       esRef.current = es;
       es.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
           if (data.type === 'attendance') {
-            if (liveAttendanceEnabledRef.current) add(data);
+            if (liveAttendanceEnabledRef.current) { add(data); if (isMobileMode()) playDing(); }
           } else if (data.type === 'new_message') {
             // Show popup only if current user is a recipient
             const uid = currentUser?.id;
@@ -453,10 +455,10 @@ export function AttendanceNotificationProvider({ children }) {
           }
         } catch (_) {}
       };
-      es.onerror = () => { es.close(); setTimeout(connect, 5000); };
+      es.onerror = () => { es.close(); if (!closed) setTimeout(connect, 5000); };
     };
     connect();
-    return () => esRef.current?.close();
+    return () => { closed = true; esRef.current?.close(); };
   }, [add, currentUser?.id]);
 
   return (

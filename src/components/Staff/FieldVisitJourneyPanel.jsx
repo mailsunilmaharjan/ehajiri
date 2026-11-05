@@ -131,7 +131,10 @@ const FieldVisitJourneyPanel = ({ task, tasks, currentUser, showToast }) => {
   const startTrip = async () => {
     setStarting(true);
     try {
-      const result = await api.post('/field-visit/session/start', { taskId: task.id });
+      // Record where the office is: best-effort GPS fix with the Office Out (the trip still starts without one)
+      let fix = {};
+      try { const c = await getCurrentLocation(); fix = { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, deviceInfo: deviceInfo() }; } catch { /* no GPS */ }
+      const result = await api.post('/field-visit/session/start', { taskId: task.id, ...fix });
       setSession(result);
       showToast?.('Checked out from office');
     } catch (e) { showToast?.(e.message || 'Failed to check out from office', 'error'); }

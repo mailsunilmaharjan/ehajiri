@@ -95,7 +95,7 @@ const TopMenu = () => {
   } = useAuth();
   const { flags: moduleFlags } = useModuleFlags();
   const { t, language, changeLanguage } = useLanguage();
-  const { stats, filteredLeaves, filteredVisits } = useData();
+  const { stats, filteredLeaves, filteredVisits, filteredEmployees } = useData();
   const { msgCount, taskCount, fieldVisitTaskCount } = useNotifications();
   const { totalUnread: chatUnread } = useChat();
   const { assignments: recoConfig } = useRecoApproval();
@@ -180,7 +180,12 @@ const TopMenu = () => {
   const roleColor = { admin: '#7e3af2', branchManager: '#1a56db', departmentHead: '#0e9f6e', employee: '#6b7280' };
   const avatarBg  = { admin: '#ede9fe', branchManager: '#dbeafe', departmentHead: '#d1fae5', employee: '#f3f4f6' };
 
-  const pendingCount     = stats.pendingLeaves + stats.pendingVisits;
+  // Your own pending application is never something you can act on (the
+  // server refuses self-approval for everyone below admin), so it must not
+  // count as "awaiting your approval" in the menu badge or the bell.
+  const isOthers = (empId) => isAdmin || String(empId) !== String(currentUser?.id);
+  const pendingCount     = filteredLeaves.filter(l => l.status === 'pending' && isOthers(l.employeeId)).length
+                         + filteredVisits.filter(v => v.status === 'pending' && isOthers(v.employeeId)).length;
   const leaveActive      = isActive('/leave') || isActive('/office-visit');
   const attendanceActive = isActive('/attendance');
 
@@ -190,6 +195,7 @@ const TopMenu = () => {
   // that same scope, or clicking through to "12 pending" would land on a
   // page showing far fewer (or different) rows than the badge promised.
   const isMyRecoOrApproval = (empId) => {
+    if (!isOthers(empId)) return false;
     const a = recoConfig[String(empId)] || {};
     const recoIds = Array.isArray(a.reco) ? a.reco : (a.reco ? [a.reco] : []);
     const apprIds = Array.isArray(a.approval) ? a.approval : (a.approval ? [a.approval] : []);
@@ -208,15 +214,21 @@ const TopMenu = () => {
     if (!isManager) return;
     api.get('/attendance/missing-requests').then(rows => {
       const list = Array.isArray(rows) ? rows : [];
-      const assignedToMe = list.filter(r =>
+      // "Any pending request" only counts for staff in this manager's own
+      // scope (filteredEmployees = own branch for a Branch Manager, everyone
+      // for Admin) — previously a Branch Manager's bell counted every
+      // branch's requests. Ones explicitly assigned to me still count
+      // wherever they're from.
+      const inScope = new Set((filteredEmployees || []).map(e => String(e.id)));
+      const assignedToMe = list.filter(r => isOthers(r.employeeId) && (
         (String(r.recommendedBy) === String(currentUser?.id) && r.status === 'pending') ||
         (String(r.approvedBy) === String(currentUser?.id) && ['pending', 'recommended'].includes(r.status)) ||
-        (isManager && ['pending', 'recommended'].includes(r.status))
+        (isManager && ['pending', 'recommended'].includes(r.status) && inScope.has(String(r.employeeId))))
       );
       setMissingAssignedCount(assignedToMe.length);
     }).catch(() => {});
   };
-  useEffect(() => { fetchMissingAssigned(); }, [isManager, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchMissingAssigned(); }, [isManager, currentUser?.id, filteredEmployees]); // eslint-disable-line react-hooks/exhaustive-deps
   const notifTotal = myPendingLeaves + myPendingVisits + missingAssignedCount;
 
   const Chevron = ({ cls = '' }) => (

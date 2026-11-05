@@ -4,6 +4,7 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import api from '../../api/client.js';
 import EmpMultiSelect from '../Common/EmpMultiSelect.jsx';
+import { hqBranchName, isHQBranch } from '../../utils/branchUtils.js';
 
 /* ── table helpers ── */
 const TH = ({ children, wide }) => (
@@ -156,7 +157,7 @@ const RecoApprovalModal = ({ employees, onClose }) => {
   }, [onClose]);
 
   const activeEmps = employees.filter(e => e.active !== false);
-  const companyHQ  = settings.companyNameEn || '';
+  const companyHQ  = hqBranchName(settings);
 
   const postMap = useMemo(() => {
     const m = {};
@@ -165,11 +166,7 @@ const RecoApprovalModal = ({ employees, onClose }) => {
   }, [settings.posts]);
 
   const hqEmps = useMemo(() =>
-    activeEmps.filter(e =>
-      companyHQ
-        ? (e.branch === companyHQ || (!e.branch && (settings.branches||[]).length === 0))
-        : !e.branch
-    ), [activeEmps, companyHQ, settings.branches]);
+    activeEmps.filter(e => isHQBranch(e.branch, settings)), [activeEmps, settings]);
 
   /* Search — narrows which staff rows are DISPLAYED in the active tab, AND
      narrows the header "apply for all" target to just those matching rows
@@ -200,7 +197,7 @@ const RecoApprovalModal = ({ employees, onClose }) => {
   }, [hqEmps, matchesFilter]);
 
   const branchGroups = useMemo(() => {
-    const branchEmps = activeEmps.filter(e => e.branch && e.branch !== companyHQ).filter(matchesFilter);
+    const branchEmps = activeEmps.filter(e => !isHQBranch(e.branch, settings)).filter(matchesFilter);
     const map = {};
     branchEmps.forEach(e => {
       const k = `${e.branch}||${e.department || '(No Department)'}`;
@@ -208,7 +205,7 @@ const RecoApprovalModal = ({ employees, onClose }) => {
       map[k].members.push(e);
     });
     return Object.values(map).sort((a,b) => a.branch.localeCompare(b.branch) || a.dept.localeCompare(b.dept));
-  }, [activeEmps, companyHQ, matchesFilter]);
+  }, [activeEmps, settings, matchesFilter]);
 
   const openSearch = () => { setDraftFilter({ name:filterName, branch:filterBranch, dept:filterDept }); setSearchOpen(true); };
   const applySearch = () => {

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import api, { setToken, setUnauthorizedHandler } from '../api/client.js';
+import { unregisterPush } from '../utils/native.js';
 
 const AuthContext = createContext(null);
 
@@ -9,7 +10,16 @@ const AuthContext = createContext(null);
      staff:  { empId:   { pageKey: { view, edit } } }
    }
 ── */
-const PERM_KEY = 'ehajiri_page_permissions';
+// Persisted server-side (app_settings.page_permissions) — NOT localStorage:
+// browser storage is per-device and shared across tenants on this origin, so
+// an admin's change never reached other users' logins.
+
+// Pages the Admin role can never be restricted from (mirrors the pages flagged
+// adminOnly / alwaysOn in RoleManagement's matrix).
+export const ADMIN_LOCKED_PAGES = [
+  'staffContact', 'staffAnalytics', 'shift', 'settings',
+  'attendanceDevice', 'standaloneDevice',
+];
 
 export const DEFAULT_PAGE_PERMISSIONS = {
   employee: {
@@ -175,13 +185,25 @@ DEFAULT_PAGE_PERMISSIONS.superAdmin = {
 DEFAULT_PAGE_PERMISSIONS.branchAreaManager  = { ...DEFAULT_PAGE_PERMISSIONS.branchManager };
 DEFAULT_PAGE_PERMISSIONS.departmentIncharge = { ...DEFAULT_PAGE_PERMISSIONS.departmentHead };
 
-const loadPerms = () => {
-  try { return JSON.parse(localStorage.getItem(PERM_KEY) || 'null'); } catch { return null; }
+const loadPerms = async () => {
+  const norm = (p) => {
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch { p = null; } }
+    return p && typeof p === 'object' ? p : {};
+  };
+  try {
+    return norm(await api.get('/settings/page-permissions'));
+  } catch {
+    // Servers not yet restarted on the version that has the dedicated route
+    // treat it as an unknown :list — the generic settings blob carries the
+    // same `page_permissions` key and is served by every version.
+    try { return norm((await api.get('/settings'))?.page_permissions); }
+    catch { return null; }
+  }
 };
 
-export const savePagePermissions = (perms) => {
-  localStorage.setItem(PERM_KEY, JSON.stringify(perms));
-};
+// Admin-only on the server. Returns a promise — callers should await it.
+export const savePagePermissions = (perms) =>
+  api.put('/settings', { page_permissions: perms });
 
 // Shared tail of any successful authentication — plain login, or an
 // already-authenticated result handed over by the SSO exchange (see
@@ -193,7 +215,7 @@ async function applySession(result, { setCurrentUser, setToken, setPagePerms, se
   setCurrentUser(user);
   localStorage.setItem('current_user', JSON.stringify(user));
   setToken(token);
-  setPagePerms(loadPerms());
+  setPagePerms(await loadPerms());
   try { const all = await api.get('/auth/users'); setUSERS(all); } catch {}
 }
 
@@ -214,7 +236,10 @@ export const AuthProvider = ({ children }) => {
   // within the warning window — an informational one-time popup, not a block.
   const [licenseWarning, setLicenseWarning] = useState(null);
   const [USERS,          setUSERS]          = useState([]);
-  const [pagePerms,      setPagePerms]      = useState(loadPerms);
+  const [pagePerms,      setPagePerms]      = useState(null);
+  // False until the server's permission table has been fetched for the
+  // current session, so a restricted page isn't flashed from built-in defaults.
+  const [permsLoaded,    setPermsLoaded]    = useState(false);
 
   const distributorFrom = (d) => ({
     name       : d?.distributorName        || '',
@@ -291,6 +316,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = useCallback(() => {
+    unregisterPush();   // mobile app: stop this phone getting the signed-out user's notifications (no-op in a browser)
     setCurrentUser(null);
     localStorage.removeItem('current_user');
     setToken(null);
@@ -323,9 +349,21 @@ export const AuthProvider = ({ children }) => {
     return () => setUnauthorizedHandler(null);
   }, [logout]);
 
-  const refreshPagePerms = useCallback(() => {
-    setPagePerms(loadPerms());
+  const refreshPagePerms = useCallback(async () => {
+    const p = await loadPerms();
+    if (p) setPagePerms(p);
+    return p;
   }, []);
+
+  // Restored sessions (page reload) skip applySession, so fetch here; also
+  // re-fetch whenever the logged-in user changes.
+  const userId = currentUser?.id;
+  useEffect(() => {
+    if (userId === undefined || userId === null) { setPagePerms(null); setPermsLoaded(false); return; }
+    let live = true;
+    loadPerms().then(p => { if (live) { if (p) setPagePerms(p); setPermsLoaded(true); } });
+    return () => { live = false; };
+  }, [userId]);
 
   /* ── Role flags ── */
   const isSuperAdmin       = currentUser?.role === 'superAdmin';
@@ -363,7 +401,19 @@ export const AuthProvider = ({ children }) => {
   ── */
   const getPagePerm = useCallback((pageKey) => {
     if (!currentUser) return { view: false, edit: false, delete: false };
-    if (isAdmin) return { view: true, edit: true, delete: true };
+    if (isSuperAdmin) return { view: true, edit: true, delete: true };
+    // Admin is full-access by default, but a Super Admin can restrict
+    // individual pages for the Admin role (Role & Permission Management) or a
+    // single Admin staff member. Core system pages stay locked on so an Admin
+    // can never be locked out of managing the system.
+    if (isAdmin) {
+      if (ADMIN_LOCKED_PAGES.includes(pageKey)) return { view: true, edit: true, delete: true };
+      const sp = pagePerms?.staff?.[String(currentUser.id)]?.[pageKey];
+      if (sp !== undefined) return sp;
+      const rp = pagePerms?.roles?.admin?.[pageKey];
+      if (rp !== undefined) return rp;
+      return { view: true, edit: true, delete: true };
+    }
     // Contact directory is shared, low-risk info (names/phone numbers) — always
     // fully open for every role regardless of any Role Management override.
     if (pageKey === 'staffContact') return { view: true, edit: true, delete: false };
@@ -381,7 +431,7 @@ export const AuthProvider = ({ children }) => {
 
     // 3. Built-in default
     return DEFAULT_PAGE_PERMISSIONS[role]?.[pageKey] || { view: false, edit: false };
-  }, [currentUser, isAdmin, pagePerms]);
+  }, [currentUser, isAdmin, isSuperAdmin, pagePerms]);
 
   const canView   = useCallback((pageKey) => getPagePerm(pageKey).view,   [getPagePerm]);
   const canEdit   = useCallback((pageKey) => getPagePerm(pageKey).edit,   [getPagePerm]);
@@ -447,7 +497,7 @@ export const AuthProvider = ({ children }) => {
       // Permission helpers
       canManageStaff, canApprove, canManageSystem, canViewReports, canViewOwnReports,
       // Page-level permission helpers
-      canView, canEdit, canDelete, getPagePerm, refreshPagePerms,
+      canView, canEdit, canDelete, getPagePerm, refreshPagePerms, pagePerms, permsLoaded,
       // Scope helper
       filterByRole,
       USERS,

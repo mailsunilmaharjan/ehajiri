@@ -1,5 +1,6 @@
 import pool from '../db.js';
 import { broadcastNotification } from './liveNotifications.js';
+import { pushLater } from './pushService.js';
 
 /**
  * Sends an internal message to a fixed set of recipient user IDs and broadcasts
@@ -8,7 +9,7 @@ import { broadcastNotification } from './liveNotifications.js';
  * Shared by POST /api/messages and any server-triggered notification (e.g. missing
  * attendance requests) that needs to reach a specific recommender/approver.
  */
-export async function notifyUsers({ senderId, recipientIds, subject, body }) {
+export async function notifyUsers({ senderId, recipientIds, subject, body, path }) {
   const targetIds = [...new Set((recipientIds || []).map(Number))]
     .filter(n => Number.isFinite(n) && n !== senderId);
   if (!targetIds.length) return { recipientCount: 0 };
@@ -40,6 +41,8 @@ export async function notifyUsers({ senderId, recipientIds, subject, body }) {
       recipientType: 'individual',
       recipientIds: targetIds,
     });
+    // phone notification (no-op unless the mobile app + Firebase are set up)
+    pushLater(targetIds, { title: subject || 'New message', body: String(body || '').substring(0, 120), data: { path: path || '/staff/message' } });
 
     return { id: msg.id, recipientCount: targetIds.length };
   } catch (e) {

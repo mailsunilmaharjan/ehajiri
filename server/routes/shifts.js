@@ -1,5 +1,6 @@
 ﻿import { Router } from 'express';
 import pool from '../db.js';
+import { requireRole } from '../middleware/roleGuard.js';
 
 const router = Router();
 
@@ -32,7 +33,7 @@ router.get('/', async (_req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireRole('admin', 'superAdmin'), async (req, res) => {
   const s = req.body;
   const client = await pool.connect();
   try {
@@ -68,7 +69,7 @@ router.post('/', async (req, res) => {
   } finally { client.release(); }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('admin', 'superAdmin', 'branchManager', 'branchAreaManager', 'departmentHead', 'departmentIncharge'), async (req, res) => {
   const s = req.body;
   const client = await pool.connect();
   try {
@@ -104,7 +105,7 @@ router.put('/:id', async (req, res) => {
   } finally { client.release(); }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('admin', 'superAdmin'), async (req, res) => {
   try {
     const id = req.params.id;
 

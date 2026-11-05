@@ -2,15 +2,17 @@ import { Router } from 'express';
 import pool from '../db.js';
 import { authorizeRecoAction, authorizeOwnEditDelete } from '../services/recoApprovalGuard.js';
 import { logAudit } from '../services/auditLog.js';
+import { reverseGeocode } from '../services/geocode.js';
+import { notifyApproversOf, notifyApplicantOf } from '../services/approvalNotify.js';
 
 const router = Router();
 
 const SEL = `
   id, employee_id AS "employeeId", date,
   check_in_at AS "checkInAt", check_in_lat AS "checkInLat", check_in_lng AS "checkInLng",
-  check_in_accuracy AS "checkInAccuracy", check_in_device AS "checkInDevice",
+  check_in_accuracy AS "checkInAccuracy", check_in_device AS "checkInDevice", check_in_place AS "checkInPlace",
   check_out_at AS "checkOutAt", check_out_lat AS "checkOutLat", check_out_lng AS "checkOutLng",
-  check_out_accuracy AS "checkOutAccuracy", check_out_device AS "checkOutDevice",
+  check_out_accuracy AS "checkOutAccuracy", check_out_device AS "checkOutDevice", check_out_place AS "checkOutPlace",
   status, recommended_by AS "recommendedBy", recommended_date AS "recommendedDate",
   approved_by AS "approvedBy", approved_date AS "approvedDate", comment,
   created_at AS "createdAt"
@@ -27,6 +29,19 @@ async function isEnabledForUser(userId) {
 }
 
 const clientIp = (req) => (req.headers['x-forwarded-for'] || req.ip || '').toString().split(',')[0].trim() || null;
+
+/* GET /geocode?lat=&lng= — the readable place name for a position (shown on the check-in screen before the person taps). */
+router.get('/geocode', async (req, res) => {
+  const place = await reverseGeocode(req.query.lat, req.query.lng);
+  res.json({ place });
+});
+
+// Look the place name up AFTER the punch is saved (never delays or blocks a check-in) and store it on the row.
+function savePlaceLater(id, which, lat, lng) {
+  reverseGeocode(lat, lng).then(place => {
+    if (place) return pool.query(`UPDATE online_attendance SET ${which === 'in' ? 'check_in_place' : 'check_out_place'}=$1 WHERE id=$2`, [place, id]);
+  }).catch(() => {});
+}
 
 /* GET /today — the caller's own record for today (Nepal calendar date, via
    CURRENT_DATE — every pool connection is opened with timezone=Asia/Kathmandu,
@@ -74,6 +89,7 @@ router.post('/check-in', async (req, res) => {
        RETURNING ${SEL}`,
       [req.user.id, lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), clientIp(req)]
     );
+    savePlaceLater(rows[0].id, 'in', lat, lng);
     logAudit({ actor: req.user, action: 'check-in', entity: 'online_attendance', entityId: rows[0].id, before: null, after: rows[0] });
     res.status(201).json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -99,6 +115,13 @@ router.post('/check-out', async (req, res) => {
        WHERE id=$6 RETURNING ${SEL}`,
       [lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), clientIp(req), existing[0].id]
     );
+    savePlaceLater(rows[0].id, 'out', lat, lng);
+    // the day is complete: tell whoever has to approve it (inbox + website toast + phone push)
+    pool.query('SELECT full_name FROM users WHERE id=$1', [req.user.id]).then(({ rows: [u] }) => notifyApproversOf(req.user.id, {
+      subject: `Online attendance for approval: ${u?.full_name || ''}`,
+      body: `${u?.full_name || 'A staff member'} checked in and out online today and is waiting for your approval.`,
+      path: '/m/approvals',
+    })).catch(() => {});
     logAudit({ actor: req.user, action: 'check-out', entity: 'online_attendance', entityId: rows[0].id, before: null, after: rows[0] });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -112,8 +135,8 @@ router.patch('/:id/recommend', async (req, res) => {
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(
-      `UPDATE online_attendance SET recommended_by=$1, recommended_date=CURRENT_DATE, updated_at=NOW() WHERE id=$2 RETURNING ${SEL}`,
-      [req.user.id, req.params.id]
+      `UPDATE online_attendance SET recommended_by=$1, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($3,''), comment), updated_at=NOW() WHERE id=$2 RETURNING ${SEL}`,
+      [req.user.id, req.params.id, String(req.body?.comment || '').slice(0, 500)]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -167,6 +190,7 @@ router.patch('/:id/approve', async (req, res) => {
     await client.query('COMMIT');
 
     const { rows: final } = await pool.query(`SELECT ${SEL} FROM online_attendance WHERE id=$1`, [req.params.id]);
+    notifyApplicantOf(row.employee_id, req.user.id, { subject: 'Online attendance approved', body: `Your online attendance for ${String(final[0].date).slice(0, 10)} was approved.${comment ? ' ' + comment : ''}`, path: '/m/leave' });
     logAudit({ actor: req.user, action: 'approve', entity: 'online_attendance', entityId: req.params.id, before: null, after: final[0] });
     res.json(final[0]);
   } catch (e) {
@@ -188,6 +212,7 @@ router.patch('/:id/reject', async (req, res) => {
        WHERE id=$3 RETURNING ${SEL}`,
       [req.user.id, comment || '', req.params.id]
     );
+    notifyApplicantOf(existing[0].employee_id, req.user.id, { subject: 'Online attendance rejected', body: `Your online attendance for ${String(rows[0].date).slice(0, 10)} was rejected.${comment ? ' Reason: ' + comment : ''}`, path: '/m/leave' });
     logAudit({ actor: req.user, action: 'reject', entity: 'online_attendance', entityId: req.params.id, before: null, after: rows[0] });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }

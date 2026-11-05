@@ -3,7 +3,14 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import os     from 'os';
 import pool from '../db.js';
-import { signToken, authGuard, signRedirectEmailToken, verifyRedirectEmailToken, verifySsoToken } from '../middleware/authGuard.js';
+import { invalidateSession, issueStreamTicket, signToken, authGuard, signRedirectEmailToken, verifyRedirectEmailToken, verifySsoToken, verifySsoPayload, consumeSsoJti } from '../middleware/authGuard.js';
+import { loginThrottle, rateLimit } from '../middleware/security.js';
+import { KNOWN_DEFAULT_PASSWORDS } from '../utils/secrets.js';
+import { validateBody } from '../middleware/validate.js';
+
+const authLoginThrottle = loginThrottle();
+const ssoLimiter   = rateLimit({ windowMs: 60_000, max: 30 });
+const resetLimiter = rateLimit({ windowMs: 15 * 60_000, max: 10 });
 import { sendForgotPassword } from '../services/emailService.js';
 import { syncEmailDirectory } from '../services/directorySync.js';
 import { getDistributorContact, getLicenseWarning } from '../middleware/licenseGuard.js';
@@ -142,9 +149,10 @@ router.get('/resolve-redirect-token', (req, res) => {
 // back rather than minted fresh — it's independently verifiable by any
 // tenant process (same SSO_SECRET), so there's no need to reissue it, and
 // its short TTL means there's no meaningful replay window to worry about.
-router.get('/sso-exchange', async (req, res) => {
+router.get('/sso-exchange', ssoLimiter, async (req, res) => {
   try {
-    const email = verifySsoToken(req.query.token || '');
+    const ssoPayload = verifySsoPayload(req.query.token || '');
+    const email = ssoPayload?.email;
     if (!email) return res.status(400).json({ error: 'This link is invalid or has expired' });
 
     const { rows } = await pool.query(
@@ -152,6 +160,10 @@ router.get('/sso-exchange', async (req, res) => {
       [email]
     );
     if (rows[0]) {
+      // Single use: a replayed link must not mint a second session.
+      if (!consumeSsoJti(ssoPayload.jti, (ssoPayload.exp || 0) * 1000)) {
+        return res.status(400).json({ error: 'This link has already been used' });
+      }
       // Once expired, this link is the ONE bypass — and only for superAdmin
       // (LicenseAdmin's "SuperAdmin Login" right-click action), so an
       // operator can still get in to fix things. Any other role hitting an
@@ -194,7 +206,7 @@ router.get('/sso-exchange', async (req, res) => {
 });
 
 /** POST /api/auth/login */
-router.post('/login', async (req, res) => {
+router.post('/login', validateBody({ username: { required: true, max: 200 }, password: { required: true, max: 256 } }), authLoginThrottle, async (req, res) => {
   const { username, password } = req.body;
   try {
     // ── License check BEFORE authentication ─────────────────────────────────
@@ -263,6 +275,15 @@ router.post('/login', async (req, res) => {
     }
     if (!passwordOk) return res.status(401).json({ error: 'इमेल वा पासवर्ड गलत छ' });
 
+    // The seeded SYS001/SYS002 passwords are public in the source. Even if one
+    // somehow survives on an account (restored old backup, hand-created user),
+    // refuse the session rather than let it in. Desktop (single machine, no
+    // hosted exposure) and dev can opt out.
+    if (process.env.ELECTRON !== 'true' && process.env.ALLOW_DEFAULT_PASSWORDS !== 'true'
+        && KNOWN_DEFAULT_PASSWORDS.includes(String(password))) {
+      return res.status(403).json({ error: 'This account still uses a default password. Ask your administrator to reset it, or sign in via the LicenseAdmin portal.' });
+    }
+
     const { password: _, ...user } = row;
     const userOut = await attachCoverage(camelUser(user));
     res.json({ ...userOut, token: signToken(userOut), licenseWarning });
@@ -272,7 +293,7 @@ router.post('/login', async (req, res) => {
 });
 
 /** POST /api/auth/forgot-password — sends a password reset link via email */
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', resetLimiter, validateBody({ email: { required: true, max: 200 }, basePath: { max: 100 } }), async (req, res) => {
   const { email } = req.body;
   if (!email?.trim()) return res.status(400).json({ error: 'Email is required' });
   try {
@@ -294,7 +315,20 @@ router.post('/forgot-password', async (req, res) => {
       [user.id, token, expiresAt]
     );
 
-    const resetLink = `http://${getLocalIp()}:4000/reset-password?token=${token}`;
+    // Link must point at the URL the user actually reached the app on (hosted
+    // tenants have no :4000 / LAN IP). PUBLIC_URL wins if configured; otherwise
+    // the browser's Origin is trusted only when it matches the Host header, plus
+    // the tenant path prefix the frontend reports (sanitised).
+    const prefix = /^\/t\/[a-z0-9-]+$/.test(req.body.basePath || '') ? req.body.basePath : '';
+    let base = process.env.PUBLIC_URL ? process.env.PUBLIC_URL.replace(/\/+$/, '') : null;
+    if (!base) {
+      try {
+        const o = new URL(req.headers.origin || '');
+        if (o.host === req.headers.host || o.host === req.headers['x-forwarded-host']) base = o.origin + prefix;
+      } catch { /* no usable Origin */ }
+    }
+    if (!base) base = `http://${getLocalIp()}:4000`;
+    const resetLink = `${base}/reset-password?token=${token}`;
     const result = await sendForgotPassword({ to: user.email, fullName: user.full_name, resetLink });
     if (result?.skipped) return res.status(400).json({ error: 'Email notifications are not configured. Contact your administrator.' });
     res.json({ ok: true, sent: true });
@@ -304,10 +338,11 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 /** POST /api/auth/reset-password-token — validate reset token and set new password */
-router.post('/reset-password-token', async (req, res) => {
+router.post('/reset-password-token', resetLimiter, validateBody({ token: { required: true, max: 200 }, newPassword: { required: true, max: 256 } }), async (req, res) => {
   const { token, newPassword } = req.body;
   if (!token?.trim()) return res.status(400).json({ error: 'Reset token is required' });
   if (!newPassword) return res.status(400).json({ error: 'Password is required' });
+  if (String(newPassword).trim().length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   try {
     const { rows } = await pool.query(
       `SELECT t.id, t.user_id, t.expires_at, t.used, u.full_name
@@ -322,7 +357,8 @@ router.post('/reset-password-token', async (req, res) => {
     if (new Date(rec.expires_at) < new Date()) return res.status(400).json({ error: 'This reset link has expired. Please request a new one.' });
 
     const hash = await bcrypt.hash(newPassword.trim(), 10);
-    await pool.query('UPDATE users SET password=$1 WHERE id=$2', [hash, rec.user_id]);
+    await pool.query('UPDATE users SET password=$1, sessions_valid_after=NOW() WHERE id=$2', [hash, rec.user_id]);
+    invalidateSession(rec.user_id);
     await pool.query('UPDATE password_reset_tokens SET used=TRUE WHERE id=$1', [rec.id]);
     res.json({ ok: true, fullName: rec.full_name });
   } catch (err) {
@@ -330,10 +366,16 @@ router.post('/reset-password-token', async (req, res) => {
   }
 });
 
+/** POST /api/auth/stream-ticket — 60 s single-use credential for the SSE stream */
+router.post('/stream-ticket', authGuard, (req, res) => {
+  res.json({ ticket: issueStreamTicket(req.user) });
+});
+
 /** POST /api/auth/change-password — authenticated user changes their own password */
-router.post('/change-password', authGuard, async (req, res) => {
+router.post('/change-password', authGuard, validateBody({ oldPassword: { required: true, max: 256 }, newPassword: { required: true, max: 256 } }), async (req, res) => {
   const { oldPassword, newPassword } = req.body;
   if (!oldPassword || !newPassword) return res.status(400).json({ error: 'Old and new passwords are required' });
+  if (String(newPassword).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   try {
     const { rows } = await pool.query('SELECT id, password FROM users WHERE id=$1 AND active=TRUE', [req.user.id]);
     const row = rows[0];
@@ -343,15 +385,18 @@ router.post('/change-password', authGuard, async (req, res) => {
       : row.password === oldPassword;
     if (!ok) return res.status(403).json({ error: 'Old password is incorrect' });
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password=$1 WHERE id=$2', [hash, row.id]);
-    res.json({ ok: true });
+    await pool.query('UPDATE users SET password=$1, sessions_valid_after=NOW() WHERE id=$2', [hash, row.id]);
+    invalidateSession(row.id);
+    // Every older token (any device) is now rejected; hand this one a fresh token.
+    const { id, employeeId, role, branch, department } = req.user;
+    res.json({ ok: true, token: signToken({ id, employeeId, role, branch, department }) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 /** GET /api/auth/users  (admin only - returns list without passwords) */
-router.get('/users', async (_req, res) => {
+router.get('/users', authGuard, async (_req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT id, employee_id, username, full_name, role, department, branch, position, shift, email, phone, join_date, gender, avatar, active, profile_photo FROM users WHERE is_system IS NOT TRUE ORDER BY id'
@@ -390,7 +435,7 @@ router.put('/profile-photo', authGuard, async (req, res) => {
  * Self-service, scoped to req.user.id only — not the admin-only Staff form
  * (server/routes/employees.js), which any role reaching /profile isn't
  * necessarily permitted to use. */
-router.put('/profile-email', authGuard, async (req, res) => {
+router.put('/profile-email', authGuard, validateBody({ email: { max: 200 } }), async (req, res) => {
   const email = (req.body.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ error: 'Email is required' });
   if (!email.includes('@')) return res.status(400).json({ error: 'Enter a valid email address' });

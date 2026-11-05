@@ -7,7 +7,11 @@ import { logBugReport } from '../services/bugReportService.js';
 
 const router = Router();
 const canManage = requireRole('admin', 'superAdmin');
-const JWT_SECRET = process.env.JWT_SECRET || 'ehajiri_jwt_secret_change_me';
+import { JWT_SECRET } from '../utils/secrets.js';
+import { rateLimit } from '../middleware/security.js';
+
+const reportLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+const clip = (v, n) => (v == null ? v : String(v).slice(0, n));
 
 const toRow = r => ({
   id        : r.id,
@@ -30,18 +34,18 @@ const toRow = r => ({
    and error-reporting itself must never fail just because there's no valid
    session. A user is attached best-effort if a valid token happens to be
    present in the request. */
-router.post('/', async (req, res) => {
-  const { source, page, message, stack } = req.body;
+router.post('/', reportLimiter, async (req, res) => {
+  const { source, page, message, stack } = req.body || {};
   if (!message) return res.status(400).json({ error: 'message is required' });
 
   let userId = null;
   const header = req.headers.authorization || '';
   const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (token) {
-    try { userId = jwt.verify(token, JWT_SECRET).id; } catch { /* not logged in / expired — fine */ }
+    try { userId = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }).id; } catch { /* not logged in / expired — fine */ }
   }
 
-  await logBugReport({ source, page, message, stack, userId });
+  await logBugReport({ source: clip(source, 40), page: clip(page, 500), message: clip(message, 2000), stack: clip(stack, 8000), userId });
   res.status(201).json({ ok: true });
 });
 

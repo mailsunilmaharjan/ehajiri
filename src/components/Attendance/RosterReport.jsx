@@ -570,8 +570,16 @@ const DeptShiftGrid = ({ rosters, department, shiftNames, weekStart, weekEnd, se
    Shift Wise Filter Popup — Department + Fiscal Year/Month + Date Range,
    opened on every "Shift Wise" tab click.
 ══════════════════════════════════════════ */
+const AD_MONTHS_EN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+// Today / a date in the tenant's active calendar ({year, month 1-12, day}).
+const toCal = (d, useNP) => {
+  if (useNP) return adToBS(d);
+  const dt = typeof d === 'string' ? new Date(d.slice(0, 10) + 'T00:00:00') : d;
+  return { year: dt.getFullYear(), month: dt.getMonth() + 1, day: dt.getDate() };
+};
+
 const ShiftFilterModal = ({ open, onClose, depts, deptFilter, onDeptChange,
-  fiscalYears, filterFYId, onFYChange, filterMonth, onMonthChange, monthLabel,
+  fiscalYears, filterFYId, onFYChange, filterMonth, onMonthChange, monthLabel, months,
   rangeFrom, rangeTo, onRangeFromChange, onRangeToChange }) => {
   if (!open) return null;
   const Lbl = ({ children }) => (
@@ -622,7 +630,7 @@ const ShiftFilterModal = ({ open, onClose, depts, deptFilter, onDeptChange,
           <div>
             <Lbl>Month</Lbl>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {BS_MONTHS_EN.map((m, i) => (
+              {(months || BS_MONTHS_EN).map((m, i) => (
                 <button key={m} onClick={() => onMonthChange(i + 1)}
                   style={{ padding: '5px 10px', border: `1.5px solid ${filterMonth === i + 1 ? '#1a56db' : '#e5e7eb'}`,
                     borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600,
@@ -1120,11 +1128,13 @@ const RosterReport = () => {
   /* Report month filter (Fiscal Year + Month) — drives which month's data
      shows in Staff Wise / Shift Wise, which week Department Wise opens on,
      and which month the Staff calendar opens on. */
+  const useNP   = settings?.defaultCalendar === 'np';
+  const MONTHS  = useNP ? BS_MONTHS_EN : AD_MONTHS_EN;
   const today   = getNepalNow();
-  const todayBS = adToBS(getNepalTodayISO());
+  const todayBS = toCal(getNepalTodayISO(), useNP); // today in the tenant's calendar
   const currentFYObj = useMemo(() => getCurrentFY(settings.fiscalYears || []), [settings.fiscalYears]);
   const [filterFYId,  setFilterFYId]  = useState(() => currentFYObj?.id ?? null);
-  const [filterMonth, setFilterMonth] = useState(() => todayBS?.month || 1); // BS month, 1-12
+  const [filterMonth, setFilterMonth] = useState(() => todayBS?.month || 1); // month in the tenant's calendar, 1-12
   const [calMonthLabel, setCalMonthLabel] = useState('');
 
   /* Default Staff Wise to the logged-in user's own calendar. A login with
@@ -1159,7 +1169,6 @@ const RosterReport = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const useNP   = settings?.defaultCalendar === 'np';
   const useNPDg = useNP && settings?.nepaliDigits;
   const fmtN    = n => useNPDg ? toNepaliDigits(n) : String(n);
 
@@ -1169,17 +1178,22 @@ const RosterReport = () => {
     (settings.fiscalYears || []).find(fy => fy.id === filterFYId) || currentFYObj,
     [settings.fiscalYears, filterFYId, currentFYObj]);
   const filterYear = useMemo(() => {
-    const bs = filterFYObj ? adToBS(new Date(filterFYObj.startDate)) : null;
+    const bs = filterFYObj ? toCal(new Date(filterFYObj.startDate), useNP) : null;
+    // English calendar: a fiscal year can straddle two calendar years — the year follows the month
+    if (!useNP && bs && filterMonth < bs.month) {
+      const be = toCal(new Date(filterFYObj.endDate), false);
+      if (be?.year) return be.year;
+    }
     return bs?.year || todayBS?.year || today.getFullYear();
-  }, [filterFYObj, todayBS, today]);
+  }, [filterFYObj, filterMonth, todayBS, today, useNP]);
   const monthStart = useMemo(() =>
-    bsToAD(filterYear, filterMonth, 1) || new Date(today.getFullYear(), today.getMonth(), 1),
-    [filterYear, filterMonth, today]);
-  const daysInFilterMonth = useMemo(() => getBSDays(filterYear, filterMonth) || 30, [filterYear, filterMonth]);
+    (useNP ? bsToAD(filterYear, filterMonth, 1) : new Date(filterYear, filterMonth - 1, 1)) || new Date(today.getFullYear(), today.getMonth(), 1),
+    [filterYear, filterMonth, today, useNP]);
+  const daysInFilterMonth = useMemo(() => (useNP ? getBSDays(filterYear, filterMonth) : new Date(filterYear, filterMonth, 0).getDate()) || 30, [filterYear, filterMonth, useNP]);
   const monthEnd = useMemo(() =>
-    bsToAD(filterYear, filterMonth, daysInFilterMonth) || new Date(today.getFullYear(), today.getMonth() + 1, 0),
-    [filterYear, filterMonth, daysInFilterMonth, today]);
-  const monthLabel = `${BS_MONTHS_EN[filterMonth - 1] || ''} ${fmtN(filterYear)} BS`;
+    (useNP ? bsToAD(filterYear, filterMonth, daysInFilterMonth) : new Date(filterYear, filterMonth - 1, daysInFilterMonth)) || new Date(today.getFullYear(), today.getMonth() + 1, 0),
+    [filterYear, filterMonth, daysInFilterMonth, today, useNP]);
+  const monthLabel = `${MONTHS[filterMonth - 1] || ''} ${fmtN(filterYear)}${useNP ? ' BS' : ''}`;
 
   /* Shift Wise's default date range — the day-of-month "week bucket" that
      today falls in (day 3 → 1st week → days 1-7, day 10 → 2nd week →
@@ -1193,10 +1207,10 @@ const RosterReport = () => {
     const startDay = (weekNum - 1) * 7 + 1;
     const endDay = Math.min(weekNum * 7, daysInFilterMonth);
     return {
-      start: bsToAD(filterYear, filterMonth, startDay) || monthStart,
-      end:   bsToAD(filterYear, filterMonth, endDay)   || monthEnd,
+      start: (useNP ? bsToAD(filterYear, filterMonth, startDay) : new Date(filterYear, filterMonth - 1, startDay)) || monthStart,
+      end:   (useNP ? bsToAD(filterYear, filterMonth, endDay)   : new Date(filterYear, filterMonth - 1, endDay))   || monthEnd,
     };
-  }, [filterYear, filterMonth, daysInFilterMonth, todayBS, monthStart, monthEnd]);
+  }, [filterYear, filterMonth, daysInFilterMonth, todayBS, monthStart, monthEnd, useNP]);
 
   /* Re-seed the Shift Wise range whenever Fiscal Year / Month changes. */
   useEffect(() => {
@@ -1656,7 +1670,7 @@ const RosterReport = () => {
         onFYChange={setFilterFYId}
         filterMonth={filterMonth}
         onMonthChange={setFilterMonth}
-        monthLabel={monthLabel}
+        monthLabel={monthLabel} months={MONTHS}
         rangeFrom={shiftRangeFrom}
         rangeTo={shiftRangeTo}
         onRangeFromChange={setShiftRangeFrom}
@@ -1703,7 +1717,7 @@ const RosterReport = () => {
         <div style={{ flex: 1, minWidth: 260 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', marginBottom: 4 }}>Month</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {BS_MONTHS_EN.map((m, i) => (
+            {MONTHS.map((m, i) => (
               <button key={m} onClick={() => setFilterMonth(i + 1)}
                 style={{ padding: '5px 10px', border: `1.5px solid ${filterMonth === i + 1 ? '#1a56db' : '#e5e7eb'}`,
                   borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600,

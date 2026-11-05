@@ -24,7 +24,7 @@ const isoDate = (d) =>
 const DOW_NP = { Sun:'आइत', Mon:'सोम', Tue:'मंगल', Wed:'बुध', Thu:'बिही', Fri:'शुक्र', Sat:'शनि' };
 
 /* ── Status cell config ──────────────────────────────────────── */
-const STATUS = {
+const STATUS_BASE = {
   P  : { color:'#059669', main:'P',   sup:null,  title:'Present'                   },
   P1 : { color:'#0369a1', main:'P',   sup:'1P',  title:'Present – single punch'    },
   PP : { color:'#ca8a04', main:'H.P', sup:null,  title:'Present on Public Holiday' },
@@ -40,7 +40,16 @@ const STATUS = {
   OV : { color:'#2563eb', main:'OV',  sup:null,  title:'Office Visit'              },
   PH : { color:'#d97706', main:'H',   sup:null,  title:'Public Holiday'            },
   PLH: { color:'#059669', main:'P-L', sup:'½',   title:'Present + Half-day Leave'  },
+  // Before the staff's Attendance Date — not counted as Present or Absent.
+  NA : { color:'#d1d5db', main:'',    sup:null,  title:''                          },
 };
+
+// A tenant's own off shift arrives as 'OFF:<label>' (e.g. 'OFF:Due D/O') — shown with that label, like the roster.
+const STATUS = new Proxy(STATUS_BASE, {
+  get: (t, k) => (typeof k === 'string' && k.startsWith('OFF:'))
+    ? { color:'#6b7280', main:k.slice(4), sup:null, title:k.slice(4).split('D/O').join('Day Off').split('N/O').join('Night Off') }
+    : t[k],
+});
 
 // STATUS's own `title`/`main`/`sup` are the English defaults, used as-is for
 // Print/Export (kept universal there so an exported file reads the same
@@ -48,8 +57,8 @@ const STATUS = {
 // STATUS_NP/statusDisplay below when the app is in Nepali — see StatusCell.
 const STATUS_TITLE_NP = {
   P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', PP1: 'सार्वजनिक बिदामा उपस्थित – एकल पन्च',
-  WP: 'सप्ताहान्तमा उपस्थित', WP1: 'सप्ताहान्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित',
-  H: 'विकेन्ड', DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', LH: 'आधा दिन बिदा',
+  WP: 'सप्ताहन्तमा उपस्थित', WP1: 'सप्ताहन्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित',
+  H: 'सप्ताहन्त', DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', LH: 'आधा दिन बिदा',
   OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा', PLH: 'उपस्थित + आधा दिन बिदा',
 };
 const STATUS_NP = {
@@ -78,9 +87,18 @@ const statusTitle = (st, language) => {
   return language === 'np' ? (STATUS_TITLE_NP[st] || s.title) : s.title;
 };
 
-const StatusCell = ({ st, language }) => {
+// Leave days show the leave type's short code (AL, SL…) from Settings → Leave Types
+// instead of the generic "L". Half-day leave keeps its ½ superscript.
+const withLeaveCode = (disp, st, code) => {
+  if (!code) return disp;
+  if (st === 'L' || st === 'LH') return { ...disp, main: code };
+  if (st === 'PLH') return { ...disp, main: `P-${code}` };
+  return disp;
+};
+
+const StatusCell = ({ st, language, code }) => {
   const s = STATUS[st] || STATUS.AB;
-  const disp = statusDisplay(st, language);
+  const disp = withLeaveCode(statusDisplay(st, language), st, code);
   return (
     <span style={{ color:s.color, fontSize:12, fontWeight:700,
       display:'block', textAlign:'center', cursor:'default', whiteSpace:'nowrap' }}
@@ -94,10 +112,11 @@ const StatusCell = ({ st, language }) => {
    have no `.label` field (only `main`/`sup`, used for the on-screen
    superscript), so a blank status here means every attendance cell in the
    printed/exported output is empty even though the grid shows it fine. */
-const statusText = (st) => {
+const statusText = (st, code) => {
   const s = STATUS[st];
   if (!s) return '';
-  return s.sup ? `${s.main}(${s.sup})` : s.main;
+  const d = withLeaveCode(s, st, code);
+  return d.sup ? `${d.main}(${d.sup})` : d.main;
 };
 
 /* ── Advanced Search Modal ───────────────────────────────────── */
@@ -206,15 +225,15 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14 }}>
             <Field label={L('कर्मचारी','Staff')}>
               <SearchableCheckSelect options={empOpts} value={local.staffId} showAvatar
-                onChange={v=>set('staffId',v)} allLabel={L('All Staff','All Staff')} />
+                onChange={v=>set('staffId',v)} allLabel={L('सबै कर्मचारी','All Staff')} />
             </Field>
             <Field label={L('शाखा','Branch')}>
               <SearchableCheckSelect options={branches} value={local.branch}
-                onChange={v=>set('branch',v)} allLabel={L('All Branches','All Branches')} />
+                onChange={v=>set('branch',v)} allLabel={L('सबै शाखा','All Branches')} />
             </Field>
             <Field label={L('विभाग','Department')}>
               <SearchableCheckSelect options={depts} value={local.dept}
-                onChange={v=>set('dept',v)} allLabel={L('All Depts','All Depts')} />
+                onChange={v=>set('dept',v)} allLabel={L('सबै विभाग','All Depts')} />
             </Field>
           </div>
 
@@ -222,15 +241,15 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14 }}>
             <Field label={L('पद','Post')}>
               <SearchableCheckSelect options={posts} value={local.post}
-                onChange={v=>set('post',v)} allLabel={L('All Posts','All Posts')} />
+                onChange={v=>set('post',v)} allLabel={L('सबै पद','All Posts')} />
             </Field>
             <Field label={L('ग्रेड','Grade')}>
               <SearchableCheckSelect options={grades} value={local.grade}
-                onChange={v=>set('grade',v)} allLabel={L('All Grades','All Grades')} />
+                onChange={v=>set('grade',v)} allLabel={L('सबै ग्रेड','All Grades')} />
             </Field>
             <Field label={L('नियुक्ति','Mode')}>
               <SearchableCheckSelect options={modes} value={local.mode}
-                onChange={v=>set('mode',v)} allLabel={L('All Modes','All Modes')} />
+                onChange={v=>set('mode',v)} allLabel={L('सबै मोड','All Modes')} />
             </Field>
           </div>
 
@@ -238,11 +257,11 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14 }}>
             <Field label={L('टाइमिङ प्रकार','Timing Type')}>
               <SearchableCheckSelect options={timingTypes} value={local.timingType}
-                onChange={v=>set('timingType',v)} allLabel={L('All Types','All Types')} />
+                onChange={v=>set('timingType',v)} allLabel={L('सबै प्रकार','All Types')} />
             </Field>
             <Field label={L('सिफ्ट','Shift')}>
               <SearchableCheckSelect options={shiftOpts} value={local.shift}
-                onChange={v=>set('shift',v)} allLabel={L('All Shifts','All Shifts')} />
+                onChange={v=>set('shift',v)} allLabel={L('सबै शिफ्ट','All Shifts')} />
             </Field>
             <div />
           </div>
@@ -364,27 +383,29 @@ const MonthlyPresentAbsentReport = () => {
 
   const period    = data?.period;
   const dates     = data?.dates     || [];
-  const allRows = (data?.employees || []).map(emp => {
+  const allRows = [...new Map((data?.employees || []).map(e => [e.id, e])).values()].map(emp => {
     const newDays = { ...emp.days };
+    const newCodes = { ...(emp.leaveCodes || {}) };
     Object.keys(newDays).forEach(dateStr => {
       if (newDays[dateStr] === 'AB') {
         const leave = getApprovedLeaveForDate(emp.id, dateStr);
-        if (leave) newDays[dateStr] = 'L';
+        if (leave) { newDays[dateStr] = 'L'; if (leave.leaveTypeCode) newCodes[dateStr] = leave.leaveTypeCode; }
       }
     });
-    return { ...emp, days: newDays };
+    return { ...emp, days: newDays, leaveCodes: newCodes };
   });
 
   /* ── Client-side filtering ── */
+  const nz = v => String(v ?? '').trim().toLowerCase();
   const employees = allRows.filter(e => {
-    if (filters.staffId  && String(e.id) !== filters.staffId)       return false;
-    if (filters.branch   && e.branch     !== filters.branch)         return false;
-    if (filters.dept     && e.department !== filters.dept)           return false;
-    if (filters.post     && e.position   !== filters.post)           return false;
-    if (filters.grade    && e.grade      !== filters.grade)          return false;
-    if (filters.mode     && e.mode       !== filters.mode)           return false;
-    if (filters.timingType && e.timingType !== filters.timingType)   return false;
-    if (filters.shift    && e.shift      !== filters.shift)          return false;
+    if (filters.staffId    && String(e.id) !== filters.staffId)           return false;
+    if (filters.branch     && nz(e.branch)     !== nz(filters.branch))     return false;
+    if (filters.dept       && nz(e.department) !== nz(filters.dept))       return false;
+    if (filters.post       && nz(e.position)   !== nz(filters.post))       return false;
+    if (filters.grade      && nz(e.grade)      !== nz(filters.grade))      return false;
+    if (filters.mode       && nz(e.mode)       !== nz(filters.mode))       return false;
+    if (filters.timingType && nz(e.timingType) !== nz(filters.timingType)) return false;
+    if (filters.shift      && nz(e.shift)      !== nz(filters.shift))      return false;
     return true;
   });
 
@@ -473,16 +494,30 @@ const MonthlyPresentAbsentReport = () => {
   const rptTitle = 'Monthly Present Absent Report';
   const rptSub = () => periodLabel();
 
+  /* Print-only Nepali status label — Export deliberately stays English-only
+     (statusText above) so the .xlsx reads the same for whoever opens it, but
+     a printed page is a local, view-language document, so it should match
+     what's already on screen (see STATUS_NP / statusDisplay). */
+  const statusTextPrint = (st, code) => {
+    const s = STATUS[st];
+    if (!s) return '';
+    const disp = withLeaveCode(language === 'np' ? (STATUS_NP[st] || s) : s, st, code);
+    return disp.sup ? `${disp.main}(${disp.sup})` : disp.main;
+  };
+
   const handlePrint = () => {
     if (!employees.length) return;
+    const printTitle = L('मासिक उपस्थित/अनुपस्थित रिपोर्ट', rptTitle);
     // Sequential day numbers: BS mode = 1,2,...N; AD mode = actual AD day
     const dayHeaders = dates.map((d, idx) => {
-      const dispNum = useNP ? (idx + 1) : d.dayNum;
-      return `<th style="padding:2px 3px;border:1px solid #dedede;background:#efefef;font-size:9px;text-align:center;white-space:nowrap">${dispNum}<br/><span style="font-weight:500;color:#6b7280">${d.dayKey.slice(0,3)}</span></th>`;
+      const num = useNP ? (idx + 1) : d.dayNum;
+      const dispNum = settings.nepaliDigits ? toNepaliDigits(num) : num;
+      const dow = language === 'np' ? (DOW_NP[d.dayKey] || d.dayKey.slice(0,3)) : d.dayKey.slice(0,3);
+      return `<th style="padding:2px 3px;border:1px solid #dedede;background:#efefef;font-size:9px;text-align:center;white-space:nowrap">${dispNum}<br/><span style="font-weight:500;color:#6b7280">${dow}</span></th>`;
     }).join('');
     const dataRows = employees.map((e,i) => {
       const dayCells = dates.map(d => {
-        const lbl = statusText(e.days[d.date]);
+        const lbl = statusTextPrint(e.days[d.date], e.leaveCodes?.[d.date]);
         const bg = e.days[d.date]==='AB'?'#fff0f0':e.days[d.date]==='P'||e.days[d.date]==='PP'||e.days[d.date]==='PP1'||e.days[d.date]==='WP'||e.days[d.date]==='WP1'||e.days[d.date]==='PLH'?'#f0fff4':
                    e.days[d.date]==='H'?'#f9fafb':e.days[d.date]==='PH'?'#fffbeb':'white';
         const col = STATUS[e.days[d.date]]?.color || '#374151';
@@ -506,11 +541,11 @@ const MonthlyPresentAbsentReport = () => {
     const contentHtml = `<table style="border-collapse:collapse;width:100%;table-layout:auto">
       <thead><tr>
         <th style="${TH}">SN</th>
-        <th style="${TH}">Staff ID</th>
-        <th style="${TH};text-align:left;min-width:80px">Staff</th>
-        <th style="${TH}">Post</th>
-        <th style="${TH}">Dept</th>
-        <th style="${TH}">Branch</th>
+        <th style="${TH}">${L('स्टाफ आईडी','Staff ID')}</th>
+        <th style="${TH};text-align:left;min-width:80px">${L('कर्मचारी','Staff')}</th>
+        <th style="${TH}">${L('पद','Post')}</th>
+        <th style="${TH}">${L('विभाग','Dept')}</th>
+        <th style="${TH}">${L('शाखा','Branch')}</th>
         ${dayHeaders}
         <th style="padding:3px 4px;border:1px solid #dedede;background:#d1fae5;color:#065f46;font-size:9px;font-weight:700">P</th>
         <th style="padding:3px 4px;border:1px solid #dedede;background:#fee2e2;color:#991b1b;font-size:9px;font-weight:700">AB</th>
@@ -518,7 +553,7 @@ const MonthlyPresentAbsentReport = () => {
       </tr></thead>
       <tbody>${dataRows}</tbody>
     </table>`;
-    openPrintWindow(buildPrintDoc({ settings, language, reportTitle: rptTitle, reportSub: rptSub(), contentHtml, isLandscape: true }), true);
+    openPrintWindow(buildPrintDoc({ settings, language, reportTitle: printTitle, reportSub: rptSub(), contentHtml, isLandscape: true }), true);
   };
 
   /* ── Export to Excel (.xlsx via ExcelJS — xlsx/CSV can't write real
@@ -614,7 +649,7 @@ const MonthlyPresentAbsentReport = () => {
       const branch = resolveShort(e);
       const row = ws.addRow([
         i + 1, e.empCode || '—', e.fullName, post, dept, branch,
-        ...dates.map(d => statusText(e.days[d.date])),
+        ...dates.map(d => statusText(e.days[d.date], e.leaveCodes?.[d.date])),
         e.totalP, e.totalAB, e.eligibleForOt ? (e.otApprovedFormatted || '—') : '—',
       ]);
       row.eachCell({ includeEmpty: true }, (cell, colNum) => {
@@ -757,14 +792,24 @@ const MonthlyPresentAbsentReport = () => {
         <span style={{ fontSize:13,fontWeight:600,color:'#374151',whiteSpace:'nowrap' }}>
           {L('कर्मचारी','Staff')} :
         </span>
-        <select className="form-control" style={{ width:220,height:36,fontSize:13 }}
-          value={filters.staffId}
-          onChange={e => setFilters(p => ({ ...p, staffId: e.target.value }))}>
-          <option value="">— {L('सबै कर्मचारी','All Staff')} —</option>
-          {allRows.map(e => (
-            <option key={e.id} value={String(e.id)}>{e.fullName}</option>
-          ))}
-        </select>
+        {/* Searchable, same control as the Half Present Absent Report */}
+        <div style={{ width:240 }}>
+          <SearchableCheckSelect showAvatar
+            options={[...allRows]
+              .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''))
+              .map(r => {
+                const emp = allEmployees.find(x => String(x.id) === String(r.id)) || {};
+                return {
+                  value: String(r.id),
+                  label: r.fullName || emp.fullName || `Staff ${r.id}`,
+                  sub:   [emp.employeeId, emp.position].filter(Boolean).join(' - '),
+                  photo: emp.profilePhoto,
+                };
+              })}
+            value={filters.staffId}
+            onChange={v => setFilters(p => ({ ...p, staffId: v }))}
+            allLabel={L('सबै कर्मचारी','All Staff')} />
+        </div>
 
         {/* Advance Search button */}
         <button onClick={() => setShowSearch(true)}
@@ -916,7 +961,7 @@ const MonthlyPresentAbsentReport = () => {
 
                   {dates.map(({ date }) => (
                     <td key={date} style={{ ...tdBase, padding:'3px' }}>
-                      <StatusCell st={emp.days[date]} language={language} />
+                      <StatusCell st={emp.days[date]} language={language} code={emp.leaveCodes?.[date]} />
                     </td>
                   ))}
 
@@ -994,7 +1039,7 @@ const MonthlyPresentAbsentReport = () => {
               { st:'P',  desc:L('उपस्थित','Present')                   },
               { st:'P1', desc:L('एकल पन्च','Single Punch')              },
               { st:'AB', desc:L('अनुपस्थित','Absent')                  },
-              { st:'H',  desc:L('विकेन्ड (स = सप्ताह)','Weekend (W)')   },
+              { st:'H',  desc:L('सप्ताहन्त (स)','Weekend (W)')   },
               { st:'DO', desc:L('डे अफ','Day Off')                     },
               { st:'NO', desc:L('नाइट अफ','Night Off')                 },
               { st:'L',  desc:L('बिदा','Leave')                        },
@@ -1003,7 +1048,7 @@ const MonthlyPresentAbsentReport = () => {
               { st:'OV', desc:L('कार्यालय भ्रमण','Office Visit')       },
               { st:'PH', desc:L('सार्वजनिक बिदा','Public Holiday')     },
               { st:'PP', desc:L('सार्वजनिक बिदामा उपस्थित (H.P)','Present on Public Holiday (H.P)') },
-              { st:'WP', desc:L('सप्ताहान्तमा उपस्थित (W.P)','Present on Weekend (W.P)') },
+              { st:'WP', desc:L('सप्ताहन्तमा उपस्थित (W.P)','Present on Weekend (W.P)') },
             ].map(({ st, desc }) => {
               const s = STATUS[st];
               const disp = statusDisplay(st, language);

@@ -6,15 +6,16 @@ import { useData } from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
-import { getNepalTodayISO } from '../../utils/dateUtils.js';
+import { getNepalTodayISO, makeDateFormatter } from '../../utils/dateUtils.js';
+import AlertPopup, { alertFromSaveError } from '../Common/AlertPopup.jsx';
 
 /* ── Date input that respects calendar setting — mirrors LeaveApplyModal.jsx ── */
-const LeaveDateInput = ({ value, onChange, error, settings }) => {
+const LeaveDateInput = ({ value, onChange, error, settings, minDate }) => {
   const blockPast = settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
   }
-  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
 };
 
 const LeaveApplication = () => {
@@ -59,9 +60,12 @@ const LeaveApplication = () => {
   };
 
   const handleChange = (field, val) => {
-    setForm(p => ({ ...p, [field]: val }));
+    // picking From Date copies it into To Date
+    setForm(p => ({ ...p, [field]: val, ...(field === 'fromDate' ? { toDate: val } : {}) }));
     setErrors(p => ({ ...p, [field]: '', days: '' }));
   };
+
+  const [saveAlert, setSaveAlert] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -69,7 +73,13 @@ const LeaveApplication = () => {
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSubmitting(true);
     await new Promise(r => setTimeout(r, 600));
-    addLeave({ employeeId: currentUser.id, ...form, days: calcDays() });
+    try {
+      await addLeave({ employeeId: currentUser.id, ...form, days: calcDays() }, { throwOnReject: true });
+    } catch (err) {
+      setSubmitting(false);
+      setSaveAlert(alertFromSaveError(err, makeDateFormatter(settings)));
+      return;
+    }
     setSubmitting(false);
     setSuccess(true);
     setTimeout(() => navigate('/leave'), 2000);
@@ -80,6 +90,7 @@ const LeaveApplication = () => {
 
   return (
     <div className="page-container">
+      <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
       <div className="page-header">
         <div>
           <div className="breadcrumb">
@@ -131,14 +142,14 @@ const LeaveApplication = () => {
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label required">{t('From Date')}</label>
-                  <LeaveDateInput value={form.fromDate} min={today} error={errors.fromDate}
+                  <LeaveDateInput value={form.fromDate} error={errors.fromDate}
                     settings={settings}
                     onChange={v => handleChange('fromDate', v)} />
                   {errors.fromDate && <div className="form-error">{errors.fromDate}</div>}
                 </div>
                 <div className="form-group">
                   <label className="form-label required">{t('To Date')}</label>
-                  <LeaveDateInput value={form.toDate} min={form.fromDate || today} error={errors.toDate}
+                  <LeaveDateInput value={form.toDate} minDate={form.fromDate} error={errors.toDate}
                     settings={settings}
                     onChange={v => handleChange('toDate', v)} />
                   {errors.toDate && <div className="form-error">{errors.toDate}</div>}

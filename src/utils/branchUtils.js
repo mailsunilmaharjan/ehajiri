@@ -4,11 +4,45 @@
  *   - Known branch     → shortName from settings.branches
  *   - Unknown          → auto-abbreviation (initials or first 4 uppercase)
  */
+/**
+ * The branch value staff at the company's HQ carry — Settings → Company
+ * Information "Short Name", "Head Office" when unset (never the company's
+ * full name; migration v152 moved staff saved under it). A staff member with
+ * no branch at all is treated as being at HQ too — see isHQBranch.
+ */
+export const HQ_DEFAULT_NAME = 'Head Office';
+export const hqBranchName = (settings) =>
+  (settings?.companyShortName || '').trim() || HQ_DEFAULT_NAME;
+
+/** True for the HQ branch value, a blank branch, or the legacy company-name value. */
+export const isHQBranch = (branch, settings) => {
+  const b = String(branch || '').trim().toLowerCase();
+  if (!b) return true;
+  return [hqBranchName(settings), settings?.companyNameEn, settings?.companyNameNp]
+    .some(n => n && String(n).trim().toLowerCase() === b);
+};
+
+/**
+ * Company HQ / Branch dropdown options: "Head Office (HQ)" first, then every
+ * Settings → Branch entry except one that shares the HQ name (a tenant that
+ * had created its own "Head Office" branch would otherwise see it twice).
+ */
+export const branchSelectOptions = (settings) => {
+  const hq = hqBranchName(settings);
+  return [
+    { value: hq, label: `${hq} (HQ)` },
+    ...(settings?.branches || [])
+      .filter(b => String(b.name || '').trim().toLowerCase() !== hq.toLowerCase())
+      .map(b => ({ value: b.name, label: b.name })),
+  ];
+};
+
 export const branchAbbr = (name, settings) => {
   if (!name || name === '—') return '—';
   const en = (settings?.companyNameEn || '').trim();
   const np = (settings?.companyNameNp || '').trim();
-  if ((en && name === en) || (np && name === np)) return 'HQ';
+  const hq = hqBranchName(settings);
+  if ((en && name === en) || (np && name === np) || (hq && name === hq)) return 'HQ';
   const found = (settings?.branches || []).find(b => b.name === name);
   if (found?.shortName) return found.shortName;
   const words = name.trim().split(/\s+/);

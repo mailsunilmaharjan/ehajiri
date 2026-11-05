@@ -10,7 +10,7 @@ import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
-import { leaveShort } from '../../utils/inOutStatus.js';
+import { presentSymbol, leaveShort } from '../../utils/inOutStatus.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -44,7 +44,7 @@ const ROWS = [
 // ROWS is module-level (defined before `language` exists), so its `label`
 // stays untranslated English there — resolve the displayed text at render
 // time instead.
-const ROW_LABEL_NP = { in:'आउने', out:'जाने', wh:'घण्टा', ot:'ओभरटाइम' };
+const ROW_LABEL_NP = { in:'आएको', out:'गएको', wh:'घण्टा', ot:'ओभरटाइम' };
 const rowLabel = (key, language, fallback) => (language === 'np' ? (ROW_LABEL_NP[key] || fallback) : fallback);
 
 /* ── Staff Select dropdown ── */
@@ -214,6 +214,7 @@ const YearlyInOutReport = () => {
           otHrs:     d2.otHrs||null,
           punches:   d2.punches||0,
           leave:     d2.leave||null,
+          absent:    !!d2.absent,
           isWeekend: meta.isWeekend||false,
           // Prefer this employee's own scoped holiday flag (a holiday can be
           // limited to e.g. Gender=Female) — meta.isHoliday is the shared,
@@ -241,16 +242,19 @@ const YearlyInOutReport = () => {
       if (rowKey==='in') return { text:leaveShort(d.leave), color:'#5b21b6', bg:'#ede9fe', mono:false, isLeave:true, title:d.leave.name };
       return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'white', mono:false };
     }
-    if (d.isWeekend) {
+    if (d.isWeekend && !d.timeIn) {
       if (rowKey==='ot') return { text:'—', color:'#e5e7eb', bg:'#faf5ff', mono:false };
-      return { text:'W', color:'#9ca3af', bg:'#f3f4f6', mono:false };
+      return { text:L('स','W'), color:'#9ca3af', bg:'#f3f4f6', mono:false, isWeekend:true };
     }
     if (d.isHoliday && !d.timeIn) {
-      if (rowKey==='in') return { text:(d.holidayName||'PH').slice(0,8), color:'#92400e', bg:'#fef3c7', mono:false, small:true };
+      if (rowKey==='in') return { text:(d.holidayName||'PH').slice(0,8), color:'#92400e', bg:'#fef3c7', mono:false, small:true, title:d.holidayName||L('सार्वजनिक बिदा','Public Holiday') };
       return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'#fef9e7', mono:false };
     }
+    // No punch at all on a past working day (server-computed `absent`).
+    if (d.absent && rowKey==='in') return { text:L('अनु','AB'), color:'#991b1b', bg:'#fee2e2', mono:false, isLeave:true, title:L('अनुपस्थित','Absent') };
     // Half-day leave still has a real punch — show the time with "SL 1/2" under it.
-    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:'#1a56db',bg:'white',   mono:true, sub: d.leave?.halfDay ? `${leaveShort(d.leave)} 1/2` : null} :{text:'—',color:'#e5e7eb',bg:'white',   mono:false};
+    const sym = rowKey==='in' ? presentSymbol(d, d.isWeekend, d.isHoliday, L) : null;
+    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:'#1a56db',bg:'white',   mono:true, top:sym?.text, topColor:sym?.color, topTitle:sym?.title, sub: d.leave?.halfDay ? `${leaveShort(d.leave)} 1/2` : null} :{text:'—',color:'#e5e7eb',bg:'white',   mono:false};
     if (rowKey==='out') return d.timeOut   ? {text:d.timeOut,   color:'#059669',bg:'white',   mono:true} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
     if (rowKey==='wh')  return d.workedHrs ? {text:d.workedHrs, color:'#374151',bg:'#fafafa', mono:true} : {text:'—',color:'#e5e7eb',bg:'#fafafa', mono:false};
     if (rowKey==='ot')  return d.otHrs     ? {text:d.otHrs,     color:'#7c3aed',bg:'#faf5ff', mono:true} : {text:'—',color:'#e5e7eb',bg:'#faf5ff', mono:false};
@@ -309,7 +313,7 @@ const YearlyInOutReport = () => {
                     const v = getCellValue(d, rk);
                     return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:9px">${!v ? '' : v.isLeave
                       ? `<span style="font-weight:800;color:${v.color}">${v.text}</span>`
-                      : `${v.text}${v.sub ? `<br/><span style="font-size:6.5px;font-weight:800;color:#5b21b6">${v.sub}</span>` : ''}`}</td>`;
+                      : `${v.top ? `<span style="display:block;font-size:6.5px;font-weight:800;color:${v.topColor}">${v.top}</span>` : ''}${v.text}${v.sub ? `<br/><span style="font-size:6.5px;font-weight:800;color:#5b21b6">${v.sub}</span>` : ''}`}</td>`;
                   });
                   return `<tr>
                     <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:10px;font-weight:700">${rowLabels[rk]}</td>
@@ -407,9 +411,12 @@ const YearlyInOutReport = () => {
       {!loading && matrix.length>0 && (
         <>
           <div style={{ fontSize:13,fontWeight:700,color:'#374151',marginBottom:8 }}>{L('विवरण','Detail')}</div>
-          <div style={{ overflowX:'auto',borderRadius:8,border:'1px solid #dedede',boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
+          {/* Own scroll box (both axes) + sticky <thead> so the header freezes
+              while scrolling down — with only overflowX set, the page scrolled
+              instead and the header scrolled away with it. */}
+          <div style={{ maxHeight:'calc(100vh - 150px)',overflow:'auto',borderRadius:8,border:'1px solid #dedede',boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
             <table style={{ borderCollapse:'collapse',width:'100%' }}>
-              <thead>
+              <thead style={{ position:'sticky',top:0,zIndex:5 }}>
                 <tr>
                   <th style={{ ...TH,minWidth:78,textAlign:'left',left:0,zIndex:4 }}>Month</th>
                   <th style={{ ...TH,minWidth:82,left:78,zIndex:4,background:'#f5f5f5',textAlign:'left',paddingLeft:8 }}></th>
@@ -483,9 +490,10 @@ const YearlyInOutReport = () => {
                               width:52,minWidth:52 }}
                               title={dayData?.dateStr?fd(dayData.dateStr):''}>
                               {!cell ? <span style={{ color:'#f0f0f0',fontSize:9 }}>·</span>
-                                : cell.text==='—'||cell.text==='W'
-                                  ? <span style={{ color:cell.color,fontSize:cell.text==='W'?11:10,fontWeight:600 }}>{cell.text}</span>
+                                : cell.text==='—'||cell.isWeekend
+                                  ? <span style={{ color:cell.color,fontSize:cell.isWeekend?11:10,fontWeight:600 }}>{cell.text}</span>
                                   : <div style={{ display:'flex',flexDirection:'column',alignItems:'center',lineHeight:1.15 }}>
+                                      {cell.top && <span title={cell.topTitle||''} style={{ fontSize:9,fontWeight:800,color:cell.topColor,marginBottom:1,cursor:'help' }}>{cell.top}</span>}
                                       <span title={cell.title||''} style={{ fontFamily:cell.mono?'monospace':'inherit',
                                         fontSize:cell.small?9:12,fontWeight:cell.isLeave?800:700,color:cell.color,
                                         cursor:cell.title?'help':undefined }}>
@@ -512,8 +520,9 @@ const YearlyInOutReport = () => {
             borderRadius:8,border:'1px solid #e5e7eb',alignItems:'center' }}>
             <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
             {ROWS.map(r=><span key={r.key}><strong style={{ color:r.color,fontFamily:'monospace' }}>HH:MM</strong> = {rowLabel(r.key, language, r.label)}</span>)}
-            <span style={{ background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:4,padding:'1px 7px',color:'#9ca3af',fontWeight:700 }}>W</span>= {L('विकेन्ड','Weekend')}
+            <span style={{ background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:4,padding:'1px 7px',color:'#9ca3af',fontWeight:700 }}>{L('स','W')}</span>= {L('सप्ताहन्त','Weekend')}
             <span style={{ background:'#fef3c7',border:'1px solid #fde68a',borderRadius:4,padding:'1px 7px',color:'#92400e',fontWeight:700 }}>PH</span>= {L('सार्वजनिक बिदा','Public Holiday')}
+            <span style={{ background:'#fee2e2',border:'1px solid #fecaca',borderRadius:4,padding:'1px 7px',color:'#991b1b',fontWeight:700 }}>{L('अनु','AB')}</span>= {L('अनुपस्थित','Absent')}
             <span style={{ background:'#ede9fe',border:'1px solid #ddd6fe',borderRadius:4,padding:'1px 7px',color:'#5b21b6',fontWeight:700 }}>SL</span>= {L('बिदा (बिदा प्रकारको कोड)','Leave (leave type code)')}
           </div>
         </>

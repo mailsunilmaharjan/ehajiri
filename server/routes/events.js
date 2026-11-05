@@ -10,7 +10,7 @@ const router = Router();
 // confused with) a real login/SSO token even though the signing key
 // is shared. Long-lived (30d) since a printed/displayed QR is meant to
 // stay valid for the whole run-up to and duration of the event.
-const JWT_SECRET = process.env.JWT_SECRET || 'ehajiri_jwt_secret_change_me';
+import { JWT_SECRET } from '../utils/secrets.js';
 
 /* GET /api/events/:id/checkin-token?contactId=  — staff-only, mints the
    token a "Scan to Check In" QR encodes for one (event, company) pair. */

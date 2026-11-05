@@ -21,15 +21,25 @@
  * "record a decision someone else already made" pickers) — everyone else is
  * always recorded as themselves.
  */
+import { notifyApplicantOf, notifyApproversNext } from '../services/approvalNotify.js';
 import { Router } from 'express';
 import pool       from '../db.js';
 import { logError } from '../utils/logError.js';
-import { resolveOrgScope, resolveOrgEmployeeIds } from './orgScope.js';
+import { resolveOrgScope, resolveOrgEmployeeIds, canManagerManualPost } from './orgScope.js';
 import { loadRosterMap, getEffectiveRoster, isRosterWeekend, bucketPunchesByShiftDay, resolveWinterShift } from './attendance.js';
 import { authorizeRecoAction } from '../services/recoApprovalGuard.js';
 
 const router  = Router();
 const PRIVILEGED_ROLES = ['admin', 'superAdmin'];
+
+// Branch Manager / Branch Area Manager approving OT for their own branch staff
+// or themself counts as their Manual Posting and is allowed outright (see
+// canManagerManualPost); everyone else goes through the normal configured
+// recommender/approver check.
+async function authorizeOtAction(req, employeeId, action, opts) {
+  if (await canManagerManualPost(req, employeeId).catch(() => false)) return null;
+  return authorizeRecoAction(req, employeeId, action, opts);
+}
 const pad2    = (n) => String(Math.round(n)).padStart(2, '0');
 const toHHMM  = (m) => `${pad2(Math.floor(Math.abs(m)/60))}:${pad2(Math.abs(m)%60)}`;
 const toDateS = (v) => {
@@ -157,9 +167,9 @@ router.get('/', async (req, res) => {
         s.winter_policy                  AS shift_winter_policy
       FROM users u
       LEFT JOIN shifts      s  ON s.code = u.shift
-      LEFT JOIN branches    br ON br.name = u.branch
-      LEFT JOIN posts       p  ON p.name  = u.position
-      LEFT JOIN departments d  ON d.name  = u.department
+      LEFT JOIN LATERAL (SELECT * FROM branches WHERE name = u.branch ORDER BY id LIMIT 1) br ON TRUE
+      LEFT JOIN LATERAL (SELECT * FROM posts WHERE name = u.position ORDER BY id LIMIT 1) p ON TRUE
+      LEFT JOIN LATERAL (SELECT * FROM departments WHERE name = u.department ORDER BY id LIMIT 1) d ON TRUE
       WHERE u.active = TRUE
         ${scopeCond}
     `, [shiftName, ...scopeParams]);
@@ -436,14 +446,15 @@ router.patch('/:id/recommend', async (req, res) => {
   try {
     const { rows: existingRows } = await pool.query('SELECT employee_id FROM overtime_approvals WHERE id=$1', [req.params.id]);
     if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
-    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'recommend');
+    const authError = await authorizeOtAction(req, existingRows[0].employee_id, 'recommend');
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(
-      `UPDATE overtime_approvals SET recommended_by=$1, recommended_date=CURRENT_DATE WHERE id=$2 RETURNING *`,
-      [req.user.id, req.params.id]
+      `UPDATE overtime_approvals SET recommended_by=$1, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($3,''), comment) WHERE id=$2 RETURNING *`,
+      [req.user.id, req.params.id, String(req.body?.comment || '').slice(0, 500)]
     );
     if (!rows[0]) return res.status(404).json({ error: 'OT record not found' });
+    notifyApproversNext(existingRows[0].employee_id, req.user.id, { subject: 'Overtime recommended — needs approval', body: `An overtime record for ${String(rows[0].date).slice(0, 10)} was recommended and is waiting for your approval.`, path: '/m/approvals' });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -454,19 +465,20 @@ router.patch('/:id/recommend', async (req, res) => {
    that's never been touched needs the same insert-or-update-by-(employee,date)
    shape as approve-inline below, rather than requiring a PATCH :id first. */
 router.post('/recommend-inline', async (req, res) => {
-  const { employeeId, date, otMinutes } = req.body;
+  const { employeeId, date, otMinutes, comment } = req.body;
   if (!employeeId || !date) return res.status(400).json({ error: 'employeeId and date required' });
   try {
-    const authError = await authorizeRecoAction(req, employeeId, 'recommend');
+    const authError = await authorizeOtAction(req, employeeId, 'recommend');
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(`
-      INSERT INTO overtime_approvals (employee_id, date, ot_minutes, status, recommended_by, recommended_date)
-      VALUES ($1, $2, $3, 'pending', $4, CURRENT_DATE)
+      INSERT INTO overtime_approvals (employee_id, date, ot_minutes, status, recommended_by, recommended_date, comment)
+      VALUES ($1, $2, $3, 'pending', $4, CURRENT_DATE, $5)
       ON CONFLICT (employee_id, date) DO UPDATE
-        SET recommended_by=$4, recommended_date=CURRENT_DATE
+        SET recommended_by=$4, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($5,''), overtime_approvals.comment)
       RETURNING *
-    `, [employeeId, date, otMinutes || 0, req.user.id]);
+    `, [employeeId, date, otMinutes || 0, req.user.id, String(comment || '').slice(0, 500)]);
+    notifyApproversNext(employeeId, req.user.id, { subject: 'Overtime recommended — needs approval', body: `An overtime record for ${String(date).slice(0, 10)} was recommended and is waiting for your approval.`, path: '/m/approvals' });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -479,7 +491,7 @@ router.patch('/:id/approve', async (req, res) => {
       'SELECT employee_id, recommended_by FROM overtime_approvals WHERE id=$1', [req.params.id]
     );
     if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
-    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'approve',
+    const authError = await authorizeOtAction(req, existingRows[0].employee_id, 'approve',
       { alreadyRecommended: !!existingRows[0].recommended_by });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
@@ -491,6 +503,7 @@ router.patch('/:id/approve', async (req, res) => {
        RETURNING *
     `, [req.user.id, comment || '', approvedOTMins ?? null, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'OT record not found' });
+    notifyApplicantOf(existingRows[0].employee_id, req.user.id, { subject: 'Overtime approved', body: `Your overtime for ${String(rows[0].date).slice(0, 10)} was approved.${comment ? ' ' + comment : ''}`, path: '/m/attendance' });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -502,7 +515,7 @@ router.patch('/:id/reject', async (req, res) => {
     'SELECT employee_id FROM overtime_approvals WHERE id=$1', [req.params.id]
   );
   if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
-  const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'reject');
+  const authError = await authorizeOtAction(req, existingRows[0].employee_id, 'reject');
   if (authError) return res.status(authError.status).json({ error: authError.error });
 
   const client = await pool.connect();
@@ -520,6 +533,7 @@ router.patch('/:id/reject', async (req, res) => {
     `, [req.user.id, comment || '', req.params.id]);
     if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'OT record not found' }); }
     await client.query('COMMIT');
+    notifyApplicantOf(existingRows[0].employee_id, req.user.id, { subject: 'Overtime rejected', body: `Your overtime for ${String(rows[0].date).slice(0, 10)} was rejected.${comment ? ' Reason: ' + comment : ''}`, path: '/m/attendance' });
     res.json(rows[0]);
   } catch (e) {
     await client.query('ROLLBACK');
@@ -539,7 +553,7 @@ router.post('/approve-inline', async (req, res) => {
     const { rows: existingRows } = await pool.query(
       'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
     );
-    const authError = await authorizeRecoAction(req, employeeId, action,
+    const authError = await authorizeOtAction(req, employeeId, action,
       { alreadyRecommended: !!existingRows[0]?.recommended_by });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
@@ -550,6 +564,7 @@ router.post('/approve-inline', async (req, res) => {
         SET ot_minutes=$3, status=$4, approved_by=$5, approved_date=CURRENT_DATE, comment=$6
       RETURNING *
     `, [employeeId, date, otMinutes || 0, status, req.user.id, comment || '']);
+    notifyApplicantOf(employeeId, req.user.id, { subject: `Overtime ${status}`, body: `Your overtime for ${String(date).slice(0, 10)} was ${status}.${comment ? ' ' + comment : ''}`, path: '/m/attendance' });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -580,7 +595,7 @@ router.post('/approve-leave', async (req, res) => {
     const { rows: existingApprRows } = await pool.query(
       'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
     );
-    const authError = await authorizeRecoAction(req, employeeId, 'approve',
+    const authError = await authorizeOtAction(req, employeeId, 'approve',
       { alreadyRecommended: !!existingApprRows[0]?.recommended_by });
     if (authError) return res.status(authError.status).json({ error: authError.error });
   }
@@ -669,7 +684,7 @@ router.post('/bulk-approve', async (req, res) => {
         const { rows: existingRows } = await pool.query(
           'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [r.employeeId, r.date]
         );
-        const authError = await authorizeRecoAction(req, r.employeeId, action,
+        const authError = await authorizeOtAction(req, r.employeeId, action,
           { alreadyRecommended: !!existingRows[0]?.recommended_by });
         if (authError) { skipped++; continue; }
       }
@@ -690,6 +705,14 @@ router.post('/bulk-approve', async (req, res) => {
 
 /* ── DELETE /api/overtime/:id — reset approval (back to pending) ─────────────── */
 router.delete('/:id', async (req, res) => {
+  // Resetting an OT decision (and reversing its leave-in-lieu credit) used to
+  // have no authorization at all — any logged-in user could reset anyone's OT
+  // approval by id. Same rule as rejecting it.
+  const { rows: ex } = await pool.query('SELECT employee_id FROM overtime_approvals WHERE id=$1', [req.params.id]);
+  if (!ex[0]) return res.status(404).json({ error: 'OT record not found' });
+  const authError = await authorizeOtAction(req, ex[0].employee_id, 'reject');
+  if (authError) return res.status(authError.status).json({ error: authError.error });
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

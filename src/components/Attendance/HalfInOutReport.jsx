@@ -11,7 +11,7 @@ import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
-import { leaveShort, inRowPrintHtml, inRowExcelText } from '../../utils/inOutStatus.js';
+import { leaveShort, presentSymbol, inRowPrintHtml, inRowExcelText } from '../../utils/inOutStatus.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import ExcelJS from 'exceljs';
 
@@ -151,7 +151,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
 
 /* ── Day cell ──────────────────────────────────────────────── */
 const ROW_COLORS = { in:'#1a56db', out:'#059669', wh:'#374151', ot:'#7c3aed' };
-const ROW_LABEL_NP = { in:'आउने', out:'जाने', wh:'घण्टा', ot:'ओभरटाइम' };
+const ROW_LABEL_NP = { in:'आएको', out:'गएको', wh:'घण्टा', ot:'ओभरटाइम' };
 
 const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, language }) => {
   const LL = (np, en) => (language === 'np' ? np : en);
@@ -169,11 +169,12 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
     let badge = null;
     // Public Holiday takes priority over a same-day Leave record — see
     // attendance.js's identical status precedence reasoning.
-    if (isHoliday)        badge = <span title={holidayName||LL('सार्वजनिक बिदा','Public Holiday')} style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('साबि','PH')}</span>;
+    if (isHoliday)        badge = <span title={holidayName||LL('सार्वजनिक बिदा','Public Holiday')} style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{holidayName ? String(holidayName).slice(0,8) : LL('साबि','PH')}</span>;
     else if (day?.leave)  badge = <span title={day.leave.name} style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{leaveShort(day.leave)}</span>;
     else if (day?.visit)  badge = <span title={LL('कार्यालय भ्रमण','Office Visit')} style={{ background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('भ्रमण','OV')}</span>;
-    else if (offType)     badge = <span title={LL(offType==='Night Off'?'नाइट अफ':'डे अफ', offType)} style={{ background: offType==='Night Off' ? '#e0e7ff' : '#e5e7eb', color: offType==='Night Off' ? '#4338ca' : '#6b7280', borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{offType==='Night Off'?LL('रा.अ','NO'):LL('दि.अ','DO')}</span>;
-    else if (isWeekend)   badge = <span title={LL('विकेन्ड','Weekend')} style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('ब','W')}</span>;
+    else if (offType)     badge = <span title={LL(offType==='Night Off'?'नाइट अफ':'डे अफ', offType)} style={{ background: offType==='Night Off' ? '#e0e7ff' : '#e5e7eb', color: offType==='Night Off' ? '#4338ca' : '#6b7280', borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{offType==='Night Off'?LL('रा.अ','NO'):offType==='Day Off'?LL('दि.अ','DO'):String(offType).split('Night Off').join('N/O').split('Day Off').join('D/O')}</span>;
+    else if (isWeekend)   badge = <span title={LL('सप्ताहन्त','Weekend')} style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('स','W')}</span>;
+    else if (day?.absent) badge = <span title={LL('अनुपस्थित','Absent')} style={{ background:'#fee2e2',color:'#991b1b',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:800,cursor:'help' }}>{LL('अनु','AB')}</span>;
     return (
       <td style={{ background:bg,borderRight:bdRight,borderBottom:bdBottom,padding:'3px 4px',minWidth:54,textAlign:'center',verticalAlign:'middle' }}>
         {badge || <span style={{ color:'#d1d5db',fontSize:11 }}>—</span>}
@@ -194,13 +195,14 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
   // A punch on a day that's also a configured Public Holiday — otherwise this
   // just renders as an ordinary time-in with no sign the staff actually came
   // in on a holiday (relevant for comp-off/extra-pay eligibility).
-  const presentOnHoliday = rowKey === 'in' && isHoliday && !!day?.timeIn;
+  const topSym = rowKey === 'in' ? presentSymbol(day, isWeekend, isHoliday, LL) : null;
 
   return (
     <td style={{ background:bg, borderRight:bdRight, borderBottom:bdBottom,
       padding:'3px 4px', minWidth:54, textAlign:'center', verticalAlign:'middle' }}>
       {value
         ? <div style={{ display:'flex', flexDirection:'column', alignItems:'center', lineHeight:1.15 }}>
+            {topSym && <span title={topSym.title} style={{ fontSize:9, fontWeight:800, color:topSym.color, marginBottom:1, cursor:'help' }}>{topSym.text}</span>}
             <span style={{
               fontSize:13,
               fontWeight: (rowKey==='in' || rowKey==='wh') ? 700 : 400,
@@ -211,12 +213,6 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
             {halfLeave && (
               <span title={halfLeave.name} style={{ fontSize:9, fontWeight:800, color:'#5b21b6', marginTop:1 }}>
                 {leaveShort(halfLeave)} 1/2
-              </span>
-            )}
-            {presentOnHoliday && (
-              <span title={holidayName || LL('सार्वजनिक बिदामा हाजिर','Present on Public Holiday')}
-                style={{ fontSize:9, fontWeight:800, color:'#92400e', marginTop:1 }}>
-                {LL('हा-साबि','P-PH')}
               </span>
             )}
           </div>
@@ -498,7 +494,7 @@ const HalfInOutReport = () => {
         const isWH   = ROWS_[rIdx].key === 'wh';
         row.eachCell({ includeEmpty: true }, (cell, colNum) => {
           if (colNum === 2) return;
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
           cell.border = { right: colNum <= 3 ? thin : { style: 'thin', color: { argb: 'FFE5E7EB' } },
             bottom: isLast ? heavy : light };
           // Worked Hours row — day values bold, matching the on-screen matrix.
@@ -646,9 +642,12 @@ const HalfInOutReport = () => {
 
       {/* ── Matrix Table ── */}
       {!loading&&data&&(
-        <div style={{ overflowX:'auto',borderRadius:8,border:'1px solid #dedede',boxShadow:'0 1px 3px rgba(0,0,0,.07)' }}>
+        // Own scroll box (both axes) + sticky <thead> so both header rows
+        // freeze while scrolling down — with only overflowX set, the page
+        // scrolled instead and the header scrolled away with it.
+        <div style={{ maxHeight:'calc(100vh - 150px)',overflow:'auto',borderRadius:8,border:'1px solid #dedede',boxShadow:'0 1px 3px rgba(0,0,0,.07)' }}>
           <table style={{ borderCollapse:'collapse',width:'100%' }}>
-            <thead>
+            <thead style={{ position:'sticky',top:0,zIndex:5 }}>
               {/* Row 1 — day numbers */}
               <tr>
                 <th style={{ ...TH,minWidth:34,position:'sticky',left:0,zIndex:4 }}>SN</th>
@@ -768,13 +767,14 @@ const HalfInOutReport = () => {
           color:'#6b7280',padding:'8px 14px',background:'#f9fafb',
           borderRadius:8,border:'1px solid #e5e7eb',alignItems:'center' }}>
           <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
-          {[['IN','in','#1a56db',L('आउने समय','Time In')],['OUT','out','#059669',L('जाने समय','Time Out')],['WH','wh','#374151',L('काम भएको घण्टा','Worked Hrs')],['OT','ot','#7c3aed',L('ओभरटाइम','Overtime')]].map(([l,key,c,d])=>(
+          {[['IN','in','#1a56db',L('आएको समय','Time In')],['OUT','out','#059669',L('गएको समय','Time Out')],['WH','wh','#374151',L('काम भएको घण्टा','Worked Hrs')],['OT','ot','#7c3aed',L('ओभरटाइम','Overtime')]].map(([l,key,c,d])=>(
             <span key={l} style={{ display:'inline-flex',alignItems:'center',gap:4 }}>
               <span style={{ background:c,color:'white',borderRadius:4,padding:'1px 7px',fontSize:10,fontWeight:800 }}>{L(ROW_LABEL_NP[key], l)}</span>
               <span>= {d}</span>
             </span>
           ))}
-          <span><span style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:800 }}>{L('ब','W')}</span> = {L('विकेन्ड','Weekend')}</span>
+          <span><span style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:800 }}>{L('स','W')}</span> = {L('सप्ताहन्त','Weekend')}</span>
+          <span><span style={{ background:'#fee2e2',color:'#991b1b',borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:800 }}>{L('अनु','AB')}</span> = {L('अनुपस्थित','Absent')}</span>
           <span><span style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:800 }}>{L('साबि','PH')}</span> = {L('सार्वजनिक बिदा','Public Holiday')}</span>
           <span><span style={{ background:'#fde68a',color:'#78350f',borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:800 }}>{L('हा-साबि','P-PH')}</span> = {L('सार्वजनिक बिदामा हाजिर','Present on Public Holiday')}</span>
           <span><strong style={{ color:'#d97706' }}>⚠</strong> = {L('एकल पन्च','Single punch')}</span>

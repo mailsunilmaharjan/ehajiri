@@ -30,7 +30,12 @@ const DateInput = ({ value, onChange, error }) => {
    PayrollItems.jsx. No calculation engine yet — this only stores the
    bracket definitions a future payroll run would apply. */
 
-const emptyForm = { yearlyIncomeSlab: '', effectiveDate: '', incomeFrom: '0', incomeTo: '', ratePercent: '' };
+const APPLIES_OPTS = [
+  { value: 'all',    label: 'Everyone (single and couple)' },
+  { value: 'single', label: 'Single (unmarried) taxpayers' },
+  { value: 'couple', label: 'Couple (married) taxpayers' },
+];
+const emptyForm = { yearlyIncomeSlab: '', effectiveDate: '', incomeFrom: '0', incomeTo: '', ratePercent: '', appliesTo: 'all', isSst: false };
 
 const fmtNum = (v) => v == null ? '—' : Number(v).toLocaleString();
 
@@ -67,6 +72,7 @@ const PayrollTaxSlab = () => {
       incomeFrom: row.incomeFrom != null ? String(row.incomeFrom) : '0',
       incomeTo:   row.incomeTo   != null ? String(row.incomeTo)   : '',
       ratePercent: row.ratePercent != null ? String(row.ratePercent) : '',
+      appliesTo: row.appliesTo || 'all', isSst: !!row.isSst,
     });
     setError(''); setModal(true);
   };
@@ -82,6 +88,7 @@ const PayrollTaxSlab = () => {
       incomeFrom: Number(form.incomeFrom),
       incomeTo:   form.incomeTo === '' ? null : Number(form.incomeTo),
       ratePercent: Number(form.ratePercent),
+      appliesTo: form.appliesTo, isSst: form.isSst,
       rankingOrder: editId ? undefined : items.length + 1,
     };
     try {
@@ -124,6 +131,8 @@ const PayrollTaxSlab = () => {
       { field: 'incomeFrom', header: 'Income From', width: 130, render: v => fmtNum(v) },
       { field: 'incomeTo',   header: 'Income To',   width: 130, render: v => v == null ? 'and above' : fmtNum(v) },
       { field: 'ratePercent', header: 'Rate %', width: 100, render: v => `${v ?? 0}%` },
+      { field: 'appliesTo', header: 'Applies To', width: 110, render: v => ({ single: 'Single', couple: 'Couple' }[v] || 'Everyone') },
+      { field: 'isSst', header: 'Social Security Tax', width: 140, align: 'center', render: v => (v ? 'Yes (waived for SSF)' : '—') },
     ];
     if (canManageSystem) {
       cols.push({
@@ -223,6 +232,20 @@ const PayrollTaxSlab = () => {
                 <input type="number" value={form.ratePercent} onChange={e => setForm(f => ({ ...f, ratePercent: e.target.value }))}
                   style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 10px', fontSize: 13 }} />
               </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Applies To</label>
+                <select value={form.appliesTo} onChange={e => setForm(f => ({ ...f, appliesTo: e.target.value }))}
+                  style={{ height: 36, border: '1px solid #d1d5db', borderRadius: 7, padding: '0 8px', fontSize: 13 }}>
+                  {APPLIES_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>Enter a separate set of slabs for Single and Couple if the rates differ. Use the same Effective Date for all rows of one set.</span>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.isSst} onChange={e => setForm(f => ({ ...f, isSst: e.target.checked }))} />
+                This is the Social Security Tax slab (charged at 0% for employees who contribute to SSF)
+              </label>
 
               {error && <span style={{ fontSize: 11, color: '#dc2626' }}>{error}</span>}
             </div>

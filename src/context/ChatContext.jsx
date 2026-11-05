@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useAuth } from './AuthContext.jsx';
 import { useNotifications } from '../components/Notifications/AttendanceToasts.jsx';
 import { useBeepAlert } from '../hooks/useBeepAlert.js';
-import api, { apiUrl } from '../api/client.js';
+import api, { apiUrl, liveStreamUrl } from '../api/client.js';
 
 const ChatCtx = createContext(null);
 export const useChat = () => useContext(ChatCtx);
@@ -66,10 +66,10 @@ export function ChatProvider({ children }) {
   useEffect(() => {
     if (!currentUser) return;
     let closed = false;
-    const connect = () => {
-      const token = localStorage.getItem('auth_token');
-      if (!token) return;
-      const es = new EventSource(apiUrl(`/attendance/live?token=${encodeURIComponent(token)}`));
+    const connect = async () => {
+      const url = await liveStreamUrl();
+      if (!url || closed) return;
+      const es = new EventSource(url);
       esRef.current = es;
       es.onmessage = (e) => {
         try {

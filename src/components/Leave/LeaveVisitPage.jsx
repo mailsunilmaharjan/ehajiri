@@ -4,6 +4,7 @@ import { useLanguage }  from '../../context/LanguageContext.jsx';
 import { useData }      from '../../context/DataContext.jsx';
 import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import { useSettings }  from '../../context/SettingsContext.jsx';
+import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
 import { makeDateFormatter, getNepalTodayISO, formatNepalDateTime } from '../../utils/dateUtils.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
@@ -19,17 +20,26 @@ import useLeaveOpening from '../../hooks/useLeaveOpening.js';
 import LeaveApproval from './LeaveApproval.jsx';
 import OfficeVisitApproval from '../OfficeVisit/OfficeVisitApproval.jsx';
 import { LeaveAdvancedFilter, DEFAULT_ADV_FILTERS } from './LeaveCalculation.jsx';
-import { isHolidayForEmployee } from '../../utils/holidayScope.js';
+import { countLeaveDays } from '../../utils/holidayScope.js';
+import AlertPopup, { alertFromSaveError } from '../Common/AlertPopup.jsx';
 
 /* date picker that respects settings.defaultCalendar and settings.leaveBackdateEnabled —
    allowPast overrides the block regardless of that setting, for Admin Manual Posting
    (correcting/backfilling records is the whole point of that form; see its own callers). */
-const LeaveDateInput = ({ value, onChange, error, settings, allowPast }) => {
+const LeaveDateInput = ({ value, onChange, error, settings, allowPast, minDate }) => {
   const blockPast = !allowPast && settings.leaveBackdateEnabled === false;
   if (settings.defaultCalendar === 'np') {
-    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+    return <NepaliDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
   }
-  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} />;
+  return <EnglishDatePicker value={value} onChange={onChange} error={error} maxToday={false} minToday={blockPast} minDate={minDate} />;
+};
+
+/* The one active staff configured as a Recommendator/Approver (a single id or
+   an array, per recoConfig), or '' when there are none or several to choose from. */
+const soleActiveId = (cfgIds, employees) => {
+  const ids = [].concat(cfgIds || []).map(String)
+    .filter(id => (employees || []).some(e => String(e.id) === id && e.active !== false));
+  return ids.length === 1 ? ids[0] : '';
 };
 
 /* ─────────── shared badge — language-aware ─────────── */
@@ -188,6 +198,8 @@ const LeavePanel = () => {
   const { t, language } = useLanguage();
   const { settings, refreshSettings } = useSettings();
   const fd = makeDateFormatter(settings);
+  // Server-refused Apply/Edit save (e.g. "Already Posted leave on that day.") → popup.
+  const [saveAlert, setSaveAlert] = useState(null);
   const {
     filteredLeaves: leaves,
     // Raw, company-wide leaves — needed only for the "Pending for Approvals"
@@ -266,7 +278,7 @@ const LeavePanel = () => {
       recommendedBy:   String(row.recommendedBy  || ''),
       recommendedDate: toDateStr(row.recommendedDate),
       approvedBy:      String(row.approvedBy     || ''),
-      approvedDate:    toDateStr(row.approvedDate),
+      approvedDate:    toDateStr(row.approvedDate) || getNepalTodayISO(), // default: today
     });
     setEditErrors({});
     setEditLeave(row);
@@ -308,6 +320,8 @@ const LeavePanel = () => {
   // after saving (see handleManualSubmit), so this is tracked separately
   // rather than read off manualForm, and persists until the next save.
   const [manualLastSaved, setManualLastSaved] = useState(null);
+  // Duplicate / already-posted popup for Manual Leave Posting — { title, msg, detail }
+  const [manualAlert, setManualAlert] = useState(null);
   /* Ctrl+S submits the Manual Entry form — same action as the Save button */
   useSaveShortcut(showManual, () => manualFormRef.current?.requestSubmit());
   useEffect(() => { if (showManual) refreshRecoApproval(); }, [showManual]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -318,6 +332,17 @@ const LeavePanel = () => {
 
   /* ── Reco/approval config for inline approval logic ── */
   const recoConfig = leaveRecoAssignments;
+  // Manual Posting: when the chosen staff has exactly one Recommendator /
+  // Approver configured, pre-select it (re-runs once recoConfig refreshes).
+  useEffect(() => {
+    if (!showManual || !manualForm.employeeId) return;
+    const cfg = recoConfig[String(manualForm.employeeId)] || {};
+    setManualForm(p => ({
+      ...p,
+      recommendedBy: p.recommendedBy || soleActiveId(cfg.reco, allEmployees),
+      approvedBy:    p.approvedBy    || soleActiveId(cfg.approval, allEmployees),
+    }));
+  }, [showManual, manualForm.employeeId, recoConfig]); // eslint-disable-line react-hooks/exhaustive-deps
   const isRecoCompulsoryLeave = settings.recoApprovalCompulsory || false;
   const isApproverForLeave    = (empId) => {
     const a = recoConfig[String(empId)]?.approval;
@@ -350,7 +375,9 @@ const LeavePanel = () => {
     // configured at all, compulsory can't apply — nobody exists who could
     // ever satisfy it.
     const dualRoleBlocked = isRecoCompulsoryLeave && recoConfigured && amRecommender;
-    const canApprove = amApprover && !dualRoleBlocked && (!isRecoCompulsoryLeave || !!row.recommendedBy || !recoConfigured);
+    // Server (authorizeRecoAction) never lets a non-admin act on their own application.
+    const isOwnRow = !isAdmin && String(row.employeeId) === String(currentUser.id);
+    const canApprove = amApprover && !isOwnRow && !dualRoleBlocked && (!isRecoCompulsoryLeave || !!row.recommendedBy || !recoConfigured);
     return { amApprover, amRecommender, canApprove, dualRoleBlocked, alreadyReco: !!row.recommendedBy };
   };
   // Shared with the grid's actions column, right-click menu, and the
@@ -470,25 +497,6 @@ const LeavePanel = () => {
     ltConfigs.find(lt => lt.shortName === applyForm.leaveTypeCode),
   [ltConfigs, applyForm.leaveTypeCode]);
 
-  /* weekend set for the current effective period */
-  const weekendDays = useMemo(() => {
-    const ws = settings.defaultWeekends || ['Sat'];
-    const map = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
-    return ws.map(d => map[d]).filter(d => d !== undefined);
-  }, [settings.defaultWeekends]);
-
-  // Public holidays are stored as a startDate→endDate range (there is no
-  // `h.date` field — this used to build an always-empty set, so
-  // "Reduce Public Holiday" never actually deducted anything), and can be
-  // scoped to a Gender/Branch/Department/Religion/Handicapped subset — so
-  // this checks currentUser (this page is always self-service, employeeId
-  // is always currentUser.id — see addLeave calls below) against each
-  // holiday's own scope via isHolidayForEmployee, same as every report now does.
-  const isHoliday = useCallback(
-    (ds) => isHolidayForEmployee(settings, ds, currentUser),
-    [settings, currentUser]
-  );
-
   /* reco/approval — live from the API (useRecoApproval above) */
   const getMyRecoApproval = useCallback(() => ({
     reco:     getLeaveRecoIds(currentUser.id),
@@ -503,19 +511,9 @@ const LeavePanel = () => {
   /* smart day calculator */
   const calcDays = useCallback(() => {
     if (applyForm.halfDay) return 0.5;
-    if (!applyForm.fromDate || !applyForm.toDate) return 0;
-    const from = new Date(applyForm.fromDate + 'T00:00:00');
-    const to   = new Date(applyForm.toDate   + 'T00:00:00');
-    if (to < from) return 0;
-    let count = 0;
-    for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-      if (selectedLtConfig?.reduceWeekend && weekendDays.includes(d.getDay())) continue;
-      const ds = d.toISOString().split('T')[0];
-      if (selectedLtConfig?.reducePublicHoliday && isHoliday(ds)) continue;
-      count++;
-    }
-    return count;
-  }, [applyForm.fromDate, applyForm.toDate, applyForm.halfDay, selectedLtConfig, weekendDays, isHoliday]);
+    // Self-service: employeeId is always currentUser.id (see addLeave below).
+    return countLeaveDays(settings, selectedLtConfig, applyForm.fromDate, applyForm.toDate, currentUser);
+  }, [applyForm.fromDate, applyForm.toDate, applyForm.halfDay, selectedLtConfig, settings, currentUser]);
 
   /* service period check — how many times this leave has been taken */
   const timesAlreadyTaken = useMemo(() => {
@@ -539,6 +537,17 @@ const LeavePanel = () => {
     }
     if (!applyForm.reason.trim()) e.reason = t('Required field');
     if (applyForm.reason.trim().length < 5) e.reason = 'Minimum 5 characters required';
+    // More than one configured Recommendator/Approver means the applicant
+    // must actually pick one — previously this was only visually marked
+    // required (the red asterisk) but never enforced, so submitting with
+    // nothing picked silently sent every configured id and the server just
+    // took the first one (see visits.js/leaves.js POST's reco[0]/approval[0]
+    // fallback), which is never what the applicant actually chose.
+    if (applyForm.reco.length > 1 && !selectedReco) e.selectedReco = t('Required field');
+    if (applyForm.approval.length > 1 && !selectedApproval) e.selectedApproval = t('Required field');
+    // Approval Authority is compulsory — an application with nobody to approve
+    // it just sits Pending forever (and shows a blank Approval column).
+    if (applyForm.approval.length === 0) e.selectedApproval = 'No Approval Authority is set for you — ask Admin to set it (Staff Detail → Set Recommendator & Approval).';
     if (applyForm.leaveTypeCode && days > 0) {
       /* Provide only on balance */
       if (selectedLtConfig?.provideOnlyOnBalance) {
@@ -558,7 +567,7 @@ const LeavePanel = () => {
     setApplyForm(p => {
       const next = { ...p, [field]: val };
       if (field === 'halfDay' && val) { next.fromDate = today; next.toDate = today; }
-      if (field === 'fromDate' && p.halfDay) { next.toDate = val; }
+      if (field === 'fromDate') next.toDate = val; // To Date follows From Date
       return next;
     });
     setApplyErrors(p => ({ ...p, [field]: '', days: '' }));
@@ -569,6 +578,7 @@ const LeavePanel = () => {
     const errs = validateApply();
     if (Object.keys(errs).length) { setApplyErrors(errs); return; }
     setSubmitting(true);
+    try {
     await addLeave({
       employeeId: currentUser.id,
       leaveTypeCode: applyForm.leaveTypeCode,
@@ -579,7 +589,12 @@ const LeavePanel = () => {
       reason:   applyForm.reason,
       reco:     selectedReco     ? [selectedReco]     : applyForm.reco,
       approval: selectedApproval ? [selectedApproval] : applyForm.approval,
-    });
+    }, { throwOnReject: true });
+    } catch (err) {
+      setSubmitting(false);
+      setSaveAlert(alertFromSaveError(err, fd));
+      return;
+    }
     setSubmitting(false);
     setApplySuccess(true);
     setTimeout(() => { setShowApply(false); setApplyForm(emptyForm); setApplyErrors({}); setApplySuccess(false); }, 1500);
@@ -631,7 +646,11 @@ const LeavePanel = () => {
       if (advFilters.leaveTypes.length   && !advFilters.leaveTypes.includes(l.leaveTypeCode))    return false;
     }
     return true;
-  }).sort(byAppliedDateDesc);
+  }).sort(byAppliedDateDesc).map(l => {
+    // Global search is name-only (see DataGrid searchOnlyExtraFields) — the Name
+    // column's raw value is the employee id, so expose the displayed name.
+    return { ...l, searchText: getEmployeeName(l.employeeId) || '' };
+  });
 
   const countByStatus = s => (showForApprovalLeave ? allLeaves : leaves).filter(l => {
     if (showForApprovalLeave) {
@@ -656,17 +675,25 @@ const LeavePanel = () => {
      still fully enforced server-side on every call, so a selection mixing
      eligible and ineligible rows simply skips the ineligible ones instead of
      failing the whole batch. ── */
+  // Skipped (server-refused) rows are rolled back by DataContext — tell the
+  // user how many and why, rather than letting them look done.
+  const reportBulkLeaves = (results) => {
+    const failed = results.filter(r => r.status === 'rejected');
+    if (!failed.length) return;
+    setActionToast({ msg: `${failed.length} of ${results.length} not done: ${failed[0].reason?.message || 'refused'}`, type: 'danger' });
+    setTimeout(() => setActionToast(null), 5000);
+  };
   const bulkApproveLeaves = async () => {
-    await Promise.allSettled(selectedLeaveIds.map(id => approveLeave(id, currentUser.id)));
+    reportBulkLeaves(await Promise.allSettled(selectedLeaveIds.map(id => approveLeave(id, currentUser.id))));
     setSelectedLeaveIds([]);
   };
   const bulkRejectLeaves = async () => {
-    await Promise.allSettled(selectedLeaveIds.map(id => rejectLeave(id, currentUser.id, 'Declined')));
+    reportBulkLeaves(await Promise.allSettled(selectedLeaveIds.map(id => rejectLeave(id, currentUser.id, 'Declined'))));
     setSelectedLeaveIds([]);
   };
   const bulkDeleteLeaves = async () => {
     if (!confirm(t('Are you sure you want to delete this record?'))) return;
-    await Promise.allSettled(selectedLeaveIds.map(id => deleteLeave(id)));
+    reportBulkLeaves(await Promise.allSettled(selectedLeaveIds.map(id => deleteLeave(id))));
     setSelectedLeaveIds([]);
   };
 
@@ -719,9 +746,11 @@ const LeavePanel = () => {
     // candidate list (used elsewhere, e.g. the printable pending-approval
     // slip, where every possible signer is genuinely relevant).
     { field: 'recommendatorNames', header: 'Recommendator', width: 150, sortable:false, filterable:false,
-      render: (_, row) => personCellForLeave(row.recommendedBy || row.recoId) },
+      // Pending with nobody named (older entries) → show the staff member's
+      // configured recommender/approver, i.e. who will actually act on it.
+      render: (_, row) => personCellForLeave(row.recommendedBy || row.recoId || (row.status === 'pending' ? [].concat(recoConfig[String(row.employeeId)]?.reco || [])[0] : null)) },
     { field: 'approvalNames', header: 'Approval', width: 150, sortable:false, filterable:false,
-      render: (_, row) => personCellForLeave(row.approvedBy || row.approvalId) },
+      render: (_, row) => personCellForLeave(row.approvedBy || row.approvalId || (row.status === 'pending' ? [].concat(recoConfig[String(row.employeeId)]?.approval || [])[0] : null)) },
   ];
 
   /* ── Rejection notifications ── */
@@ -745,6 +774,7 @@ const LeavePanel = () => {
 
   return (
     <div>
+      <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
       {/* ── Rejection Notifications ── */}
       {rejectedNotifications.map(l => (
         <div key={l.id} style={{ display:'flex', alignItems:'flex-start', gap:12, background:'#fef2f2',
@@ -979,7 +1009,7 @@ const LeavePanel = () => {
                 </button>
               )}
               {canManageStaff && (
-                <button className="btn btn-sm" onClick={() => { setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today }); setManualErrors({}); setManualLastSaved(null); setShowManual(true); }}
+                <button className="btn btn-sm" onClick={() => { setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today, approvedDate:today }); setManualErrors({}); setManualLastSaved(null); setShowManual(true); }}
                   style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
                   ✍️ Manual Posting
                 </button>
@@ -992,7 +1022,7 @@ const LeavePanel = () => {
         );
       })()}
 
-      <DataGrid columns={columns} data={displayLeaves} defaultPageSize={20} pageSizeOptions={[5, 10, 20, 50, 100]} showSearch searchPlaceholder={t('Search') + '...'}
+      <DataGrid columns={columns} data={displayLeaves} extraSearchFields={['searchText']} searchOnlyExtraFields defaultPageSize={20} pageSizeOptions={[5, 10, 20, 50, 100]} showSearch searchPlaceholder={t('Search') + '...'}
         showFilterButton={false}
         toolbarRightInset={viewLeave ? 456 : 0}
         onRowClick={row => setViewLeave(v => v?.id === row.id ? null : row)}
@@ -1089,20 +1119,24 @@ const LeavePanel = () => {
               <button className="btn btn-outline" onClick={() => setActionModal(null)}>{t('Cancel')}</button>
               <button
                 className={`btn ${actionModal.type === 'reject' ? 'btn-danger' : 'btn-success'}`}
-                onClick={() => {
-                  if (actionModal.type === 'recommend') {
-                    recommendLeave(actionModal.id, currentUser.id, comment);
-                  } else if (actionModal.type === 'approve') {
-                    approveLeave(actionModal.id, currentUser.id, comment);
-                  } else {
-                    rejectLeave(actionModal.id, currentUser.id, comment);
-                  }
-                  setActionToast({
-                    msg: actionModal.type === 'recommend' ? t('Application recommended') : actionModal.type === 'approve' ? t('Application approved') : t('Application rejected'),
-                    type: actionModal.type === 'reject' ? 'danger' : 'success',
-                  });
-                  setTimeout(() => setActionToast(null), 3000);
+                onClick={async () => {
+                  const { id, type } = actionModal;
                   setActionModal(null); setComment('');
+                  // Wait for the server — a refusal (not the configured
+                  // approver, etc.) is rolled back by DataContext and shown
+                  // here instead of a false "approved" toast.
+                  try {
+                    if (type === 'recommend')     await recommendLeave(id, currentUser.id, comment);
+                    else if (type === 'approve')  await approveLeave(id, currentUser.id, comment);
+                    else                          await rejectLeave(id, currentUser.id, comment);
+                    setActionToast({
+                      msg: type === 'recommend' ? t('Application recommended') : type === 'approve' ? t('Application approved') : t('Application rejected'),
+                      type: type === 'reject' ? 'danger' : 'success',
+                    });
+                  } catch (err) {
+                    setActionToast({ msg: err?.message || 'Action failed', type: 'danger' });
+                  }
+                  setTimeout(() => setActionToast(null), 4000);
                 }}>
                 {actionModal.type === 'recommend' ? `👍 ${t('Recommend')}` : actionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`}
               </button>
@@ -1121,7 +1155,8 @@ const LeavePanel = () => {
 
       {/* ── Edit Leave Modal (double-click) ── */}
       {editLeave && (() => {
-        const setEF = (f, v) => setEditForm(p => ({ ...p, [f]: v }));
+        // keep an existing multi-day range; only pull To Date forward if From passes it
+        const setEF = (f, v) => setEditForm(p => ({ ...p, [f]: v, ...(f === 'fromDate' && (!p.toDate || p.toDate < v) ? { toDate: v } : {}) }));
         const validateEdit = () => {
           const e = {};
           if (!editForm.leaveTypeCode) e.leaveTypeCode = t('Required field');
@@ -1131,19 +1166,20 @@ const LeavePanel = () => {
             e.toDate = 'To Date must be on or after From Date';
           return e;
         };
-        const handleEditSubmit = (ev) => {
+        const handleEditSubmit = async (ev) => {
           ev.preventDefault();
           const errs = validateEdit();
           if (Object.keys(errs).length) { setEditErrors(errs); return; }
-          const days = editForm.halfDay ? 0.5 : (() => {
-            const fromStr = (editForm.fromDate || '').split('T')[0];
-            const toStr   = (editForm.toDate   || '').split('T')[0];
-            const from = new Date(fromStr + 'T00:00:00');
-            const to   = new Date(toStr   + 'T00:00:00');
-            const d = Math.floor((to - from) / 86400000) + 1;
-            return isNaN(d) || d < 1 ? 1 : d;
-          })();
-          updateLeave(editLeave.id, {
+          // Same weekend/holiday deduction as the apply form — this used to be
+          // a plain calendar-day diff, ignoring the leave type's settings.
+          const days = editForm.halfDay ? 0.5 : (countLeaveDays(
+            settings,
+            ltConfigs.find(lt => lt.shortName === editForm.leaveTypeCode),
+            editForm.fromDate, editForm.toDate,
+            allEmployees.find(e => String(e.id) === String(editForm.employeeId)),
+          ));
+          try {
+          await updateLeave(editLeave.id, {
             employeeId:      editForm.employeeId,
             leaveTypeCode:   editForm.leaveTypeCode,
             fromDate:        editForm.fromDate,
@@ -1156,7 +1192,12 @@ const LeavePanel = () => {
             recommendedDate: editForm.recommendedDate || null,
             approvedBy:      editForm.approvedBy      || null,
             approvedDate:    editForm.approvedDate    || null,
-          });
+          }, { throwOnReject: true });
+          } catch (err) {
+            // Refused (e.g. clashes with another entry that day) — keep the form open.
+            setSaveAlert(alertFromSaveError(err, fd));
+            return;
+          }
           setEditLeave(null);
         };
 
@@ -1241,7 +1282,7 @@ const LeavePanel = () => {
                     <div className="form-group">
                       <Lbl required>To Date</Lbl>
                       <LeaveDateInput value={editForm.toDate} error={!!editErrors.toDate}
-                        min={editForm.fromDate} settings={settings} onChange={v => setEF('toDate', v)} />
+                        minDate={editForm.fromDate} settings={settings} onChange={v => setEF('toDate', v)} />
                       <Err msg={editErrors.toDate} />
                     </div>
                   </div>
@@ -1323,7 +1364,8 @@ const LeavePanel = () => {
 
       {/* ── Manual Posting Modal (Leave) ── */}
       {showManual && (() => {
-        const setMF = (f, v) => setManualForm(p => ({ ...p, [f]: v }));
+        // picking From Date copies it into To Date
+        const setMF = (f, v) => setManualForm(p => ({ ...p, [f]: v, ...(f === 'fromDate' ? { toDate: v } : {}) }));
 
         const validateManual = () => {
           const e = {};
@@ -1334,6 +1376,9 @@ const LeavePanel = () => {
           if (manualForm.fromDate && manualForm.toDate && manualForm.toDate < manualForm.fromDate)
             e.toDate = 'To Date must be on or after From Date';
           if (!manualForm.reason.trim()) e.reason = t('Required field');
+          // Approved By is compulsory for every Manual Posting.
+          if (manualForm.employeeId && !manualForm.approvedBy)
+            e.approvedBy = manualApprOpts.length === 0 ? 'No approver configured for this staff — set it in Staff Detail → Set Recommendator & Approval' : t('Required field');
           return e;
         };
 
@@ -1341,16 +1386,39 @@ const LeavePanel = () => {
           ev.preventDefault();
           const errs = validateManual();
           if (Object.keys(errs).length) { setManualErrors(errs); return; }
-          const days = manualForm.halfDay ? 0.5
-            : (() => {
-              const fromStr = (manualForm.fromDate || '').split('T')[0];
-              const toStr   = (manualForm.toDate   || '').split('T')[0];
-              const from = new Date(fromStr + 'T00:00:00');
-              const to   = new Date(toStr   + 'T00:00:00');
-              const d = Math.floor((to - from) / 86400000) + 1;
-              return isNaN(d) || d < 1 ? 1 : d;
-            })();
+
+          // Block duplicates / overlaps against this employee's existing
+          // (non-rejected) leaves: an identical entry (same staff + leave type
+          // + dates) is a duplicate; any other leave touching one of these
+          // dates means that day already has a leave posted.
+          const d10 = (v) => String(v || '').slice(0, 10);
+          const newFrom = d10(manualForm.fromDate);
+          const newTo   = d10(manualForm.toDate);
+          const existing = (allLeaves || []).filter(l =>
+            String(l.employeeId) === String(manualForm.employeeId) && l.status !== 'rejected');
+          const fmtLeave = (l) => `${getLeaveTypeName(l.leaveTypeCode) || l.leaveTypeCode}: ${fd(l.fromDate)}${d10(l.toDate) !== d10(l.fromDate) ? ' → ' + fd(l.toDate) : ''}`;
+          const dup = existing.find(l =>
+            l.leaveTypeCode === manualForm.leaveTypeCode && d10(l.fromDate) === newFrom && d10(l.toDate) === newTo);
+          if (dup) {
+            setManualAlert({ title: language === 'np' ? 'दोहोरो प्रविष्टि' : 'Duplicate Leave', msg: language === 'np' ? 'यही कर्मचारीको यही मितिमा उही बिदा पहिले नै दर्ता भइसकेको छ। पुनः सुरक्षित गर्न मिल्दैन।' : 'Duplicate entry — an identical leave has already been recorded for this staff member on the selected date. It cannot be saved again.', detail: fmtLeave(dup) });
+            return;
+          }
+          const overlap = existing.find(l => d10(l.fromDate) <= newTo && d10(l.toDate) >= newFrom);
+          if (overlap) {
+            setManualAlert({ title: language === 'np' ? 'बिदा पहिले नै पोस्ट भएको' : 'Leave Already Exists', msg: language === 'np' ? 'यो कर्मचारीको चयन गरिएको मितिमा अर्को बिदा पहिले नै दर्ता भइसकेको छ। एक दिनमा एउटा मात्र बिदा राख्न सकिन्छ — कृपया फरक मिति छान्नुहोस्।' : 'This staff member already has another leave on the selected day. Only one leave can be recorded per day — please choose a different date or review the existing entry.', detail: fmtLeave(overlap) });
+            return;
+          }
+
+          // Same weekend/holiday deduction as the apply form — this used to be
+          // a plain calendar-day diff, ignoring the leave type's settings.
+          const days = manualForm.halfDay ? 0.5 : (countLeaveDays(
+            settings,
+            ltConfigs.find(lt => lt.shortName === manualForm.leaveTypeCode),
+            manualForm.fromDate, manualForm.toDate,
+            allEmployees.find(e => String(e.id) === String(manualForm.employeeId)),
+          ));
           const savedDevice = getDeviceInfo();
+          try {
           await addLeave({
             employeeId:       manualForm.employeeId,
             leaveTypeCode:    manualForm.leaveTypeCode,
@@ -1367,11 +1435,16 @@ const LeavePanel = () => {
             approvedBy:       manualForm.approvedBy       || null,
             approvedDate:     manualForm.approvedDate      || null,
             deviceInfo:       savedDevice,
-          });
+          }, { throwOnReject: true });
+          } catch (err) {
+            // Server refused it (e.g. staff outside your branch) — nothing was saved.
+            setManualAlert(alertFromSaveError(err, fd));
+            return;
+          }
           // Stay on the form for back-to-back manual postings instead of
           // closing — clear the fields and reopen the Staff picker ready for
           // the next entry.
-          setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today });
+          setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today, approvedDate:today });
           setManualErrors({});
           setManualResetKey(k => k + 1);
           // addLeave only returns the new id, not the saved row — build the
@@ -1389,14 +1462,24 @@ const LeavePanel = () => {
         );
         const Err = ({ msg }) => msg ? <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{msg}</div> : null;
 
-        const activeEmps = allEmployees.filter(e => e.active !== false)
+        // Staff field is scoped to who this user is allowed to post on behalf
+        // of (Branch Manager → own branch, Dept Head → own dept, Branch Area
+        // Manager/Dept Incharge → their covered branches/depts — see
+        // AuthContext's filterByRole). Recommender/approver options just
+        // below intentionally keep searching the full company list
+        // (activeEmps/allEmployees) since a recommender/approver can be
+        // configured outside the poster's own branch/department (Staff
+        // Detail → Set Recommendator & Approval).
+        const scopedEmps = employees.filter(e => e.active !== false)
           .sort((a, b) => staffRankCompare(a, b, settings));
-        const empOpts = activeEmps.map(e => ({
+        const empOpts = scopedEmps.map(e => ({
           value: String(e.id),
           label: e.fullName,
           sub: [e.employeeId, e.position || e.department].filter(Boolean).join(' - '),
           photo: e.profilePhoto,
         }));
+        const activeEmps = allEmployees.filter(e => e.active !== false)
+          .sort((a, b) => staffRankCompare(a, b, settings));
         const ltOpts = ltConfigs.map(lt => ({ value: lt.shortName, label: lt.name }));
 
         /* only staff configured (Staff Detail → Set Recommendator & Approval) for this employee */
@@ -1407,13 +1490,49 @@ const LeavePanel = () => {
         const manualRecoOpts = activeEmps.filter(e => manualRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
         const manualApprOpts = activeEmps.filter(e => manualApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
 
+        // Tab order: Staff → Leave Type → Half Day → From/To Date → Reason →
+        // Status → Recommended By/Date → Approved By/Date → Cancel → Save,
+        // wrapping at either end so focus never escapes to the page behind.
+        const cycleManualTab = (e) => {
+          if (e.key !== 'Tab' || manualAlert) return;
+          const list = Array.from(e.currentTarget.querySelectorAll(
+            'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])'
+          )).filter(n => n.tabIndex >= 0 && n.offsetParent !== null);
+          if (!list.length) return;
+          const first = list[0], last = list[list.length - 1];
+          if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+          else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        };
+
         return (
           <div className="modal-overlay">
+            {manualAlert && (
+              <div className="modal-overlay" style={{ zIndex:2000 }}>
+                <div className="modal modal-sm" style={{ maxWidth:400 }} onClick={e => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h2 style={{ color:'#991b1b' }}>⚠️ {manualAlert.title}</h2>
+                    <button className="modal-close" onClick={() => setManualAlert(null)}>✕</button>
+                  </div>
+                  <div className="modal-body">
+                    <div style={{ background:'#fff5f5', border:'1px solid #fecaca', borderRadius:8, padding:'12px 16px', fontSize:14, fontWeight:600, color:'#991b1b', lineHeight:1.7 }}>
+                      {manualAlert.msg}
+                    </div>
+                    {manualAlert.detail && (
+                      <div style={{ marginTop:10, fontSize:12, color:'#6b7280' }}>{manualAlert.detail}</div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" className="btn btn-primary" autoFocus onClick={() => setManualAlert(null)}>OK</button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="modal modal-lg" style={{ maxWidth:700, maxHeight:'90vh', overflowY:'auto' }}
-              onClick={e => e.stopPropagation()}>
+              onClick={e => e.stopPropagation()} onKeyDown={cycleManualTab}>
               <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>✍️ Manual Leave Posting</h2>
-                <button className="modal-close" onClick={() => setShowManual(false)}>✕</button>
+                {/* out of the Tab cycle — Esc / Cancel still close */}
+                <button className="modal-close" tabIndex={-1} onClick={() => setShowManual(false)}>✕</button>
               </div>
               <div className="modal-body">
                 <div style={{ background:'#fef3c7', border:'1px solid #fde68a', borderRadius:8, padding:'8px 12px', marginBottom:14, fontSize:12, color:'#92400e' }}>
@@ -1425,7 +1544,7 @@ const LeavePanel = () => {
                   <div className="form-group">
                     <Lbl required>Staff</Lbl>
                     <div style={{ outline: manualErrors.employeeId ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
-                      <SearchableSelect key={manualResetKey} autoOpen={manualResetKey > 0} value={manualForm.employeeId}
+                      <SearchableSelect key={manualResetKey} autoOpen value={manualForm.employeeId}
                         onChange={v => setManualForm(p => ({ ...p, employeeId: v, recommendedBy: '', approvedBy: '' }))}
                         options={empOpts} placeholder="— Search & Select Staff —" showAvatar />
                     </div>
@@ -1462,7 +1581,7 @@ const LeavePanel = () => {
                     <div className="form-group">
                       <Lbl required>To Date</Lbl>
                       <LeaveDateInput value={manualForm.toDate} error={!!manualErrors.toDate}
-                        min={manualForm.fromDate} settings={settings} allowPast={isAdmin} onChange={v => setMF('toDate', v)} />
+                        minDate={manualForm.fromDate} settings={settings} allowPast={isAdmin} onChange={v => setMF('toDate', v)} />
                       <Err msg={manualErrors.toDate} />
                     </div>
                   </div>
@@ -1506,11 +1625,14 @@ const LeavePanel = () => {
                   {/* Approved By + Date */}
                   <div className="form-row">
                     <div className="form-group">
-                      <Lbl>Approved By</Lbl>
-                      <SearchableSelect value={manualForm.approvedBy} onChange={v => setMF('approvedBy', v)}
+                      <Lbl required>Approved By</Lbl>
+                      <div style={{ outline: manualErrors.approvedBy ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
+                      <SearchableSelect value={manualForm.approvedBy} onChange={v => { setMF('approvedBy', v); setManualErrors(p => ({ ...p, approvedBy: '' })); }}
                         options={manualApprOpts}
                         placeholder={!manualForm.employeeId ? '— Select staff first —' : manualApprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
                         disabled={!manualForm.employeeId || manualApprOpts.length === 0} showAvatar />
+                      </div>
+                      <Err msg={manualErrors.approvedBy} />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
@@ -1664,14 +1786,14 @@ const LeavePanel = () => {
                       <div className="form-group">
                         <Lbl required>From Date</Lbl>
                         <LeaveDateInput value={applyForm.fromDate} error={!!applyErrors.fromDate}
-                          min={today} settings={settings}
+                          settings={settings}
                           onChange={v => handleApplyChange('fromDate', v)} />
                         <Err msg={applyErrors.fromDate} />
                       </div>
                       <div className="form-group">
                         <Lbl required>To Date</Lbl>
                         <LeaveDateInput value={applyForm.toDate} error={!!applyErrors.toDate}
-                          min={applyForm.fromDate || today} settings={settings}
+                          minDate={applyForm.fromDate} settings={settings}
                           onChange={v => handleApplyChange('toDate', v)} />
                         <Err msg={applyErrors.toDate} />
                       </div>
@@ -1726,25 +1848,25 @@ const LeavePanel = () => {
                       )}
                       {applyForm.reco.length > 1 && (
                         <>
-                          <select value={selectedReco} onChange={e => setSelectedReco(e.target.value)}
-                            className={`form-control ${applyErrors.selectedReco ? 'error' : ''}`}
-                            style={{ fontSize:13, minHeight:42 }}>
-                            <option value="">— Select Recommendator —</option>
-                            {applyForm.reco.map(id => (
-                              <option key={id} value={String(id)}>{getEmpName(id)}</option>
-                            ))}
-                          </select>
-                          {applyErrors.selectedReco && <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{applyErrors.selectedReco}</div>}
+                          <SearchableSelect value={selectedReco}
+                            onChange={v => { setSelectedReco(v); setApplyErrors(p => ({ ...p, selectedReco: '' })); }}
+                            options={applyForm.reco.map(id => {
+                              const e = allEmployees.find(x => String(x.id) === String(id));
+                              return { value: String(id), label: e ? e.fullName : getEmpName(id), sub: e ? [e.employeeId, e.position].filter(Boolean).join(' - ') : '', photo: e?.profilePhoto };
+                            })}
+                            placeholder="— Select Recommendator —" showAvatar />
+                          <Err msg={applyErrors.selectedReco} />
                         </>
                       )}
                     </div>
                     <div>
-                      <Lbl required={applyForm.approval.length > 1}>Approval Authority</Lbl>
+                      <Lbl required>Approval Authority</Lbl>
                       {applyForm.approval.length === 0 && (
                         <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 12px', minHeight:36 }}>
                           <span style={{ fontSize:13, color:'#9ca3af' }}>— Not configured —</span>
                         </div>
                       )}
+                      {applyForm.approval.length === 0 && <Err msg={applyErrors.selectedApproval} />}
                       {applyForm.approval.length === 1 && (
                         <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:8, padding:'8px 12px', minHeight:36, display:'flex', alignItems:'center' }}>
                           <span style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 12px', fontSize:13, fontWeight:600 }}>
@@ -1754,15 +1876,14 @@ const LeavePanel = () => {
                       )}
                       {applyForm.approval.length > 1 && (
                         <>
-                          <select value={selectedApproval} onChange={e => setSelectedApproval(e.target.value)}
-                            className={`form-control ${applyErrors.selectedApproval ? 'error' : ''}`}
-                            style={{ fontSize:13, minHeight:42 }}>
-                            <option value="">— Select Approval Authority —</option>
-                            {applyForm.approval.map(id => (
-                              <option key={id} value={String(id)}>{getEmpName(id)}</option>
-                            ))}
-                          </select>
-                          {applyErrors.selectedApproval && <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{applyErrors.selectedApproval}</div>}
+                          <SearchableSelect value={selectedApproval}
+                            onChange={v => { setSelectedApproval(v); setApplyErrors(p => ({ ...p, selectedApproval: '' })); }}
+                            options={applyForm.approval.map(id => {
+                              const e = allEmployees.find(x => String(x.id) === String(id));
+                              return { value: String(id), label: e ? e.fullName : getEmpName(id), sub: e ? [e.employeeId, e.position].filter(Boolean).join(' - ') : '', photo: e?.profilePhoto };
+                            })}
+                            placeholder="— Select Approval Authority —" showAvatar />
+                          <Err msg={applyErrors.selectedApproval} />
                         </>
                       )}
                     </div>
@@ -2096,7 +2217,13 @@ const LeavePanel = () => {
             <div className="modal-body"><p style={{ fontSize:14 }}>{t('Are you sure you want to delete this record?')}</p></div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setDelConfirm(null)}>{t('Cancel')}</button>
-              <button className="btn btn-danger" onClick={() => { deleteLeave(delConfirm); setDelConfirm(null); }}>🗑 {t('Delete')}</button>
+              <button className="btn btn-danger" onClick={() => {
+                const id = delConfirm; setDelConfirm(null);
+                deleteLeave(id).catch(err => {
+                  setActionToast({ msg: err?.message || 'Delete failed', type: 'danger' });
+                  setTimeout(() => setActionToast(null), 4000);
+                });
+              }}>🗑 {t('Delete')}</button>
             </div>
           </div>
         </div>
@@ -2125,9 +2252,17 @@ const LeavePanel = () => {
 ══════════════════════════════════════════════════ */
 const VisitPanel = () => {
   const { currentUser, isManager, canManageStaff, isAdmin } = useAuth();
+  // Apply for Office Visit now opens the single, globally-shared modal (also
+  // used by the floating "+" quick-action button) instead of this page's own
+  // separate copy of the form — two copies had drifted out of sync before
+  // (one had a real Recommendator/Approval picker, the other just showed
+  // every configured person as static, unselectable chips).
+  const { open: openOfficeVisitApply } = useOfficeVisitApply();
   const { t, language } = useLanguage();
   const { settings, refreshSettings } = useSettings();
   const fd = makeDateFormatter(settings);
+  // Server-refused Apply/Edit save (e.g. "Already Posted leave on that day.") → popup.
+  const [saveAlert, setSaveAlert] = useState(null);
   const {
     filteredVisits: officeVisits,
     // Raw, company-wide visits — needed only for the "Pending for Approvals"
@@ -2208,7 +2343,7 @@ const VisitPanel = () => {
       recommendedBy:   String(row.recommendedBy || ''),
       recommendedDate: toDateStr(row.recommendedDate),
       approvedBy:      String(row.approvedBy || ''),
-      approvedDate:    toDateStr(row.approvedDate),
+      approvedDate:    toDateStr(row.approvedDate) || getNepalTodayISO(), // default: today
     });
     setEditVisitErrors({});
     setEditVisit(row);
@@ -2228,12 +2363,9 @@ const VisitPanel = () => {
   };
   const [delConfirm,     setDelConfirm]    = useState(null);
   const { getRecoIds: getVisitRecoIds, getApprovalIds: getVisitApprovalIds, assignments: visitRecoAssignments, refresh: refreshVisitRecoApproval } = useRecoApproval();
-  const [showApply,      setShowApply]     = useState(false);
   // Full-width popup for the Office Visit Approval page — same reasoning as
   // LeavePanel's showLeaveApprovalModal above.
   const [showVisitApprovalModal, setShowVisitApprovalModal] = useState(false);
-  // Refetch settings right as Apply opens — see LeavePanel's identical effect above.
-  useEffect(() => { if (showApply) { refreshSettings(); refreshVisitRecoApproval(); } }, [showApply]); // eslint-disable-line react-hooks/exhaustive-deps
   // Same reasoning, for the Edit Visit modal — see LeavePanel's identical effect above.
   useEffect(() => { if (editVisit) refreshVisitRecoApproval(); }, [editVisit]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showManualV,    setShowManualV]   = useState(false);
@@ -2258,6 +2390,17 @@ const VisitPanel = () => {
 
   /* ── Reco/approval config ── */
   const visitRecoConfig = visitRecoAssignments;
+  // Manual Posting: when the chosen staff has exactly one Recommendator /
+  // Approver configured, pre-select it (re-runs once visitRecoConfig refreshes).
+  useEffect(() => {
+    if (!showManualV || !manualVForm.employeeId) return;
+    const cfg = visitRecoConfig[String(manualVForm.employeeId)] || {};
+    setManualVForm(p => ({
+      ...p,
+      recommendedBy: p.recommendedBy || soleActiveId(cfg.reco, allEmployees),
+      approvedBy:    p.approvedBy    || soleActiveId(cfg.approval, allEmployees),
+    }));
+  }, [showManualV, manualVForm.employeeId, visitRecoConfig]); // eslint-disable-line react-hooks/exhaustive-deps
   const isRecoCompulsoryVisit = settings.recoApprovalCompulsory || false;
   const isApproverForVisit    = (empId) => {
     const a = visitRecoConfig[String(empId)]?.approval;
@@ -2284,7 +2427,9 @@ const VisitPanel = () => {
     const amRecommender  = isRecommenderForVisit(row.employeeId);
     const recoConfigured = hasRecommenderForVisit(row.employeeId);
     const dualRoleBlocked = isRecoCompulsoryVisit && recoConfigured && amRecommender;
-    const canApprove = amApprover && !dualRoleBlocked && (!isRecoCompulsoryVisit || !!row.recommendedBy || !recoConfigured);
+    // Server (authorizeRecoAction) never lets a non-admin act on their own application.
+    const isOwnRow = !isAdmin && String(row.employeeId) === String(currentUser.id);
+    const canApprove = amApprover && !isOwnRow && !dualRoleBlocked && (!isRecoCompulsoryVisit || !!row.recommendedBy || !recoConfigured);
     return { amApprover, amRecommender, canApprove, dualRoleBlocked, alreadyReco: !!row.recommendedBy };
   };
   // Names of the employee's CONFIGURED recommender(s)/approver(s) — see
@@ -2317,84 +2462,12 @@ const VisitPanel = () => {
     (isRecommenderForVisit(v.employeeId) || isApproverForVisit(v.employeeId))
   ).length;
 
-  /* ── Apply form state ── */
   const today = getNepalTodayISO();
 
-  /* reco/approval — live from the API (useRecoApproval above) */
-  const getMyRecoApproval = useCallback(() => ({
-    reco:     getVisitRecoIds(currentUser.id),
-    approval: getVisitApprovalIds(currentUser.id),
-  }), [currentUser.id, getVisitRecoIds, getVisitApprovalIds]);
-
-  const emptyForm = {
-    officialVisit: '', visitType: 'National', country: '',
-    address: '', description: '', fromDate: today, toDate: today,
-    reco: [], approval: [], document: null,
-  };
-  const [applyForm,    setApplyForm]    = useState(emptyForm);
-  const [applyErrors,  setApplyErrors]  = useState({});
-  const [applySuccess, setApplySuccess] = useState(false);
-  const [submitting,   setSubmitting]   = useState(false);
-
-  /* office visit types from settings */
+  /* office visit types from settings — used by the Edit Visit modal below */
   const visitTypeOptions = useMemo(() =>
     (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean),
   [settings.officeVisitTypes]);
-
-  /* use all employees (not scoped) so reco/approval from any branch/dept can be resolved */
-  const getEmpNameForVisit = useCallback((id) =>
-    (allEmployees || []).find(e => String(e.id) === String(id))?.fullName || `#${id}`,
-  [allEmployees]);
-
-  const handleApplyChange = (field, val) => {
-    setApplyForm(p => ({ ...p, [field]: val }));
-    setApplyErrors(p => ({ ...p, [field]: '' }));
-  };
-
-  const validateApply = () => {
-    const e = {};
-    if (!applyForm.officialVisit.trim()) e.officialVisit = t('Required field');
-    if (!applyForm.address.trim())       e.address       = t('Required field');
-    if (!applyForm.description.trim())   e.description   = t('Required field');
-    if (!applyForm.fromDate)             e.fromDate      = t('Required field');
-    if (!applyForm.toDate)               e.toDate        = t('Required field');
-    if (applyForm.fromDate && applyForm.toDate && applyForm.toDate < applyForm.fromDate)
-      e.toDate = 'To Date must be on or after From Date';
-    if (applyForm.visitType === 'International' && !applyForm.country.trim())
-      e.country = t('Required field');
-    return e;
-  };
-
-  const handleApplySubmit = async (e) => {
-    e.preventDefault();
-    const errs = validateApply();
-    if (Object.keys(errs).length) { setApplyErrors(errs); return; }
-    setSubmitting(true);
-    await addVisit({
-      employeeId:    currentUser.id,
-      purpose:       applyForm.officialVisit,
-      officialVisit: applyForm.officialVisit,
-      visitType:     applyForm.visitType,
-      country:       applyForm.visitType === 'International' ? applyForm.country : '',
-      address:       applyForm.address,
-      location:      applyForm.address,
-      description:   applyForm.description,
-      reason:        applyForm.description,
-      fromDate:      applyForm.fromDate,
-      toDate:        applyForm.toDate,
-      reco:          applyForm.reco,
-      approval:      applyForm.approval,
-    });
-    setSubmitting(false);
-    setApplySuccess(true);
-    setTimeout(() => { setShowApply(false); setApplyForm(emptyForm); setApplyErrors({}); setApplySuccess(false); }, 1500);
-  };
-
-  const openApply = () => {
-    const { reco, approval } = getMyRecoApproval();
-    setApplyForm({ ...emptyForm, reco, approval });
-    setApplyErrors({}); setApplySuccess(false); setShowApply(true);
-  };
 
   /* ── Grid data ── */
   // Newest first (by Applied Date, falling back to From Date) — same as the
@@ -2420,7 +2493,10 @@ const VisitPanel = () => {
       if (advFilters.staffIds.length     && !advFilters.staffIds.includes(String(v.employeeId))) return false;
     }
     return true;
-  }).sort((a, b) => new Date(b.appliedDate || b.fromDate) - new Date(a.appliedDate || a.fromDate));
+  }).sort((a, b) => new Date(b.appliedDate || b.fromDate) - new Date(a.appliedDate || a.fromDate)).map(v => {
+    // Name-only global search — see the Leave grid.
+    return { ...v, searchText: getEmployeeName(v.employeeId) || '' };
+  });
 
   const countByStatus = s => (showForApprovalVisit ? allVisits : officeVisits).filter(v => {
     if (showForApprovalVisit) {
@@ -2433,17 +2509,23 @@ const VisitPanel = () => {
 
   /* ── Bulk actions (checkbox toolbar, near Search) — see LeavePanel's
      identical comment above. ── */
+  const reportBulkVisits = (results) => {
+    const failed = results.filter(r => r.status === 'rejected');
+    if (!failed.length) return;
+    setVisitActionToast({ msg: `${failed.length} of ${results.length} not done: ${failed[0].reason?.message || 'refused'}`, type: 'danger' });
+    setTimeout(() => setVisitActionToast(null), 5000);
+  };
   const bulkApproveVisits = async () => {
-    await Promise.allSettled(selectedVisitIds.map(id => approveVisit(id, currentUser.id)));
+    reportBulkVisits(await Promise.allSettled(selectedVisitIds.map(id => approveVisit(id, currentUser.id))));
     setSelectedVisitIds([]);
   };
   const bulkRejectVisits = async () => {
-    await Promise.allSettled(selectedVisitIds.map(id => rejectVisit(id, currentUser.id, 'Declined')));
+    reportBulkVisits(await Promise.allSettled(selectedVisitIds.map(id => rejectVisit(id, currentUser.id, 'Declined'))));
     setSelectedVisitIds([]);
   };
   const bulkDeleteVisits = async () => {
     if (!confirm(t('Are you sure you want to delete this record?'))) return;
-    await Promise.allSettled(selectedVisitIds.map(id => deleteVisit(id)));
+    reportBulkVisits(await Promise.allSettled(selectedVisitIds.map(id => deleteVisit(id))));
     setSelectedVisitIds([]);
   };
 
@@ -2465,9 +2547,10 @@ const VisitPanel = () => {
     // Only the one recommender/approver this application actually names —
     // see the identical Leave columns' comment above.
     { field: 'recommendatorNames', header: 'Recommendator', width: 150, sortable:false, filterable:false,
-      render: (_, row) => personCellForVisit(row.recommendedBy || row.recoId) },
+      // Pending with nobody named → configured recommender/approver (see Leave grid).
+      render: (_, row) => personCellForVisit(row.recommendedBy || row.recoId || (row.status === 'pending' ? [].concat(visitRecoConfig[String(row.employeeId)]?.reco || [])[0] : null)) },
     { field: 'approvalNames', header: 'Approval', width: 150, sortable:false, filterable:false,
-      render: (_, row) => personCellForVisit(row.approvedBy || row.approvalId) },
+      render: (_, row) => personCellForVisit(row.approvedBy || row.approvalId || (row.status === 'pending' ? [].concat(visitRecoConfig[String(row.employeeId)]?.approval || [])[0] : null)) },
   ];
 
   /* ── OV rejection notifications ── */
@@ -2490,6 +2573,7 @@ const VisitPanel = () => {
 
   return (
     <div>
+      <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
       {/* ── OV Rejection Notifications ── */}
       {ovRejectedNotifications.map(v => (
         <div key={v.id} style={{ display:'flex', alignItems:'flex-start', gap:12, background:'#fef2f2',
@@ -2550,25 +2634,25 @@ const VisitPanel = () => {
             </button>
           )}
           {canManageStaff && (
-            <button className="btn btn-sm" onClick={() => { setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' }); setManualVErrors({}); setManualVLastSaved(null); setShowManualV(true); }}
+            <button className="btn btn-sm" onClick={() => { setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:today }); setManualVErrors({}); setManualVLastSaved(null); setShowManualV(true); }}
               style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
               ✍️ Manual Posting
             </button>
           )}
-          <button className="btn btn-primary btn-sm" onClick={openApply}>
-            + {t('Apply for Visit')}
+          <button className="btn btn-primary btn-sm" onClick={() => openOfficeVisitApply()}>
+            + {t('Apply for Office Visit')}
           </button>
         </div>
       </div>
 
-      <DataGrid columns={columns} data={displayVisits} defaultPageSize={20} pageSizeOptions={[5, 10, 20, 50, 100]} showSearch searchPlaceholder={t('Search') + '...'}
+      <DataGrid columns={columns} data={displayVisits} extraSearchFields={['searchText']} searchOnlyExtraFields defaultPageSize={20} pageSizeOptions={[5, 10, 20, 50, 100]} showSearch searchPlaceholder={t('Search') + '...'}
         showFilterButton={false}
         toolbarRightInset={viewVisit ? 456 : 0}
         onRowClick={row => setViewVisit(v => v?.id === row.id ? null : row)}
         onFocusChange={row => setViewVisit(row)}
         onSelectionChange={setSelectedVisitIds}
         contextMenu={[
-          { label: t('Add New'), icon:'➕', onClick: () => openApply() },
+          { label: t('Add New'), icon:'➕', onClick: () => openOfficeVisitApply() },
           'divider',
           { label: t('Edit'), icon:'✏️', onClick: (row) => { if (canEditVisitRow(row)) openEditFormVisit(row); } },
           'divider',
@@ -2651,20 +2735,22 @@ const VisitPanel = () => {
               <button className="btn btn-outline" onClick={() => setVisitActionModal(null)}>{t('Cancel')}</button>
               <button
                 className={`btn ${visitActionModal.type === 'reject' ? 'btn-danger' : 'btn-success'}`}
-                onClick={() => {
-                  if (visitActionModal.type === 'recommend') {
-                    recommendVisit(visitActionModal.id, currentUser.id, visitComment);
-                  } else if (visitActionModal.type === 'approve') {
-                    approveVisit(visitActionModal.id, currentUser.id, visitComment);
-                  } else {
-                    rejectVisit(visitActionModal.id, currentUser.id, visitComment);
-                  }
-                  setVisitActionToast({
-                    msg: visitActionModal.type === 'recommend' ? t('Application recommended') : visitActionModal.type === 'approve' ? t('Application approved') : t('Application rejected'),
-                    type: visitActionModal.type === 'reject' ? 'danger' : 'success',
-                  });
-                  setTimeout(() => setVisitActionToast(null), 3000);
+                onClick={async () => {
+                  const { id, type } = visitActionModal;
                   setVisitActionModal(null); setVisitComment('');
+                  // See the leave action modal — show a server refusal, not a false success.
+                  try {
+                    if (type === 'recommend')     await recommendVisit(id, currentUser.id, visitComment);
+                    else if (type === 'approve')  await approveVisit(id, currentUser.id, visitComment);
+                    else                          await rejectVisit(id, currentUser.id, visitComment);
+                    setVisitActionToast({
+                      msg: type === 'recommend' ? t('Application recommended') : type === 'approve' ? t('Application approved') : t('Application rejected'),
+                      type: type === 'reject' ? 'danger' : 'success',
+                    });
+                  } catch (err) {
+                    setVisitActionToast({ msg: err?.message || 'Action failed', type: 'danger' });
+                  }
+                  setTimeout(() => setVisitActionToast(null), 4000);
                 }}>
                 {visitActionModal.type === 'recommend' ? `👍 ${t('Recommend')}` : visitActionModal.type === 'approve' ? `✅ ${t('Approve')}` : `❌ ${t('Reject')}`}
               </button>
@@ -2683,11 +2769,15 @@ const VisitPanel = () => {
 
       {/* ── Manual Posting Modal (Office Visit) ── */}
       {showManualV && (() => {
-        const setMV = (f, v) => setManualVForm(p => ({ ...p, [f]: v }));
+        // picking From Date copies it into To Date
+        const setMV = (f, v) => setManualVForm(p => ({ ...p, [f]: v, ...(f === 'fromDate' ? { toDate: v } : {}) }));
 
         const validateMV = () => {
           const e = {};
           if (!manualVForm.employeeId)     e.employeeId     = t('Required field');
+          // Approved By is compulsory for every Manual Posting.
+          if (manualVForm.employeeId && !manualVForm.approvedBy)
+            e.approvedBy = manualVApprOpts.length === 0 ? 'No approver configured for this staff — set it in Staff Detail → Set Recommendator & Approval' : t('Required field');
           if (!manualVForm.officialVisit.trim()) e.officialVisit = t('Required field');
           if (!manualVForm.address.trim()) e.address        = t('Required field');
           if (!manualVForm.fromDate)       e.fromDate       = t('Required field');
@@ -2703,6 +2793,7 @@ const VisitPanel = () => {
           const errs = validateMV();
           if (Object.keys(errs).length) { setManualVErrors(errs); return; }
           const savedDevice = getDeviceInfo();
+          try {
           await addVisit({
             employeeId:      manualVForm.employeeId,
             purpose:         manualVForm.officialVisit,
@@ -2723,11 +2814,16 @@ const VisitPanel = () => {
             approvedBy:      manualVForm.approvedBy      || null,
             approvedDate:    manualVForm.approvedDate     || null,
             deviceInfo:      savedDevice,
-          });
+          }, { throwOnReject: true });
+          } catch (err) {
+            // Server refused it — nothing was saved; keep the form as entered.
+            setSaveAlert(alertFromSaveError(err, fd));
+            return;
+          }
           // Stay on the form for back-to-back manual postings instead of
           // closing — clear the fields and reopen the Staff picker ready for
           // the next entry.
-          setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
+          setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:today });
           setManualVErrors({});
           setManualVResetKey(k => k + 1);
           setManualVLastSaved({ updatedByName: currentUser.fullName, updatedAt: new Date().toISOString(), updatedDevice: savedDevice });
@@ -2751,7 +2847,12 @@ const VisitPanel = () => {
         const manualVRecoOpts = activeEmps.filter(e => manualVRecoIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
         const manualVApprOpts = activeEmps.filter(e => manualVApprIds.includes(String(e.id))).map(e => ({ value: String(e.id), label: e.fullName, sub: [e.employeeId, e.position].filter(Boolean).join(' - '), photo: e.profilePhoto }));
         const visitTypeOpts = (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean);
-        const empOpts = activeEmps.map(e => ({
+        // Staff field scoped to who this user may post on behalf of (see the
+        // matching comment in the Leave Manual Posting modal above) — the
+        // recommender/approver options above intentionally stay unscoped.
+        const scopedEmps = employees.filter(e => e.active !== false)
+          .sort((a, b) => staffRankCompare(a, b, settings));
+        const empOpts = scopedEmps.map(e => ({
           value: String(e.id),
           label: e.fullName,
           sub: [e.employeeId, e.position || e.department].filter(Boolean).join(' - '),
@@ -2855,7 +2956,7 @@ const VisitPanel = () => {
                     <div className="form-group">
                       <Lbl required>To Date</Lbl>
                       <LeaveDateInput value={manualVForm.toDate} error={!!manualVErrors.toDate}
-                        min={manualVForm.fromDate} settings={settings} allowPast={isAdmin} onChange={v => setMV('toDate', v)} />
+                        minDate={manualVForm.fromDate} settings={settings} allowPast={isAdmin} onChange={v => setMV('toDate', v)} />
                       <Err msg={manualVErrors.toDate} />
                     </div>
                   </div>
@@ -2890,11 +2991,14 @@ const VisitPanel = () => {
                   {/* Approved By + Date */}
                   <div className="form-row">
                     <div className="form-group">
-                      <Lbl>Approved By</Lbl>
-                      <SearchableSelect value={manualVForm.approvedBy} onChange={v => setMV('approvedBy', v)}
+                      <Lbl required>Approved By</Lbl>
+                      <div style={{ outline: manualVErrors.approvedBy ? '1.5px solid #f87171' : 'none', borderRadius: 7 }}>
+                      <SearchableSelect value={manualVForm.approvedBy} onChange={v => { setMV('approvedBy', v); setManualVErrors(p => ({ ...p, approvedBy: '' })); }}
                         options={manualVApprOpts}
                         placeholder={!manualVForm.employeeId ? '— Select staff first —' : manualVApprOpts.length === 0 ? 'No approver configured' : '— Select Approver —'}
-                        disabled={!manualVForm.employeeId || manualVApprOpts.length === 0} showAvatar />
+                        disabled={!manualVForm.employeeId || manualVApprOpts.length === 0} showAvatar openUp />
+                      </div>
+                      <Err msg={manualVErrors.approvedBy} />
                     </div>
                     <div className="form-group">
                       <Lbl>Approved Date</Lbl>
@@ -2922,295 +3026,10 @@ const VisitPanel = () => {
       {manualVToast && (
         <div className="toast-container">
           <div className={`toast toast-${manualVToast.type}`}>
-            <span>✅</span>{manualVToast.msg}
+            <span>{manualVToast.type === 'error' ? '⚠️' : '✅'}</span>{manualVToast.msg}
           </div>
         </div>
       )}
-
-      {/* ── Apply Modal ── */}
-      {showApply && (() => {
-        const Lbl = ({ children, required }) => (
-          <div style={{ fontSize:12, fontWeight:600, color:'#374151', marginBottom:4 }}>
-            {children}{required && <span style={{ color:'#dc2626', marginLeft:2 }}>*</span>}
-          </div>
-        );
-        const Err = ({ msg }) => msg ? <div style={{ fontSize:11, color:'#dc2626', marginTop:3 }}>{msg}</div> : null;
-
-        /* ── Searchable single-select dropdown ── */
-        const SearchSelect = ({ value, onChange, options, placeholder, error }) => {
-          const [open, setOpen] = React.useState(false);
-          const [srch, setSrch] = React.useState('');
-          const [activeIndex, setActiveIndex] = React.useState(-1);
-          const ref = React.useRef(null);
-          const itemRefs = React.useRef([]);
-          React.useEffect(() => {
-            const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-            document.addEventListener('mousedown', h);
-            return () => document.removeEventListener('mousedown', h);
-          }, []);
-          const filtered = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
-          itemRefs.current = [];
-
-          const select = (v) => { onChange(v); setOpen(false); setSrch(''); setActiveIndex(-1); };
-          const openWithHighlight = () => {
-            const idx = filtered.indexOf(value);
-            setActiveIndex(idx >= 0 ? idx : (filtered.length ? 0 : -1));
-            setOpen(true);
-          };
-          const handleTriggerKeyDown = e => {
-            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-              e.preventDefault();
-              open ? setOpen(false) : openWithHighlight();
-            } else if (e.key === 'Escape') {
-              setOpen(false);
-            }
-          };
-          const handleSearchKeyDown = e => {
-            if (e.key === 'ArrowDown') {
-              e.preventDefault();
-              setActiveIndex(i => (filtered.length ? (i + 1) % filtered.length : -1));
-            } else if (e.key === 'ArrowUp') {
-              e.preventDefault();
-              setActiveIndex(i => (filtered.length ? (i - 1 + filtered.length) % filtered.length : -1));
-            } else if (e.key === 'Enter') {
-              e.preventDefault();
-              if (activeIndex >= 0 && filtered[activeIndex] !== undefined) select(filtered[activeIndex]);
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              setOpen(false);
-            }
-          };
-          React.useEffect(() => {
-            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
-          }, [activeIndex, open]);
-          React.useEffect(() => { if (open) setActiveIndex(filtered.length ? 0 : -1); }, [srch]);
-          return (
-            <div ref={ref} style={{ position:'relative' }}>
-              <div tabIndex={0} onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
-                onKeyDown={handleTriggerKeyDown}
-                style={{
-                  display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'9px 12px', border:`1.5px solid ${error?'#f87171':open?'#1a56db':'#d1d5db'}`,
-                  borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minHeight:42,
-                  color: value ? '#1f2937' : '#9ca3af', fontWeight: value ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none',
-                }}>
-                <span>{value || placeholder}</span>
-                <span style={{ fontSize:9, color:'#9ca3af', flexShrink:0 }}>{open?'▲':'▼'}</span>
-              </div>
-              {open && (
-                <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
-                  boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:240, display:'flex', flexDirection:'column' }}>
-                  <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
-                    <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
-                      placeholder="Search..." onClick={e=>e.stopPropagation()} onKeyDown={handleSearchKeyDown}
-                      style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 9px',
-                        fontSize:13, outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div style={{ overflowY:'auto', flex:1 }}>
-                    {filtered.map((opt, i) => (
-                      <div key={opt} ref={el => itemRefs.current[i] = el}
-                        onMouseDown={e=>{e.preventDefault(); select(opt);}}
-                        onMouseEnter={() => setActiveIndex(i)}
-                        style={{ padding:'9px 12px', fontSize:13, cursor:'pointer', borderBottom:'1px solid #f3f4f6',
-                          background: value===opt ? '#eff6ff' : (i===activeIndex ? '#f8fafc' : 'white'),
-                          color: value===opt ? '#1e40af' : '#374151', fontWeight: value===opt ? 700 : 400 }}>
-                        {opt}
-                      </div>
-                    ))}
-                    {filtered.length === 0 && (
-                      <div style={{ padding:'10px 12px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results found</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
-
-        return (
-          <div className="modal-overlay">
-            <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'92vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
-              <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
-                <h2>🏢 {t('Apply for Visit')}</h2>
-                <button className="modal-close" onClick={() => setShowApply(false)}>✕</button>
-              </div>
-              <div className="modal-body">
-                {applySuccess && (
-                  <div className="alert alert-success" style={{ marginBottom:14 }}>
-                    <span>✅</span> {t('Application submitted successfully')}
-                  </div>
-                )}
-
-                {/* Staff Info */}
-                <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 16px', marginBottom:18 }}>
-                  <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:10 }}>
-                    👤 Staff Information
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
-                    {[['Name',currentUser.fullName],['Staff ID',currentUser.employeeId],['Post',currentUser.position||'—'],['Department',currentUser.department||'—'],['Branch',currentUser.branch||'—']].map(([l,v])=>(
-                      <div key={l}><div style={{ fontSize:10, color:'#9ca3af', marginBottom:2 }}>{l}</div><div style={{ fontSize:13, fontWeight:600, color:'#1f2937' }}>{v}</div></div>
-                    ))}
-                  </div>
-                </div>
-
-                <form onSubmit={handleApplySubmit}>
-                  {/* Official Visit */}
-                  <div className="form-group">
-                    <Lbl required>Official Visit</Lbl>
-                    <SearchSelect
-                      value={applyForm.officialVisit}
-                      onChange={v => handleApplyChange('officialVisit', v)}
-                      options={visitTypeOptions}
-                      placeholder="— Select Official Visit Type —"
-                      error={!!applyErrors.officialVisit}
-                    />
-                    <Err msg={applyErrors.officialVisit} />
-                  </div>
-
-                  {/* Visit Type */}
-                  <div className="form-group">
-                    <Lbl required>Visit Type</Lbl>
-                    <div style={{ display:'flex', gap:10, marginTop:4 }}>
-                      {['National','International'].map(vt => (
-                        <label key={vt} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none',
-                          padding:'8px 18px', border:`1.5px solid ${applyForm.visitType===vt?'#1a56db':'#d1d5db'}`,
-                          borderRadius:8, background: applyForm.visitType===vt ? '#eff6ff' : 'white',
-                          fontSize:13, fontWeight: applyForm.visitType===vt ? 700 : 400,
-                          color: applyForm.visitType===vt ? '#1a56db' : '#374151', transition:'all .12s' }}>
-                          <input type="radio" name="visitTypeModal" value={vt}
-                            checked={applyForm.visitType===vt}
-                            onChange={() => handleApplyChange('visitType', vt)}
-                            style={{ accentColor:'#1a56db', width:14, height:14 }} />
-                          {vt==='National' ? '🇳🇵 National' : '🌍 International'}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Country — only if International */}
-                  {applyForm.visitType === 'International' && (
-                    <div className="form-group">
-                      <Lbl required>Country</Lbl>
-                      <input type="text" className={`form-control ${applyErrors.country?'error':''}`}
-                        placeholder="Enter country name..." value={applyForm.country}
-                        onChange={e => handleApplyChange('country', e.target.value)} style={{ fontSize:13 }} />
-                      <Err msg={applyErrors.country} />
-                    </div>
-                  )}
-
-                  {/* Address */}
-                  <div className="form-group">
-                    <Lbl required>Address</Lbl>
-                    <input type="text" className={`form-control ${applyErrors.address?'error':''}`}
-                      placeholder="Enter visit address / location..." value={applyForm.address}
-                      onChange={e => handleApplyChange('address', e.target.value)} style={{ fontSize:13 }} />
-                    <Err msg={applyErrors.address} />
-                  </div>
-
-                  {/* Description */}
-                  <div className="form-group">
-                    <Lbl required>Description</Lbl>
-                    <textarea className={`form-control ${applyErrors.description?'error':''}`}
-                      rows={3} placeholder="Enter description / purpose of the visit..."
-                      value={applyForm.description}
-                      onChange={e => handleApplyChange('description', e.target.value)}
-                      style={{ fontSize:13 }} />
-                    <Err msg={applyErrors.description} />
-                  </div>
-
-                  {/* From / To Date */}
-                  <div className="form-row">
-                    <div className="form-group">
-                      <Lbl required>From Date</Lbl>
-                      <LeaveDateInput value={applyForm.fromDate} min={today}
-                        error={!!applyErrors.fromDate} settings={settings}
-                        onChange={v => handleApplyChange('fromDate', v)} />
-                      <Err msg={applyErrors.fromDate} />
-                    </div>
-                    <div className="form-group">
-                      <Lbl required>To Date</Lbl>
-                      <LeaveDateInput value={applyForm.toDate} min={applyForm.fromDate||today}
-                        error={!!applyErrors.toDate} settings={settings}
-                        onChange={v => handleApplyChange('toDate', v)} />
-                      <Err msg={applyErrors.toDate} />
-                    </div>
-                  </div>
-
-                  {/* Recommendator & Approval */}
-                  <div className="form-row" style={{ marginBottom:14 }}>
-                    <div>
-                      <Lbl>Recommendator</Lbl>
-                      <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 12px', minHeight:36 }}>
-                        {applyForm.reco.length > 0
-                          ? <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
-                              {applyForm.reco.map(id => (
-                                <span key={id} style={{ background:'#eff6ff', color:'#1a56db', borderRadius:10, padding:'2px 10px', fontSize:12, fontWeight:600 }}>
-                                  {getEmpNameForVisit(id)}
-                                </span>
-                              ))}
-                            </div>
-                          : <span style={{ fontSize:12, color:'#9ca3af' }}>— Not configured —</span>
-                        }
-                      </div>
-                    </div>
-                    <div>
-                      <Lbl>Approval Authority</Lbl>
-                      <div style={{ background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:8, padding:'8px 12px', minHeight:36 }}>
-                        {applyForm.approval.length > 0
-                          ? <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
-                              {applyForm.approval.map(id => (
-                                <span key={id} style={{ background:'#d1fae5', color:'#065f46', borderRadius:10, padding:'2px 10px', fontSize:12, fontWeight:600 }}>
-                                  {getEmpNameForVisit(id)}
-                                </span>
-                              ))}
-                            </div>
-                          : <span style={{ fontSize:12, color:'#9ca3af' }}>— Not configured —</span>
-                        }
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Document Upload */}
-                  <div className="form-group">
-                    <Lbl>Document / Attachment</Lbl>
-                    <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
-                      border:'1.5px dashed #d1d5db', borderRadius:8, cursor:'pointer',
-                      background: applyForm.document ? '#f0fdf4' : '#fafafa', transition:'border .15s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor='#0d9488'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor='#d1d5db'}>
-                      <input type="file" accept="image/*,.pdf,.doc,.docx" style={{ display:'none' }}
-                        onChange={e => handleApplyChange('document', e.target.files[0] || null)} />
-                      <span style={{ fontSize:20 }}>{applyForm.document ? '📎' : '📄'}</span>
-                      <div>
-                        {applyForm.document
-                          ? <><div style={{ fontSize:13, fontWeight:600, color:'#065f46' }}>{applyForm.document.name}</div>
-                              <div style={{ fontSize:11, color:'#6b7280' }}>{(applyForm.document.size/1024).toFixed(1)} KB</div></>
-                          : <><div style={{ fontSize:13, color:'#374151' }}>Click to upload document</div>
-                              <div style={{ fontSize:11, color:'#9ca3af' }}>PDF, Word, Image — optional</div></>
-                        }
-                      </div>
-                      {applyForm.document && (
-                        <button type="button"
-                          onClick={e => { e.preventDefault(); handleApplyChange('document', null); }}
-                          style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:16 }}>✕</button>
-                      )}
-                    </label>
-                  </div>
-
-                  <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:6 }}>
-                    <button type="button" className="btn btn-outline" onClick={() => setShowApply(false)}>{t('Cancel')}</button>
-                    <button type="submit" className="btn btn-primary" disabled={submitting||applySuccess}>
-                      {submitting ? `⏳ ${t('Please wait...')}` : `📤 ${t('Submit')}`}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Right-side detail panel — also the click destination now, with
           Add/Print always available, plus Recommend/Approve/Reject/Edit/
@@ -3272,7 +3091,7 @@ const VisitPanel = () => {
             statusBadge={<StatusBadge status={viewVisit.status} />}
             onClose={() => setViewVisit(null)}
             footer={<>
-              <button style={panelBtnStyle()} onClick={() => { setViewVisit(null); openApply(); }}>➕ {t('Add New')}</button>
+              <button style={panelBtnStyle()} onClick={() => { setViewVisit(null); openOfficeVisitApply(); }}>➕ {t('Add New')}</button>
               <button style={panelBtnStyle()} onClick={printRecord}>🖨️ Print</button>
               {!decided && canManageStaff && (
                 <button style={panelBtnStyle()} onClick={() => { openEditFormVisit(viewVisit); setViewVisit(null); }}>✏️ {t('Edit')}</button>
@@ -3339,7 +3158,8 @@ const VisitPanel = () => {
 
       {/* ── Edit Office Visit Modal ── */}
       {editVisit && (() => {
-        const setEVF = (f, v) => setEditVisitForm(p => ({ ...p, [f]: v }));
+        // keep an existing multi-day range; only pull To Date forward if From passes it
+        const setEVF = (f, v) => setEditVisitForm(p => ({ ...p, [f]: v, ...(f === 'fromDate' && (!p.toDate || p.toDate < v) ? { toDate: v } : {}) }));
         const validateEditVisit = () => {
           const e = {};
           if (!editVisitForm.officialVisit?.trim()) e.officialVisit = t('Required field');
@@ -3351,11 +3171,12 @@ const VisitPanel = () => {
             e.toDate = 'To Date must be on or after From Date';
           return e;
         };
-        const handleEditVisitSubmit = (ev) => {
+        const handleEditVisitSubmit = async (ev) => {
           ev.preventDefault();
           const errs = validateEditVisit();
           if (Object.keys(errs).length) { setEditVisitErrors(errs); return; }
-          updateVisit(editVisit.id, {
+          try {
+          await updateVisit(editVisit.id, {
             employeeId:      editVisitForm.employeeId,
             purpose:         editVisitForm.officialVisit,
             location:        editVisitForm.address,
@@ -3367,7 +3188,11 @@ const VisitPanel = () => {
             recommendedDate: editVisitForm.recommendedDate || null,
             approvedBy:      editVisitForm.approvedBy      || null,
             approvedDate:    editVisitForm.approvedDate    || null,
-          });
+          }, { throwOnReject: true });
+          } catch (err) {
+            setSaveAlert(alertFromSaveError(err, fd));
+            return;
+          }
           setEditVisit(null);
         };
 
@@ -3461,7 +3286,7 @@ const VisitPanel = () => {
                     <div className="form-group">
                       <Lbl required>To Date</Lbl>
                       <LeaveDateInput value={editVisitForm.toDate} error={!!editVisitErrors.toDate}
-                        min={editVisitForm.fromDate} settings={settings} onChange={v => setEVF('toDate', v)} />
+                        minDate={editVisitForm.fromDate} settings={settings} onChange={v => setEVF('toDate', v)} />
                       <Err msg={editVisitErrors.toDate} />
                     </div>
                   </div>
@@ -3539,7 +3364,13 @@ const VisitPanel = () => {
             <div className="modal-body"><p style={{ fontSize:14 }}>{t('Are you sure you want to delete this record?')}</p></div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setDelConfirm(null)}>{t('Cancel')}</button>
-              <button className="btn btn-danger" onClick={() => { deleteVisit(delConfirm); setDelConfirm(null); }}>🗑 {t('Delete')}</button>
+              <button className="btn btn-danger" onClick={() => {
+                const id = delConfirm; setDelConfirm(null);
+                deleteVisit(id).catch(err => {
+                  setVisitActionToast({ msg: err?.message || 'Delete failed', type: 'danger' });
+                  setTimeout(() => setVisitActionToast(null), 4000);
+                });
+              }}>🗑 {t('Delete')}</button>
             </div>
           </div>
         </div>

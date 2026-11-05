@@ -25,6 +25,9 @@ export const FLAG_KEYS = {
   chat:             'module_chat_enabled',
   task:             'module_task_enabled',
   smsGateway:       'module_sms_gateway_enabled',
+  // Help assistant widget. Unlike every flag above, this one defaults ON: only
+  // an explicit `false` hides it (a missing row means enabled).
+  supportHelp:      'module_support_help_enabled',
 };
 
 const TTL_MS = 5000;
@@ -51,6 +54,7 @@ export async function getModuleFlags() {
     chatEnabled:              map[FLAG_KEYS.chat]              === true,
     taskEnabled:              map[FLAG_KEYS.task]              === true,
     smsGatewayEnabled:        map[FLAG_KEYS.smsGateway]        === true,
+    supportHelpEnabled:       map[FLAG_KEYS.supportHelp]       !== false,
   };
   cachedAt = now;
   return cache;
@@ -71,5 +75,6 @@ export async function isModuleEnabled(flagKey) {
   if (flagKey === FLAG_KEYS.chat)              return flags.chatEnabled;
   if (flagKey === FLAG_KEYS.task)              return flags.taskEnabled;
   if (flagKey === FLAG_KEYS.smsGateway)        return flags.smsGatewayEnabled;
+  if (flagKey === FLAG_KEYS.supportHelp)       return flags.supportHelpEnabled;
   return false;
 }

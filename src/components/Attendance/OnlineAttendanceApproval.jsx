@@ -29,6 +29,34 @@ const StatusBadge = ({ status }) => {
   return <span className={`badge ${cls}`}>{label}</span>;
 };
 
+/** Real OpenStreetMap picture around the point (3x3 tiles) with a pin on the exact spot. */
+const MapPreview = ({ lat, lng, label, place, w = 400, h = 190 }) => {
+  lat = Number(lat); lng = Number(lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const z = 16, n = 2 ** z;
+  const x = ((lng + 180) / 360) * n;
+  const lr = (lat * Math.PI) / 180;
+  const y = ((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2) * n;
+  const tx = Math.floor(x), ty = Math.floor(y);
+  const px = (x - tx + 1) * 256, py = (y - ty + 1) * 256;
+  const tiles = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) tiles.push({ dx, dy });
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 3 }}>{label}{place ? <span style={{ fontWeight: 400 }}> · {place}</span> : null}</div>
+      <a href={`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`} target="_blank" rel="noreferrer"
+        style={{ display: 'block', position: 'relative', width: '100%', maxWidth: w, height: h, overflow: 'hidden', borderRadius: 8, border: '1px solid #d1d5db', background: '#e5e7eb' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, width: 768, height: 768, transform: `translate(${-(px - w / 2)}px, ${-(py - h / 2)}px)` }}>
+          {tiles.map(t2 => <img key={`${t2.dx}${t2.dy}`} alt="" src={`https://tile.openstreetmap.org/${z}/${tx + t2.dx}/${ty + t2.dy}.png`}
+            style={{ position: 'absolute', width: 256, height: 256, left: (t2.dx + 1) * 256, top: (t2.dy + 1) * 256 }} />)}
+          <span style={{ position: 'absolute', left: px, top: py, transform: 'translate(-50%,-100%)', fontSize: 28, lineHeight: 1, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.5))' }}>📍</span>
+        </div>
+        <span style={{ position: 'absolute', right: 3, bottom: 2, fontSize: 9, background: 'rgba(255,255,255,.8)', padding: '0 4px', borderRadius: 3, color: '#374151' }}>© OpenStreetMap</span>
+      </a>
+    </div>
+  );
+};
+
 const mapLink = (lat, lng) => (lat == null || lng == null) ? null :
   `https://www.google.com/maps?q=${lat},${lng}`;
 
@@ -83,7 +111,16 @@ const OnlineAttendanceApproval = () => {
   };
   const canApproveRecord = (r) => !isRecoCompulsory || !!r.recommendedBy;
 
-  const isMine = (r) => isRecommenderFor(r.employeeId) || isApproverFor(r.employeeId);
+  // Never your own record (unless admin/superAdmin) — see LeaveApproval.
+  const isSelf = (r) => String(r.employeeId) === String(currentUser.id) && !isAdmin;
+  // An admin also sees records of staff who have NO recommender/approver set up at all (and their own) — otherwise such a
+  // check-in would be invisible to everyone. The server already lets admins act on anything (recoApprovalGuard).
+  const hasNoApprover = (empId) => {
+    const c = recoConfig[String(empId)];
+    const n = (v) => (Array.isArray(v) ? v : v ? [v] : []).length;
+    return !c || (n(c.reco) === 0 && n(c.approval) === 0);
+  };
+  const isMine = (r) => isAdmin || (!isSelf(r) && (isRecommenderFor(r.employeeId) || isApproverFor(r.employeeId))) || (isAdmin && hasNoApprover(r.employeeId));
   const myRecords = records.filter(isMine);
   const pendingRecords = myRecords.filter(r => r.status === 'pending');
 
@@ -114,14 +151,14 @@ const OnlineAttendanceApproval = () => {
     { field: 'checkInAt', header: 'Check In', width: 140, render: v => v ? new Date(v).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—' },
     { field: 'checkOutAt', header: 'Check Out', width: 140, render: v => v ? new Date(v).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—' },
     {
-      field: 'location', header: 'Location', width: 130, sortable: false,
+      field: 'location', header: 'Location', width: 260, sortable: false,
       render: (_, r) => {
         const inLink = mapLink(r.checkInLat, r.checkInLng);
         const outLink = mapLink(r.checkOutLat, r.checkOutLng);
         return (
-          <div style={{ display: 'flex', gap: 6, fontSize: 11.5 }}>
-            {inLink && <a href={inLink} target="_blank" rel="noreferrer" style={{ color: '#1a56db' }}>📍 In</a>}
-            {outLink && <a href={outLink} target="_blank" rel="noreferrer" style={{ color: '#1a56db' }}>📍 Out</a>}
+          <div style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+            {inLink && <div><HoverCard trigger={<a href={inLink} target="_blank" rel="noreferrer" style={{ color: '#1a56db', fontWeight: 600 }}>📍 In</a>} content={<MapPreview lat={r.checkInLat} lng={r.checkInLng} label="Check-In" place={r.checkInPlace} w={320} h={170} />} maxWidth={360} />{r.checkInPlace && <span style={{ color: '#374151' }}> · {r.checkInPlace}</span>}</div>}
+            {outLink && <div><HoverCard trigger={<a href={outLink} target="_blank" rel="noreferrer" style={{ color: '#1a56db', fontWeight: 600 }}>📍 Out</a>} content={<MapPreview lat={r.checkOutLat} lng={r.checkOutLng} label="Check-Out" place={r.checkOutPlace} w={320} h={170} />} maxWidth={360} />{r.checkOutPlace && <span style={{ color: '#374151' }}> · {r.checkOutPlace}</span>}</div>}
           </div>
         );
       },
@@ -158,8 +195,9 @@ const OnlineAttendanceApproval = () => {
       field: 'actions', header: 'Actions', width: 180, filterable: false, sortable: false,
       render: (_, row) => {
         const amReco = isRecommenderFor(row.employeeId);
-        const amApprover = isApproverFor(row.employeeId);
-        const canApprove = canApproveRecord(row);
+        const adminOverride = isAdmin && hasNoApprover(row.employeeId);   // nobody configured: admin decides
+        const amApprover = isApproverFor(row.employeeId) || adminOverride;
+        const canApprove = adminOverride || canApproveRecord(row);
         const alreadyReco = !!row.recommendedBy;
 
         if (row.status !== 'pending') {
@@ -293,6 +331,8 @@ const OnlineAttendanceApproval = () => {
                         {outLink && <a href={outLink} target="_blank" rel="noreferrer" style={{ color: '#1a56db', fontSize: 12 }}>📍 Check-Out Location</a>}
                       </div>
                     )}
+                    <MapPreview lat={r.checkInLat} lng={r.checkInLng} label="📍 Check-In location" place={r.checkInPlace} />
+                    <MapPreview lat={r.checkOutLat} lng={r.checkOutLng} label="📍 Check-Out location" place={r.checkOutPlace} />
                     {device && (
                       <div style={{ marginTop: 6, fontSize: 11.5, color: '#6b7280', wordBreak: 'break-word' }}>
                         🖥️ {device}

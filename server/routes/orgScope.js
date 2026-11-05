@@ -96,3 +96,54 @@ export async function resolveRecoApprovalEmployeeIds(req) {
   );
   return rows.map(r => r.employee_id);
 }
+
+// Manual Posting / editing on behalf of another staff member by a Branch
+// Manager or Branch Area Manager (the roles that get the Manual Posting
+// button — canManageStaff in AuthContext.jsx). Allowed only when every
+// target employee is inside the caller's own org scope AND none of them is
+// the caller themself (no self-approving your own leave/visit). Admin /
+// Super Admin don't go through this — they're privileged outright.
+const MANAGER_POSTING_ROLES = ['branchManager', 'branchAreaManager'];
+export async function canManagerPostFor(req, ...employeeIds) {
+  if (!MANAGER_POSTING_ROLES.includes(req.user?.role)) return false;
+  const targets = employeeIds.filter(v => v != null && v !== '').map(Number);
+  if (!targets.length || targets.some(id => !Number.isFinite(id) || id === Number(req.user.id))) return false;
+  const ids = await resolveOrgEmployeeIds(req);
+  if (ids === null) return true;
+  const allowed = new Set(ids.map(Number));
+  return targets.every(id => allowed.has(id));
+}
+
+// Manual Posting (Leave / Office Visit / Late In & Early Out / OT) by a Branch
+// Manager or Branch Area Manager lands as Approved — for staff in their own
+// org scope AND for their own record (business decision: a Branch Manager's
+// Manual Posting is itself the approval, even for themself). Unlike
+// canManagerPostFor, self is allowed here; that one still guards ordinary
+// (non-manual) edits/deletes of someone else's application.
+export async function canManagerManualPost(req, ...employeeIds) {
+  if (!MANAGER_POSTING_ROLES.includes(req.user?.role)) return false;
+  const targets = employeeIds.filter(v => v != null && v !== '').map(Number);
+  if (!targets.length || targets.some(id => !Number.isFinite(id))) return false;
+  const others = targets.filter(id => id !== Number(req.user.id));
+  if (!others.length) return true;
+  const ids = await resolveOrgEmployeeIds(req);
+  if (ids === null) return true;
+  const allowed = new Set(ids.map(Number));
+  return others.every(id => allowed.has(id));
+}
+
+// Normal (non-manual) Apply for Leave / Office Visit on behalf of another
+// staff member — the global apply modals can be opened for a specific
+// employee (Daily Attendance / Staff Ledger right-click, targetEmployeeId).
+// Any manager role may do this for staff in their own org scope; the
+// application still goes in as Pending through the normal reco/approval
+// flow, so this grants no approval power. Not for self (that's just a
+// normal self-application, which needs no check).
+const MANAGER_APPLY_ROLES = ['branchManager', 'branchAreaManager', 'departmentHead', 'departmentIncharge'];
+export async function canManagerApplyFor(req, employeeId) {
+  if (!MANAGER_APPLY_ROLES.includes(req.user?.role)) return false;
+  const id = Number(employeeId);
+  if (!Number.isFinite(id) || id === Number(req.user.id)) return false;
+  const ids = await resolveOrgEmployeeIds(req);
+  return ids === null || ids.map(Number).includes(id);
+}

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { validateBody } from '../middleware/validate.js';
 import pool from '../db.js';
 import { broadcastNotification } from '../services/liveNotifications.js';
 
@@ -139,7 +140,7 @@ router.put('/:id/read', async (req, res) => {
 });
 
 /* POST /api/messages — send new message */
-router.post('/', async (req, res) => {
+router.post('/', validateBody({ recipientType: { type: 'scalar', max: 40 }, recipientIds: { type: 'array', max: 5000 }, department: { type: 'scalar', max: 200 }, subject: { max: 500 }, body: { max: 1000000 } }), async (req, res) => {
   const { recipientType, recipientIds, department, subject, body } = req.body;
   const senderId = req.user.id;
 

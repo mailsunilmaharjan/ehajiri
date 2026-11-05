@@ -103,28 +103,40 @@ const LeaveApproval = ({ embedded = false } = {}) => {
   const canShowApprove = (empId) => !(isRecoCompulsory && hasRecommenderFor(empId) && isRecommenderFor(empId));
 
   /* ── Handle action ── */
-  const handleAction = () => {
+  const handleAction = async () => {
     if (!actionModal) return;
-    const { id, type, leave } = actionModal;
-    if (type === 'recommend') {
-      recommendLeave(id, currentUser.id, comment);
-      showToast('Leave recommended successfully', 'success');
-    } else if (type === 'approve') {
-      approveLeave(id, currentUser.id, comment);
-      showToast(t('Application approved'), 'success');
-    } else {
-      rejectLeave(id, currentUser.id, comment);
-      showToast(t('Application rejected'), 'danger');
-    }
+    const { id, type } = actionModal;
     setActionModal(null);
     setComment('');
+    // Await the server so a refusal shows its reason (DataContext rolls the
+    // row back) instead of a false success toast.
+    try {
+      if (type === 'recommend') {
+        await recommendLeave(id, currentUser.id, comment);
+        showToast('Leave recommended successfully', 'success');
+      } else if (type === 'approve') {
+        await approveLeave(id, currentUser.id, comment);
+        showToast(t('Application approved'), 'success');
+      } else {
+        await rejectLeave(id, currentUser.id, comment);
+        showToast(t('Application rejected'), 'danger');
+      }
+    } catch (err) {
+      showToast(err?.message || 'Action failed', 'danger');
+    }
   };
 
   // Scope everything on this page to applications the current user is
   // actually the assigned recommender/approver for — the action buttons
   // already only appear for those (see amReco/amApprover below), so an
   // unfiltered org-wide list was mostly rows nobody here could act on.
-  const isMine = (l) => isRecommenderFor(l.employeeId) || isApproverFor(l.employeeId);
+  // Never your own application (unless admin/superAdmin) — authorizeRecoAction
+  // refuses self-action server-side, so listing it here (e.g. a user set as
+  // their own approver in Set Recommendator & Approval) only offered buttons
+  // that always failed with "You cannot act on your own application."
+  const isSelf = (l) => String(l.employeeId) === String(currentUser.id)
+    && !['admin', 'superAdmin'].includes(currentUser.role);
+  const isMine = (l) => !isSelf(l) && (isRecommenderFor(l.employeeId) || isApproverFor(l.employeeId));
   const myLeaves       = leaves.filter(isMine);
   const pendingLeaves  = myLeaves.filter(l => l.status === 'pending');
   const allLeaves      = [...myLeaves].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));

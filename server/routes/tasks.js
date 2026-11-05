@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import { validateBody } from '../middleware/validate.js';
 import pool from '../db.js';
+import { pushLater } from '../services/pushService.js';
 import { requireRole } from '../middleware/roleGuard.js';
 import { broadcastNotification } from '../services/liveNotifications.js';
 import { sendTaskAssigned, sendTaskCompleted } from '../services/emailService.js';
@@ -167,6 +169,8 @@ async function insertTaskNotifications(recipientIds, taskId, event, title, byUse
      SELECT $1, $2, $3, $4, u, FALSE FROM UNNEST($5::int[]) AS u`,
     [taskId, event, title, byUserId, recipientIds]
   );
+  // phone alert (no-op unless Firebase push is configured); same audience as the in-app badge
+  pushLater(recipientIds.filter(id => id !== byUserId), { title: /follow/i.test(String(event)) ? 'Task update' : 'New task', body: String(title || ''), data: { path: '/staff/task' } });
 }
 
 // Full audience for a task-event popup/badge — deliberately wider than the
@@ -446,7 +450,7 @@ router.post('/:id/notifications/read', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', validateBody({ title: { max: 500 }, description: { max: 2000000 }, contactId: {"type":"scalar","max":100}, contactPersonId: {"type":"scalar","max":100}, categoryId: {"type":"scalar","max":100}, priorityId: {"type":"scalar","max":100}, dueDate: {"type":"scalar","max":40}, status: { type: 'scalar', max: 40 }, assignedTo: { type: 'array', max: 500 } }), async (req, res) => {
   const { title, description, contactId, contactPersonId, categoryId, priorityId, dueDate, assignedTo, isFieldVisit } = req.body;
   if (!title?.trim()) return res.status(400).json({ error: 'Task title is required' });
   const assigneeIds = toAssigneeIds(assignedTo);
@@ -474,7 +478,7 @@ router.post('/', async (req, res) => {
   } finally { client.release(); }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', validateBody({ title: { max: 500 }, description: { max: 2000000 }, contactId: {"type":"scalar","max":100}, contactPersonId: {"type":"scalar","max":100}, categoryId: {"type":"scalar","max":100}, priorityId: {"type":"scalar","max":100}, dueDate: {"type":"scalar","max":40}, status: { type: 'scalar', max: 40 }, assignedTo: { type: 'array', max: 500 } }), async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
   const { title, description, contactId, contactPersonId, categoryId, priorityId, dueDate, status, assignedTo, isFieldVisit } = req.body;
@@ -706,7 +710,7 @@ router.get('/:taskId/followups', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/:taskId/followups', async (req, res) => {
+router.post('/:taskId/followups', validateBody({ mode: { type: 'scalar', max: 40 }, followupDate: {"type":"scalar","max":40}, description: { max: 2000000 }, nextCategoryId: {"type":"scalar","max":100}, handedOverTo: {"type":"scalar","max":100} }), async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   if (isNaN(taskId)) return res.status(400).json({ error: 'Invalid task id' });
   const { mode, followupDate, description, nextCategoryId, nextFollowupAt, handedOverTo } = req.body;
@@ -750,7 +754,7 @@ router.post('/:taskId/followups', async (req, res) => {
   } finally { client.release(); }
 });
 
-router.put('/:taskId/followups/:id', async (req, res) => {
+router.put('/:taskId/followups/:id', validateBody({ mode: { type: 'scalar', max: 40 }, followupDate: {"type":"scalar","max":40}, description: { max: 2000000 }, nextCategoryId: {"type":"scalar","max":100}, handedOverTo: {"type":"scalar","max":100} }), async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   const id = parseInt(req.params.id);
   if (isNaN(taskId) || isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
@@ -825,12 +829,27 @@ const REPLY_SEL = `
 `;
 const REPLY_JOINS = `FROM task_followup_replies r LEFT JOIN users u ON u.id = r.user_id`;
 
+// userCanAccessTask(taskId) only proves access to THAT task. These confirm the
+// followup/reply in the URL actually belongs to it — otherwise pairing one's own
+// task id with another task's followup/reply id read or wrote across tasks.
+async function followupInTask(followupId, taskId) {
+  const { rows } = await pool.query('SELECT 1 FROM task_followups WHERE id=$1 AND task_id=$2', [followupId, taskId]);
+  return rows.length > 0;
+}
+async function replyInFollowup(replyId, followupId, taskId) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM task_followup_replies r JOIN task_followups f ON f.id = r.followup_id
+     WHERE r.id=$1 AND r.followup_id=$2 AND f.task_id=$3`, [replyId, followupId, taskId]);
+  return rows.length > 0;
+}
+
 router.get('/:taskId/followups/:followupId/replies', async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   const followupId = parseInt(req.params.followupId);
   if (isNaN(taskId) || isNaN(followupId)) return res.status(400).json({ error: 'Invalid id' });
   try {
     if (!(await userCanAccessTask(req.user, taskId))) return res.status(404).json({ error: 'Task not found' });
+    if (!(await followupInTask(followupId, taskId))) return res.status(404).json({ error: 'Followup not found' });
     const { rows } = await pool.query(
       `SELECT ${REPLY_SEL} ${REPLY_JOINS} WHERE r.followup_id = $1 ORDER BY r.created_at ASC`,
       [followupId]
@@ -839,7 +858,7 @@ router.get('/:taskId/followups/:followupId/replies', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/:taskId/followups/:followupId/replies', async (req, res) => {
+router.post('/:taskId/followups/:followupId/replies', validateBody({ message: { required: true, max: 10000 }, parentReplyId: { type: 'scalar', max: 100 } }), async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   const followupId = parseInt(req.params.followupId);
   if (isNaN(taskId) || isNaN(followupId)) return res.status(400).json({ error: 'Invalid id' });
@@ -847,6 +866,7 @@ router.post('/:taskId/followups/:followupId/replies', async (req, res) => {
   if (!message?.trim()) return res.status(400).json({ error: 'Reply message is required' });
   try {
     if (!(await userCanAccessTask(req.user, taskId))) return res.status(404).json({ error: 'Task not found' });
+    if (!(await followupInTask(followupId, taskId))) return res.status(404).json({ error: 'Followup not found' });
 
     let parentId = null;
     if (parentReplyId) {
@@ -873,7 +893,7 @@ router.post('/:taskId/followups/:followupId/replies', async (req, res) => {
 // (a followup's own description, or one specific reply). Reacting again with
 // the same emoji removes it; a different emoji replaces it. Same access
 // audience as the followup/reply itself (userCanAccessTask).
-const REACTION_EMOJI = ['✅', '👍', '👎', '❤️', '😂'];
+const REACTION_EMOJI = ['✅', '👍', '👎', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 
 async function setReaction(targetType, targetId, userId, emoji) {
   const { rows: existing } = await pool.query(
@@ -906,6 +926,7 @@ router.put('/:taskId/followups/:followupId/reactions', async (req, res) => {
   if (!REACTION_EMOJI.includes(emoji)) return res.status(400).json({ error: 'Invalid emoji' });
   try {
     if (!(await userCanAccessTask(req.user, taskId))) return res.status(404).json({ error: 'Task not found' });
+    if (!(await followupInTask(followupId, taskId))) return res.status(404).json({ error: 'Followup not found' });
     res.json(await setReaction('followup', followupId, req.user.id, emoji));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -913,11 +934,13 @@ router.put('/:taskId/followups/:followupId/reactions', async (req, res) => {
 router.put('/:taskId/followups/:followupId/replies/:replyId/reactions', async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   const replyId = parseInt(req.params.replyId);
-  if (isNaN(taskId) || isNaN(replyId)) return res.status(400).json({ error: 'Invalid id' });
+  const followupIdR = parseInt(req.params.followupId);
+  if (isNaN(taskId) || isNaN(replyId) || isNaN(followupIdR)) return res.status(400).json({ error: 'Invalid id' });
   const { emoji } = req.body;
   if (!REACTION_EMOJI.includes(emoji)) return res.status(400).json({ error: 'Invalid emoji' });
   try {
     if (!(await userCanAccessTask(req.user, taskId))) return res.status(404).json({ error: 'Task not found' });
+    if (!(await replyInFollowup(replyId, followupIdR, taskId))) return res.status(404).json({ error: 'Reply not found' });
     res.json(await setReaction('reply', replyId, req.user.id, emoji));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -970,6 +993,7 @@ router.put('/:taskId/followups/:id/seen', async (req, res) => {
   if (isNaN(taskId) || isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
   try {
     if (!(await userCanAccessTask(req.user, taskId))) return res.status(404).json({ error: 'Task not found' });
+    if (!(await followupInTask(id, taskId))) return res.status(404).json({ error: 'Followup not found' });
     res.json(await recordView('followup', id, req.user.id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

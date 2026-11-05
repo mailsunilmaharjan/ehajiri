@@ -21,11 +21,17 @@ import pool    from '../db.js';
 import { saveAttlogs } from '../services/zktecoService.js';
 
 const router = express.Router();
+const MAX_RECORDS = 5000;
+const SN_RE = /^[A-Za-z0-9._-]{3,40}$/;
 
 router.post('/logs', async (req, res) => {
   const device = req.standaloneDevice;
   const { serialNumber, records } = req.body;
   if (!Array.isArray(records)) return res.status(400).json({ error: 'records array is required' });
+  if (records.length > MAX_RECORDS) return res.status(413).json({ error: `At most ${MAX_RECORDS} records per sync` });
+  if (serialNumber != null && !SN_RE.test(String(serialNumber))) {
+    return res.status(400).json({ error: 'Invalid serial number' });
+  }
 
   try {
     let sn = device.serial_number;
@@ -44,7 +50,7 @@ router.post('/logs', async (req, res) => {
       verifyType: r.verifyType || 0,
       workCode  : r.workCode   || 0,
       rawLine   : `REMOTE_SYNC_AGENT enroll=${r.pin} verify=${r.verifyType} inout=${r.checkType}`,
-    })).filter(r => !Number.isNaN(r.checkTime.getTime()));
+    })).filter(r => r.pin.length > 0 && r.pin.length <= 24 && !Number.isNaN(r.checkTime.getTime()));
 
     const inserted = await saveAttlogs(sn, parsed);
 

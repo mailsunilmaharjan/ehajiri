@@ -38,7 +38,7 @@ const statusStyle = (s) => STATUS_STYLE[s] || STATUS_STYLE.Leave;
 // translate for display when Nepali is active (module-level so it can't call
 // the component's own L(), which needs `language` from context).
 const STATUS_LABEL_NP = {
-  Present: 'उपस्थित', Absent: 'अनुपस्थित', Weekend: 'विकेन्ड',
+  Present: 'उपस्थित', Absent: 'अनुपस्थित', Weekend: 'सप्ताहन्त',
   'Day Off': 'डे अफ', 'Night Off': 'नाइट अफ', Leave: 'बिदा',
   'Public Holiday': 'सार्वजनिक बिदा', 'Office Visit': 'कार्यालय भ्रमण',
 };
@@ -186,6 +186,23 @@ const StaffLedger = () => {
   const L = (np,en)    => language==='np' ? np : en;
 
   const isStaffLogin = currentUser?.role === 'employee';
+  const isAdmin      = ['admin', 'superAdmin'].includes(currentUser?.role);
+
+  // Right-click → Delete Time In / Time Out Log (Admin only) — removes the
+  // raw device log behind that punch, e.g. a double-punch duplicate that got
+  // taken as the Time Out, then reloads so the day re-pairs from what's left.
+  const deletePunch = async (row, which) => {
+    const iso = which === 'in' ? row.timeIn : row.timeOut;
+    const label = which === 'in' ? 'Time In' : 'Time Out';
+    if (!iso) { window.alert(`No ${label} on ${row.dateStr}.`); return; }
+    const d = new Date(iso);
+    const when = `${row.dateStr} ${fmtTime(iso)}:${String(d.getSeconds()).padStart(2,'0')}`;
+    if (!window.confirm(`Permanently delete the ${label} attendance log at ${when}?`)) return;
+    try {
+      await api.post('/attendance/logs/delete-punch', { employeeId: emp.id, checkTime: iso });
+      load();
+    } catch (err) { window.alert(err.message); }
+  };
 
   // Half-monthly context: shows 1st/2nd Half toggle (1–15 or 16–end of month)
   // Monthly context: shows full month range (no toggle)
@@ -384,7 +401,7 @@ const StaffLedger = () => {
       },
     },
     {
-      field:'timeIn', header:L('आउने','Time In'), align:'center',
+      field:'timeIn', header:L('आएको','Time In'), align:'center',
       render:(v,row)=>{
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         const warn=row.punches===1;
@@ -398,7 +415,7 @@ const StaffLedger = () => {
       },
     },
     {
-      field:'timeOut', header:L('جاने','Time Out'), align:'center',
+      field:'timeOut', header:L('गएको','Time Out'), align:'center',
       render:(v,row)=>{
         if(!v){
           if(row.timeIn){
@@ -621,8 +638,8 @@ const StaffLedger = () => {
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">SN</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef;text-align:left">Date</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">Day</th>
-                    <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">Time In</th>
-                    <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">Time Out</th>
+                    <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">${L('आएको','Time In')}</th>
+                    <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">${L('गएको','Time Out')}</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">Total Hrs</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">IN Status</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">OUT Status</th>
@@ -656,7 +673,7 @@ const StaffLedger = () => {
               // Staff info + summary as extra CSV rows after company header
               const staffInfoRow = `"Staff Name: ${emp.fullName||''}","Post: ${emp.postShort||emp.position||''}","Dept: ${emp.deptShort||emp.department||''}","Grade: ${emp.grade||''}","Mode: ${emp.mode||''}","Branch: ${emp.branchShort||emp.branch||''}"`;
               const summaryRow = `"Present: ${s.presentCount||0}  Absent: ${s.absentCount||0}  Leave: ${s.leaveCount||0}  Office Visit: ${visitCount2}  Late In: ${s.lateCount||0}  Early Out: ${s.earlyCount||0}  Att.Rate: ${s.attendanceRate||0}%  Present in Holiday: ${presentInHoliday2}  Present in Weekend: ${presentInWeekend2}${emp?.eligibleForOt ? `  Total OT: ${s.otApprovedFormatted||'0:00'}` : ''}"`;
-              const header = ['SN','Date','Day','Time In','Time Out','Total Hrs','IN Status','OUT Status','OT','Status','Remarks'];
+              const header = ['SN','Date','Day',L('आएको','Time In'),L('गएको','Time Out'),'Total Hrs','IN Status','OUT Status','OT','Status','Remarks'];
               const dataRows = days.map(r => [
                 r.sn, fd(r.dateStr)||r.dateStr, r.dayFull,
                 r.timeIn  ? fmtTime(r.timeIn)  : '',
@@ -874,8 +891,8 @@ const StaffLedger = () => {
                 { label:L('उपस्थिति दर','Att. Rate'),   value:`${summary.attendanceRate}%`,    c:'#eff6ff', tc:'#1a56db' },
                 { label:L('सार्वजनिक बिदा','Public Holiday'), value:days.filter(r=>r.isPublicHoliday).length, c:'#fef3c7', tc:'#92400e' },
                 { label:L('बिदामा उपस्थित','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
-                { label:L('विकेन्ड','Weekend'), value:days.filter(r=>r.isWeekend).length, c:'#f3f4f6', tc:'#6b7280' },
-                { label:L('विकेन्डमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
+                { label:L('सप्ताहन्त','Weekend'), value:days.filter(r=>r.isWeekend).length, c:'#f3f4f6', tc:'#6b7280' },
+                { label:L('सप्ताहन्तमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
                 ...(emp?.eligibleForOt ? [
                   { label:L('जम्मा ओटी','Total OT'), value:summary.otApprovedFormatted || '0:00', c:'#d1fae5', tc:'#059669' },
                 ] : []),
@@ -986,6 +1003,19 @@ const StaffLedger = () => {
               icon: '📩',
               onClick: (row) => openMissingAttendance(emp.id, row.dateStr),
             },
+            ...(isAdmin ? [
+              'divider',
+              {
+                label: 'Delete Time In Log',
+                icon: '🗑',
+                onClick: (row) => deletePunch(row, 'in'),
+              },
+              {
+                label: 'Delete Time Out Log',
+                icon: '🗑',
+                onClick: (row) => deletePunch(row, 'out'),
+              },
+            ] : []),
           ]}
           toolbarLeft={
             <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
@@ -996,7 +1026,7 @@ const StaffLedger = () => {
                 { value:'',               label:L('सबै','All'),                  color:'#374151' },
                 { value:'Present',        label:L('उपस्थित','Present'),          color:'#065f46' },
                 { value:'Absent',         label:L('अनुपस्थित','Absent'),         color:'#991b1b' },
-                { value:'Weekend',        label:L('विकेन्ड','Weekend'),           color:'#6b7280' },
+                { value:'Weekend',        label:L('सप्ताहन्त','Weekend'),           color:'#6b7280' },
                 { value:'Day Off',        label:L('डे अफ','Day Off'),             color:'#6b7280' },
                 { value:'Night Off',      label:L('नाइट अफ','Night Off'),         color:'#4338ca' },
                 { value:'Leave',          label:L('बिदा','Leave'),                color:'#5b21b6' },

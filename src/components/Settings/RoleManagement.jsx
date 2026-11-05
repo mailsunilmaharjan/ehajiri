@@ -172,15 +172,14 @@ const ROLES_FOR_MATRIX = [
   { key: 'departmentIncharge', label: 'Dept. Incharge',       color: '#047857', bg: '#a7f3d0' },
   { key: 'branchManager',      label: 'Branch Manager',       color: '#1a56db', bg: '#dbeafe' },
   { key: 'branchAreaManager',  label: 'Branch Area Manager',  color: '#1e3a8a', bg: '#e0e7ff' },
+  { key: 'admin',              label: 'Admin',                color: '#9333ea', bg: '#f3e8ff' },
 ];
+const FULL_PERM = { view: true, edit: true, delete: true };
 
 /* ─────────────────────────────────────────────────────────────────────────
    localStorage helpers
 ───────────────────────────────────────────────────────────────────────── */
-const PERM_KEY = 'ehajiri_page_permissions';
-const loadSaved = () => {
-  try { return JSON.parse(localStorage.getItem(PERM_KEY) || 'null'); } catch { return null; }
-};
+// Permissions live server-side (see savePagePermissions / refreshPagePerms in AuthContext).
 
 /* ─────────────────────────────────────────────────────────────────────────
    PermCell  —  View | Edit | Delete checkboxes
@@ -267,13 +266,14 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
   const setPerm   = (pageKey, perm) => setOverrides(p => ({ ...p, [pageKey]: perm }));
   const clearPerm = (pageKey) => setOverrides(p => { const n = { ...p }; delete n[pageKey]; return n; });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selEmpId) return;
     const next = JSON.parse(JSON.stringify(saved || {}));
     if (!next.staff) next.staff = {};
     if (Object.keys(overrides).length === 0) delete next.staff[selEmpId];
     else next.staff[selEmpId] = overrides;
-    savePagePermissions(next);
+    try { await savePagePermissions(next); }
+    catch (err) { setToast(`Save failed: ${err.message}`); return; }
     onSave(next);
     setToast('Staff override saved!');
     setTimeout(() => setToast(''), 2500);
@@ -282,11 +282,12 @@ const StaffOverrideSection = ({ employees, saved, onSave }) => {
   /* Ctrl+S saves — this section only exists while its tab is active */
   useSaveShortcut(true, handleSave);
 
-  const handleClearAll = () => {
-    setOverrides({});
+  const handleClearAll = async () => {
     const next = JSON.parse(JSON.stringify(saved || {}));
     if (next.staff) delete next.staff[selEmpId];
-    savePagePermissions(next);
+    try { await savePagePermissions(next); }
+    catch (err) { setToast(`Save failed: ${err.message}`); return; }
+    setOverrides({});
     onSave(next);
     setToast('All overrides cleared — inherits role defaults');
     setTimeout(() => setToast(''), 2500);
@@ -803,11 +804,11 @@ const CoverageAssignment = ({ employees }) => {
    MAIN — RoleManagement
 ═══════════════════════════════════════════════════════════════════════════ */
 const RoleManagement = () => {
-  const { refreshPagePerms, isSuperAdmin } = useAuth();
+  const { refreshPagePerms, pagePerms, isSuperAdmin } = useAuth();
   const { employees, updateEmployee } = useData();
 
   const [activeTab, setActiveTab] = useState('matrix');
-  const [saved,     setSaved]     = useState(loadSaved);
+  const [saved,     setSaved]     = useState(pagePerms);
   const [saveMsg,   setSaveMsg]   = useState('');
 
   /* ── Module Controls tab — global on/off flags (Email Setup / StandAlone
@@ -816,7 +817,7 @@ const RoleManagement = () => {
      the same admin/superAdmin rule as its own in-page toggle (Settings →
      StandAlone Device), duplicated here so it can be turned on before that
      page is even reachable (its tab is hidden until this flag is enabled). */
-  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false, guestRegistrationEnabled: false, onlineAttendanceEnabled: false, dutyRosterEnabled: false, chatEnabled: false, taskEnabled: false, smsGatewayEnabled: false });
+  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false, guestRegistrationEnabled: false, onlineAttendanceEnabled: false, dutyRosterEnabled: false, chatEnabled: false, taskEnabled: false, smsGatewayEnabled: false, supportHelpEnabled: true });
   const [moduleFlagsLoading, setModuleFlagsLoading] = useState(true);
 
   useEffect(() => {
@@ -836,11 +837,14 @@ const RoleManagement = () => {
     module_chat_enabled:                'chatEnabled',
     module_task_enabled:                'taskEnabled',
     module_sms_gateway_enabled:         'smsGatewayEnabled',
+    module_support_help_enabled:        'supportHelpEnabled',
   };
 
   const toggleModuleFlag = async (flagKey) => {
     const field = MODULE_FLAG_FIELD[flagKey];
-    const next = !moduleFlags[field];
+    // Help defaults ON: a missing value counts as enabled.
+    const cur = field === 'supportHelpEnabled' ? moduleFlags[field] !== false : !!moduleFlags[field];
+    const next = !cur;
     try {
       await api.put('/settings', { [flagKey]: next });
       setModuleFlags(f => ({ ...f, [field]: next }));
@@ -850,19 +854,33 @@ const RoleManagement = () => {
   };
 
   /* Build editable role permissions: merge saved → defaults */
-  const [rolePerms, setRolePerms] = useState(() => {
+  const buildRolePerms = (src) => {
     const base = {};
     ROLES_FOR_MATRIX.forEach(r => {
       base[r.key] = {};
       ALL_MATRIX_PAGES.forEach(p => {
-        const fromSaved = saved?.roles?.[r.key]?.[p.key];
+        const fromSaved = src?.roles?.[r.key]?.[p.key];
         base[r.key][p.key] = fromSaved !== undefined
           ? fromSaved
-          : (DEFAULT_PAGE_PERMISSIONS[r.key]?.[p.key] || { view: false, edit: false, delete: false });
+          : (DEFAULT_PAGE_PERMISSIONS[r.key]?.[p.key] || (r.key === 'admin' ? FULL_PERM : { view: false, edit: false, delete: false }));
       });
     });
     return base;
-  });
+  };
+  const [rolePerms, setRolePerms] = useState(() => buildRolePerms(saved));
+
+  /* Pull the authoritative copy from the server when the page opens (the
+     context's copy may still be loading on a direct page reload). */
+  useEffect(() => {
+    let live = true;
+    refreshPagePerms().then(p => {
+      if (!live || !p) return;
+      setSaved(p);
+      setRolePerms(buildRolePerms(p));
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setPerm = useCallback((role, pageKey, perm) => {
     setRolePerms(p => ({ ...p, [role]: { ...p[role], [pageKey]: perm } }));
@@ -871,17 +889,22 @@ const RoleManagement = () => {
   const resetRole = (roleKey) => {
     const defaults = {};
     ALL_MATRIX_PAGES.forEach(p => {
-      defaults[p.key] = DEFAULT_PAGE_PERMISSIONS[roleKey]?.[p.key] || { view: false, edit: false, delete: false };
+      defaults[p.key] = DEFAULT_PAGE_PERMISSIONS[roleKey]?.[p.key] || (roleKey === 'admin' ? FULL_PERM : { view: false, edit: false, delete: false });
     });
     setRolePerms(prev => ({ ...prev, [roleKey]: defaults }));
   };
 
-  const handleSaveMatrix = () => {
+  const handleSaveMatrix = async () => {
     const next = JSON.parse(JSON.stringify(saved || {}));
     next.roles = rolePerms;
-    savePagePermissions(next);
+    try { await savePagePermissions(next); }
+    catch (err) {
+      setSaveMsg(`Save failed: ${err.message}`);
+      setTimeout(() => setSaveMsg(''), 4000);
+      return;
+    }
     setSaved(next);
-    refreshPagePerms();
+    await refreshPagePerms();
     setSaveMsg('Role permissions saved!');
     setTimeout(() => setSaveMsg(''), 2500);
   };
@@ -982,7 +1005,7 @@ const RoleManagement = () => {
                     <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700,
                       borderBottom: '2px solid #c8d6e5', minWidth: 160,
                       background: '#ede9fe', color: '#7e3af2', borderLeft: '1px solid #dce6f0' }}>
-                      <div>👑 System Admin</div>
+                      <div>👑 Super Admin</div>
                       <div style={{ fontSize: 11, fontWeight: 400, marginTop: 4, color: '#9ca3af' }}>Full access (fixed)</div>
                     </th>
                   </tr>
@@ -1226,6 +1249,31 @@ const RoleManagement = () => {
                     <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
                   )}
                 </div>
+
+                {/* Help assistant — Super Admin only. Defaults ON. */}
+                {(() => { const on = moduleFlags.supportHelpEnabled !== false; return (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: on ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${on ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>💬 Help Assistant</div>
+                    <div style={{ fontSize: 12, color: on ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {on ? '✅ Enabled — the Help button shows for every user' : '⛔ Disabled — the Help button is hidden for every user'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${on ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_support_help_enabled')}>
+                      {on ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+                ); })()}
 
                 {/* Task — Super Admin only. */}
                 <div style={{

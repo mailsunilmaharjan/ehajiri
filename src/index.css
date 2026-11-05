@@ -723,3 +723,26 @@ textarea.form-control { resize: vertical; min-height: 80px; }
     grid-template-columns: 1fr !important;
   }
 }
+
+/* ───────────── Phones and the eHajiri Android app ───────────── */
+@media (max-width: 768px) {
+  /* Help assistant: compact round button above the quick-apply (+) button instead of colliding with it */
+  .help-fab { left: 12px !important; bottom: 84px !important; padding: 11px 13px !important; border-radius: 50% !important; font-size: 18px !important; }
+  .help-fab .help-fab-label { display: none; }
+  .help-panel { left: 8px !important; right: 8px !important; bottom: 8px !important; width: auto !important; max-width: none !important; height: calc(100vh - 70px) !important; max-height: 640px !important; }
+  /* never cover a form's buttons (e.g. Check In) with the Help button */
+  body:has(.modal-overlay) .help-fab { display: none !important; }
+  /* button rows that overflowed the screen (Leave list: Leave Approval / Manual Posting / Apply) */
+  [style*="flex-shrink: 0"][style*="flex-wrap: wrap"] { flex-shrink: 1 !important; max-width: 100%; }
+}
+@media (max-width: 480px) {
+  /* make room in the top bar on small phones: logo + menu + language + profile (the brand text is redundant next to the logo) */
+  .tm-brand-text { display: none !important; }
+}
+/* Android app: no text-selection flash / tap highlight; respect the system gesture bar */
+html.native-app { -webkit-tap-highlight-color: transparent; }
+html.native-app body { overscroll-behavior-y: none; }
+
+/* Phone app: the Help button is reached from More > Help & Support instead of floating over the screens */
+html.mobile-mode .help-fab { display: none !important; }
+html.mobile-mode .help-panel { bottom: 76px !important; height: calc(100vh - 140px) !important; z-index: 2500 !important; }

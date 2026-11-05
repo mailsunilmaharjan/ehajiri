@@ -52,6 +52,31 @@ router.get('/', async (_req, res) => {
       if (weekendRows.length > 0) obj.main.weekendHistory = weekendRows;
     }
 
+    /* The setup lists below are edited through PUT /settings/:list/:id, which
+       needs the REAL table id. A blob list can carry stale client-made ids
+       (Date.now() timestamps — "value 1785664208899 is out of range for type
+       integer" on edit), so re-key each list from its table, keeping any
+       extra blob fields by matching id, then name. Empty table = leave alone. */
+    if (obj.main && typeof obj.main === 'object') {
+      obj.main = { ...obj.main };
+      for (const key of ['branches', 'departments', 'posts', 'grades', 'modes', 'religions', 'jobTimings']) {
+        const cfg = SETUP_TABLES[key];
+        if (!cfg || !Array.isArray(obj.main[key])) continue;
+        try {
+          const { rows } = await pool.query(`SELECT id, ${cfg.cols.join(',')} FROM ${cfg.table} ORDER BY id`);
+          if (!rows.length) continue;
+          const blob = obj.main[key];
+          const byId = new Map(blob.map(x => [String(x.id), x]));
+          const byName = new Map(blob.map(x => [String(x.name || '').trim().toLowerCase(), x]));
+          obj.main[key] = rows.map(r => {
+            const live = snakeToCamel(r);
+            const old = byName.get(String(r.name || "").trim().toLowerCase()) || byId.get(String(r.id)) || {};
+            return { ...old, ...live };
+          });
+        } catch (e) { /* keep the blob list as-is */ }
+      }
+    }
+
     res.json(obj);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -74,6 +99,7 @@ const SUPER_ADMIN_ONLY_FLAGS = [
   FLAG_KEYS.guestRegistration,
   FLAG_KEYS.standaloneDevice,
   FLAG_KEYS.smsGateway,
+  FLAG_KEYS.supportHelp,
 ];
 
 router.put('/', canManageSettings, async (req, res) => {
@@ -88,6 +114,46 @@ router.put('/', canManageSettings, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Settings → Official Setting's Post / Department / Branch lists (and the
+    // company name, which doubles as the HQ branch) live in this `main` blob,
+    // while staff records store those values by NAME. Renaming an entry used
+    // to leave every staff member on the old text — it then matched nothing
+    // (blank Staff Detail dropdowns, full names instead of short names in
+    // reports). Carry renames through to users, matched by list entry id.
+    if (settings.main && typeof settings.main === 'object') {
+      const prevRow = (await client.query("SELECT value FROM app_settings WHERE key='main'")).rows[0];
+      let prev = prevRow?.value;
+      if (typeof prev === 'string') { try { prev = JSON.parse(prev); } catch { prev = null; } }
+      if (prev && typeof prev === 'object') {
+        const renames = [];
+        for (const [listKey, col] of [['posts', 'position'], ['departments', 'department'], ['branches', 'branch']]) {
+          const oldById = new Map((prev[listKey] || []).map(x => [String(x.id), x.name]));
+          // An id used by more than one entry (seen live: two "Electrician"
+          // posts sharing id 6) can't be matched reliably — skip it rather
+          // than "renaming" staff back and forth between the duplicates.
+          const idCount = {};
+          [...(prev[listKey] || []), ...(settings.main[listKey] || [])].forEach(x => { idCount[String(x.id)] = (idCount[String(x.id)] || 0) + 1; });
+          for (const x of (settings.main[listKey] || [])) {
+            if (idCount[String(x.id)] > 2) continue;
+            const oldName = oldById.get(String(x.id));
+            if (oldName && x.name && oldName !== x.name) renames.push([col, oldName, x.name]);
+          }
+        }
+        // Staff at HQ carry the HQ branch name — the Company Short Name, or
+        // "Head Office" when unset (hqBranchName in src/utils/branchUtils.js).
+        const hqName = (m) => String(m.companyShortName || '').trim() || 'Head Office';
+        const nextMain = 'companyShortName' in settings.main
+          ? settings.main
+          : { ...settings.main, companyShortName: prev.companyShortName };
+        const prevHQ = hqName(prev), nextHQ = hqName(nextMain);
+        if (prevHQ && nextHQ && prevHQ !== nextHQ) {
+          renames.push(['branch', prevHQ, nextHQ]);
+        }
+        for (const [col, oldName, newName] of renames) {
+          await client.query(`UPDATE users SET ${col}=$1 WHERE ${col}=$2`, [newName, oldName]);
+        }
+      }
+    }
     for (const [key, value] of Object.entries(settings)) {
       await client.query(
         `INSERT INTO app_settings (key, value) VALUES ($1, $2)
@@ -113,7 +179,8 @@ router.put('/', canManageSettings, async (req, res) => {
       invalidateModuleFlagsCache();
     } else if (
       FLAG_KEYS.onlineAttendance in settings || FLAG_KEYS.dutyRoster in settings ||
-      FLAG_KEYS.chat in settings || FLAG_KEYS.task in settings || FLAG_KEYS.guestRegistration in settings
+      FLAG_KEYS.chat in settings || FLAG_KEYS.task in settings || FLAG_KEYS.guestRegistration in settings ||
+      FLAG_KEYS.supportHelp in settings
     ) {
       invalidateModuleFlagsCache();
     }
@@ -139,12 +206,27 @@ const SETUP_TABLES = {
   weekendHistory   : { table: 'weekend_history',    cols: ['weekends','effective_date','changed_date','changed_by','reason'] },
   taskCategories   : { table: 'task_categories',    cols: ['name','ranking_order'] },
   taskPriorities   : { table: 'task_priorities',    cols: ['name','color','ranking_order'] },
-  payrollItems     : { table: 'payroll_items',      cols: ['name','type','calc_method','calc_value','formula','taxable','payment_mode','ranking_order'] },
-  payrollTaxSlabs  : { table: 'payroll_tax_slabs',  cols: ['yearly_income_slab','effective_date','income_from','income_to','rate_percent','ranking_order'] },
+  payrollItems     : { table: 'payroll_items',      cols: ['name','type','calc_method','calc_value','formula','taxable','payment_mode','category','applies_gender','prorate','ranking_order'] },
+  payrollTaxSlabs  : { table: 'payroll_tax_slabs',  cols: ['yearly_income_slab','effective_date','income_from','income_to','rate_percent','applies_to','is_sst','ranking_order'] },
 };
 
+/* Role / staff page permissions (Settings → Role & Permission Management).
+   Stored server-side so a change made by an admin applies to every user —
+   it used to live only in the admin's own browser localStorage, so other
+   logins (e.g. a Branch Manager) never saw their pages disabled. Any
+   authenticated user may read it (their own client enforces it); writes go
+   through PUT / with key `page_permissions`, which is admin-only. */
+router.get('/page-permissions', async (_req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='page_permissions'");
+    let v = rows[0]?.value ?? null;
+    if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
+    res.json(v && typeof v === 'object' ? v : {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/:list', async (req, res) => {
-  const cfg = SETUP_TABLES[req.params.list];
+  const cfg = (Object.hasOwn(SETUP_TABLES, req.params.list) ? SETUP_TABLES[req.params.list] : undefined);
   if (!cfg) return res.status(404).json({ error: 'Unknown list' });
   try {
     const { rows } = await pool.query(`SELECT * FROM ${cfg.table} ORDER BY id`);
@@ -153,7 +235,7 @@ router.get('/:list', async (req, res) => {
 });
 
 router.post('/:list', canManageSettings, async (req, res) => {
-  const cfg = SETUP_TABLES[req.params.list];
+  const cfg = (Object.hasOwn(SETUP_TABLES, req.params.list) ? SETUP_TABLES[req.params.list] : undefined);
   if (!cfg) return res.status(404).json({ error: 'Unknown list' });
   const vals = cfg.cols.map(c => camelVal(req.body, c));
   const placeholders = cfg.cols.map((_, i) => `$${i + 1}`).join(',');
@@ -167,12 +249,23 @@ router.post('/:list', canManageSettings, async (req, res) => {
 });
 
 router.put('/:list/:id', canManageSettings, async (req, res) => {
-  const cfg = SETUP_TABLES[req.params.list];
+  const cfg = (Object.hasOwn(SETUP_TABLES, req.params.list) ? SETUP_TABLES[req.params.list] : undefined);
   if (!cfg) return res.status(404).json({ error: 'Unknown list' });
   const sets = cfg.cols.map((c, i) => `${c}=$${i + 1}`).join(',');
   const vals = [...cfg.cols.map(c => camelVal(req.body, c)), req.params.id];
+  // Staff records store Branch / Department / Post by NAME (users.branch /
+  // .department / .position), not id — so renaming one here used to leave
+  // every staff member on the old text, which then matched nothing in
+  // Settings (blank Staff Detail dropdowns, full names instead of short names
+  // in reports). Carry the rename through to users in the same transaction.
+  const USER_COL = { branches: 'branch', departments: 'department', posts: 'position' }[req.params.list];
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+    const before = USER_COL
+      ? (await client.query(`SELECT name FROM ${cfg.table} WHERE id=$1`, [req.params.id])).rows[0]
+      : null;
+    const { rows } = await client.query(
       `UPDATE ${cfg.table} SET ${sets} WHERE id=$${vals.length} RETURNING *`, vals
     );
     // No row matched — an id that no longer exists (e.g. already deleted, or
@@ -180,13 +273,23 @@ router.put('/:list/:id', canManageSettings, async (req, res) => {
     // undefined and res.json(undefined) sends a 200 with a completely empty
     // body, which the client's fetch wrapper then fails to parse as JSON —
     // a real failure disguised as a crash instead of a clear error.
-    if (!rows[0]) return res.status(404).json({ error: 'Record not found — it may have already been deleted.' });
+    if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Record not found — it may have already been deleted.' }); }
+    const oldName = before?.name, newName = rows[0].name;
+    if (USER_COL && oldName && newName && oldName !== newName) {
+      await client.query(`UPDATE users SET ${USER_COL}=$1 WHERE ${USER_COL}=$2`, [newName, oldName]);
+    }
+    await client.query('COMMIT');
     res.json(snakeToCamel(rows[0]));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 router.delete('/:list/:id', canManageSettings, async (req, res) => {
-  const cfg = SETUP_TABLES[req.params.list];
+  const cfg = (Object.hasOwn(SETUP_TABLES, req.params.list) ? SETUP_TABLES[req.params.list] : undefined);
   if (!cfg) return res.status(404).json({ error: 'Unknown list' });
   try {
     await pool.query(`DELETE FROM ${cfg.table} WHERE id=$1`, [req.params.id]);
@@ -213,6 +316,11 @@ function camelVal(body, snakeKey) {
   // calcMethod is 'formula') got JSON.stringify'd into the literal string
   // "null" instead of a real SQL NULL.
   if (val !== undefined && val !== null && typeof val === 'object') return JSON.stringify(val);
+  // A blank form field arrives as "" — for an integer/date column (e.g. a
+  // Post with no Ranking Order) Postgres rejects that outright ("invalid
+  // input syntax for type integer"), so every edit of such a row failed.
+  // Blank means "not set": store NULL.
+  if (typeof val === 'string' && val.trim() === '') return null;
   return val ?? null;
 }
 

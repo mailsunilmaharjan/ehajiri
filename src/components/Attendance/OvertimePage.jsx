@@ -93,7 +93,12 @@ const OTTooltip = ({ text, children }) => {
 };
 
 const OvertimePage = () => {
-  const { currentUser, isManager, canApprove, isAdmin } = useAuth();
+  const { currentUser, isManager, canApprove, isAdmin, isBranchManager, isBranchAreaManager } = useAuth();
+  // Branch Manager / Branch Area Manager approving OT is their Manual Posting —
+  // allowed for their own branch staff and themself, like admin (server:
+  // canManagerManualPost in overtime.js). Admin-only: recording someone ELSE
+  // as the approver in "Approve All".
+  const isOtPoster = isAdmin || isBranchManager || isBranchAreaManager;
   const { language, t } = useLanguage();
   const { settings, updateSettings } = useSettings();
   const { getEmployeeName, getEmployeeById, employees: allEmployees } = useData();
@@ -116,8 +121,8 @@ const OvertimePage = () => {
      authorizeRecoAction. admin/superAdmin bypass the assignment checks
      (same PRIVILEGED_ROLES bypass authorizeRecoAction grants server-side). ── */
   const isRecoCompulsory = settings.recoApprovalCompulsory || false;
-  const isRecommenderFor = (empId) => isAdmin || getOtRecoIds(empId).includes(String(currentUser.id));
-  const isApproverFor    = (empId) => isAdmin || getOtApprovalIds(empId).includes(String(currentUser.id));
+  const isRecommenderFor = (empId) => isOtPoster || getOtRecoIds(empId).includes(String(currentUser.id));
+  const isApproverFor    = (empId) => isOtPoster || getOtApprovalIds(empId).includes(String(currentUser.id));
   // Whether this employee has ANY recommender configured — if not,
   // Recommendation Compulsory is unsatisfiable for them (nobody exists who
   // could ever recommend it), so it must not block their approver. Mirrors
@@ -130,7 +135,7 @@ const OvertimePage = () => {
   const canActOnRowApprove = (row) => {
     if (!isApproverFor(row.employeeId)) return false;
     // dual-role block — only meaningful when a recommender is configured
-    if (!isAdmin && isRecoCompulsory && hasRecommenderFor(row.employeeId) && isRecommenderFor(row.employeeId)) return false;
+    if (!isOtPoster && isRecoCompulsory && hasRecommenderFor(row.employeeId) && isRecommenderFor(row.employeeId)) return false;
     return canApproveRow(row);
   };
   const L  = (np, en) => language === 'np' ? np : en;
@@ -560,7 +565,7 @@ const OvertimePage = () => {
     // server now enforces this too (skips anything else), so this just
     // keeps the modal from showing rows that would silently do nothing.
     const recs = visibleRecords.filter(r =>
-      r.status === 'pending' && (scope === 'all' || r._dayType === scope) && (isAdmin || canActOnRowApprove(r))
+      r.status === 'pending' && (scope === 'all' || r._dayType === scope) && (isOtPoster || canActOnRowApprove(r))
     );
     if (!recs.length) { showToast('No pending OT records to approve', 'error'); return; }
     setBulkRecoBy(''); setBulkRecoDate(today);

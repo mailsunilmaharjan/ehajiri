@@ -8,6 +8,7 @@ import { makeDateFormatter } from '../../utils/dateUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import RecordPreviewModal from '../Common/RecordPreviewModal.jsx';
+import OfficeVisitImportModal from './OfficeVisitImportModal.jsx';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 const StatusBadge = ({ status }) => {
@@ -22,17 +23,18 @@ const StatusBadge = ({ status }) => {
 };
 
 const OfficeVisitManagement = () => {
-  const { currentUser, isManager } = useAuth();
+  const { currentUser, isManager, isAdmin } = useAuth();
   const { t } = useLanguage();
   const { settings } = useSettings();
   const fd = makeDateFormatter(settings);
-  const { officeVisits, deleteVisit, recommendVisit, getEmployeeName, getEmployeeById } = useData();
+  const { officeVisits, deleteVisit, recommendVisit, getEmployeeName, getEmployeeById, refreshOfficeVisits } = useData();
   const navigate = useNavigate();
   const [filterStatus,   setFilterStatus]   = useState('all');
   const [viewVisit,      setViewVisit]      = useState(null);
   const [deleteConfirm,  setDeleteConfirm]  = useState(null);
   const [recoConfirm,    setRecoConfirm]    = useState(null); // { id, visit }
   const [recoComment,    setRecoComment]    = useState('');
+  const [importModal,    setImportModal]    = useState(false);
 
   const { assignments: recoConfig } = useRecoApproval();
   const isRecommenderFor = (empId) => {
@@ -96,10 +98,13 @@ const OfficeVisitManagement = () => {
           <h1 className="page-title">🏢 {t('Office Visit Management')}</h1>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {isAdmin && (
+            <button className="btn btn-outline" onClick={() => setImportModal(true)}>📥 {t('Bulk Import')}</button>
+          )}
           {isManager && (
             <button className="btn btn-outline" onClick={() => navigate('/office-visit/approval')}>✅ {t('Visit Approval')}</button>
           )}
-          <button className="btn btn-primary" onClick={() => navigate('/office-visit/apply')}>+ {t('Apply for Visit')}</button>
+          <button className="btn btn-primary" onClick={() => navigate('/office-visit/apply')}>+ {t('Apply for Office Visit')}</button>
         </div>
       </div>
 
@@ -157,7 +162,7 @@ const OfficeVisitManagement = () => {
             <div className="modal-body"><p>{t('Are you sure you want to delete this record?')}</p></div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setDeleteConfirm(null)}>{t('Cancel')}</button>
-              <button className="btn btn-danger" onClick={() => { deleteVisit(deleteConfirm); setDeleteConfirm(null); }}>🗑 {t('Delete')}</button>
+              <button className="btn btn-danger" onClick={() => { deleteVisit(deleteConfirm).catch(err => alert(err?.message || 'Delete failed')); setDeleteConfirm(null); }}>🗑 {t('Delete')}</button>
             </div>
           </div>
         </div>
@@ -189,7 +194,7 @@ const OfficeVisitManagement = () => {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setRecoConfirm(null)}>{t('Cancel')}</button>
               <button
-                onClick={() => { recommendVisit(recoConfirm.id, currentUser.id, recoComment); setRecoConfirm(null); setRecoComment(''); }}
+                onClick={() => { recommendVisit(recoConfirm.id, currentUser.id, recoComment).catch(err => alert(err?.message || 'Recommend failed')); setRecoConfirm(null); setRecoComment(''); }}
                 style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 7,
                   padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                 👍 Confirm Recommend
@@ -197,6 +202,14 @@ const OfficeVisitManagement = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Bulk Import (Admin/Super Admin) */}
+      {importModal && (
+        <OfficeVisitImportModal
+          onClose={() => setImportModal(false)}
+          onImported={refreshOfficeVisits}
+        />
       )}
     </div>
   );

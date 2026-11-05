@@ -1,8 +1,24 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { resolveOrgScope } from './orgScope.js';
+import { logAudit } from '../services/auditLog.js';
+import { notifyUsers } from '../services/internalMessages.js';
 
 const router = Router();
+
+/** Tell the staff member their duty roster was assigned/changed (inbox + live + push). Fire-and-forget;
+ *  one unread roster notice at a time per person, so a bulk save doesn't spam them. */
+async function notifyRosterChange(req, employeeId, subject, body) {
+  try {
+    if (!employeeId || String(employeeId) === String(req.user?.id)) return;
+    const { rows } = await pool.query(
+      `SELECT 1 FROM message_recipients mr JOIN internal_messages m ON m.id = mr.message_id
+        WHERE mr.recipient_id = $1 AND mr.is_read = FALSE AND m.subject LIKE 'Duty roster%'
+          AND m.created_at > NOW() - INTERVAL '3 minutes' LIMIT 1`, [employeeId]);
+    if (rows.length) return;
+    await notifyUsers({ senderId: req.user.id, recipientIds: [employeeId], subject, body, path: '/m/roster' });
+  } catch (e) { console.error('[duty-roster notify]', e.message); }
+}
 
 const DAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -101,6 +117,7 @@ router.post('/', async (req, res) => {
                 created_by AS "createdBy", created_at AS "createdAt"
     `, [employeeId, ids[0] || null, JSON.stringify(ids), dateFrom, dateTo,
         JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), createdBy]);
+    notifyRosterChange(req, employeeId, 'Duty roster assigned', `A new duty roster was assigned to you: ${String(dateFrom).slice(0, 10)} to ${String(dateTo).slice(0, 10)}.`);
     res.status(201).json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -124,6 +141,7 @@ router.put('/:id', async (req, res) => {
     `, [ids[0] || null, JSON.stringify(ids), dateFrom, dateTo,
         JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    notifyRosterChange(req, existing[0].employee_id, 'Duty roster updated', `Your duty roster was updated: ${String(dateFrom).slice(0, 10)} to ${String(dateTo).slice(0, 10)}.`);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -220,6 +238,7 @@ router.post('/bulk-days', async (req, res) => {
       }
     }
     await client.query('COMMIT');
+    notifyRosterChange(req, employeeId, 'Duty roster updated', 'Your duty roster was updated for ' + dates.length + ' day(s) starting ' + String([...dates].sort()[0]).slice(0, 10) + '.');
     res.json({ success: true, upserted, deleted });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -261,10 +280,79 @@ router.delete('/clear', async (req, res) => {
     }
     if (scope.level === 'branch')     { params.push(scope.value); conds.push(`u.branch = $${params.length}`); }
 
-    const { rowCount } = await pool.query(
-      `DELETE FROM duty_roster dr USING users u WHERE ${conds.join(' AND ')}`,
-      params
-    );
+    // Clear only the requested dates. This used to DELETE every entry that
+    // merely overlapped the range, so clearing one day wiped whole multi-day
+    // rosters (Eastern, 2026-09-29: clearing 28-Sep dropped 122 staff's
+    // night-shift ranges running into October, then re-seeded the default
+    // day shift). Now an entry sticking out past either end is trimmed back
+    // to the part outside [dateFrom, dateTo] — split in two if it covers both
+    // sides — and only entries wholly inside the range are deleted. A missing
+    // bound is open-ended, same as the filter above.
+    const client = await pool.connect();
+    const addDays = (d, n) => { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10); };
+    const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+    // A trimmed piece that becomes a single day can collide with an existing
+    // single-day override on that date (idx_dr_single_day_uniq). That
+    // override is the more specific entry and wins anyway, so drop the piece.
+    const singleDayTaken = async (emp, date, selfId) => (await client.query(
+      `SELECT 1 FROM duty_roster WHERE employee_id=$1 AND date_from=$2 AND date_to=$2 AND id<>$3`, [emp, date, selfId])).rowCount > 0;
+
+    let rowCount = 0, trimmed = 0, affected = [];
+    try {
+      await client.query('BEGIN');
+      ({ rows: affected } = await client.query(
+        `SELECT dr.id, dr.employee_id, dr.shift_id, dr.shift_ids, dr.date_from::text AS date_from, dr.date_to::text AS date_to,
+                dr.off_days, dr.day_off_days, dr.night_off_days, dr.created_by
+         FROM duty_roster dr, users u WHERE ${conds.join(' AND ')} FOR UPDATE OF dr`,
+        params
+      ));
+      for (const r of affected) {
+        const left  = dateFrom && r.date_from < dateFrom ? [r.date_from, addDays(dateFrom, -1)] : null;
+        const right = dateTo   && r.date_to   > dateTo   ? [addDays(dateTo, 1), r.date_to]     : null;
+        const okLeft  = left  && !(left[0]  === left[1]  && await singleDayTaken(r.employee_id, left[0],  r.id));
+        const okRight = right && !(right[0] === right[1] && await singleDayTaken(r.employee_id, right[0], r.id));
+        if (!okLeft && !okRight) {
+          await client.query(`DELETE FROM duty_roster WHERE id=$1`, [r.id]);
+          rowCount++;
+          continue;
+        }
+        trimmed++;
+        // The right piece starts later than the original, so rotate its
+        // shift list to keep the same shift landing on the same date
+        // (resolveRotationShift counts from each entry's own date_from).
+        const ids = Array.isArray(r.shift_ids) && r.shift_ids.length ? r.shift_ids : (r.shift_id ? [r.shift_id] : []);
+        let rightIds = ids;
+        if (okRight && ids.length > 1) {
+          const k = ((daysBetween(r.date_from, right[0]) % ids.length) + ids.length) % ids.length;
+          rightIds = ids.slice(k).concat(ids.slice(0, k));
+        }
+        if (okLeft) {
+          await client.query(`UPDATE duty_roster SET date_to=$2 WHERE id=$1`, [r.id, left[1]]);
+          if (okRight) {
+            await client.query(
+              `INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, day_off_days, night_off_days, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+              [r.employee_id, rightIds[0] ?? r.shift_id, r.shift_ids == null ? null : JSON.stringify(rightIds), right[0], right[1],
+               JSON.stringify(r.off_days ?? []), JSON.stringify(r.day_off_days ?? []), JSON.stringify(r.night_off_days ?? []), r.created_by]
+            );
+          }
+        } else {
+          await client.query(`UPDATE duty_roster SET date_from=$2, shift_id=$3, shift_ids=$4 WHERE id=$1`,
+            [r.id, right[0], rightIds[0] ?? r.shift_id, r.shift_ids == null ? null : JSON.stringify(rightIds)]);
+        }
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally { client.release(); }
+    if (affected.length) {
+      logAudit({ actor: req.user, action: 'clear', entity: 'duty-roster', entityId: `${dateFrom || ''}..${dateTo || ''}`,
+                 before: affected, after: { deleted: rowCount, trimmed, filters: req.body } });
+      for (const empId of new Set(affected.map(a => a.employee_id))) {
+        notifyRosterChange(req, empId, 'Duty roster updated', 'Your duty roster was changed. Open Duty Roster to see your current shifts.');
+      }
+    }
 
     // ── Auto-seed default shift for all matching staff with no roster ──────
     // Find the default shift
@@ -321,7 +409,7 @@ router.delete('/clear', async (req, res) => {
       }
     }
 
-    res.json({ success: true, deleted: rowCount, seeded, defaultShiftId });
+    res.json({ success: true, deleted: rowCount, trimmed, seeded, defaultShiftId });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -335,6 +423,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to delete this roster entry' });
     }
     await pool.query('DELETE FROM duty_roster WHERE id=$1', [req.params.id]);
+    notifyRosterChange(req, existing[0].employee_id, 'Duty roster updated', 'One of your duty roster entries was removed. Open Duty Roster to see your current shifts.');
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

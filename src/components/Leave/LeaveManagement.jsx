@@ -40,7 +40,7 @@ const LeaveManagement = () => {
   });
 
   const handleDelete = (id) => {
-    deleteLeave(id);
+    deleteLeave(id).catch(err => alert(err?.message || 'Delete failed'));
     setShowDeleteModal(null);
   };
 

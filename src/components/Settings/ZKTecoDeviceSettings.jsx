@@ -215,7 +215,8 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 
   const id  = device.id;
   const sn  = device.serial_number;
-  const fpMinus1 = device.fp_count === -1;
+  const fpMinus1   = device.fp_count === -1;
+  const faceMinus1 = device.face_count === -1;
 
   // Device offline detection (same threshold as OnlineDot: >15 min since last_seen)
   const isOffline = !device.last_seen ||
@@ -262,7 +263,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
           <div>
             <h2 style={{ color:'#1e40af', margin:0 }}>⚙️ Device Control — {device.name}</h2>
             <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>
-              SN: {sn||'—'} &nbsp;·&nbsp; {cleanIp(device.last_ip)}{device.port?`:${device.port}`:''}
+              SN: {sn||'—'} &nbsp;·&nbsp; {cleanIp(device.lan_ip || device.last_ip)}{device.port?`:${device.port}`:''}
               &nbsp;·&nbsp; <OnlineDot ts={device.last_seen} />
             </div>
           </div>
@@ -271,10 +272,11 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 
         {/* Capacity bar */}
         {device.user_count != null && (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, padding:'10px 14px', background:'#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:8, padding:'10px 14px', background:'#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
             {[
               { label:'Users',    value:`${device.user_count}/${device.max_user||'?'}`, color:'#1a56db' },
               { label:'FP Slots', value:`${device.fp_count??'?'}`, color:fpMinus1?'#dc2626':'#7c3aed' },
+              { label:'Face',     value:`${device.face_count??'?'}`, color:faceMinus1?'#dc2626':'#7c3aed' },
               { label:'Firmware', value:device.info_firmware||device.firmware_ver||'—', color:'#374151' },
               { label:'Platform', value:device.info_platform||device.platform||'—',     color:'#374151' },
             ].map(s=>(
@@ -288,6 +290,11 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
         {fpMinus1 && (
           <div style={{ background:'#fee2e2', borderBottom:'1px solid #fca5a5', padding:'6px 14px', fontSize:11, color:'#991b1b' }}>
             ⚠️ FPCount=-1 — hardware does not support fingerprint template export
+          </div>
+        )}
+        {faceMinus1 && (
+          <div style={{ background:'#fee2e2', borderBottom:'1px solid #fca5a5', padding:'6px 14px', fontSize:11, color:'#991b1b' }}>
+            ⚠️ FaceCount=-1 — hardware does not support face template export
           </div>
         )}
 
@@ -338,11 +345,12 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
 
             {/* Inline capacity display — populated from getrequest?INFO= (no command needed) */}
             {device.user_count != null && (
-              <div style={{ display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6,padding:'10px 16px',
+              <div style={{ display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:6,padding:'10px 16px',
                 background:'#f8fafc',borderBottom:'1px solid #f3f4f6' }}>
                 {[
                   {l:'Users',    v:`${device.user_count||0}/${device.max_user||'?'}`, c:'#1a56db'},
                   {l:'FP Slots', v:`${device.fp_count??'?'}`,                         c:fpMinus1?'#dc2626':'#7c3aed'},
+                  {l:'Face',     v:`${device.face_count??'?'}`,                       c:faceMinus1?'#dc2626':'#7c3aed'},
                   {l:'Firmware', v:device.info_firmware||device.firmware_ver||'—',    c:'#374151'},
                   {l:'Platform', v:device.info_platform||device.platform||'—',        c:'#374151'},
                 ].map(s=>(
@@ -357,6 +365,12 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
               <div style={{ padding:'6px 16px',background:'#fee2e2',borderBottom:'1px solid #fca5a5',
                 fontSize:11,color:'#991b1b' }}>
                 ⚠️ FPCount=-1 — hardware does not support FP template export (firmware upgrade required)
+              </div>
+            )}
+            {faceMinus1 && (
+              <div style={{ padding:'6px 16px',background:'#fee2e2',borderBottom:'1px solid #fca5a5',
+                fontSize:11,color:'#991b1b' }}>
+                ⚠️ FaceCount=-1 — hardware does not support face template export (firmware upgrade required)
               </div>
             )}
 
@@ -820,8 +834,8 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                     </div>
                     <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
                       {[
-                        { t:'fp',   icon:'👆', label:'Fingerprint', color:'#1a56db', bg:'#eff6ff', disabled:fpMinus1, note:fpMinus1?'Not supported (FPCount=-1)':'' },
-                        { t:'face', icon:'👤', label:'Face',        color:'#7c3aed', bg:'#f5f3ff', disabled:false },
+                        { t:'fp',   icon:'👆', label:'Fingerprint', color:'#1a56db', bg:'#eff6ff', disabled:fpMinus1,   note:fpMinus1?'Not supported (FPCount=-1)':'' },
+                        { t:'face', icon:'👤', label:'Face',        color:'#7c3aed', bg:'#f5f3ff', disabled:faceMinus1, note:faceMinus1?'Not supported (FaceCount=-1)':'' },
                       ].map(e=>(
                         <button key={e.t} disabled={e.disabled}
                           onClick={()=>setEnrollType(e.t)}
@@ -870,7 +884,7 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                       )}
                     </div>
                     <div style={{ background:'#fef3c7',border:'1px solid #fcd34d',borderRadius:6,padding:'7px 10px',fontSize:11,color:'#92400e',marginBottom:10 }}>
-                      After queuing: go to the device — it will prompt the user to scan (3 attempts). Template is returned via OPERLOG.
+                      After queuing: go to the device — it will prompt the user to scan{enrollType==='fp' ? ' (1 attempt)' : ' (3 attempts)'}. Template is returned via OPERLOG.
                     </div>
                     <div style={{ display:'flex',gap:6 }}>
                       <button className="btn btn-primary btn-sm"
@@ -878,7 +892,9 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                         disabled={!formData.enrollPin||!!busy['enroll']}
                         onClick={async()=>{
                           const ep = enrollType==='fp' ? `/zkteco/devices/${id}/enroll-fp` : `/zkteco/devices/${id}/enroll-face`;
-                          const body = { pin:formData.enrollPin, name:formData.enrollName||'', fingerId:formData.enrollFid||0, retry:3, overwrite:1 };
+                          // FP retry=1 — see server/routes/zktecoApi.js enroll-fp handler for why
+                          // (RETRY=3 on this hardware caused ~12 repeated capture prompts, not 3).
+                          const body = { pin:formData.enrollPin, name:formData.enrollName||'', fingerId:formData.enrollFid||0, retry: enrollType==='fp' ? 1 : 3, overwrite:1 };
                           await run('enroll',()=>api.post(ep,body),`✅ ${enrollType==='fp'?'Fingerprint':'Face'} enrollment queued`);
                           setFormData(p=>({...p,enrollPin:'',enrollName:'',enrollFid:0}));
                           setActiveItem(null); setEnrollType(null);
@@ -1306,7 +1322,7 @@ const ZKTecoDeviceSettings = () => {
   /* ── device CRUD ── */
   const openAdd  = () => { setForm({...emptyDevice}); setErrors({}); setEditId(null); setModal(true); };
   const openEdit = (d) => {
-    setForm({ name:d.name||'',serialNumber:d.serial_number||'',ipAddress:d.last_ip||d.ip_address||'',
+    setForm({ name:d.name||'',serialNumber:d.serial_number||'',ipAddress:d.lan_ip||d.last_ip||d.ip_address||'',
       port:d.port||4370, model:d.model||'SenseFace', deviceType:d.device_type||'face',
       location:d.location||'', communicationKey:d.communication_key||'0',
       timezoneOffset: d.timezone_offset ?? 345,
@@ -2024,7 +2040,7 @@ const ZKTecoDeviceSettings = () => {
                         <div style={{ padding:'8px 14px',background:'#f9fafb',borderBottom:'1px solid #f3f4f6',
                           fontSize:11,fontWeight:700,color:'#9ca3af',textTransform:'uppercase',letterSpacing:'.5px' }}>
                           {selDev?.serial_number || 'No SN yet'}
-                          {selDev?.last_ip && <span style={{ marginLeft:6,fontWeight:400 }}>{selDev.last_ip.replace(/^::ffff:/i,'')}</span>}
+                          {(selDev?.lan_ip || selDev?.last_ip) && <span style={{ marginLeft:6,fontWeight:400 }}>{(selDev.lan_ip || selDev.last_ip).replace(/^::ffff:/i,'')}</span>}
                         </div>
                         {CMDS.map((cmd, i) =>
                           cmd.sep ? (

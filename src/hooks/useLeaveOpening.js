@@ -49,7 +49,13 @@ export default function useLeaveOpening() {
     openingRef.current = next;
     setOpeningState(next);
     if (!entries.length) return Promise.resolve();
-    return api.put('/leaves/openings', { entries });
+    // Roll back the optimistic update if the server rejects it, so the grid
+    // never shows figures that were never actually saved.
+    return api.put('/leaves/openings', { entries }).catch(err => {
+      openingRef.current = prev;
+      setOpeningState(prev);
+      throw err;
+    });
   }, []);
 
   return { opening, loaded, refresh, saveOpening };

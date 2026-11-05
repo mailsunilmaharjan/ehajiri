@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import api from '../../api/client.js';
+import { getTenantPrefix } from '../../utils/tenantPath.js';
 import './Login.css';
 
 /* ── Subscription Expired / Activation screen ─────────────────────────────── */
@@ -313,7 +314,7 @@ const ForgotPasswordModal = ({ onClose }) => {
     if (!usernameInput.trim()) return;
     setLoading(true);
     try {
-      await api.post('/auth/forgot-password', { email: usernameInput.trim() });
+      await api.post('/auth/forgot-password', { email: usernameInput.trim(), basePath: getTenantPrefix() });
       setResult({ sent: true });
     } catch (err) {
       setResult({ error: err.message || 'Failed to process request. Please contact your administrator.' });
@@ -426,6 +427,8 @@ const Login = () => {
   const [showForgot, setShowForgot] = useState(false);
   const [adContent, setAdContent] = useState(null);
   const [adSlide, setAdSlide] = useState(0);
+  const [adPaused, setAdPaused] = useState(false);
+  const adTouchX = useRef(null);
   const { login, error, licenseError, licenseChecked, licenseDistributor, currentUser } = useAuth();
   const { t, language, changeLanguage } = useLanguage();
   const { settings } = useSettings();
@@ -477,11 +480,12 @@ const Login = () => {
 
   useEffect(() => {
     const images = adContent?.adImages;
-    if (!images || images.length < 2 || adContent?.adSlideAutoplay === false) return;
+    if (!images || images.length < 2 || adContent?.adSlideAutoplay === false || adPaused) return;
     const ms = Math.max(2, Number(adContent?.adSlideInterval) || 5) * 1000;
     const id = setInterval(() => setAdSlide(s => (s + 1) % images.length), ms);
     return () => clearInterval(id);
-  }, [adContent]);
+  }, [adContent, adPaused, adSlide]);
+  const adGo = (dir) => setAdSlide(s => { const n = adContent?.adImages?.length || 1; return (s + dir + n) % n; });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -535,7 +539,10 @@ const Login = () => {
 
         {/* ── Left panel: advertisement (content managed via LicenseAdmin) ── */}
         {adContent?.adImages?.length ? (
-          <div className="login-left" style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+          <div className="login-left login-ad" style={{ padding: 0, overflow: 'hidden', position: 'relative' }}
+            onMouseEnter={() => setAdPaused(true)} onMouseLeave={() => setAdPaused(false)}
+            onTouchStart={e => { adTouchX.current = e.touches[0].clientX; }}
+            onTouchEnd={e => { const x0 = adTouchX.current; adTouchX.current = null; if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 40) adGo(dx < 0 ? 1 : -1); }}>
             {adContent.adImages.map((src, i) => (
               <img key={i} src={src} alt="Advertisement"
                 style={{
@@ -549,17 +556,16 @@ const Login = () => {
                 its own branding, and stacking LicenseAdmin's title text on
                 top of it (defaulting to a generic placeholder whenever that
                 field is empty) just duplicated/clashed with it. */}
-            {adContent.adImages.length > 1 && (
-              <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 6, zIndex: 2 }}>
+            {adContent.adImages.length > 1 && (<>
+              <button type="button" className="login-ad-arrow prev" aria-label="Previous" onClick={() => adGo(-1)}>‹</button>
+              <button type="button" className="login-ad-arrow next" aria-label="Next" onClick={() => adGo(1)}>›</button>
+              <div className="login-ad-count">{adSlide + 1} / {adContent.adImages.length}</div>
+              <div className="login-ad-dots">
                 {adContent.adImages.map((_, i) => (
-                  <span key={i} onClick={() => setAdSlide(i)} style={{
-                    width: i === adSlide ? 18 : 7, height: 7, borderRadius: 4, cursor: 'pointer',
-                    background: i === adSlide ? '#fff' : 'rgba(255,255,255,.45)',
-                    transition: 'all 0.3s ease',
-                  }} />
+                  <button type="button" key={i} aria-label={`Slide ${i + 1}`} className={i === adSlide ? 'on' : ''} onClick={() => setAdSlide(i)} />
                 ))}
               </div>
-            )}
+            </>)}
           </div>
         ) : (
         <div className="login-left">

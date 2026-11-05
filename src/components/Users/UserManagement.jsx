@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth }     from '../../context/AuthContext.jsx';
 import { useLanguage } from '../../context/LanguageContext.jsx';
@@ -20,7 +20,7 @@ import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import useNewShortcut   from '../../hooks/useNewShortcut.js';
 import useFieldShortcuts from '../../hooks/useFieldShortcuts.js';
 import api, { apiUrl }  from '../../api/client.js';
-import { staffRankCompare, branchRankOf } from '../../utils/branchUtils.js';
+import { staffRankCompare, branchRankOf, hqBranchName, branchSelectOptions } from '../../utils/branchUtils.js';
 import { getDeviceInfo } from '../../utils/deviceInfo.js';
 
 const ROLE_COLORS = {
@@ -287,6 +287,13 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
   // actions below still apply to ALL selected devices.
   const selDev = devices.find(d => String(d.id) === selDevIds[0]);
   const enrollment = selDev ? enrollments.find(e => e.device_sn === selDev.serial_number) : null;
+
+  // True while any selected device still has an unfinished Enroll FP/Face
+  // command outstanding (queued or sent) — blocks a second click from piling
+  // another command in right behind one the device hasn't finished acting on
+  // yet, which is what made a single logical "enroll" look like the device
+  // was being sent continuous commands back-to-back.
+  const enrollInFlight = selDevIds.some(id => ['queued', 'sent'].includes(cmdWatch[id]?.status));
 
   const isOnline = (dev) => {
     if (!dev?.last_seen) return false;
@@ -560,12 +567,14 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
                   })}
                 </select>
               </div>
-              <button style={btn()} disabled={loading}
+              <button style={btn()} disabled={loading || enrollInFlight}
+                title={enrollInFlight ? t('An enroll command is still in progress on the device — wait for it to finish before sending another') : undefined}
                 onClick={() => runEnroll('Enroll FP', (devId) => post(`/devices/${devId}/enroll-fp`, { pin:devicePin, name:staffName, fingerId:fpSlot }))}>
                 {t('Enroll FP')}
               </button>
             </div>
-            <button style={{ ...btn('#7c3aed'), width:'100%' }} disabled={loading}
+            <button style={{ ...btn('#7c3aed'), width:'100%' }} disabled={loading || enrollInFlight}
+              title={enrollInFlight ? t('An enroll command is still in progress on the device — wait for it to finish before sending another') : undefined}
               onClick={() => runEnroll('Enroll Face', (devId) => post(`/devices/${devId}/enroll-face`, { pin:devicePin, name:staffName }))}>
               {t('Enroll Face')}
             </button>
@@ -794,6 +803,14 @@ const DeviceConnTab = ({ devicePin, staffName, employeeId }) => {
               {t('Delete from Device')}
             </button>
           </div>
+          <button style={{ ...btn('#059669'), width:'100%' }} disabled={loading}
+            title={t('Re-adds the PIN and re-pushes their previously-captured fingerprint template(s) — no re-scan needed. Only works if this PIN was removed via Delete from Device above and never re-enrolled fresh.')}
+            onClick={() => {
+              if (!window.confirm(`${t('Restore PIN')} ${devicePin} ${t('and their backed-up fingerprint(s) to')} ${selDevIds.length} ${t('selected device(s)?')}`)) return;
+              run('Restore from Backup', (devId) => post(`/devices/${devId}/restore-user`, { pin:devicePin }));
+            }}>
+            🔄 {t('Restore from Backup')}
+          </button>
         </div>
       </Panel>
     </div>
@@ -843,10 +860,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
       case 'status':
         return (settings.statuses || []).map(s => ({ value:s.name, label:`${s.name}${s.statusType ? ` (${s.statusType})` : ''}` }));
       case 'branch':
-        return [
-          ...(settings.companyNameEn ? [{ value: settings.companyNameEn, label: `${settings.companyNameEn} (HQ)` }] : []),
-          ...(settings.branches || []).map(b => ({ value:b.name, label:b.name })),
-        ];
+        return branchSelectOptions(settings);
       case 'position':   return (settings.posts       || []).map(p => ({ value:p.name, label:p.name }));
       case 'department': return (settings.departments || []).map(d => ({ value:d.name, label:d.name }));
       case 'mode':       return (settings.modes       || []).map(m => ({ value:m.name, label:m.name }));
@@ -895,9 +909,6 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
     } catch (err) { window.alert(err.message); }
   };
 
-  /* Grid cells reuse the global DataGrid classes (dg-th / dg-td / dg-sn-col)
-     so this table matches the Staff Detail grid exactly. */
-
   /* Status values get a green/red Working tint; other fields a neutral chip */
   const ValueChip = ({ name }) => {
     if (!name) return <span style={{ color:'#d1d5db' }}>—</span>;
@@ -919,6 +930,29 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
   /* Most recent applied change for this field — its date is when the
      current value took effect (blank if the value was never changed here) */
   const latestApplied = fieldRows.find(r => r.applied);
+
+  const historyColumns = [
+    { field:'toValue', header: fieldLabel, render:(v, row) => (
+        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+          {row.fromValue && <>
+            <span style={{ fontSize:12, color:'#6b7280' }}>{row.fromValue}</span>
+            <span style={{ color:'#9ca3af' }}>→</span>
+          </>}
+          <ValueChip name={v} />
+        </div>
+      ) },
+    { field:'effectiveDate', header:'Effective Date', width:150, render: v => fd(v) },
+    { field:'remarks', header:'Remarks', render: v => v || <span style={{ color:'#d1d5db' }}>—</span> },
+    { field:'applied', header:'Status', width:110, render: v => v ? (
+        <span style={{ fontSize:11, fontWeight:700, color:'#065f46', background:'#d1fae5', padding:'2px 8px', borderRadius:10 }}>
+          ✓ {t('Applied')}
+        </span>
+      ) : (
+        <span style={{ fontSize:11, fontWeight:700, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10 }}>
+          ⏳ {t('Pending')}
+        </span>
+      ) },
+  ];
 
   return (
     <div>
@@ -943,97 +977,42 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
         })}
       </div>
 
-      {/* Tab content card */}
-      <div style={{ border:'1px solid #dedede', borderRadius:8, background:'white',
-        boxShadow:'0 1px 3px rgba(0,0,0,.07)', overflow:'hidden' }}>
-
-      {/* Toolbar — title + Add New, mirrors the DataGrid toolbar */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-        padding:'9px 14px', background:'#f9fafb', borderBottom:'1px solid #dedede' }}>
-        <span style={{ fontSize:14, fontWeight:600, color:'#111827' }}>
-          {fieldDef.icon} {fieldLabel} {t('Change History')}
-        </span>
-        <button className="btn btn-primary" style={{ height:32, fontSize:13 }} onClick={openAddNew}>
-          + {t('Add New')}
-        </button>
-      </div>
-
-      {/* History grid — same dg-* classes as the Staff Detail grid */}
-      <table className="dg-table compact" style={{ minWidth:'unset' }}>
-        <thead>
-          <tr className="dg-header-row">
-            <th className="dg-th dg-sn-col">SN</th>
-            <th className="dg-th" style={{ textAlign:'left' }}>{fieldLabel}</th>
-            <th className="dg-th" style={{ textAlign:'left', width:150 }}>{t('Effective Date')}</th>
-            <th className="dg-th" style={{ textAlign:'left' }}>{t('Remarks')}</th>
-            <th className="dg-th" style={{ width:110 }}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {/* Pinned first row — the staff's current value */}
-          {!loading && (
-            <tr className="dg-row">
-              <td className="dg-td dg-sn-col">★</td>
-              <td className="dg-td"><ValueChip name={currentValue} /></td>
-              <td className="dg-td">{latestApplied ? fd(latestApplied.effectiveDate) : <span className="dg-null">—</span>}</td>
-              <td className="dg-td" style={{ color:'#9ca3af', fontStyle:'italic' }}>{t('Current')} {fieldLabel}</td>
-              <td className="dg-td" style={{ textAlign:'right' }}>
-                <span style={{ fontSize:11, fontWeight:700, color:'#1e40af', background:'#dbeafe', padding:'2px 8px', borderRadius:10 }}>
-                  {t('Current')}
-                </span>
-              </td>
-            </tr>
-          )}
-          {loading ? (
-            <tr><td colSpan={5} className="dg-td" style={{ textAlign:'center', color:'#9ca3af', padding:'24px 0' }}>Loading…</td></tr>
-          ) : fieldRows.length === 0 ? (
-            <tr><td colSpan={5} className="dg-td" style={{ textAlign:'center', color:'#9ca3af', padding:'24px 0' }}>
-              {t('No changes yet')} — {t('use + Add New to record one')}
-            </td></tr>
-          ) : fieldRows.map((r, i) => (
-            <tr key={r.id} className="dg-row clickable" title={t('Double-click to edit')}
-              onDoubleClick={() => openEditRow(r)}>
-              <td className="dg-td dg-sn-col">{i + 1}</td>
-              <td className="dg-td">
-                <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-                  {r.fromValue && <>
-                    <span style={{ fontSize:12, color:'#6b7280' }}>{r.fromValue}</span>
-                    <span style={{ color:'#9ca3af' }}>→</span>
-                  </>}
-                  <ValueChip name={r.toValue} />
-                </div>
-              </td>
-              <td className="dg-td">{fd(r.effectiveDate)}</td>
-              <td className="dg-td" style={{ whiteSpace:'normal' }}>{r.remarks || <span className="dg-null">—</span>}</td>
-              <td className="dg-td" style={{ textAlign:'right' }}>
-                {r.applied ? (
-                  <span style={{ fontSize:11, fontWeight:700, color:'#065f46', background:'#d1fae5', padding:'2px 8px', borderRadius:10 }}>
-                    ✓ {t('Applied')}
-                  </span>
-                ) : (
-                  <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-                    <span style={{ fontSize:11, fontWeight:700, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10 }}>
-                      ⏳ {t('Pending')}
-                    </span>
-                    <button title={t('Delete')} onClick={e => { e.stopPropagation(); remove(r); }}
-                      style={{ background:'none', border:'none', cursor:'pointer', color:'#ef4444', fontSize:14, padding:2 }}>
-                      🗑
-                    </button>
-                  </span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* Footer hint — mirrors the DataGrid footer */}
-      <div style={{ padding:'7px 14px', background:'#f9fafb', borderTop:'1px solid #dedede',
-        fontSize:12, color:'#6b7280' }}>
-        {t('Future-dated changes stay pending and apply automatically on the effective date. Double-click a row to edit it.')}
-      </div>
-
-      </div>{/* /tab content card */}
+      {/* History grid — the actual shared DataGrid, same as Staff Detail */}
+      <DataGrid
+        title={`${fieldDef.icon} ${fieldLabel} ${t('Change History')}`}
+        toolbarLeft={
+          <span style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#6b7280', marginLeft:10 }}>
+            {t('Current')}: <ValueChip name={currentValue} />
+            {latestApplied && <span>({fd(latestApplied.effectiveDate)})</span>}
+          </span>
+        }
+        toolbar={
+          <button className="btn btn-primary" style={{ height:32, fontSize:13 }} onClick={openAddNew}>
+            + {t('Add New')}
+          </button>
+        }
+        columns={historyColumns}
+        data={fieldRows}
+        rowKey="id"
+        loading={loading}
+        compact={true}
+        showCheckbox={false}
+        showSearch={false}
+        showFilterButton={false}
+        onRowDoubleClick={openEditRow}
+        contextMenu={[
+          { label: 'Add New',  icon: '➕', onClick: () => openAddNew() },
+          'divider',
+          { label: 'Edit',     icon: '✏️', onClick: (row) => openEditRow(row) },
+          { label: 'Delete',   icon: '🗑', className: 'danger',
+            onClick: (row) => row.applied ? window.alert(t('Applied changes cannot be deleted')) : remove(row) },
+        ]}
+        footerLeft={
+          <span style={{ fontSize:12, color:'#6b7280' }}>
+            {t('Future-dated changes stay pending and apply automatically on the effective date. Double-click a row to edit it.')}
+          </span>
+        }
+      />
 
       {/* ── Add New / Edit popup ── */}
       {editor && (
@@ -1700,13 +1679,45 @@ const defaultForm = {
 };
 
 const UserManagement = () => {
-  const { isAdmin, canManageStaff, isBranchManager, isDeptHead, currentUser, filterByRole, canView } = useAuth();
+  const { isAdmin, canManageStaff: roleCanManageStaff, isBranchManager, isDeptHead, isBranchAreaManager, isDeptIncharge, currentUser, filterByRole, canView, canEdit } = useAuth();
+  // Department Head / Incharge manage staff only when Role & Permission grants
+  // Staff Details → Edit (the server enforces the same grant + their dept scope).
+  const canManageStaff = roleCanManageStaff || ((isDeptHead || isDeptIncharge) && canEdit('staffDetail'));
   const { t }        = useLanguage();
   const { filteredEmployees: employees, addEmployee, updateEmployee, deleteEmployee, shifts, refreshEmployees } = useData();
   const [importModal,    setImportModal]    = useState(false);
   const [excelImport,    setExcelImport]    = useState(false);
   const [recoModal,      setRecoModal]      = useState(false);
   const { settings, updateSetupList } = useSettings();
+
+  // Company HQ / Branch choices in the Staff form, scoped to the logged-in
+  // user: Admin → HQ + every branch; Branch Manager / Dept Head → only their
+  // own branch; Branch Area Manager → only their covered branches. The server
+  // enforces the Branch Manager case too (employees.js guardAdminAccountMutation).
+  const staffBranchOpts = useMemo(() => {
+    const all = branchSelectOptions(settings);
+    if (isAdmin) return all;
+    const norm = (v) => String(v || '').toLowerCase().trim();
+    // A manager with no branch of their own is at HQ (blank = Head Office).
+    const allowed = isBranchAreaManager
+      ? new Set((currentUser?.coverageBranches || []).map(norm))
+      : new Set([norm(currentUser?.branch || hqBranchName(settings))]);
+    return all.filter(o => allowed.has(norm(o.value)));
+  }, [isAdmin, isBranchAreaManager, currentUser, settings.companyNameEn, settings.companyShortName, settings.branches]);
+
+  // User Role choices: only an Admin can grant Admin; a Dept Head can't grant
+  // Branch Manager either. (Also enforced server-side.)
+  const staffRoleOpts = useMemo(() => {
+    const all = [
+      { value:'employee',       label:'👤 Employee' },
+      { value:'branchManager',  label:'🏪 Branch Manager' },
+      { value:'departmentHead', label:'🏗️ Department Head' },
+      { value:'admin',          label:'👑 Admin' },
+    ];
+    if (isAdmin) return all;
+    if (isDeptHead || isDeptIncharge) return all.filter(o => ['employee', 'departmentHead'].includes(o.value));
+    return all.filter(o => o.value !== 'admin');
+  }, [isAdmin, isDeptHead, isDeptIncharge]);
   const fd = useDateFormat();
 
   const [modal,         setModal]         = useState(false);
@@ -1730,6 +1741,7 @@ const UserManagement = () => {
   const [showAdvSearch, setShowAdvSearch] = useState(false);
   const [selectedUserIds,   setSelectedUserIds]   = useState([]);
   const [resetPwdModal,     setResetPwdModal]     = useState(false);
+  const [defaultResetRow,   setDefaultResetRow]   = useState(null);
   const [resetPwdInput,     setResetPwdInput]     = useState('');
   const [resetPwdConfirm,   setResetPwdConfirm]   = useState('');
   const [resetPwdLoading,   setResetPwdLoading]   = useState(false);
@@ -1849,7 +1861,7 @@ const UserManagement = () => {
     return {
       religion:      def(s.religions),
       status:        def(s.statuses) || 'Active',
-      branch:        s.companyNameEn || def(s.branches),
+      branch:        hqBranchName(s) || def(s.branches),
       department:    def(s.departments),
       position:      def(s.posts),
       mode:          def(s.modes),
@@ -1875,7 +1887,13 @@ const UserManagement = () => {
       });
       return;
     }
-    setForm({ ...defaultForm, ...buildDefaults(), employeeId:`EMP${String(employees.length+1).padStart(3,'0')}` });
+    const defaults = buildDefaults();
+    // Non-admins can only add staff to their own branch(es) — pre-select it
+    // (the admin default, HQ, isn't even in their Branch dropdown).
+    if (!isAdmin && !staffBranchOpts.some(o => o.value === defaults.branch)) {
+      defaults.branch = staffBranchOpts[0]?.value || '';
+    }
+    setForm({ ...defaultForm, ...defaults, employeeId:`EMP${String(employees.length+1).padStart(3,'0')}` });
     setErrors({}); setEditId(null); setActiveTab('Staff Detail'); setQuickDeviceView(false); setModal(true);
   };
 
@@ -1890,7 +1908,8 @@ const UserManagement = () => {
       deviceId:  u.deviceId  || '', religion:   u.religion   || '',
       handicapped: u.handicapped || false,
       eligibleForOt: u.eligibleForOt ?? false,
-      branch:    u.branch    || '', mode:      u.mode      || '',
+      // No branch saved = Head Office (HQ) — show it selected rather than "— None —".
+      branch:    u.branch    || hqBranchName(settings), mode:      u.mode      || '',
       grade:     u.grade     || '', timingType:u.timingType || '',
       status:    u.status    || 'Active', shift: u.shift || '',
       rankingOrder: u.rankingOrder != null ? String(u.rankingOrder) : '',
@@ -1945,7 +1964,9 @@ const UserManagement = () => {
         showToast(t('Record updated successfully'));
         setModal(false);
       } else {
-        await addEmployee(form);
+        // No branch picked → Company HQ (Settings → Company Information Short Name).
+        // (Admins only — a Branch Manager's list doesn't include HQ.)
+        await addEmployee({ ...form, branch: form.branch || (isAdmin ? hqBranchName(settings) : '') });
         showToast(t('Record saved successfully'));
         // Stay on the Add Staff Management form instead of closing, so a run of
         // new staff can be entered back-to-back without touching the mouse —
@@ -1994,6 +2015,16 @@ const UserManagement = () => {
       }));
       showToast(t('Change applied successfully'));
 
+      // A non-admin who just transferred this staff member out of their own
+      // branch(es) can no longer edit them (server returns 403) — close the
+      // form instead of leaving a Save button that would only fail.
+      if (change.field === 'branch' && !isAdmin
+          && !staffBranchOpts.some(o => String(o.value).toLowerCase().trim() === String(user.branch || '').toLowerCase().trim())) {
+        showToast(`${user.fullName || t('Staff')} → ${user.branch}`);
+        setModal(false);
+        return;
+      }
+
       // These only fire for a change that took effect immediately — a
       // future-dated change applies later via the unattended sweep
       // (applyDueOfficialChanges), with nobody present to answer a prompt.
@@ -2027,18 +2058,36 @@ const UserManagement = () => {
     setResetPwdModal(true);
   };
 
+  const DEFAULT_PASSWORD = 'Ehajiri@123';
+
+  const copyDefaultCreds = async (row) => {
+    const text = `Username/Email: ${row.email || ''}\nPassword: ${DEFAULT_PASSWORD}`;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      document.body.removeChild(ta);
+    }
+    showToast('Username and password copied');
+  };
+
   const resetToDefault = async (row) => {
-    if (!window.confirm(`Reset login password for "${row.fullName}" to default (123456)?`)) return;
+    setDefaultResetRow(null);
     try {
       const res = await fetch(apiUrl(`/employees/${row.id}/reset-password`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
-        body: JSON.stringify({ password: '123456' }),
+        body: JSON.stringify({ password: DEFAULT_PASSWORD }),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed');
+      }
       showToast(`Password reset to default for ${row.fullName}`);
-    } catch {
-      showToast('Failed to reset password', 'error');
+    } catch (e) {
+      showToast(e.message && e.message !== 'Failed' ? e.message : 'Failed to reset password', 'error');
     }
   };
 
@@ -2050,7 +2099,7 @@ const UserManagement = () => {
       await Promise.all(selectedUserIds.map(id =>
         fetch(apiUrl(`/employees/${id}/reset-password`), {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
           body: JSON.stringify({ password: resetPwdInput.trim() }),
         }).then(r => { if (!r.ok) throw new Error('Failed'); })
       ));
@@ -2168,7 +2217,7 @@ const UserManagement = () => {
           || (e.deviceId||'').toLowerCase().includes(ql)
       )) return false;
     }
-    if (f.branches.length    && !f.branches.includes(e.branch      || '')) return false;
+    if (f.branches.length    && !f.branches.includes(e.branch || hqBranchName(settings))) return false;
     if (f.departments.length && !f.departments.includes(e.department|| '')) return false;
     if (f.positions.length   && !f.positions.includes(e.position   || '')) return false;
     if (f.grades.length      && !f.grades.includes(e.grade         || '')) return false;
@@ -2194,7 +2243,9 @@ const UserManagement = () => {
 
   /* full lists from settings — ensures all configured options appear even if no staff assigned yet */
   const sNames = (key) => (settings[key] || []).map(x => x.name || x).filter(Boolean).sort();
-  const branchOpts     = sNames('branches').length     ? sNames('branches')     : uniq('branch');
+  // Head Office (HQ) first — it isn't a Settings → Branch entry, so sNames alone misses it.
+  const branchOpts     = [hqBranchName(settings), ...(sNames('branches').length ? sNames('branches') : uniq('branch'))
+    .filter(b => b.toLowerCase() !== hqBranchName(settings).toLowerCase())];
   const departmentOpts = sNames('departments').length  ? sNames('departments')  : uniq('department');
   const postOpts       = sNames('posts').length        ? sNames('posts')        : uniq('position');
   const gradeOpts      = sNames('grades').length       ? sNames('grades')       : uniq('grade');
@@ -2223,7 +2274,7 @@ const UserManagement = () => {
     { field:'department', header:'Department', width:120,
       render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
     { field:'branch',     header:'Branch',     width:110,
-      render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
+      render:v=>v || hqBranchName(settings) },
     { field:'phone',      header:'Mobile',     width:110,
       render:v=>v||<span style={{color:'#d1d5db'}}>—</span> },
     { field:'email',      header:'Email',      width:190,
@@ -2669,7 +2720,7 @@ const UserManagement = () => {
           'divider',
           { label: 'Edit',                  icon: '✏️', onClick: (row) => openEdit(row) },
           { label: 'Enroll Device',         icon: '📲', onClick: (row) => openEdit(row, true) },
-          { label: 'Reset Login Password',  icon: '🔑', onClick: (row) => resetToDefault(row) },
+          { label: 'Reset Login Password',  icon: '🔑', onClick: (row) => setDefaultResetRow(row) },
           'divider',
           { label: 'Delete',                icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
         ] : undefined}
@@ -2835,17 +2886,32 @@ const UserManagement = () => {
                   {/* ── Panel 2: Organization ── */}
                   <Panel title="Organization">
                     <Fg idx={0}>
-                      <Fl onQA={() => openQA('Branch', 'branches', 'branch')} shortcut={FIELD_SHORTCUT_LETTER.branch}>Company HQ / Branch</Fl>
-                      <SearchableSelect
-                        ref={el => (staffFieldRefs.current.branch = el)}
-                        value={form.branch}
-                        onChange={v => handleChange('branch', v)}
-                        placeholder="— None —"
-                        options={[
-                          ...(settings.companyNameEn ? [{value: settings.companyNameEn, label: `${settings.companyNameEn} (HQ)`}] : []),
-                          ...(settings.branches||[]).map(b => ({value: b.name, label: b.name})),
-                        ]}
-                      />
+                      <Fl onQA={isAdmin ? () => openQA('Branch', 'branches', 'branch') : undefined} shortcut={FIELD_SHORTCUT_LETTER.branch}>Company HQ / Branch</Fl>
+                      {/* Non-admins don't pick a branch here: a new staff member
+                          goes into their own branch (a Branch Area Manager still
+                          picks among the branches they cover), and moving an
+                          existing staff member is done only via Officially
+                          Changes → Branch, which keeps the transfer history. */}
+                      {!isAdmin && (editId || staffBranchOpts.length <= 1) ? (
+                        <>
+                          <input className="form-control" style={{ fontSize:13, background:'#f3f4f6' }}
+                            ref={el => (staffFieldRefs.current.branch = el)}
+                            value={form.branch || '—'} readOnly tabIndex={-1} />
+                          {editId && (
+                            <div style={{ fontSize:11, color:'#6b7280', marginTop:3 }}>
+                              {t('To change branch, use')} <a href="#" onClick={e => { e.preventDefault(); setActiveTab('Officially Changes'); }}>{t('Officially Changes')}</a> → Branch
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <SearchableSelect
+                          ref={el => (staffFieldRefs.current.branch = el)}
+                          value={form.branch}
+                          onChange={v => handleChange('branch', v)}
+                          placeholder="— None —"
+                          options={staffBranchOpts}
+                        />
+                      )}
                     </Fg>
                     <Fg idx={1}>
                       <Fl onQA={() => openQA('Department', 'departments', 'department')} shortcut={FIELD_SHORTCUT_LETTER.department}>Department</Fl>
@@ -2951,10 +3017,13 @@ const UserManagement = () => {
                         ref={el => (staffFieldRefs.current.role = el)}
                         value={form.role}
                         onChange={e => handleChange('role', e.target.value)}>
-                        <option value="employee">👤 Employee</option>
-                        <option value="branchManager">🏪 Branch Manager</option>
-                        <option value="departmentHead">🏗️ Department Head</option>
-                        <option value="admin">👑 Admin</option>
+                        {staffRoleOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        {/* Keep a role this user can't grant (e.g. editing their own
+                            record) visible as-is instead of the select silently
+                            showing a different one — but not selectable. */}
+                        {form.role && !staffRoleOpts.some(o => o.value === form.role) && (
+                          <option value={form.role} disabled>{form.role}</option>
+                        )}
                       </select>
                     </Fg>
                   </Panel>
@@ -3261,6 +3330,38 @@ const UserManagement = () => {
                 disabled={resetPwdLoading || !resetPwdInput.trim() || resetPwdInput !== resetPwdConfirm}
                 style={{ background:'#6d28d9', color:'white', border:'none', borderRadius:6, padding:'8px 20px', fontSize:13, fontWeight:700, cursor: resetPwdLoading || !resetPwdInput.trim() || resetPwdInput !== resetPwdConfirm ? 'not-allowed' : 'pointer', opacity: resetPwdLoading || !resetPwdInput.trim() || resetPwdInput !== resetPwdConfirm ? 0.6 : 1 }}>
                 {resetPwdLoading ? '⏳ Resetting...' : '🔑 Reset Password'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════ RESET TO DEFAULT PASSWORD MODAL ══════════ */}
+      {defaultResetRow && (
+        <div className="modal-overlay" style={{ zIndex:1100 }}>
+          <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:440 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 style={{ color:'#6d28d9' }}>🔑 Reset Password</h2>
+              <button className="modal-close" onClick={() => setDefaultResetRow(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize:13, color:'#374151', marginBottom:12 }}>
+                Reset login password for <strong>{defaultResetRow.fullName}</strong> to the default password?
+              </div>
+              <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'12px 14px', fontSize:13, lineHeight:2 }}>
+                <div><span style={{ display:'inline-block', width:150, color:'#6b7280' }}>Username / Email :</span><strong>{defaultResetRow.email || '—'}</strong></div>
+                <div><span style={{ display:'inline-block', width:150, color:'#6b7280' }}>New Password :</span><strong>{DEFAULT_PASSWORD}</strong></div>
+              </div>
+              <button type="button" onClick={() => copyDefaultCreds(defaultResetRow)}
+                style={{ marginTop:10, background:'#fff', border:'1px solid #d1d5db', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+                📋 Copy All
+              </button>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setDefaultResetRow(null)}>{t('Cancel')}</button>
+              <button onClick={() => resetToDefault(defaultResetRow)}
+                style={{ background:'#6d28d9', color:'white', border:'none', borderRadius:6, padding:'8px 20px', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                🔑 Reset Password
               </button>
             </div>
           </div>

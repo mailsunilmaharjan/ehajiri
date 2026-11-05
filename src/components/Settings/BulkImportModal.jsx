@@ -24,8 +24,9 @@ const BulkImportModal = ({ open, onClose, title, hasShortName, nextRankingOrder,
   const { language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
 
-  const [text,   setText]   = useState('');
-  const [result, setResult] = useState(null); // { added, skipped } once imported
+  const [text,      setText]      = useState('');
+  const [result,    setResult]    = useState(null); // { added, skipped } once imported
+  const [importing, setImporting] = useState(false);
 
   // Hooks must run on every render regardless of `open` — this component
   // stays mounted the whole time and only toggles `open`, so an early
@@ -36,10 +37,19 @@ const BulkImportModal = ({ open, onClose, title, hasShortName, nextRankingOrder,
 
   if (!open) return null;
 
-  const handleClose = () => { setText(''); setResult(null); onClose(); };
-  const handleImport = () => {
-    if (!rows.length) return;
-    setResult(onImport(rows));
+  const handleClose = () => { setText(''); setResult(null); setImporting(false); onClose(); };
+  // onImport is async now (it writes each row through to the real table
+  // behind this list, not just the local blob — see Settings.jsx's
+  // handleBulkImport) — awaited so `result` is the real {added,skipped}
+  // instead of a pending Promise object.
+  const handleImport = async () => {
+    if (!rows.length || importing) return;
+    setImporting(true);
+    try {
+      setResult(await onImport(rows));
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
@@ -105,9 +115,9 @@ const BulkImportModal = ({ open, onClose, title, hasShortName, nextRankingOrder,
             <button className="btn btn-primary" onClick={handleClose}>{L('बन्द गर्नुस्','Close')}</button>
           ) : (
             <>
-              <button className="btn btn-outline" onClick={handleClose}>{L('रद्द गर्नुस्','Cancel')}</button>
-              <button className="btn btn-primary" disabled={!rows.length} onClick={handleImport}>
-                {L('आयात गर्नुस्','Import')} {rows.length > 0 ? `${rows.length} ${L('पङ्क्ति','Rows')}` : ''}
+              <button className="btn btn-outline" onClick={handleClose} disabled={importing}>{L('रद्द गर्नुस्','Cancel')}</button>
+              <button className="btn btn-primary" disabled={!rows.length || importing} onClick={handleImport}>
+                {importing ? `⏳ ${L('आयात हुँदैछ...','Importing...')}` : `${L('आयात गर्नुस्','Import')} ${rows.length > 0 ? `${rows.length} ${L('पङ्क्ति','Rows')}` : ''}`}
               </button>
             </>
           )}

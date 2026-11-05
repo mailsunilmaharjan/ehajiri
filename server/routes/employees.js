@@ -3,6 +3,9 @@ import bcrypt from 'bcryptjs';
 import os from 'os';
 import pool from '../db.js';
 import { requireRole } from '../middleware/roleGuard.js';
+import { resolveOrgEmployeeIds } from './orgScope.js';
+import { invalidateSession } from '../middleware/authGuard.js';
+import { validateBody } from '../middleware/validate.js';
 import { logAudit } from '../services/auditLog.js';
 import { sendStaffCreated, sendPasswordReset } from '../services/emailService.js';
 import { syncEmailDirectory } from '../services/directorySync.js';
@@ -63,10 +66,104 @@ function getLocalIp() {
 }
 
 const router = Router();
-const canManageStaff = requireRole('admin', 'branchManager', 'superAdmin');
-const canDeleteStaff = requireRole('admin', 'superAdmin');
+const canManageStaffStrict = requireRole('admin', 'branchManager', 'superAdmin');
 
 const ADMIN_ROLES = ['admin', 'superAdmin'];
+const DEPT_ROLES  = ['departmentHead', 'departmentIncharge'];
+
+/* Department Head / Incharge hold no staff-management role by default. They get
+   Staff Details add/edit/delete only when Role & Permission Management grants
+   it (staff override → role setting; default = none), and only inside their own
+   department scope — see deptStaffScope below. Everyone else keeps the fixed
+   role allowlist. */
+async function deptHasStaffPerm(req, action) {
+  const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='page_permissions'");
+  let v = rows[0]?.value ?? null;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
+  const p = v?.staff?.[String(req.user.id)]?.staffDetail ?? v?.roles?.[req.user.role]?.staffDetail;
+  return !!(p?.view && p[action]);
+}
+function staffWriteAccess(action) {
+  const strict = action === 'delete' ? requireRole('admin', 'superAdmin') : canManageStaffStrict;
+  return async (req, res, next) => {
+    try {
+      if (req.user && DEPT_ROLES.includes(req.user.role) && await deptHasStaffPerm(req, action)) {
+        req.deptStaffActor = true;
+        return next();
+      }
+      return strict(req, res, next);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  };
+}
+const canManageStaff = staffWriteAccess('edit');
+const canDeleteStaff = staffWriteAccess('delete');
+
+/* Extra limits for a Department Head/Incharge acting through the permission
+   grant above: only staff inside their own scope (never themself, never a
+   Branch Manager or above), and any department/branch being saved must also be
+   inside that scope. No-op for every other role. */
+async function deptStaffScope(req, res, next) {
+  if (!req.deptStaffActor) return next();
+  try {
+    const norm = (v) => String(v || '').toLowerCase().trim();
+    const deny = (msg) => res.status(403).json({ authError: true, error: msg });
+    if (req.params.id) {
+      const target = Number(req.params.id);
+      if (!Number.isInteger(target)) return res.status(400).json({ error: 'Invalid staff id' });
+      if (target === Number(req.user.id)) return deny('You cannot modify your own staff record');
+      const ids = await resolveOrgEmployeeIds(req);
+      if (ids !== null && !ids.map(Number).includes(target)) return deny('This staff member is outside your department scope');
+      const { rows } = await pool.query('SELECT role FROM users WHERE id=$1', [target]);
+      if (['branchManager', 'branchAreaManager'].includes(rows[0]?.role)) return deny('Only an Admin can manage Branch Manager accounts');
+    }
+    if (req.body && ('department' in req.body || 'branch' in req.body) && req.method !== 'DELETE') {
+      const dept = norm(req.body.department), branch = norm(req.body.branch);
+      if (!dept) return deny('Department is required');
+      let ok;
+      if (req.user.role === 'departmentHead') {
+        const { rows: me } = await pool.query('SELECT department, branch FROM users WHERE id=$1', [req.user.id]);
+        ok = dept === norm(me[0]?.department) && (!norm(me[0]?.branch) || branch === norm(me[0].branch));
+      } else {
+        const { rows } = await pool.query(
+          `SELECT 1 FROM manager_department_coverage mdc
+           JOIN departments d ON d.id = mdc.department_id
+           LEFT JOIN branches b ON b.id = mdc.branch_id
+           WHERE mdc.user_id = $1 AND LOWER(TRIM(d.name)) = $2
+             AND (mdc.branch_id IS NULL OR LOWER(TRIM(b.name)) = $3) LIMIT 1`,
+          [req.user.id, dept, branch]);
+        ok = rows.length > 0;
+      }
+      if (!ok) return deny('Staff can only be saved to your own department/branch');
+    }
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
+/* ── Per-record access control for /:id/* staff sub-resources ──
+   authGuard only proves "logged in". Without this, any employee could read
+   (or, for bio-photo, overwrite) another staff member's ID-card numbers and
+   scans, addresses, emergency contacts and official-change history just by
+   changing the :id in the URL.
+   Allowed: the record's owner (reads only), or a staff-management role whose
+   org scope (all / branch / covered branches) includes that employee. */
+const STAFF_RECORD_ROLES = ['admin', 'superAdmin', 'branchManager', 'branchAreaManager'];
+function staffRecordScope({ allowSelf }) {
+  return async (req, res, next) => {
+    try {
+      const target = Number(req.params.id);
+      if (!Number.isInteger(target)) return res.status(400).json({ error: 'Invalid staff id' });
+      if (allowSelf && Number(req.user?.id) === target) return next();
+      if (!STAFF_RECORD_ROLES.includes(req.user?.role) && !(!allowSelf && req.deptStaffActor)) {
+        return res.status(403).json({ authError: true, error: 'You do not have permission to access this staff record' });
+      }
+      const ids = await resolveOrgEmployeeIds(req);          // null = unrestricted (admin/superAdmin)
+      if (ids === null || ids.map(Number).includes(target)) return next();
+      return res.status(403).json({ authError: true, error: 'This staff member is outside your branch/department scope' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  };
+}
+const viewStaffRecord = staffRecordScope({ allowSelf: true });
+const editStaffRecord = staffRecordScope({ allowSelf: false });
 
 /* Permission rules for admin-level account mutations:
    - superAdmin → can manage any role including superAdmin and admin
@@ -83,11 +180,47 @@ async function guardAdminAccountMutation(req, res, next) {
     }
 
     /* Check if the target account is currently superAdmin */
+    let target = null;
     if (req.params.id) {
-      const { rows } = await pool.query('SELECT role FROM users WHERE id=$1', [req.params.id]);
-      const targetRole = rows[0]?.role;
-      if (targetRole === 'superAdmin' && actorRole !== 'superAdmin') {
+      const { rows } = await pool.query('SELECT role, branch FROM users WHERE id=$1', [req.params.id]);
+      target = rows[0] || null;
+      if (target?.role === 'superAdmin' && actorRole !== 'superAdmin') {
         return res.status(403).json({ error: 'Only a super admin can manage Super Admin accounts' });
+      }
+    }
+
+    /* Non-admins (Branch Manager / Department Head) — enforced here, not just
+       hidden in the Staff form's dropdowns, so a raw API call can't escalate:
+       - can never assign Admin, nor edit an existing Admin account;
+       - a Department Head can't assign Branch Manager either;
+       - a Branch Manager can only create/edit staff in their OWN branch
+         (branch read fresh from the DB — the JWT copy can be up to 30 days
+         stale after an Officially Changes transfer). */
+    if (!ADMIN_ROLES.includes(actorRole)) {
+      if (ADMIN_ROLES.includes(target?.role)) {
+        return res.status(403).json({ error: 'Only an Admin can manage Admin accounts' });
+      }
+      if (ADMIN_ROLES.includes(incomingRole)) {
+        return res.status(403).json({ error: 'Only an Admin can assign the Admin role' });
+      }
+      if (['departmentHead', 'departmentIncharge'].includes(actorRole)
+          && ['branchManager', 'branchAreaManager'].includes(incomingRole)
+          && target?.role !== incomingRole) {
+        return res.status(403).json({ error: 'A Department Head cannot assign the Branch Manager role' });
+      }
+      if (actorRole === 'branchManager') {
+        const { rows: me } = await pool.query('SELECT branch FROM users WHERE id=$1', [req.user.id]);
+        const norm = (v) => String(v || '').toLowerCase().trim();
+        const myBranch = norm(me[0]?.branch);
+        if (!myBranch) {
+          return res.status(403).json({ error: 'Your account has no branch assigned — ask an Admin' });
+        }
+        if (target && norm(target.branch) !== myBranch) {
+          return res.status(403).json({ error: 'You can only manage staff in your own branch' });
+        }
+        if (norm(req.body?.branch) !== myBranch) {
+          return res.status(403).json({ error: 'Staff can only be saved to your own branch' });
+        }
       }
     }
 
@@ -120,7 +253,7 @@ const SEL = `
 
 const sql = {
   list: `SELECT ${SEL} FROM users WHERE is_system IS NOT TRUE AND role NOT IN ('superAdmin')
-    ORDER BY (SELECT b.ranking_order FROM branches b WHERE b.name = branch) ASC NULLS LAST,
+    ORDER BY (SELECT MIN(b.ranking_order) FROM branches b WHERE b.name = branch) ASC NULLS LAST,
              ranking_order ASC NULLS LAST, id ASC`,
 
   insert: `
@@ -197,12 +330,18 @@ async function applyDueOfficialChanges() {
   `);
 }
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
     // Apply any official changes that became due since the last fetch —
     // this is what makes a future-dated change take effect on its date.
     await applyDueOfficialChanges().catch(() => {});
-    res.json((await pool.query(sql.list)).rows);
+    const { rows } = await pool.query(sql.list);
+    // Free-text HR remarks are only for staff-management/manager roles.
+    const MANAGER_VIEW = ['admin', 'superAdmin', 'branchManager', 'branchAreaManager', 'departmentHead', 'departmentIncharge'];
+    if (!MANAGER_VIEW.includes(req.user?.role)) {
+      for (const r of rows) if (Number(r.id) !== Number(req.user?.id)) r.remarks = null;
+    }
+    res.json(rows);
   }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -243,7 +382,7 @@ const SOC_SEL = `
   created_at                           AS "createdAt"
 `;
 
-router.get('/:id/official-changes', async (req, res) => {
+router.get('/:id/official-changes', viewStaffRecord, async (req, res) => {
   try {
     const { field } = req.query;
     const params = [req.params.id];
@@ -258,9 +397,9 @@ router.get('/:id/official-changes', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/:id/official-changes', canManageStaff, async (req, res) => {
+router.post('/:id/official-changes', canManageStaffStrict, editStaffRecord, async (req, res) => {
   const { field, toValue, effectiveDate, remarks } = req.body;
-  const col = OFFICIAL_FIELDS[field];
+  const col = Object.hasOwn(OFFICIAL_FIELDS, field) ? OFFICIAL_FIELDS[field] : undefined;
   if (!col)             return res.status(400).json({ error: `Unknown field "${field}"` });
   if (!toValue?.trim()) return res.status(400).json({ error: 'Changing value is required' });
   if (!effectiveDate)   return res.status(400).json({ error: 'Effective Date is required' });
@@ -291,7 +430,7 @@ router.post('/:id/official-changes', canManageStaff, async (req, res) => {
 /* Edit an entry (grid double-click). The row is reset to pending and the
    sweep re-runs, so per user+field the latest due row still wins — editing
    an already-applied entry re-applies correctly. */
-router.put('/:id/official-changes/:changeId', canManageStaff, async (req, res) => {
+router.put('/:id/official-changes/:changeId', canManageStaffStrict, editStaffRecord, async (req, res) => {
   const { toValue, effectiveDate, remarks } = req.body;
   if (!toValue?.trim()) return res.status(400).json({ error: 'Changing value is required' });
   if (!effectiveDate)   return res.status(400).json({ error: 'Effective Date is required' });
@@ -346,7 +485,7 @@ const IDENTITY_KINDS = {
 };
 
 function identityKind(req, res) {
-  const kind = IDENTITY_KINDS[req.params.kind];
+  const kind = Object.hasOwn(IDENTITY_KINDS, req.params.kind) ? IDENTITY_KINDS[req.params.kind] : undefined;
   if (!kind) res.status(400).json({ error: `Unknown identity section "${req.params.kind}"` });
   return kind;
 }
@@ -365,7 +504,7 @@ function identityValues(kind, body) {
   return { values };
 }
 
-router.get('/:id/identity/:kind', async (req, res) => {
+router.get('/:id/identity/:kind', viewStaffRecord, async (req, res) => {
   const kind = identityKind(req, res);
   if (!kind) return;
   try {
@@ -377,7 +516,7 @@ router.get('/:id/identity/:kind', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/:id/identity/:kind', canManageStaff, async (req, res) => {
+router.post('/:id/identity/:kind', canManageStaff, editStaffRecord, async (req, res) => {
   const kind = identityKind(req, res);
   if (!kind) return;
   const { values, error } = identityValues(kind, req.body);
@@ -396,7 +535,7 @@ router.post('/:id/identity/:kind', canManageStaff, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/:id/identity/:kind/:rowId', canManageStaff, async (req, res) => {
+router.put('/:id/identity/:kind/:rowId', canManageStaff, editStaffRecord, async (req, res) => {
   const kind = identityKind(req, res);
   if (!kind) return;
   const { values, error } = identityValues(kind, req.body);
@@ -416,7 +555,7 @@ router.put('/:id/identity/:kind/:rowId', canManageStaff, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/:id/identity/:kind/:rowId', canManageStaff, async (req, res) => {
+router.delete('/:id/identity/:kind/:rowId', canManageStaff, editStaffRecord, async (req, res) => {
   const kind = identityKind(req, res);
   if (!kind) return;
   try {
@@ -432,7 +571,7 @@ router.delete('/:id/identity/:kind/:rowId', canManageStaff, async (req, res) => 
 });
 
 /* Only pending (not-yet-applied) entries can be removed — applied ones are history */
-router.delete('/:id/official-changes/:changeId', canManageStaff, async (req, res) => {
+router.delete('/:id/official-changes/:changeId', canManageStaffStrict, editStaffRecord, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `DELETE FROM staff_official_changes
@@ -444,7 +583,7 @@ router.delete('/:id/official-changes/:changeId', canManageStaff, async (req, res
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => {
+router.post('/', canManageStaff, deptStaffScope, validateBody({ employeeId: { type: 'scalar', max: 60 }, fullName: { max: 300 }, role: { type: 'scalar', max: 40 }, department: { max: 200 }, position: { max: 200 }, shift: { type: 'scalar', max: 100 }, email: { max: 300 }, phone: { max: 60 }, joinDate: { type: 'scalar', max: 40 }, gender: { type: 'scalar', max: 30 }, deviceId: { type: 'scalar', max: 60 }, religion: { max: 100 }, branch: { max: 200 }, mode: { max: 100 }, grade: { max: 100 }, timingType: { type: 'scalar', max: 60 }, dob: { type: 'scalar', max: 40 }, attendanceDate: { type: 'scalar', max: 40 }, status: { type: 'scalar', max: 60 }, remarks: { max: 50000 } }), guardAdminAccountMutation, async (req, res) => {
   const {
     employeeId, fullName, role, department, position, shift,
     email, phone, joinDate, gender, avatar,
@@ -516,7 +655,7 @@ router.post('/', canManageStaff, guardAdminAccountMutation, async (req, res) => 
 });
 
 /* POST /api/employees/import — bulk create (skip duplicates by employeeId) */
-router.post('/import', async (req, res) => {
+router.post('/import', canManageStaffStrict, async (req, res) => {
   const { employees } = req.body;
   if (!Array.isArray(employees) || employees.length === 0)
     return res.status(400).json({ error: 'No employees provided' });
@@ -524,6 +663,20 @@ router.post('/import', async (req, res) => {
   const created = [], skipped = [], errors = [];
 
   try {
+    // Same rules as guardAdminAccountMutation for single create/edit — this
+    // route used to have no role check at all, so any logged-in user could
+    // import accounts with the Admin role. Non-admins can't import Admin /
+    // Super Admin rows, and a Branch Manager's rows always land in their own
+    // branch.
+    const actorRole = req.user?.role;
+    const isAdminActor = ADMIN_ROLES.includes(actorRole);
+    let forcedBranch = null;
+    if (actorRole === 'branchManager') {
+      const { rows: me } = await pool.query('SELECT branch FROM users WHERE id=$1', [req.user.id]);
+      forcedBranch = me[0]?.branch || null;
+      if (!forcedBranch) return res.status(403).json({ error: 'Your account has no branch assigned — ask an Admin' });
+    }
+
     // Pre-filter obviously-invalid rows and collect IDs for ONE batched
     // duplicate check, instead of a separate SELECT per row — with a large
     // file (100+ rows) that per-row round trip was slow enough to occasionally
@@ -536,7 +689,15 @@ router.post('/import', async (req, res) => {
         errors.push({ employeeId: emp.employeeId || '?', error: 'Employee ID and Full Name are required' });
         continue;
       }
-      candidates.push(emp);
+      if (emp.role === 'superAdmin' && actorRole !== 'superAdmin') {
+        errors.push({ employeeId: emp.employeeId, error: 'Only a super admin can assign the Super Admin role' });
+        continue;
+      }
+      if (!isAdminActor && ADMIN_ROLES.includes(emp.role)) {
+        errors.push({ employeeId: emp.employeeId, error: 'Only an Admin can assign the Admin role' });
+        continue;
+      }
+      candidates.push(forcedBranch ? { ...emp, branch: forcedBranch } : emp);
     }
 
     const existingIds = new Set();
@@ -623,7 +784,7 @@ router.put('/online-attendance-bulk', requireRole('admin', 'superAdmin'), async 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) => {
+router.put('/:id', canManageStaff, deptStaffScope, validateBody({ employeeId: { type: 'scalar', max: 60 }, fullName: { max: 300 }, role: { type: 'scalar', max: 40 }, department: { max: 200 }, position: { max: 200 }, shift: { type: 'scalar', max: 100 }, email: { max: 300 }, phone: { max: 60 }, joinDate: { type: 'scalar', max: 40 }, gender: { type: 'scalar', max: 30 }, deviceId: { type: 'scalar', max: 60 }, religion: { max: 100 }, branch: { max: 200 }, mode: { max: 100 }, grade: { max: 100 }, timingType: { type: 'scalar', max: 60 }, dob: { type: 'scalar', max: 40 }, attendanceDate: { type: 'scalar', max: 40 }, status: { type: 'scalar', max: 60 }, remarks: { max: 50000 } }), guardAdminAccountMutation, async (req, res) => {
   const {
     employeeId, fullName, role, department, position, shift,
     email, phone, joinDate, gender, active,
@@ -671,7 +832,7 @@ router.put('/:id', canManageStaff, guardAdminAccountMutation, async (req, res) =
 });
 
 /* GET /:id/bio-photo — returns only the bio_photo field (avoids bloating the list query) */
-router.get('/:id/bio-photo', async (req, res) => {
+router.get('/:id/bio-photo', viewStaffRecord, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT bio_photo AS "bioPhoto" FROM users WHERE id=$1', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
@@ -680,7 +841,7 @@ router.get('/:id/bio-photo', async (req, res) => {
 });
 
 /* PATCH /:id/bio-photo — save base64 profile photo */
-router.patch('/:id/bio-photo', async (req, res) => {
+router.patch('/:id/bio-photo', canManageStaff, editStaffRecord, async (req, res) => {
   const { bioPhoto } = req.body;
   try {
     await pool.query('UPDATE users SET bio_photo=$1 WHERE id=$2', [bioPhoto || null, req.params.id]);
@@ -688,7 +849,7 @@ router.patch('/:id/bio-photo', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/:id', canDeleteStaff, guardAdminAccountMutation, async (req, res) => {
+router.delete('/:id', canDeleteStaff, deptStaffScope, guardAdminAccountMutation, async (req, res) => {
   try {
     const before = (await pool.query(`SELECT ${SEL} FROM users WHERE id=$1`, [req.params.id])).rows[0];
     await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
@@ -698,16 +859,18 @@ router.delete('/:id', canDeleteStaff, guardAdminAccountMutation, async (req, res
   } catch (e) { res.status(500).json({ error: friendlyDbError(e, 'delete') }); }
 });
 
-router.put('/:id/reset-password', canManageStaff, async (req, res) => {
+router.put('/:id/reset-password', canManageStaff, deptStaffScope, validateBody({ password: { required: true, max: 256 } }), async (req, res) => {
   const { password } = req.body;
   if (!password || !password.trim()) return res.status(400).json({ error: 'Password is required' });
+  if (password.trim().length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   try {
     const plainPassword = password.trim();
     const hash = await bcrypt.hash(plainPassword, 10);
     const { rows } = await pool.query(
-      'UPDATE users SET password=$1 WHERE id=$2 RETURNING full_name, email',
+      'UPDATE users SET password=$1, sessions_valid_after=NOW() WHERE id=$2 RETURNING full_name, email',
       [hash, req.params.id]
     );
+    invalidateSession(req.params.id);
     logAudit({ actor: req.user, action: 'reset-password', entity: 'employee', entityId: req.params.id, before: null, after: null });
     res.json({ success: true });
     const user = rows[0];

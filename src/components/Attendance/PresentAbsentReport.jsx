@@ -21,7 +21,7 @@ const MONTHS_EN = ['January','February','March','April','May','June',
 const DOW_NP = { Sun:'आइत', Mon:'सोम', Tue:'मंगल', Wed:'बुध', Thu:'बिही', Fri:'शुक्र', Sat:'शनि' };
 
 /* ── Status cell config ──────────────────────────────────────── */
-const STATUS = {
+const STATUS_BASE = {
   P  : { color:'#059669', main:'P',   sup:null,  title:'Present'                   },
   P1 : { color:'#0369a1', main:'P',   sup:'1P',  title:'Present – single punch'    },
   PP : { color:'#ca8a04', main:'H.P', sup:null,  title:'Present on Public Holiday' },
@@ -37,16 +37,25 @@ const STATUS = {
   OV : { color:'#2563eb', main:'OV',  sup:null,  title:'Office Visit'              },
   PH : { color:'#d97706', main:'H',   sup:null,  title:'Public Holiday'            },
   PLH: { color:'#059669', main:'P-L', sup:'½',   title:'Present + Half-day Leave'  },
+  // Before the staff's Attendance Date — not counted as Present or Absent.
+  NA : { color:'#d1d5db', main:'',    sup:null,  title:''                          },
 };
 
 // STATUS's own `title`/`main`/`sup` are the English defaults, used as-is for
 // Print/Export (kept universal there so an exported file reads the same
 // regardless of who opens it). The on-screen grid instead resolves through
 // STATUS_NP/statusDisplay below when the app is in Nepali — see StatusCell.
+// A tenant's own off shift arrives as 'OFF:<label>' (e.g. 'OFF:Due D/O') — shown with that label, like the roster.
+const STATUS = new Proxy(STATUS_BASE, {
+  get: (t, k) => (typeof k === 'string' && k.startsWith('OFF:'))
+    ? { color:'#6b7280', main:k.slice(4), sup:null, title:k.slice(4).split('D/O').join('Day Off').split('N/O').join('Night Off') }
+    : t[k],
+});
+
 const STATUS_TITLE_NP = {
   P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', PP1: 'सार्वजनिक बिदामा उपस्थित – एकल पन्च',
-  WP: 'सप्ताहान्तमा उपस्थित', WP1: 'सप्ताहान्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित',
-  H: 'विकेन्ड', DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', LH: 'आधा दिन बिदा',
+  WP: 'सप्ताहन्तमा उपस्थित', WP1: 'सप्ताहन्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित',
+  H: 'सप्ताहन्त', DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', LH: 'आधा दिन बिदा',
   OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा', PLH: 'उपस्थित + आधा दिन बिदा',
 };
 const STATUS_NP = {
@@ -75,9 +84,18 @@ const statusDisplay = (st, language) => {
   return language === 'np' ? (STATUS_NP[st] || s) : s;
 };
 
-const StatusCell = ({ st, language }) => {
+// Leave days show the leave type's short code (AL, SL…) from Settings → Leave Types
+// instead of the generic "L". Half-day leave keeps its ½ superscript.
+const withLeaveCode = (disp, st, code) => {
+  if (!code) return disp;
+  if (st === 'L' || st === 'LH') return { ...disp, main: code };
+  if (st === 'PLH') return { ...disp, main: `P-${code}` };
+  return disp;
+};
+
+const StatusCell = ({ st, language, code }) => {
   const s = STATUS[st] || STATUS.AB;
-  const disp = statusDisplay(st, language);
+  const disp = withLeaveCode(statusDisplay(st, language), st, code);
   return (
     <span style={{ color:s.color, fontSize:12, fontWeight:700,
       display:'block', textAlign:'center', cursor:'default', whiteSpace:'nowrap' }}
@@ -91,10 +109,11 @@ const StatusCell = ({ st, language }) => {
    have no `.label` field (only `main`/`sup`, used for the on-screen
    superscript), so a blank status here means every attendance cell in the
    printed/exported output is empty even though the grid shows it fine. */
-const statusText = (st) => {
+const statusText = (st, code) => {
   const s = STATUS[st];
   if (!s) return '';
-  return s.sup ? `${s.main}(${s.sup})` : s.main;
+  const d = withLeaveCode(s, st, code);
+  return d.sup ? `${d.main}(${d.sup})` : d.main;
 };
 
 /* ── Advanced Search Modal ───────────────────────────────────── */
@@ -388,13 +407,14 @@ const PresentAbsentReport = () => {
   const dispDayNum = (dayNum, idx) => useNP ? (bsHalfStartDay + idx) : dayNum;
   const allRows = (data?.employees || []).map(emp => {
     const newDays = { ...emp.days };
+    const newCodes = { ...(emp.leaveCodes || {}) };
     Object.keys(newDays).forEach(dateStr => {
       if (newDays[dateStr] === 'AB') {
         const leave = getApprovedLeaveForDate(emp.id, dateStr);
-        if (leave) newDays[dateStr] = 'L';
+        if (leave) { newDays[dateStr] = 'L'; if (leave.leaveTypeCode) newCodes[dateStr] = leave.leaveTypeCode; }
       }
     });
-    return { ...emp, days: newDays };
+    return { ...emp, days: newDays, leaveCodes: newCodes };
   });
 
   /* Branch short-name from settings — uses camelCase shortName as stored in frontend settings */
@@ -501,7 +521,7 @@ const PresentAbsentReport = () => {
     const dayHeaders = dates.map((d, idx) => `<th style="padding:3px 4px;border:1px solid #dedede;background:#efefef;font-size:10px">${dispDayNum(d.dayNum, idx)}<br/>${d.dayKey.slice(0,3)}</th>`).join('');
     const dataRows = employees.map((e,i) => {
       const dayCells = dates.map(d => {
-        const lbl = statusText(e.days[d.date]);
+        const lbl = statusText(e.days[d.date], e.leaveCodes?.[d.date]);
         return `<td style="padding:2px 3px;border:1px solid #dedede;text-align:center;font-size:10px">${lbl}</td>`;
       }).join('');
       return `<tr>
@@ -606,7 +626,7 @@ const PresentAbsentReport = () => {
     employees.forEach((e, i) => {
       const row = ws.addRow([
         i + 1, e.fullName, e.postShort || '—', e.deptShort || '—', e.branchShort || '—',
-        ...dates.map(d => statusText(e.days[d.date])),
+        ...dates.map(d => statusText(e.days[d.date], e.leaveCodes?.[d.date])),
         e.totalP, e.totalAB, e.eligibleForOt ? (e.otApprovedFormatted || '—') : '—',
       ]);
       row.eachCell({ includeEmpty: true }, (cell, colNum) => {
@@ -888,7 +908,7 @@ const PresentAbsentReport = () => {
 
                   {dates.map(({ date }) => (
                     <td key={date} style={{ ...tdBase, padding:'3px' }}>
-                      <StatusCell st={emp.days[date]} language={language} />
+                      <StatusCell st={emp.days[date]} language={language} code={emp.leaveCodes?.[date]} />
                     </td>
                   ))}
 
@@ -966,7 +986,7 @@ const PresentAbsentReport = () => {
               { st:'P',  desc:L('उपस्थित','Present')                   },
               { st:'P1', desc:L('एकल पन्च','Single Punch')              },
               { st:'AB', desc:L('अनुपस्थित','Absent')                  },
-              { st:'H',  desc:L('विकेन्ड (स = सप्ताह)','Weekend (W)')   },
+              { st:'H',  desc:L('सप्ताहन्त (स)','Weekend (W)')   },
               { st:'DO', desc:L('डे अफ','Day Off')                     },
               { st:'NO', desc:L('नाइट अफ','Night Off')                 },
               { st:'L',  desc:L('बिदा','Leave')                        },
@@ -975,7 +995,7 @@ const PresentAbsentReport = () => {
               { st:'OV', desc:L('कार्यालय भ्रमण','Office Visit')       },
               { st:'PH', desc:L('सार्वजनिक बिदा','Public Holiday')     },
               { st:'PP', desc:L('सार्वजनिक बिदामा उपस्थित (H.P)','Present on Public Holiday (H.P)') },
-              { st:'WP', desc:L('सप्ताहान्तमा उपस्थित (W.P)','Present on Weekend (W.P)') },
+              { st:'WP', desc:L('सप्ताहन्तमा उपस्थित (W.P)','Present on Weekend (W.P)') },
             ].map(({ st, desc }) => {
               const s = STATUS[st];
               const disp = statusDisplay(st, language);

@@ -6,6 +6,21 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { APP_VERSION, DB_VERSION } from '../../version.js';
 import api, { getToken, apiUrl } from '../../api/client.js';
+import { promptPassword } from '../../utils/promptPassword.js';
+
+/* Backup / restore re-authentication: the server (BACKUP_REQUIRE_PASSWORD=true)
+   wants the caller's password before any export/save/restore. Opens a
+   10-minute window once the password is accepted. Returns false if cancelled. */
+async function ensureBackupUnlocked() {
+  try {
+    const s = await api.get('/backup/unlock-status');
+    if (!s?.required || s.unlocked) return true;
+  } catch { return true; }               // older server: nothing to unlock
+  const pw = await promptPassword('Enter your password to continue with backup / restore');
+  if (pw == null) return false;
+  try { await api.post('/backup/unlock', { password: pw }); return true; }
+  catch (e) { window.alert(e.message || 'Incorrect password'); return false; }
+}
 import ZKTecoDeviceSettings from './ZKTecoDeviceSettings.jsx';
 import StandAloneDeviceSettings from './StandAloneDeviceSettings.jsx';
 import ProfileTab from '../Common/ProfileTab.jsx';
@@ -41,6 +56,17 @@ const LOGO_MAX_KB = 500;
 const LOGO_MIN_AR = 1.5;
 const LOGO_MAX_AR = 7.0;
 const PREVIEW_DATE = new Date(2026, 4, 27);
+
+// These SetupSection-backed lists also live in a real relational table (see
+// server/routes/settings.js's SETUP_TABLES and migration 147's note) that
+// other features read directly — handleSetupSave/handleSetupDelete/
+// handleBulkImport write through to /settings/:list for these, not just the
+// blob. leaveTypeConfigs/officeVisitTypes/publicHolidays/taskCategories/etc.
+// have their own dedicated save handlers elsewhere in this file and never
+// go through handleSetupSave, so they're deliberately not listed here.
+const SETUP_REST_KEYS = new Set([
+  'fiscalYears', 'branches', 'departments', 'posts', 'grades', 'modes', 'religions', 'statuses', 'jobTimings',
+]);
 
 const SHIFT_DAYS = [
   { key:'Sun', np:'आइत', en:'Sun' },
@@ -443,10 +469,15 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
         onRowDoubleClick={openEdit}
         onDeleteKey={row => { if (!row.isSystem && !row.isDefault) setDelConfirm(row.id); }}
         onDeleteSelected={ids => {
-          ids.filter(id => {
+          // One call with every id — calling onDelete once per id fired N
+          // concurrent blob saves that each removed only its own row from the
+          // same starting list, so the last save won and all but one of the
+          // selected rows came back (seen live: hotel-shangrila Posts).
+          const deletable = ids.filter(id => {
             const item = data.find(d => d.id === id);
             return item && !item.isSystem && !item.isDefault;
-          }).forEach(id => onDelete(id));
+          });
+          if (deletable.length) onDelete(deletable);
         }}
         toolbar={
           <div style={{ display: 'flex', gap: 8 }}>
@@ -1325,7 +1356,7 @@ const LeaveTypeSection = () => {
           { field:'shortName',           header:L('छोटो नाम','Short'),             width:70,  render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
           { field:'daysPerYear',         header:L('दिन/वर्ष','Days/Yr'),           width:80,  align:'center', render:v=><span style={{fontWeight:700,color:'#0369a1'}}>{v}</span> },
           { field:'genderFor',           header:L('लिङ्ग','Gender'),               width:90,  render:v=>(v||['All']).join(', ') },
-          { field:'reduceWeekend',       header:L('विकेन्ड घटाउ','Red.Wknd'),     width:95,  align:'center', render:v=>v?'✅':'—' },
+          { field:'reduceWeekend',       header:L('सप्ताहन्त घटाउ','Red.Wknd'),     width:95,  align:'center', render:v=>v?'✅':'—' },
           { field:'reducePublicHoliday', header:L('सा.छुट्टी','Red.PH'),          width:80,  align:'center', render:v=>v?'✅':'—' },
           { field:'provideOnlyOnBalance',header:L('ब्यालेन्स मात्र','Bal.Only'),  width:90,  align:'center', render:v=>v?'✅':'—' },
           { field:'carryForward',        header:L('ढुवानी','Carry Fwd'),           width:120, align:'center', render:(v,row)=>v?`✅ (max ${row.maxAccumulateDays??'—'})`:'—' },
@@ -1386,7 +1417,7 @@ const LeaveTypeSection = () => {
               {/* Row 2 — toggles */}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14, marginBottom:14 }}>
                 <div className="form-group">
-                  <label className="form-label">{L('विकेन्ड घटाउने','Reduce Weekend')}</label>
+                  <label className="form-label">{L('सप्ताहन्त घटाउने','Reduce Weekend')}</label>
                   <Toggle value={form.reduceWeekend} onChange={v => set('reduceWeekend',v)} label={form.reduceWeekend ? L('हो','Yes') : L('होइन','No')} />
                 </div>
                 <div className="form-group">
@@ -2592,6 +2623,7 @@ const Settings = () => {
   const [activeSetup, setActiveSetup] = useState('fiscalYear');
   const [local,       setLocal]       = useState({ ...settings });
   const [relinking,   setRelinking]   = useState(false);
+  const [rosterCheck, setRosterCheck] = useState(null);
   // `local` is captured once at mount, which is usually BEFORE the initial
   // post-login /api/settings fetch resolves (SettingsContext seeds state
   // from localStorage/defaults first) — without this, clicking Save on this
@@ -2669,6 +2701,7 @@ const Settings = () => {
     setRelinking(true);
     try {
       const r = await api.post('/attendance/relink-logs');
+      setRosterCheck(r.rosterCheck || null);
       const gap = (r.stillUnmatched || []).reduce((sum, u) => sum + u.count, 0);
       showToast(
         r.relinked > 0
@@ -2717,6 +2750,7 @@ const Settings = () => {
     setCForm({
       companyNameNp:    settings.companyNameNp    || '',
       companyNameEn:    settings.companyNameEn    || '',
+      companyShortName: settings.companyShortName || '',
       companyAddressNp: settings.companyAddressNp || '',
       companyAddressEn: settings.companyAddressEn || '',
       companyPhone:     settings.companyPhone     || '',
@@ -2730,6 +2764,7 @@ const Settings = () => {
       officeLocationName: settings.officeLocationName || '',
       liveAttendanceNotifications: settings.liveAttendanceNotifications !== false,
       taskNotifications: settings.taskNotifications !== false,
+      timeOutMinGapMinutes: settings.timeOutMinGapMinutes ?? 0,
     });
     setLogoError('');
     setOfficeLocError('');
@@ -2843,14 +2878,36 @@ const Settings = () => {
   }));
 
   /* ── Setup CRUD ── */
-  const handleSetupSave = (key, id, form, exclusiveDefault = false) => {
+  const handleSetupSave = async (key, id, form, exclusiveDefault = false) => {
     const list = settings[key] || [];
     let savedId = id;
+
+    // These 9 lists also live in a real relational table (fiscal_years/
+    // branches/departments/posts/grades/employment_modes/religions/
+    // employee_statuses/job_timings) that other features — Role &
+    // Permission Management's Branch/Dept. Coverage tab is the confirmed
+    // case — query directly via GET /settings/:list, never this blob. See
+    // migration 147: without writing through here too, a newly added
+    // department/branch/etc. is invisible everywhere except this Settings
+    // page itself until the next backfill migration happens to run.
+    // Migration 147 also rewrote every existing blob item's id to match its
+    // real table row, so an edit's `id` here already resolves correctly.
+    if (SETUP_REST_KEYS.has(key)) {
+      try {
+        const saved = id ? await api.put(`/settings/${key}/${id}`, form) : await api.post(`/settings/${key}`, form);
+        savedId = saved.id;
+      } catch (e) {
+        showToast(`${L('बचत असफल','Save failed')}: ${e.message}`, 'danger');
+        return;
+      }
+    } else if (!id) {
+      savedId = Date.now();
+    }
+
     let updated;
     if (id) {
       updated = list.map(item => item.id === id ? { ...item, ...form } : item);
     } else {
-      savedId = Date.now();
       updated = [...list, { ...form, id: savedId, isSystem: false }];
     }
     if (exclusiveDefault && form.isDefault === true) {
@@ -2896,8 +2953,26 @@ const Settings = () => {
     showToast(t('Record saved successfully'));
   };
 
-  const handleSetupDelete = (key, id) => {
-    updateSetupList(key, (settings[key] || []).filter(item => item.id !== id));
+  // Accepts one id or an array (SetupSection's multi-select delete) — the
+  // blob must be saved ONCE for the whole batch; see onDeleteSelected there.
+  const handleSetupDelete = async (key, idOrIds) => {
+    const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    const removed = new Set();
+    for (const id of ids) {
+      if (SETUP_REST_KEYS.has(key)) {
+        try {
+          await api.delete(`/settings/${key}/${id}`);
+        } catch (e) {
+          showToast(`${L('मेटाउन असफल','Delete failed')}: ${e.message}`, 'danger');
+          continue;
+        }
+      }
+      removed.add(id);
+    }
+    if (!removed.size) return;
+    // Filter the freshly refetched list inside persist(), not this render's
+    // possibly stale `settings[key]`.
+    updateSetupList(key, list => (list || []).filter(item => !removed.has(item.id)));
     showToast(t('Record deleted successfully'));
   };
 
@@ -2905,14 +2980,30 @@ const Settings = () => {
   // path as handleSetupSave, so it goes through the same fresh-refetch
   // persist() and can't silently clobber another tab's concurrent edit.
   // De-dupes case-insensitively against the CURRENT list, not just within
-  // the pasted block.
-  const handleBulkImport = (key, newItems) => {
+  // the pasted block. For SETUP_REST_KEYS, each row is also POSTed to the
+  // real table (see handleSetupSave's comment on migration 147) — one row
+  // at a time since these REST endpoints have no bulk variant; a row that
+  // fails to save server-side is simply left out rather than aborting the
+  // rest of the paste.
+  const handleBulkImport = async (key, newItems) => {
     const list = settings[key] || [];
     const existingNames = new Set(list.map(i => String(i.name).trim().toLowerCase()));
-    const base = Date.now();
-    const toAdd = newItems
-      .filter(ni => ni.name && !existingNames.has(ni.name.trim().toLowerCase()))
-      .map((ni, idx) => ({ ...ni, id: base + idx, isSystem: false, isDefault: false }));
+    const candidates = newItems.filter(ni => ni.name && !existingNames.has(ni.name.trim().toLowerCase()));
+
+    let toAdd;
+    if (SETUP_REST_KEYS.has(key)) {
+      toAdd = [];
+      for (const ni of candidates) {
+        try {
+          const saved = await api.post(`/settings/${key}`, ni);
+          toAdd.push({ ...ni, ...saved, id: saved.id, isSystem: false, isDefault: false });
+        } catch { /* skip this row, keep going — see comment above */ }
+      }
+    } else {
+      const base = Date.now();
+      toAdd = candidates.map((ni, idx) => ({ ...ni, id: base + idx, isSystem: false, isDefault: false }));
+    }
+
     if (toAdd.length) updateSetupList(key, [...list, ...toAdd]);
     return { added: toAdd.length, skipped: newItems.length - toAdd.length };
   };
@@ -2996,6 +3087,7 @@ const Settings = () => {
   const handleBackup = async (dirArg) => {
     const dir = typeof dirArg === 'string' ? dirArg : backupPath;
     if (!dir) { openBackupPathModal('json'); return; }
+    if (!(await ensureBackupUnlocked())) return;
     setBackupLoading(true);
     try {
       const r = await api.post('/backup/save', { path: dir, by: currentUser?.fullName || 'Admin' });
@@ -3024,6 +3116,7 @@ const Settings = () => {
   const handleBackupSql = async (dirArg) => {
     const dir = typeof dirArg === 'string' ? dirArg : backupPath;
     if (!dir) { openBackupPathModal('sql'); return; }
+    if (!(await ensureBackupUnlocked())) return;
     setSqlBackupLoading(true);
     try {
       const r = await api.post('/backup/sql/save', { path: dir });
@@ -3059,6 +3152,7 @@ const Settings = () => {
   };
 
   const handleBackupDownload = async () => {
+    if (!(await ensureBackupUnlocked())) return;
     setBackupLoading(true);
     try {
       const stamp = new Date().toISOString().replace(/[:T]/g,'-').slice(0,19);
@@ -3076,6 +3170,7 @@ const Settings = () => {
   };
 
   const handleBackupSqlDownload = async () => {
+    if (!(await ensureBackupUnlocked())) return;
     setSqlBackupLoading(true);
     try {
       const stamp = new Date().toISOString().slice(0,10);
@@ -3164,6 +3259,7 @@ const Settings = () => {
 
   const handleRestore = async () => {
     if (!restoreData) return;
+    if (!(await ensureBackupUnlocked())) return;
     setRestoreLoading(true);
     setRestoreLog('');
 
@@ -3275,7 +3371,10 @@ const Settings = () => {
         </div>
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'230px 1fr', gap:20 }}>
+      {/* minmax(0,1fr), not 1fr: a plain 1fr column can't shrink below its
+          content, so a wide grid (e.g. Attendance Device list) pushed the whole
+          page past the window edge instead of scrolling inside its own box. */}
+      <div style={{ display:'grid', gridTemplateColumns:'230px minmax(0, 1fr)', gap:20 }}>
         {/* Main Sidebar */}
         <div className="card" style={{ padding:'8px 0', height:'fit-content' }}>
           {tabs.map(tab => (
@@ -3304,7 +3403,7 @@ const Settings = () => {
           </div>
         </div>
 
-        <div>
+        <div style={{ minWidth:0 }}>
 
           {/* ══════════ COMPANY / SYSTEM ══════════ */}
           {activeTab === 'system' && (
@@ -3355,6 +3454,7 @@ const Settings = () => {
                   {[
                     [L('नेपाली नाम','Nepali Name'), settings.companyNameNp],
                     [L('अंग्रेजी नाम','English Name'), settings.companyNameEn],
+                    [L('छोटो नाम','Short Name'), settings.companyShortName],
                     [L('फोन','Phone'), settings.companyPhone],
                     [L('नेपाली ठेगाना','Nepali Address'), settings.companyAddressNp],
                     [L('अंग्रेजी ठेगाना','English Address'), settings.companyAddressEn],
@@ -3530,6 +3630,40 @@ const Settings = () => {
                       {relinking ? `⏳ ${L('चलिरहेको...','Running...')}` : `🔄 ${L('पुन: उत्पन्न गर्नुस','Regenerate')}`}
                     </button>
                   </div>
+                  {rosterCheck && (
+                    <div style={{ padding:'10px 16px 14px', borderTop:'1px solid #e5e7eb', fontSize:12, color:'#374151' }}>
+                      <div style={{ fontWeight:700, marginBottom:6 }}>
+                        {L('रोस्टर / डिफल्ट सिफ्ट जाँच','Roster / default shift check')} — {rosterCheck.startDate} → {rosterCheck.endDate}
+                        <span style={{ fontWeight:400, color:'#9ca3af' }}> ({L('हेर्न मात्र, डाटा परिवर्तन हुँदैन','review only, nothing changed')})</span>
+                      </div>
+                      {rosterCheck.offDayPunchCount === 0 && rosterCheck.singlePunchCount === 0
+                        && !rosterCheck.unrosteredNightCount && !rosterCheck.otMismatchCount && (
+                        <div style={{ color:'#065f46' }}>✓ {L('कुनै समस्या भेटिएन','No issues found')}</div>
+                      )}
+                      {[
+                        { key:'offDayPunches',   count:rosterCheck.offDayPunchCount, title:L('डे अफ / नाइट अफ मा पन्च','Punches on a roster Day Off / Night Off'), tag:(x)=>x.kind },
+                        { key:'singlePunchDays', count:rosterCheck.singlePunchCount, title:L('एक मात्र पन्च भएका दिन','Days with a single punch'), tag:(x)=>x.shift || '' },
+                        { key:'unrosteredNight', count:rosterCheck.unrosteredNightCount || 0, title:L('रोस्टर नबनेको सम्भावित नाइट ड्युटी','Likely night duty with no roster'),
+                          tag:(x)=>`${x.count} ${L('रात','nights')}: ${(x.dates || []).join(', ')}`, noDate:true },
+                        { key:'otMismatches', count:rosterCheck.otMismatchCount || 0, title:L('स्वीकृत OT भएको मितिमा हाजिरी छैन','Approved OT on a day with no attendance'),
+                          tag:(x)=>`${Math.floor(x.otMinutes/60)}h ${x.otMinutes%60}m${x.punchesOn ? ` · ${L('पन्च','punches on')} ${x.punchesOn}` : ''}` },
+                      ].filter(s => s.count > 0).map(s => (
+                        <details key={s.key} style={{ marginTop:6 }}>
+                          <summary style={{ cursor:'pointer', fontWeight:600 }}>{s.title}: {s.count}</summary>
+                          <div style={{ maxHeight:200, overflowY:'auto', marginTop:4 }}>
+                            {rosterCheck[s.key].map((x, i) => (
+                              <div key={i} style={{ padding:'2px 0', borderBottom:'1px solid #f3f4f6' }}>
+                                {!s.noDate && `${x.date} · `}{x.name}{x.code ? ` (${x.code})` : ''} {s.tag(x) ? `· ${s.tag(x)}` : ''}
+                              </div>
+                            ))}
+                            {s.count > rosterCheck[s.key].length && (
+                              <div style={{ color:'#9ca3af', paddingTop:4 }}>… {s.count - rosterCheck[s.key].length} {L('थप','more')}</div>
+                            )}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -4625,10 +4759,22 @@ const Settings = () => {
                     onChange={e => sc('companyEmail', e.target.value)} />
                 </div>
               </div>
-              <div className="form-group">
-                <label className="form-label">{L('वेबसाइट','Website')}</label>
-                <input type="text" className="form-control" value={cForm.companyWebsite || ''}
-                  onChange={e => sc('companyWebsite', e.target.value)} />
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">{L('छोटो नाम','Short Name')}</label>
+                  <input type="text" className="form-control" value={cForm.companyShortName || ''}
+                    placeholder="Head Office" maxLength={100}
+                    onChange={e => sc('companyShortName', e.target.value)} />
+                  <div style={{ fontSize:11, color:'#6b7280', marginTop:3 }}>
+                    {L('कर्मचारी विवरणमा मुख्य कार्यालय (HQ) शाखाको नाम', 'Head office (HQ) branch name in Staff Detail')}
+                    {cForm.companyShortName?.trim() ? '' : ` — ${L('खाली भए अंग्रेजी नाम','English Name if left blank')}`}
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{L('वेबसाइट','Website')}</label>
+                  <input type="text" className="form-control" value={cForm.companyWebsite || ''}
+                    onChange={e => sc('companyWebsite', e.target.value)} />
+                </div>
               </div>
 
               <div className="form-group">
@@ -4657,43 +4803,58 @@ const Settings = () => {
                 </div>
               </div>
 
-              <div style={{ marginTop:16, padding:'12px 16px', background:'#f9fafb', borderRadius:10,
-                border:'1px solid #e5e7eb', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <div>
-                  <div style={{ fontSize:14, fontWeight:600 }}>
-                    {L('लाइभ स्टाफ हाजिरी सूचना सक्षम गर्नुहोस्','Enable Live Staff Attendance Notifications')}
-                  </div>
-                  <div style={{ fontSize:12, color:'#6b7280' }}>
-                    {L('कर्मचारीले पन्च गर्दा तत्काल पप-अप सूचना देखाउनुहोस्','Show a live pop-up whenever a staff member punches in/out')}
-                  </div>
-                </div>
-                <div style={{ width:48, height:26, background: cForm.liveAttendanceNotifications ? '#1a56db' : '#d1d5db',
-                    borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
-                  onClick={() => sc('liveAttendanceNotifications', !cForm.liveAttendanceNotifications)}>
-                  <div style={{ position:'absolute', top:3, left: cForm.liveAttendanceNotifications ? 24 : 3,
-                    width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s',
-                    boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
+              <div className="form-group">
+                <label className="form-label">{L('टाइम आउटका लागि लग अवधि (मिनेट)','Log Duration for Time Out (Minutes)')}</label>
+                <input type="number" min="0" max="720" className="form-control" style={{ maxWidth: 140 }}
+                  value={cForm.timeOutMinGapMinutes ?? 0}
+                  onChange={e => sc('timeOutMinGapMinutes', Math.max(0, parseInt(e.target.value, 10) || 0))} />
+                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                  {L('पहिलो पन्चको यति मिनेटभित्रका लगहरू टाइम आउटमा गनिँदैनन् (दोहोरो पन्च)। ० = बन्द',
+                     'Logs within this many minutes of the first punch are ignored for Time Out (e.g. a double punch). 0 = off')}
                 </div>
               </div>
 
-              <div style={{ marginTop:10, padding:'12px 16px', background:'#f9fafb', borderRadius:10,
-                border:'1px solid #e5e7eb', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <div>
-                  <div style={{ fontSize:14, fontWeight:600 }}>
-                    {L('कार्य सूचना सक्षम गर्नुहोस्','Enable Task Notifications')}
+              {isSuperAdmin && (
+                <>
+                  <div style={{ marginTop:16, padding:'12px 16px', background:'#f9fafb', borderRadius:10,
+                    border:'1px solid #e5e7eb', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <div style={{ fontSize:14, fontWeight:600 }}>
+                        {L('लाइभ स्टाफ हाजिरी सूचना सक्षम गर्नुहोस्','Enable Live Staff Attendance Notifications')}
+                      </div>
+                      <div style={{ fontSize:12, color:'#6b7280' }}>
+                        {L('कर्मचारीले पन्च गर्दा तत्काल पप-अप सूचना देखाउनुहोस्','Show a live pop-up whenever a staff member punches in/out')}
+                      </div>
+                    </div>
+                    <div style={{ width:48, height:26, background: cForm.liveAttendanceNotifications ? '#1a56db' : '#d1d5db',
+                        borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                      onClick={() => sc('liveAttendanceNotifications', !cForm.liveAttendanceNotifications)}>
+                      <div style={{ position:'absolute', top:3, left: cForm.liveAttendanceNotifications ? 24 : 3,
+                        width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s',
+                        boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
+                    </div>
                   </div>
-                  <div style={{ fontSize:12, color:'#6b7280' }}>
-                    {L('कार्य तोकिँदा वा पूरा हुँदा ब्राउजर पप-अप सूचना देखाउनुहोस्','Show a browser pop-up when a task is assigned to you or one you created is completed')}
+
+                  <div style={{ marginTop:10, padding:'12px 16px', background:'#f9fafb', borderRadius:10,
+                    border:'1px solid #e5e7eb', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <div style={{ fontSize:14, fontWeight:600 }}>
+                        {L('कार्य सूचना सक्षम गर्नुहोस्','Enable Task Notifications')}
+                      </div>
+                      <div style={{ fontSize:12, color:'#6b7280' }}>
+                        {L('कार्य तोकिँदा वा पूरा हुँदा ब्राउजर पप-अप सूचना देखाउनुहोस्','Show a browser pop-up when a task is assigned to you or one you created is completed')}
+                      </div>
+                    </div>
+                    <div style={{ width:48, height:26, background: cForm.taskNotifications ? '#1a56db' : '#d1d5db',
+                        borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                      onClick={() => sc('taskNotifications', !cForm.taskNotifications)}>
+                      <div style={{ position:'absolute', top:3, left: cForm.taskNotifications ? 24 : 3,
+                        width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s',
+                        boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
+                    </div>
                   </div>
-                </div>
-                <div style={{ width:48, height:26, background: cForm.taskNotifications ? '#1a56db' : '#d1d5db',
-                    borderRadius:13, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
-                  onClick={() => sc('taskNotifications', !cForm.taskNotifications)}>
-                  <div style={{ position:'absolute', top:3, left: cForm.taskNotifications ? 24 : 3,
-                    width:20, height:20, background:'white', borderRadius:'50%', transition:'left .2s',
-                    boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setCompanyModal(false)}>{t('Cancel')}</button>

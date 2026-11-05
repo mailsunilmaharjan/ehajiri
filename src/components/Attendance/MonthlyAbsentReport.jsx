@@ -13,6 +13,7 @@ import { branchAbbr } from '../../utils/branchUtils.js';
 import ViewMonthlyBtn from './ViewMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
+import { makeOrgShortNames } from '../../utils/orgShortNames.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -269,6 +270,8 @@ const MonthlyAbsentReport = () => {
   const navigate       = useNavigate();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
+  // Post / Dept short names from Settings → Official Setting (grid, Print, Export).
+  const { postShortOf, deptShortOf } = makeOrgShortNames(settings);
   const { filteredEmployees: employees, shifts, getEmployeeById } = useData();
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
@@ -406,11 +409,11 @@ const MonthlyAbsentReport = () => {
     },
     {
       field:'postShort', header:L('पद','Post'),
-      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.position || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{postShortOf(row)}</span>,
     },
     {
       field:'deptShort', header:L('विभाग','Dept.'),
-      render: (v, row) => <span style={{ color:'#1f2937' }}>{row.department || v || '—'}</span>,
+      render: (v, row) => <span style={{ color:'#1f2937' }}>{deptShortOf(row)}</span>,
     },
     {
       field:'branchShort', header:L('शाखा','Branch'),
@@ -479,8 +482,8 @@ const MonthlyAbsentReport = () => {
     const dataRows = records.map((r,i) => `<tr>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${i+1}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;font-weight:700">${r.fullName}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.postShort||''}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.deptShort||''}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${postShortOf(r)}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${deptShortOf(r)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.branchShort||''}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.date}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${DOW_FULL[r.dayKey]||r.dayKey}</td>
@@ -501,7 +504,7 @@ const MonthlyAbsentReport = () => {
     const headers = ['Name','Post','Dept.','Branch','Date','Day','Mobile','Email','Reason'];
     const dataRows = records.map(r => {
       const reason = savedReasons[`${r.id}-${r.date}`] || '';
-      return [r.fullName,r.postShort,r.deptShort,r.branchShort,r.date,
+      return [r.fullName,postShortOf(r), deptShortOf(r),r.branchShort,r.date,
         DOW_FULL[r.dayKey]||r.dayKey, r.phone||'', r.email||'', reason]
         .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
     }).join('\n');

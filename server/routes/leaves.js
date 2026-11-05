@@ -1,11 +1,15 @@
 ﻿import { Router } from 'express';
 import pool from '../db.js';
+import { validateBody } from '../middleware/validate.js';
 import { logAudit } from '../services/auditLog.js';
 import { sendLeaveApplication, sendLeaveStatusUpdate } from '../services/emailService.js';
 import { logError } from '../utils/logError.js';
+import { pushLater } from '../services/pushService.js';
+import { notifyPeople, notifyApproversNext, notifyApplicantOf } from '../services/approvalNotify.js';
 import { isLeaveBackdateEnabled } from '../utils/appSettings.js';
 import { authorizeRecoAction, authorizeOwnEditDelete } from '../services/recoApprovalGuard.js';
-import { resolveOrgScope, resolveOrgEmployeeIds, resolveRecoApprovalEmployeeIds } from './orgScope.js';
+import { findLeaveVisitConflict } from '../services/leaveVisitConflicts.js';
+import { resolveOrgScope, resolveOrgEmployeeIds, resolveRecoApprovalEmployeeIds, canManagerPostFor, canManagerManualPost, canManagerApplyFor } from './orgScope.js';
 
 const router = Router();
 const PRIVILEGED_ROLES = ['admin', 'superAdmin'];
@@ -47,6 +51,8 @@ async function notifyLeaveApplication(leave) {
       pool.query('SELECT full_name FROM users WHERE id=$1', [leave.employeeId]),
       pool.query('SELECT name FROM leave_types WHERE code=$1', [leave.leaveTypeCode]),
     ]);
+    notifyPeople(leave.employeeId, ids, { subject: 'Leave request', body: `${requester?.full_name || 'A colleague'} applied for ${lt?.name || leave.leaveTypeCode} (${String(leave.fromDate).slice(0, 10)} to ${String(leave.toDate).slice(0, 10)}). Open Approvals.`, path: '/m/approvals' });
+    pushLater(ids, { title: 'Leave request', body: `${requester?.full_name || 'A colleague'} applied for ${lt?.name || leave.leaveTypeCode} (${leave.fromDate} to ${leave.toDate})`, data: { path: '/m/approvals' } });
     for (const r of recipients) {
       await sendLeaveApplication({
         to: r.email, fullName: requester?.full_name || '',
@@ -65,6 +71,8 @@ async function notifyLeaveStatusUpdate(leave) {
       pool.query('SELECT email, full_name FROM users WHERE id=$1', [leave.employeeId]),
       pool.query('SELECT name FROM leave_types WHERE code=$1', [leave.leaveTypeCode]),
     ]);
+    notifyApplicantOf(leave.employeeId, leave.approvedBy, { subject: `Leave ${leave.status}`, body: `Your ${lt?.name || leave.leaveTypeCode} leave (${String(leave.fromDate).slice(0, 10)} to ${String(leave.toDate).slice(0, 10)}) was ${leave.status}.${leave.comment ? ' ' + leave.comment : ''}`, path: '/m/leave' });
+    pushLater([leave.employeeId], { title: `Leave ${leave.status}`, body: `${lt?.name || leave.leaveTypeCode} (${leave.fromDate} to ${leave.toDate})${leave.comment ? ' - ' + leave.comment : ''}`, data: { path: '/m/leave' } });
     if (!employee?.email) return;
     await sendLeaveStatusUpdate({
       to: employee.email, fullName: employee.full_name, status: leave.status,
@@ -206,7 +214,7 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', validateBody({ employeeId: {"type":"scalar","max":100}, leaveTypeCode: { type: 'scalar', max: 30 }, fromDate: {"type":"scalar","max":40}, toDate: {"type":"scalar","max":40}, days: { type: 'scalar', max: 20 }, reason: { max: 20000 }, status: { type: 'scalar', max: 40 }, recommendedBy: {"type":"scalar","max":100}, approvedBy: {"type":"scalar","max":100}, recommendedDate: {"type":"scalar","max":40}, approvedDate: {"type":"scalar","max":40} }), async (req, res) => {
   let { employeeId } = req.body;
   const { leaveTypeCode, fromDate, toDate, days, reason, halfDay,
           status, recommendedBy, recommendedDate, approvedBy, approvedDate, reco, approval, isManual, deviceInfo } = req.body;
@@ -220,8 +228,24 @@ router.post('/', async (req, res) => {
   // already-recommended before the actual recommender has done anything
   // (that column is meant to be set only by the dedicated /recommend action
   // — see authorizeRecoAction's compulsory-recommend-first check).
-  const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
-  if (!isPrivileged) employeeId = req.user.id;
+  // Branch Manager / Branch Area Manager Manual Posting for a staff member in
+  // their own scope (not themselves) counts as privileged too — previously
+  // only admin/superAdmin did, so a Branch Manager's manual entry was silently
+  // rewritten into THEIR OWN pending application (wrong staff, status reset
+  // to Pending, Recommended/Approved By dropped). Includes the manager's OWN
+  // record too — see canManagerManualPost.
+  const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role)
+    || (isManual === true && await canManagerManualPost(req, employeeId).catch(() => false));
+  // A Manual Posting that isn't allowed must fail loudly, not be quietly
+  // rewritten into the caller's own pending application.
+  if (!isPrivileged && isManual === true) {
+    return res.status(403).json({ error: 'You can only manually post for staff in your own branch.' });
+  }
+  // A manager applying (Pending) on behalf of a staff member in their own
+  // scope keeps that staff member — see canManagerApplyFor. Anyone else
+  // always applies for themselves.
+  const onBehalf = !isPrivileged && await canManagerApplyFor(req, employeeId).catch(() => false);
+  if (!isPrivileged && !onBehalf) employeeId = req.user.id;
 
   const finalStatus   = isPrivileged && ['approved','rejected','pending'].includes(status) ? status : 'pending';
   const finalRecoBy   = isPrivileged ? (recommendedBy   || null) : null;
@@ -234,11 +258,22 @@ router.post('/', async (req, res) => {
   // Apply form) — unlike recommendedBy/approvedBy above, this is never
   // privileged-gated: it's just recording the applicant's own choice, not an
   // outcome. See migration 142.
-  const recoId     = Array.isArray(reco)     ? (reco[0]     || null) : (reco     || null);
-  const approvalId = Array.isArray(approval) ? (approval[0] || null) : (approval || null);
+  // A privileged Manual Posting has no reco/approval picker — fall back to the
+  // Recommended By / Approved By it names, so a Pending manual entry still
+  // records (and the grid shows) who is to recommend/approve it.
+  const recoId     = (Array.isArray(reco)     ? (reco[0]     || null) : (reco     || null))
+                  || (isPrivileged ? (recommendedBy || null) : null);
+  const approvalId = (Array.isArray(approval) ? (approval[0] || null) : (approval || null))
+                  || (isPrivileged ? (approvedBy || null) : null);
 
   try {
     if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
+    // No two leave/office-visit entries for one staff member on the same day
+    // (see findLeaveVisitConflict) — enforced here for every save path.
+    if (finalStatus !== 'rejected') {
+      const clash = await findLeaveVisitConflict({ kind: 'leave', employeeId: employeeId, fromDate, toDate, leaveTypeCode });
+      if (clash) return res.status(409).json(clash);
+    }
     const { rows } = await pool.query(
       `INSERT INTO leaves
          (employee_id,leave_type_code,from_date,to_date,days,reason,half_day,status,recommended_by,recommended_date,approved_by,approved_date,is_manual,reco_id,approval_id,updated_by,updated_at,updated_device)
@@ -253,14 +288,20 @@ router.post('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', validateBody({ employeeId: {"type":"scalar","max":100}, leaveTypeCode: { type: 'scalar', max: 30 }, fromDate: {"type":"scalar","max":40}, toDate: {"type":"scalar","max":40}, days: { type: 'scalar', max: 20 }, reason: { max: 20000 }, status: { type: 'scalar', max: 40 }, recommendedBy: {"type":"scalar","max":100}, approvedBy: {"type":"scalar","max":100}, recommendedDate: {"type":"scalar","max":40}, approvedDate: {"type":"scalar","max":40} }), async (req, res) => {
   const { employeeId, leaveTypeCode, fromDate, toDate, days, reason, halfDay,
           status, recommendedBy, recommendedDate, approvedBy, approvedDate, deviceInfo } = req.body;
 
   try {
-    const { rows: existingRows } = await pool.query('SELECT employee_id, status, recommended_by FROM leaves WHERE id=$1', [req.params.id]);
+    const { rows: existingRows } = await pool.query('SELECT employee_id, status, recommended_by, is_manual FROM leaves WHERE id=$1', [req.params.id]);
     if (!existingRows[0]) return res.status(404).json({ error: 'Leave not found' });
-    const authError = authorizeOwnEditDelete(req, existingRows[0].employee_id, existingRows[0]);
+    // A Branch Manager editing an in-scope staff member's leave (not their
+    // own) is treated like an admin edit — see canManagerPostFor. Their own
+    // Manual Posting stays editable by them too (canManagerManualPost).
+    const targetIds = [existingRows[0].employee_id, employeeId ?? existingRows[0].employee_id];
+    const managerOk = await canManagerPostFor(req, ...targetIds)
+      || (existingRows[0].is_manual && await canManagerManualPost(req, ...targetIds));
+    const authError = managerOk ? null : authorizeOwnEditDelete(req, existingRows[0].employee_id, existingRows[0]);
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     // A non-privileged owner is only authorized above because the leave is
@@ -268,7 +309,7 @@ router.put('/:id', async (req, res) => {
     // set its own outcome, so status/recommended*/approved* are only ever
     // taken from the request for admin/superAdmin (or the dedicated
     // recommend/approve/reject endpoints, which set them independently).
-    const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
+    const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role) || managerOk;
     // Also don't let a non-privileged owner reassign their own leave to a
     // different employee_id via this same edit.
     const finalEmployeeId = isPrivileged ? employeeId : existingRows[0].employee_id;
@@ -279,6 +320,12 @@ router.put('/:id', async (req, res) => {
     const finalAppDate = isPrivileged && finalStatus !== 'pending' ? (approvedDate || null) : null;
 
     if (await rejectIfBackdated(fromDate, res, isAdminManualBackdate(req))) return;
+    // No two leave/office-visit entries for one staff member on the same day
+    // (see findLeaveVisitConflict) — enforced here for every save path.
+    if (finalStatus !== 'rejected') {
+      const clash = await findLeaveVisitConflict({ kind: 'leave', employeeId: finalEmployeeId, fromDate, toDate, leaveTypeCode, excludeId: Number(req.params.id) });
+      if (clash) return res.status(409).json(clash);
+    }
     const { rows } = await pool.query(
       `UPDATE leaves
        SET employee_id=$1, leave_type_code=$2, from_date=$3, to_date=$4, days=$5,
@@ -296,7 +343,7 @@ router.put('/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.patch('/:id/recommend', async (req, res) => {
+router.patch('/:id/recommend', validateBody({ comment: { max: 2000 } }), async (req, res) => {
   const { comment } = req.body;
   try {
     const { rows: existingRows } = await pool.query('SELECT employee_id FROM leaves WHERE id=$1', [req.params.id]);
@@ -309,11 +356,12 @@ router.patch('/:id/recommend', async (req, res) => {
       [req.user.id, req.params.id, comment || null]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Leave not found' });
+    notifyApproversNext(existingRows[0].employee_id, req.user.id, { subject: 'Leave recommended — needs approval', body: `A leave request (${String(rows[0].from_date).slice(0, 10)} to ${String(rows[0].to_date).slice(0, 10)}) was recommended and is waiting for your approval.`, path: '/m/approvals' });
     res.json(toLeave(rows[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.patch('/:id/approve', async (req, res) => {
+router.patch('/:id/approve', validateBody({ comment: { max: 2000 } }), async (req, res) => {
   const { comment } = req.body;
   try {
     const { rows: existingRows } = await pool.query('SELECT employee_id, recommended_by FROM leaves WHERE id=$1', [req.params.id]);
@@ -335,7 +383,7 @@ router.patch('/:id/approve', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.patch('/:id/reject', async (req, res) => {
+router.patch('/:id/reject', validateBody({ comment: { max: 2000 } }), async (req, res) => {
   const { comment } = req.body;
   try {
     const { rows: existingRows } = await pool.query('SELECT employee_id FROM leaves WHERE id=$1', [req.params.id]);
@@ -358,12 +406,18 @@ router.patch('/:id/reject', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const { rows: existingRows } = await pool.query('SELECT employee_id, status, recommended_by FROM leaves WHERE id=$1', [req.params.id]);
+    const { rows: existingRows } = await pool.query('SELECT employee_id, status, recommended_by, is_manual FROM leaves WHERE id=$1', [req.params.id]);
     if (!existingRows[0]) return res.status(404).json({ error: 'Leave not found' });
-    const authError = authorizeOwnEditDelete(req, existingRows[0].employee_id, existingRows[0]);
+    // Same rule as PUT above: a Branch Manager / Branch Area Manager may
+    // delete an in-scope staff member's leave, or their own Manual Posting
+    // — the frontend already offers Delete to them (isManager).
+    const managerOk = await canManagerPostFor(req, existingRows[0].employee_id)
+      || (existingRows[0].is_manual && await canManagerManualPost(req, existingRows[0].employee_id));
+    const authError = managerOk ? null : authorizeOwnEditDelete(req, existingRows[0].employee_id, existingRows[0]);
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     await pool.query('DELETE FROM leaves WHERE id=$1', [req.params.id]);
+    logAudit({ actor: req.user, action: 'delete', entity: 'leave', entityId: req.params.id, before: existingRows[0], after: null });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

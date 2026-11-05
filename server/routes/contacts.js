@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { validateBody } from '../middleware/validate.js';
 import pool from '../db.js';
 
 const router = Router();
@@ -42,7 +43,7 @@ router.get('/', async (req, res) => {
 });
 
 /* POST /api/contacts */
-router.post('/', async (req, res) => {
+router.post('/', validateBody({ contactType: { type: 'scalar', max: 20 }, contactInfo: { type: 'scalar', max: 20 }, personName: { max: 300 }, office: { max: 300 }, mobile1: { max: 60 }, mobile2: { max: 60 }, officePhone: { max: 60 }, email: { max: 300 }, address: { max: 1000 }, companyName: { max: 300 }, companyPhone: { max: 60 }, companyEmail: { max: 300 }, companyAddress: { max: 1000 }, workScope: { max: 1000 }, customerCategory: { max: 200 }, customerType: { max: 200 }, district: { max: 200 } }), async (req, res) => {
   const {
     contactType, contactInfo,
     personName, office, mobile1, mobile2, officePhone, email, address,
@@ -90,7 +91,7 @@ router.post('/', async (req, res) => {
 });
 
 /* PUT /api/contacts/:id */
-router.put('/:id', async (req, res) => {
+router.put('/:id', validateBody({ contactType: { type: 'scalar', max: 20 }, contactInfo: { type: 'scalar', max: 20 }, personName: { max: 300 }, office: { max: 300 }, mobile1: { max: 60 }, mobile2: { max: 60 }, officePhone: { max: 60 }, email: { max: 300 }, address: { max: 1000 }, companyName: { max: 300 }, companyPhone: { max: 60 }, companyEmail: { max: 300 }, companyAddress: { max: 1000 }, workScope: { max: 1000 }, customerCategory: { max: 200 }, customerType: { max: 200 }, district: { max: 200 } }), async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
 
@@ -160,6 +161,28 @@ const PSEL = `
   created_at AS "createdAt"
 `;
 
+/* Access to a contact's people follows the contact itself: readable when the
+   contact is public or yours (or you are admin), editable only by its creator
+   or an admin — the same rule PUT /api/contacts/:id already applies. Without
+   this, any logged-in user could read a colleague's PRIVATE contact's people
+   or add/rename/delete people on anyone's contact by id. */
+router.use('/:id/persons', async (req, res, next) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { rows: [c] } = await pool.query('SELECT created_by, contact_type FROM staff_contacts WHERE id=$1', [id]);
+    if (!c) return res.status(404).json({ error: 'Contact not found' });
+    const isAdmin = ['admin', 'superAdmin'].includes(req.user.role);
+    const isOwner = c.created_by === req.user.id;
+    if (req.method === 'GET') {
+      if (c.contact_type === 'public' || isOwner || isAdmin) return next();
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+    if (isOwner || isAdmin) return next();
+    return res.status(403).json({ error: 'Not allowed' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* GET /api/contacts/:id/persons */
 router.get('/:id/persons', async (req, res) => {
   const id = parseInt(req.params.id);
@@ -174,7 +197,7 @@ router.get('/:id/persons', async (req, res) => {
 });
 
 /* POST /api/contacts/:id/persons */
-router.post('/:id/persons', async (req, res) => {
+router.post('/:id/persons', validateBody({ name: { max: 300 }, post: { max: 200 }, department: { max: 200 }, mobile1: { max: 60 }, mobile2: { max: 60 }, email: { max: 300 }, ext: { max: 40 } }), async (req, res) => {
   const contactId = parseInt(req.params.id);
   if (isNaN(contactId)) return res.status(400).json({ error: 'Invalid id' });
   const { name, post, department, mobile1, mobile2, email, ext } = req.body;
@@ -198,13 +221,13 @@ router.post('/:id/persons', async (req, res) => {
 });
 
 /* PUT /api/contacts/:id/persons/:pid */
-router.put('/:id/persons/:pid', async (req, res) => {
+router.put('/:id/persons/:pid', validateBody({ name: { max: 300 }, post: { max: 200 }, department: { max: 200 }, mobile1: { max: 60 }, mobile2: { max: 60 }, email: { max: 300 }, ext: { max: 40 } }), async (req, res) => {
   const pid = parseInt(req.params.pid);
   if (isNaN(pid)) return res.status(400).json({ error: 'Invalid id' });
   const { name, post, department, mobile1, mobile2, email, ext } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
   try {
-    const { rows: existing } = await pool.query('SELECT contact_id FROM staff_contact_persons WHERE id=$1', [pid]);
+    const { rows: existing } = await pool.query('SELECT contact_id FROM staff_contact_persons WHERE id=$1 AND contact_id=$2', [pid, parseInt(req.params.id)]);
     if (!existing[0]) return res.status(404).json({ error: 'Not found' });
     const { rows: dup } = await pool.query(
       `SELECT id FROM staff_contact_persons WHERE contact_id=$1 AND id!=$2 AND LOWER(TRIM(name))=LOWER(TRIM($3))`,
@@ -228,7 +251,7 @@ router.delete('/:id/persons/:pid', async (req, res) => {
   const pid = parseInt(req.params.pid);
   if (isNaN(pid)) return res.status(400).json({ error: 'Invalid id' });
   try {
-    await pool.query('DELETE FROM staff_contact_persons WHERE id=$1', [pid]);
+    await pool.query('DELETE FROM staff_contact_persons WHERE id=$1 AND contact_id=$2', [pid, parseInt(req.params.id)]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

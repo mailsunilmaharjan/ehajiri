@@ -193,7 +193,7 @@
 /* SN and checkbox cells in body rows — light #efefef background */
 td.dg-checkbox-col,
 td.dg-sn-col {
-  background: #efefef !important;
+  background: #f5f6f8 !important;
   border-right: 1px solid #dedede;
   color: #6b7280;
   font-size: 12.5px;
@@ -243,13 +243,13 @@ th.dg-sn-col {
 
 /* Row states */
 .dg-row { transition: background .1s; }
-.dg-table.striped .dg-row:nth-child(even) .dg-td { background: #f3f4f6; }
-.dg-row:hover .dg-td { background: #f5f5f5 !important; }
+.dg-table.striped .dg-row:nth-child(even) .dg-td { background: #f8f9fc; }
+.dg-row:hover .dg-td { background: #eff3fa !important; }
 .dg-row.selected .dg-td { background: #dbeafe !important; }
 .dg-row.selected td.dg-checkbox-col,
 .dg-row.selected td.dg-sn-col { background: #c7d9f5 !important; }
 .dg-row:hover td.dg-checkbox-col,
-.dg-row:hover td.dg-sn-col { background: #e2e2e2 !important; }
+.dg-row:hover td.dg-sn-col { background: #e8ecf3 !important; }
 .dg-row.clickable { cursor: pointer; }
 .dg-row.clickable:hover .dg-first-col { color: #1a56db; }
 

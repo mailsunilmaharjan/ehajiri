@@ -56,3 +56,4 @@ Thumbs.db
 
 # GitHub Actions (add manually via GitHub UI or token with workflow scope)
 .github/workflows/
+server/.env.bak-*

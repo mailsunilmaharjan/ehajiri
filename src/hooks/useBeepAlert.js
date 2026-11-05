@@ -34,6 +34,26 @@ function playBeeps(count, gapSec = 0.18) {
   }
 }
 
+/** Phones only start playing sound after a first touch — create + resume the audio engine on the first tap anywhere. */
+let unlockBound = false;
+export function unlockAudioOnFirstTouch() {
+  if (unlockBound || typeof window === 'undefined') return;
+  unlockBound = true;
+  const go = () => { const c = getCtx(); if (c && c.state === 'suspended') c.resume().catch(() => {}); };
+  ['touchstart', 'pointerdown', 'click', 'keydown'].forEach(ev => window.addEventListener(ev, go, { passive: true }));
+}
+
+/** One short, friendly "ding" (live attendance popups). */
+export function playDing() {
+  const ctx = getCtx(); if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  [[988, 0], [1319, 0.13]].forEach(([f, d]) => {
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, ctx.currentTime + d); g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + d + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + d + 0.35);
+    o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + d); o.stop(ctx.currentTime + d + 0.36);
+  });
+}
+
 /** Two-tone "beep-beep" — synthesized so no audio asset needs to ship with the app. */
 function playBeep() { playBeeps(2); }
 
@@ -76,4 +96,22 @@ export function useTaskAssignedBeepAlert(active) {
     timerRef.current = setInterval(() => playBeeps(2), TASK_ALERT_REMINDER_MS);
     return () => clearInterval(timerRef.current);
   }, [active]);
+}
+
+/**
+ * "Keep telling me until I've looked": 3 beeps the moment the unseen count goes up (or on first load with something
+ * waiting), then a 2-beep reminder every `repeatMs` for as long as anything is still unseen. Goes quiet the instant the
+ * count reaches 0 (the user opened it). Used on the phone for notices, approvals, leave / visit / OT / online / late-early.
+ */
+export function useUnseenAlert(count, repeatMs = 60000) {
+  const prev = useRef(0);
+  useEffect(() => {
+    if (count > prev.current) playBeeps(3);
+    prev.current = count;
+  }, [count]);
+  useEffect(() => {
+    if (!(count > 0)) return undefined;
+    const t = setInterval(() => playBeeps(2), repeatMs);
+    return () => clearInterval(t);
+  }, [count > 0, repeatMs]); // eslint-disable-line react-hooks/exhaustive-deps
 }

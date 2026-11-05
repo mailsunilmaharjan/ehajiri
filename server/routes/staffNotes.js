@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { validateBody } from '../middleware/validate.js';
 import bcrypt from 'bcryptjs';
 import pool from '../db.js';
 
@@ -86,7 +87,7 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', validateBody({ noteName: { max: 300 }, noteType: { type: 'scalar', max: 40 }, noteDetails: { max: 1000000 }, usernameTitle: { max: 300 }, username: { max: 500 }, password: { max: 2000 }, securityType: { type: 'scalar', max: 40 }, totpSecret: { max: 500 }, gmailAccount: { max: 300 }, remarks: { max: 100000 }, visibility: { type: 'scalar', max: 20 } }), async (req, res) => {
   const { noteName, noteType, noteDetails, usernameTitle, username, password, securityType, totpSecret, gmailAccount, remarks, visibility } = req.body;
   try {
     const { rows } = await pool.query(
@@ -103,7 +104,7 @@ router.post('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', validateBody({ noteName: { max: 300 }, noteType: { type: 'scalar', max: 40 }, noteDetails: { max: 1000000 }, usernameTitle: { max: 300 }, username: { max: 500 }, password: { max: 2000 }, securityType: { type: 'scalar', max: 40 }, totpSecret: { max: 500 }, gmailAccount: { max: 300 }, remarks: { max: 100000 }, visibility: { type: 'scalar', max: 20 } }), async (req, res) => {
   const { noteName, noteType, noteDetails, usernameTitle, username, password, securityType, totpSecret, gmailAccount, remarks, visibility } = req.body;
   const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
   try {

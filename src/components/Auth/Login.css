@@ -18,9 +18,9 @@
 .login-card {
   display: flex;
   background: #fff;
-  border-radius: 20px;
+  border-radius: 6px;
   width: 100%;
-  max-width: 1040px;
+  max-width: 1200px;
   min-height: 560px;
   box-shadow: 0 30px 60px rgba(0,0,0,.35);
   position: relative; z-index: 1;
@@ -32,15 +32,16 @@
    then an even ~46/54 split) so an uploaded image reads as a real full-bleed
    photo; the form side was shrunk to 42% since its fields don't need nearly
    that much width and were sitting in a lot of excess whitespace. Shaped to
-   a 1280:1350 aspect ratio (matches the recommended ad-image dimensions) so
+   a 1:1 square (1080x1080 recommended ad image) so
    an image of that exact size shows with no cropping — align-self: flex-start
    is what lets aspect-ratio actually drive the height instead of the row's
    default flex stretch overriding it; .login-card grows to match since it
    has no fixed height, and .login-right (still stretch) fills that same
    height with its content vertically centered. ── */
 .login-left {
-  flex: 1 1 64%;
-  aspect-ratio: 1280 / 1350;
+  flex: 1 1 68%;
+  max-height: calc(100dvh - 70px);
+  aspect-ratio: 1 / 1;
   align-self: flex-start;
   background: linear-gradient(160deg, #0f172a 0%, #1e3a8a 55%, #312e81 100%);
   padding: 44px 40px;
@@ -302,3 +303,19 @@
   font-size: 11px; color: #9ca3af;
   background: #f9fafb; border-radius: 6px; padding: 8px;
 }
+
+/* ── Advertisement slider: larger panel, square-ish corners, arrows + numbered dots ── */
+.login-ad img { transition: opacity .6s ease; }
+.login-ad-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; width: 42px; height: 64px; border: 0; background: rgba(15,23,42,.45); color: #fff; font-size: 34px; line-height: 1; cursor: pointer; border-radius: 4px; opacity: .85; transition: background .15s, opacity .15s; padding: 0 0 4px; }
+.login-ad-arrow:hover { background: rgba(15,23,42,.75); opacity: 1; }
+.login-ad-arrow.prev { left: 10px; } .login-ad-arrow.next { right: 10px; }
+.login-ad-count { position: absolute; top: 12px; right: 12px; z-index: 3; background: rgba(15,23,42,.55); color: #fff; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 4px; }
+.login-ad-dots { position: absolute; bottom: 14px; left: 0; right: 0; display: flex; justify-content: center; gap: 6px; z-index: 3; }
+.login-ad-dots button { width: 22px; height: 5px; border: 0; padding: 0; border-radius: 2px; background: rgba(255,255,255,.5); cursor: pointer; transition: all .25s; }
+.login-ad-dots button.on { width: 34px; background: #fff; }
+@media (max-width: 680px) {
+  .login-card { border-radius: 6px; }
+  .login-ad { min-height: 0; aspect-ratio: 1 / 1 !important; max-height: none; }
+  .login-ad-arrow { width: 34px; height: 52px; font-size: 28px; }
+}
+@media (max-width: 480px) { .login-card { border-radius: 0; } }

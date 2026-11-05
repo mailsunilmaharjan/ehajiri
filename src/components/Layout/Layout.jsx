@@ -15,6 +15,13 @@ import { OnlineAttendanceApplyProvider } from '../../context/OnlineAttendanceApp
 import { AttendanceNotificationProvider } from '../Notifications/AttendanceToasts.jsx';
 import { ChatProvider } from '../../context/ChatContext.jsx';
 import ChatDock from '../Chat/ChatDock.jsx';
+import SupportChat from '../Support/SupportChat.jsx';
+import NativeBridge from '../Common/NativeBridge.jsx';
+import { isMobileMode } from '../../utils/native.js';
+
+const MobileFrame = React.lazy(() => import('../../mobile/MobileFrame.jsx'));
+const MobileCheckIn = React.lazy(() => import('../../mobile/MobileCheckIn.jsx'));
+const MobileForms = React.lazy(() => import('../../mobile/MobileForms.jsx'));
 import { useModuleFlags } from '../../context/ModuleFlagsContext.jsx';
 
 /**
@@ -122,17 +129,33 @@ const Layout = ({ children }) => {
             <OnlineAttendanceApplyProvider>
               <AttendanceNotificationProvider>
                 <ChatProvider>
-                  <TopMenu />
-                  <main className="main-layout">
-                    {children}
-                  </main>
-                  <GlobalFAB />
-                  <LeaveApplyModal />
-                  <OfficeVisitApplyModal />
-                  <MissingAttendanceApplyModal />
-                  <ManualPostingApplyModal />
-                  <OnlineAttendanceApplyModal />
+                  {isMobileMode() ? (
+                    <React.Suspense fallback={null}><MobileFrame>{children}</MobileFrame></React.Suspense>
+                  ) : (
+                    <>
+                      <TopMenu />
+                      <main className="main-layout">
+                        {children}
+                      </main>
+                      <GlobalFAB />
+                    </>
+                  )}
+                  {isMobileMode() ? (
+                    <React.Suspense fallback={null}><MobileForms /></React.Suspense>
+                  ) : (
+                    <>
+                      <LeaveApplyModal />
+                      <OfficeVisitApplyModal />
+                      <MissingAttendanceApplyModal />
+                      <ManualPostingApplyModal />
+                    </>
+                  )}
+                  {isMobileMode()
+                    ? <React.Suspense fallback={null}><MobileCheckIn /></React.Suspense>
+                    : <OnlineAttendanceApplyModal />}
                   {moduleFlags.chatEnabled && <ChatDock />}
+                  {moduleFlags.supportHelpEnabled !== false && <SupportChat />}
+                  <NativeBridge />
                 </ChatProvider>
               </AttendanceNotificationProvider>
             </OnlineAttendanceApplyProvider>

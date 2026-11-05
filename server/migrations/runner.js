@@ -1,4 +1,7 @@
 ﻿import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import { PAYROLL_SCHEMA_SQL, PAYROLL_SCALE_SQL, seedFy2083Slabs } from './payrollSchema.js';
+import { PUSH_SCHEMA_SQL } from './pushSchema.js';
 import pool from '../db.js';
 import { DB_VERSION } from '../version.js';
 
@@ -3028,6 +3031,357 @@ const MIGRATIONS = [
           AND u.area_id IS NULL
           AND d.area_id IS NOT NULL;
       `);
+    },
+  },
+  {
+    version    : 147,
+    description: 'Backfill fiscalYears/branches/departments/posts/grades/modes/religions/statuses/jobTimings from the legacy app_settings "main" blob into their real relational tables (fiscal_years/branches/departments/posts/grades/employment_modes/religions/employee_statuses/job_timings) — same root cause + fix shape as v80\'s weekend_history backfill. Settings\' own Add/Edit/Bulk-Import UI has only ever written these lists into that blob; the relational tables (created back in v2) have dedicated /settings/:list REST endpoints that nothing in Settings.jsx ever called, so anything that queries a table directly — Role & Permission Management\'s Branch/Dept. Coverage tab is the one confirmed case (GET /settings/departments, /settings/branches) — never saw an item added after whatever was there at the very first sync, e.g. a department added months later on the omni tenant. Matches existing table rows by name (case-insensitive) rather than requiring the table to be empty, since employee_statuses already ships pre-seeded defaults from migration 1 — only genuinely-missing blob items get inserted. Rewrites each blob item\'s id in place to the real table row\'s id (blob ids were always just Date.now() client timestamps, disjoint from the tables\' own SERIAL ids) so Settings\' own edit/delete-by-id keeps resolving the same row once its save path is switched to write through to these tables instead of the blob alone. Each list backfills independently inside its own try/catch — one bad list\'s data must never block the others, since this runs on every tenant\'s next service start.',
+    up: async (client) => {
+      const { rows: mainRows } = await client.query(`SELECT value FROM app_settings WHERE key='main'`);
+      if (!mainRows.length || !mainRows[0].value || typeof mainRows[0].value !== 'object') return;
+      const main = mainRows[0].value;
+
+      const toCamel = (snakeCol) => snakeCol.replace(/_([a-z])/g, (_, l) => l.toUpperCase());
+
+      // Inserts any blob item whose name isn't already in `table` (case-
+      // insensitive), then rewrites item.id to match the real row — for a
+      // name that DOES already exist (e.g. employee_statuses' pre-seeded
+      // defaults), just adopts that row's id without touching the row
+      // itself, since the table copy (not the years-old blob copy) is what
+      // Coverage/etc. actually read.
+      async function backfillList(blobKey, table, cols) {
+        const items = Array.isArray(main[blobKey]) ? main[blobKey] : null;
+        if (!items || !items.length) return false;
+
+        const { rows: existingRows } = await client.query(`SELECT id, name FROM ${table}`);
+        const idByName = new Map(existingRows.map(r => [String(r.name ?? '').trim().toLowerCase(), r.id]));
+
+        let changed = false;
+        for (const item of items) {
+          if (!item || typeof item !== 'object') continue;
+          const nameKey = String(item.name ?? '').trim().toLowerCase();
+          if (!nameKey) continue;
+
+          let realId = idByName.get(nameKey);
+          if (realId == null) {
+            // An empty string is how SetupSection's own form defaults an
+            // unfilled numeric/boolean field (buildEmpty()'s f.type==='number'
+            // case) — Postgres rejects '' outright for an INTEGER/BOOLEAN/DATE
+            // column ("invalid input syntax"), confirmed against a real
+            // tenant's data (a department with rankingOrder:''), so every
+            // value is normalized the same way regardless of column type.
+            const vals = cols.map(c => {
+              const v = item[toCamel(c)] ?? item[c];
+              if (v === undefined || v === null) return null;
+              if (typeof v === 'string' && v.trim() === '') return null;
+              return v;
+            });
+            const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
+            const { rows: inserted } = await client.query(
+              `INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders}) RETURNING id`,
+              vals
+            );
+            realId = inserted[0].id;
+            idByName.set(nameKey, realId);
+          }
+          if (item.id !== realId) { item.id = realId; changed = true; }
+        }
+        return changed;
+      }
+
+      const LISTS = [
+        ['fiscalYears', 'fiscal_years',      ['name', 'start_date', 'end_date', 'is_default', 'is_system']],
+        ['branches',    'branches',          ['name', 'short_name', 'address', 'phone', 'ranking_order']],
+        ['departments', 'departments',       ['name', 'short_name', 'ranking_order', 'is_default', 'is_system']],
+        ['posts',       'posts',             ['name', 'short_name', 'ranking_order', 'is_default', 'is_system']],
+        ['grades',      'grades',            ['name']],
+        ['modes',       'employment_modes',  ['name', 'is_default', 'is_system']],
+        ['religions',   'religions',         ['name', 'is_default', 'is_system']],
+        ['statuses',    'employee_statuses', ['name', 'status_type', 'is_default', 'is_system']],
+        ['jobTimings',  'job_timings',       ['name', 'is_default', 'is_system']],
+      ];
+
+      let anyChanged = false;
+      for (const [blobKey, table, cols] of LISTS) {
+        // A savepoint, not just a JS try/catch — this whole migration runs
+        // inside ONE Postgres transaction (runMigrations' BEGIN/COMMIT
+        // around m.up(client)), and Postgres poisons an entire transaction
+        // on its first failed statement ("current transaction is aborted,
+        // commands ignored until end of transaction block") — confirmed
+        // live: departments failing on bad data cascaded into posts/grades/
+        // modes/religions/statuses/jobTimings ALL failing too, and then the
+        // whole server crashed on boot since even COMMIT couldn't succeed.
+        // Rolling back to a savepoint (not the catch block alone) is what
+        // actually un-poisons the transaction so the next list gets a clean
+        // slate.
+        await client.query(`SAVEPOINT sp_backfill_${table}`);
+        try {
+          if (await backfillList(blobKey, table, cols)) anyChanged = true;
+          await client.query(`RELEASE SAVEPOINT sp_backfill_${table}`);
+        } catch (e) {
+          await client.query(`ROLLBACK TO SAVEPOINT sp_backfill_${table}`);
+          await client.query(`RELEASE SAVEPOINT sp_backfill_${table}`);
+          console.error(`[migration 147] backfill of "${blobKey}" failed, skipping it:`, e.message);
+        }
+      }
+
+      if (anyChanged) {
+        await client.query(`UPDATE app_settings SET value = $1::jsonb WHERE key='main'`, [JSON.stringify(main)]);
+      }
+    },
+  },
+  {
+    version    : 148,
+    description: 'zkteco_fingerprints — add archived_at so "Delete User" soft-deletes the backed-up fingerprint template instead of destroying it, letting a rejoining staff member be restored to the device (name + PIN + fingerprint) without re-scanning. autoRestoreTemplates() (post-reboot re-push) and the new restore-user endpoint both filter on archived_at IS NULL/NOT NULL so an archived template never resurrects itself on its own, only via an explicit Restore action.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_fingerprints
+          ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL;
+      `);
+    },
+  },
+  {
+    version    : 149,
+    description: 'zkteco_device_info — add face_count, mirroring the existing fp_count. The device reports both counts on every getrequest poll (INFO= query param), but the handler only ever checked fpCount for the -1 "not supported" sentinel and discarded faceCount entirely — so there was never a stored, queryable signal for whether a given unit actually has a camera, only guesswork from the model name. Persisted the same way fp_count already is, and surfaced next to it wherever FP Slots is shown.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE zkteco_device_info
+          ADD COLUMN IF NOT EXISTS face_count INTEGER DEFAULT NULL;
+      `);
+    },
+  },
+  {
+    version    : 150,
+    description: 'Seed the Settings setup lists (fiscal_years/departments/posts/grades/employment_modes/religions/job_timings) for tenants whose app_settings "main" blob has no such list — every tenant provisioned after v147. Provisioning writes only company info into that blob and its own schema migration seeds none of these tables, so v147\'s backfill (which only reconciles lists the blob already has) was a no-op for them. Settings then showed SettingsContext\'s DEFAULT_SETTINGS placeholders (ids 1..n) with no matching table rows: Edit hit PUT /settings/:list/:id → 404 "Record not found", and Delete silently matched nothing. Seeds each empty table with those same placeholder values (so nothing changes on screen) and writes the table\'s real rows — real ids — into the blob. A list is only touched when its blob key is absent (present-but-empty means someone emptied it on purpose); a non-empty table is adopted into the blob as-is rather than re-seeded. Independent per-list savepoints, same as v147.',
+    up: async (client) => {
+      const { rows: mainRows } = await client.query(`SELECT value FROM app_settings WHERE key='main'`);
+      if (mainRows.length && (!mainRows[0].value || typeof mainRows[0].value !== 'object')) return;
+      const main = mainRows.length ? mainRows[0].value : {};
+
+      const toCamel = (snakeCol) => snakeCol.replace(/_([a-z])/g, (_, l) => l.toUpperCase());
+
+      // Exactly SettingsContext.jsx's DEFAULT_SETTINGS values for these lists —
+      // what a tenant with no saved list already sees, so seeding them is not
+      // a visible change. branches (defaults to empty) and statuses (already
+      // seeded in its table and overlaid live by GET /settings) aren't here.
+      const LISTS = [
+        { blobKey: 'fiscalYears', table: 'fiscal_years', cols: ['name', 'start_date', 'end_date', 'is_default', 'is_system'], rows: [
+          ['FY 2081/082', '2024-07-17', '2025-07-15', false, false],
+          ['FY 2082/083', '2025-07-16', '2026-07-15', true,  false],
+        ] },
+        { blobKey: 'departments', table: 'departments', cols: ['name', 'short_name', 'ranking_order', 'is_default', 'is_system'], rows: [
+          ['Administration', 'Admin', 1, true, true],
+        ] },
+        { blobKey: 'posts', table: 'posts', cols: ['name', 'short_name', 'ranking_order', 'is_default', 'is_system'], rows: [
+          ['General Manager', 'GM', 1, true, true],
+        ] },
+        { blobKey: 'grades', table: 'grades', cols: ['name', 'ranking_order', 'is_default', 'is_system'], rows: [
+          ['Grade A', 1, true,  true],
+          ['Grade B', 2, false, true],
+          ['Grade C', 3, false, true],
+          ['Grade D', 4, false, true],
+        ] },
+        { blobKey: 'modes', table: 'employment_modes', cols: ['name', 'is_default', 'is_system'], rows: [
+          ['Permanent', true,  true],
+          ['Temporary', false, false],
+          ['Contract',  false, false],
+        ] },
+        { blobKey: 'religions', table: 'religions', cols: ['name', 'is_default', 'is_system'], rows: [
+          ['Hindu', true, true], ['Buddhist', false, true], ['Muslim', false, true], ['Kirat', false, true],
+          ['Christian', false, true], ['Sikh', false, true], ['Jain', false, true], ['Bon', false, true],
+        ] },
+        { blobKey: 'jobTimings', table: 'job_timings', cols: ['name', 'is_default', 'is_system'], rows: [
+          ['Full Time', true, true],
+          ['Part Time', false, true],
+        ] },
+      ];
+
+      let changed = false;
+      for (const { blobKey, table, cols, rows } of LISTS) {
+        if (Array.isArray(main[blobKey])) continue; // blob already has this list — v147's territory
+
+        // Savepoint per list for the same reason as v147: one bad list must not
+        // poison the shared migration transaction and take the other lists (and
+        // this tenant's whole boot) down with it.
+        await client.query(`SAVEPOINT sp_seed_${table}`);
+        try {
+          const { rows: [{ n }] } = await client.query(`SELECT COUNT(*)::int AS n FROM ${table}`);
+          if (n === 0) {
+            const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
+            for (const vals of rows) {
+              await client.query(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`, vals);
+            }
+          }
+          // Read back what's really in the table so the blob carries the real
+          // ids. Date columns are cast to text so the blob always gets the plain
+          // 'YYYY-MM-DD' every consumer expects, independent of how the pool's
+          // DATE type parser happens to be configured (a JS Date object would
+          // JSON.stringify as a full UTC timestamp).
+          const select = cols.map(c => `${c}${c.endsWith('_date') ? '::text' : ''} AS "${toCamel(c)}"`).join(', ');
+          const { rows: real } = await client.query(`SELECT id, ${select} FROM ${table} ORDER BY id`);
+          main[blobKey] = real;
+          changed = true;
+          await client.query(`RELEASE SAVEPOINT sp_seed_${table}`);
+        } catch (e) {
+          await client.query(`ROLLBACK TO SAVEPOINT sp_seed_${table}`);
+          await client.query(`RELEASE SAVEPOINT sp_seed_${table}`);
+          console.error(`[migration 150] seeding "${blobKey}" failed, skipping it:`, e.message);
+        }
+      }
+
+      if (changed) {
+        await client.query(
+          `INSERT INTO app_settings (key, value) VALUES ('main', $1::jsonb)
+           ON CONFLICT (key) DO UPDATE SET value=$1::jsonb, updated_at=NOW()`,
+          [JSON.stringify(main)]
+        );
+      }
+    },
+  },
+  {
+    version    : 151,
+    description: 'Default Settings → Company Information "Short Name" (app_settings main.companyShortName) to "Head Office" for a brand-new tenant database. The Short Name is what Staff Detail\'s Company HQ / Branch dropdown uses as the HQ branch — "Head Office (HQ)", the default for new staff — falling back to the English company name when unset (see hqBranchName in src/utils/branchUtils.js). Only runs when the database has no staff yet (just the SYS001/SYS002 seed accounts), i.e. a freshly provisioned tenant: every existing tenant already has staff whose branch is saved as the full company name, so none of them is touched. Shallow jsonb merge, so provisioning\'s own company-info merge that runs after this keeps it.',
+    up: async (client) => {
+      const { rows: [{ n: staffCount }] } = await client.query(
+        `SELECT COUNT(*)::int AS n FROM users WHERE COALESCE(employee_id,'') NOT IN ('SYS001','SYS002')`);
+      if (staffCount > 0) return;
+
+      const { rows: mainRows } = await client.query(`SELECT value FROM app_settings WHERE key='main'`);
+      if (mainRows.length && (!mainRows[0].value || typeof mainRows[0].value !== 'object')) return;
+      if (mainRows.length && mainRows[0].value.companyShortName) return;
+
+      await client.query(
+        `INSERT INTO app_settings (key, value) VALUES ('main', $1::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value = app_settings.value || $1::jsonb, updated_at=NOW()`,
+        [JSON.stringify({ companyShortName: 'Head Office' })]
+      );
+    },
+  },
+  {
+    version    : 152,
+    description: 'Company HQ is always "Head Office (HQ)" — never the company\'s full name — on every tenant. Sets Settings → Company Information "Short Name" (main.companyShortName) to "Head Office" where unset, then moves every staff member whose branch was saved as the English/Nepali company name (the old HQ value) or left blank ("nothing selected means Head Office") to that HQ name. SYS001/SYS002 system accounts are left alone. Every changed row is recorded in branch_hq_migration_log (user_id, old_branch, new_branch) so a tenant can be reverted with UPDATE users u SET branch=l.old_branch FROM branch_hq_migration_log l WHERE l.user_id=u.id. users.branch is the only column that stores branch names (manager coverage uses branch ids), so nothing else needs renaming.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS branch_hq_migration_log (
+          id          SERIAL PRIMARY KEY,
+          user_id     INTEGER,
+          old_branch  TEXT,
+          new_branch  TEXT,
+          migrated_at TIMESTAMPTZ DEFAULT NOW()
+        )`);
+
+      const { rows: mainRows } = await client.query(`SELECT value FROM app_settings WHERE key='main'`);
+      if (mainRows.length && (!mainRows[0].value || typeof mainRows[0].value !== 'object')) return;
+      const main = mainRows.length ? mainRows[0].value : {};
+
+      let hq = String(main.companyShortName || '').trim();
+      if (!hq) {
+        hq = 'Head Office';
+        await client.query(
+          `INSERT INTO app_settings (key, value) VALUES ('main', $1::jsonb)
+           ON CONFLICT (key) DO UPDATE SET value = app_settings.value || $1::jsonb, updated_at=NOW()`,
+          [JSON.stringify({ companyShortName: hq })]
+        );
+      }
+
+      const legacy = [main.companyNameEn, main.companyNameNp]
+        .map(n => String(n || '').trim().toLowerCase()).filter(Boolean);
+      const where = `COALESCE(employee_id,'') NOT IN ('SYS001','SYS002')
+        AND COALESCE(branch,'') <> $1
+        AND (COALESCE(TRIM(branch),'') = '' OR LOWER(TRIM(branch)) = ANY($2::text[]))`;
+      await client.query(
+        `INSERT INTO branch_hq_migration_log (user_id, old_branch, new_branch)
+         SELECT id, branch, $1 FROM users WHERE ${where}`, [hq, legacy]);
+      await client.query(`UPDATE users SET branch=$1 WHERE ${where}`, [hq, legacy]);
+    },
+  },
+  {
+    version    : 153,
+    description: 'Attendance device: expired Validity/Expiry staff are taken OFF the device (user + samples removed there, samples kept in the DB) and put back automatically when the expiry is extended or removed — users.access_blocked tracks that state. Also zkteco_devices.lan_ip: the device\'s own LAN address (e.g. 192.168.1.201) as the device reports it, instead of only the public/gateway address the request arrives from.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS access_blocked BOOLEAN NOT NULL DEFAULT FALSE`);
+      await client.query(`ALTER TABLE zkteco_devices ADD COLUMN IF NOT EXISTS lan_ip TEXT`);
+    },
+  },
+  {
+    version    : 154,
+    description: 'Leave type codes widened VARCHAR(10) → VARCHAR(30). The Leave Type "short name" (free text in Settings) is what Leave Application / Manual Leave Posting store as leave_type_code, so any short name over 10 characters (e.g. "क्रिया विदा") failed with "value too long for type character varying(10)".',
+    up: async (client) => {
+      for (const [table, col] of [['leaves', 'leave_type_code'], ['leave_balances', 'leave_type_code'],
+                                  ['leave_types', 'code'], ['overtime_approvals', 'leave_type_code']]) {
+        await client.query(`ALTER TABLE ${table} ALTER COLUMN ${col} TYPE VARCHAR(30)`);
+      }
+    },
+  },
+  {
+    version    : 155,
+    description: 'users.sessions_valid_after: any JWT issued before this instant is rejected by authGuard. Set when a password is changed/reset so a stolen 30-day token stops working immediately (additive, nullable).',
+    up: async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_valid_after TIMESTAMPTZ`);
+    },
+  },
+  {
+    version    : 156,
+    description: 'Neutralise the publicly-known seed passwords: the SYS001 (superAdmin) and SYS002 (admin) accounts that every tenant is seeded with carried fixed passwords committed to source control. Any account still holding one of them gets SEED_ACCOUNT_PASSWORD (from .env) if set, otherwise a random password nobody knows (vendor access is via the LicenseAdmin "Open Software" SSO). Skipped on the packaged desktop app.',
+    up: async (client) => {
+      if (process.env.ELECTRON === 'true') return;
+      const known = ['#28O29@9837', '@dmin'];
+      const configured = process.env.SEED_ACCOUNT_PASSWORD;
+      const replacement = () => (configured && configured.length >= 12)
+        ? configured : crypto.randomBytes(24).toString('base64url');
+      const { rows } = await client.query(
+        `SELECT id, password FROM users WHERE employee_id IN ('SYS001','SYS002') OR is_system = TRUE`);
+      for (const r of rows) {
+        const pw = r.password || '';
+        const isDefault = pw.startsWith('$2')
+          ? known.some(k => bcrypt.compareSync(k, pw))
+          : known.includes(pw);
+        if (!isDefault) continue;
+        const hash = await bcrypt.hash(replacement(), 10);
+        await client.query(
+          'UPDATE users SET password=$1, sessions_valid_after=NOW() WHERE id=$2', [hash, r.id]);
+      }
+    },
+  },
+  {
+    version    : 157,
+    description: 'Payroll module: effective-dated rates/limits/policy (payroll_rates), tax slab applies_to/is_sst, item category/gender/prorate, salary history + increment dates, monthly/yearly/case-basis pay items (payroll_cases), advance policies + advances + recoveries, payroll runs/payslips, and the SSF/PF/CIT/insurance fund ledger.',
+    up: async (client) => {
+      await client.query(PAYROLL_SCHEMA_SQL);
+    },
+  },
+  {
+    version    : 158,
+    description: 'Payroll: government pay scales (pay_scales / pay_grades; employee_salary.scale_id, grade_code, grades_earned) and a labelled FY 2083/84 starter set of income-tax slabs (only when none exist).',
+    up: async (client) => {
+      await client.query(PAYROLL_SCALE_SQL);
+      await seedFy2083Slabs(client);
+    },
+  },
+  {
+    version    : 159,
+    description: 'push_devices: phones registered by the eHajiri mobile app for push notifications (Firebase Cloud Messaging).',
+    up: async (client) => {
+      await client.query(PUSH_SCHEMA_SQL);
+    },
+  },
+  {
+    version    : 160,
+    description: 'online_attendance: readable place names (reverse-geocoded) for the check-in / check-out location. Additive, nullable.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE online_attendance ADD COLUMN IF NOT EXISTS check_in_place TEXT`);
+      await client.query(`ALTER TABLE online_attendance ADD COLUMN IF NOT EXISTS check_out_place TEXT`);
+    },
+  },
+  {
+    version    : 161,
+    description: 'field_visit_sessions: GPS + place name for Office Out (and place for Office In); field_visit_stops: place names for check-in / check-out. Additive, nullable.',
+    up: async (client) => {
+      for (const c of ['office_out_lat DOUBLE PRECISION', 'office_out_lng DOUBLE PRECISION', 'office_out_accuracy DOUBLE PRECISION', 'office_out_device VARCHAR(500)', 'office_out_place TEXT', 'office_in_place TEXT']) {
+        await client.query(`ALTER TABLE field_visit_sessions ADD COLUMN IF NOT EXISTS ${c}`);
+      }
+      await client.query(`ALTER TABLE field_visit_stops ADD COLUMN IF NOT EXISTS check_in_place TEXT`);
+      await client.query(`ALTER TABLE field_visit_stops ADD COLUMN IF NOT EXISTS check_out_place TEXT`);
     },
   },
 ];

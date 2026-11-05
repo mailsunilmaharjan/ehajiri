@@ -8,7 +8,7 @@ const router = Router();
 
 // Must match events.js's own JWT_SECRET exactly — that's where these tokens
 // are minted (GET /api/events/:id/checkin-token, staff-only).
-const JWT_SECRET = process.env.JWT_SECRET || 'ehajiri_jwt_secret_change_me';
+import { JWT_SECRET } from '../utils/secrets.js';
 
 // This whole router is intentionally NOT behind authGuard (see server/index.js)
 // — it's the landing page for a QR a guest scans on their own phone with no

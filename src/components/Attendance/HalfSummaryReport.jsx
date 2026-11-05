@@ -311,7 +311,7 @@ const HalfSummaryReport = () => {
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${abbrev(r.position)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${abbrev(r.department)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${branchAbbr(r.branch, settings)}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.totalWorkingDays}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.totalCalendarDays}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.weekendDays||0}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.weekendPresent||0}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.holidayDays||0}</td>
@@ -371,7 +371,7 @@ const HalfSummaryReport = () => {
       } catch { /* bad/unsupported logo data — skip it, the rest of the header still renders */ }
     }
     [companyName, [companyAddr, companyPhone].filter(Boolean).join('  |  '), rptTitle,
-      rptSub() + (period ? `   (${period.startDate} to ${period.endDate})` : ''), ''
+      rptSub() + (period ? `   (${fd(period.startDate)} to ${fd(period.endDate)})` : ''), ''
     ].forEach((text, i) => {
       const row = ws.addRow([text]);
       ws.mergeCells(row.number, 1, row.number, lastCol);
@@ -413,7 +413,7 @@ const HalfSummaryReport = () => {
       const dept = (settings.departments||[]).find(d=>d.name===r.department)?.shortName || r.deptShort || r.department || '—';
       const row = ws.addRow([
         i + 1, getEmployeeById(r.id)?.employeeId || '—', r.fullName, post, dept, branchAbbr(r.branch, settings),
-        r.totalWorkingDays, r.weekendDays || 0, r.weekendPresent || 0, r.holidayDays || 0, r.holidayPresent || 0,
+        r.totalCalendarDays, r.weekendDays || 0, r.weekendPresent || 0, r.holidayDays || 0, r.holidayPresent || 0,
         r.leaveDays, r.officialVisitDays || 0, r.presentDays, r.absentDays,
         r.workedHrsFormatted || '0:00', r.lackHrsFormatted || '0:00',
         r.lateCount, r.earlyCount, `${r.attendanceRate}%`, r.otFormatted || '',
@@ -594,7 +594,7 @@ const HalfSummaryReport = () => {
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('विभाग','Dept.')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('शाखा','Branch')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede' }}>{L('कार्य दिन','Total')}</th>
-                <th colSpan={2} style={{ ...TH_WKD }}>{L('विकेन्ड','Weekend')}</th>
+                <th colSpan={2} style={{ ...TH_WKD }}>{L('सप्ताहन्त','Weekend')}</th>
                 <th colSpan={2} style={{ ...TH_HOL }}>{L('सार्वजनिक बिदा','Holiday')}</th>
                 <th rowSpan={2} style={{ ...TH_BASE, borderBottom:'2px solid #dedede', background:'#faf5ff', color:'#5b21b6' }}>{L('बिदा','Leave')}</th>
                 <th rowSpan={2} style={{ ...TH_OV, borderBottom:'2px solid #dedede' }}>{L('कार्यालय भ्रमण','Official Visit')}</th>
@@ -650,7 +650,7 @@ const HalfSummaryReport = () => {
                   <td style={{ ...TD_BASE, color:'#1f2937' }} title={r.branch}>
                     {branchAbbr(r.branch, settings)}
                   </td>
-                  <td style={{ ...TD_BASE, fontWeight:700 }}>{r.totalWorkingDays}</td>
+                  <td style={{ ...TD_BASE, fontWeight:700 }}>{r.totalCalendarDays}</td>
                   <td style={{ ...TD_BASE, color:'#6b7280', fontWeight:700 }}>{r.weekendDays||0}</td>
                   <td style={TD_BASE}><Pill v={r.weekendPresent||0} bg="#f3f4f6" color="#374151" /></td>
                   <td style={{ ...TD_BASE, color:'#92400e', fontWeight:700 }}>{r.holidayDays||0}</td>

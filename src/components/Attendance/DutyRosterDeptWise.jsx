@@ -105,8 +105,19 @@ function getCurrentFY(fiscalYears = []) {
       || null;
 }
 
-function getPeriodDates(bsYear, bsMonth, periodType, weekOrHalf) {
-  const totalDays = getBSDays(bsYear, bsMonth);
+const AD_MONTHS_EN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+// Calendar-agnostic helpers — the page's "bsYear/bsMonth" state holds AD year/month when the
+// company calendar setting is English.
+const calMonthDays = (useNP, y, m) => useNP ? getBSDays(y, m) : new Date(y, m, 0).getDate();
+const toCal = (d, useNP) => {
+  if (useNP) return adToBS(typeof d === 'string' ? new Date(d) : d);
+  const dt = typeof d === 'string' ? new Date(d.slice(0, 10) + 'T00:00:00') : d;
+  return { year: dt.getFullYear(), month: dt.getMonth() + 1, day: dt.getDate() };
+};
+
+function getPeriodDates(bsYear, bsMonth, periodType, weekOrHalf, useNP = true) {
+  const totalDays = calMonthDays(useNP, bsYear, bsMonth);
   let startDay, endDay;
   if (periodType === 'weekly') {
     startDay = (weekOrHalf - 1) * 7 + 1;
@@ -117,7 +128,7 @@ function getPeriodDates(bsYear, bsMonth, periodType, weekOrHalf) {
   }
   const dates = [];
   for (let d = startDay; d <= endDay; d++) {
-    const ad = bsToAD(bsYear, bsMonth, d);
+    const ad = useNP ? bsToAD(bsYear, bsMonth, d) : new Date(bsYear, bsMonth - 1, d);
     if (!ad) continue;
     dates.push({ bsDay: d, adDateStr: adToISO(ad), dayKey: DAY_KEYS[ad.getDay()] });
   }
@@ -602,6 +613,8 @@ const RosterMenuBtn = ({ active, onSelect }) => {
 const DutyRosterDeptWise = () => {
   const navigate     = useNavigate();
   const { settings } = useSettings();
+  const useNP        = settings.defaultCalendar === 'np';
+  const MONTHS       = useNP ? BS_MONTHS_EN : AD_MONTHS_EN;
   const { language } = useLanguage();
   const { canEdit, currentUser } = useAuth();
   const canEditRoster = canEdit('dutyRoster');
@@ -609,7 +622,7 @@ const DutyRosterDeptWise = () => {
 
   const currentFY    = getCurrentFY(settings.fiscalYears || []);
   const currentFYId  = currentFY?.id ?? null;
-  const todayBS      = adToBS(getNepalTodayISO()) || { year: 2083, month: 2, day: 1 };
+  const todayBS      = toCal(getNepalTodayISO(), useNP) || { year: 2083, month: 2, day: 1 };
 
   const [shifts,     setShifts]     = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -658,8 +671,8 @@ const DutyRosterDeptWise = () => {
   const setC = (k, v) => setConfig(p => ({ ...p, [k]: v }));
 
   const periodDates = useMemo(() =>
-    gridVisible ? getPeriodDates(config.bsYear, config.bsMonth, config.periodType, config.weekOrHalf) : [],
-  [config, gridVisible]);
+    gridVisible ? getPeriodDates(config.bsYear, config.bsMonth, config.periodType, config.weekOrHalf, useNP) : [],
+  [config, gridVisible, useNP]);
 
   // value = string[] per cell ([] = empty, ['OFF'] = off day, [id1, id2] = multiple shifts)
   const [colShifts,     setColShifts]     = useState({});  // dateStr -> string[]
@@ -797,8 +810,8 @@ const DutyRosterDeptWise = () => {
 
   /* ── View mode: period dates + filtered employees ── */
   const viewDates = useMemo(() =>
-    pageMode === 'view' ? getPeriodDates(viewBsYear, viewBsMonth, viewType === 'monthly' ? 'halfMonthly' : 'weekly', viewPeriodNum) : [],
-  [pageMode, viewBsYear, viewBsMonth, viewType, viewPeriodNum]);
+    pageMode === 'view' ? getPeriodDates(viewBsYear, viewBsMonth, viewType === 'monthly' ? 'halfMonthly' : 'weekly', viewPeriodNum, useNP) : [],
+  [pageMode, viewBsYear, viewBsMonth, viewType, viewPeriodNum, useNP]);
 
   // Filter employees for view mode using advSearch filters
   const viewEmployees = useMemo(() => {
@@ -1171,7 +1184,7 @@ const DutyRosterDeptWise = () => {
   const gradeOpts  = sNames('grades').length      ? sNames('grades')      : uniq('grade');
 
   const periodLabel = useMemo(() => {
-    const mName = BS_MONTHS_EN[config.bsMonth - 1];
+    const mName = MONTHS[config.bsMonth - 1];
     if (config.periodType === 'weekly') {
       return `${['1st','2nd','3rd','4th'][config.weekOrHalf - 1]} Week of ${mName} ${config.bsYear}`;
     }
@@ -1181,8 +1194,8 @@ const DutyRosterDeptWise = () => {
   const fyYears = useMemo(() => {
     const fy = (settings.fiscalYears || []).find(f => f.id === config.fiscalYearId);
     if (!fy) return [todayBS.year];
-    const bsStart = adToBS(new Date(fy.startDate));
-    const bsEnd   = adToBS(new Date(fy.endDate));
+    const bsStart = toCal(fy.startDate, useNP);
+    const bsEnd   = toCal(fy.endDate, useNP);
     if (!bsStart || !bsEnd) return [todayBS.year];
     const years = [];
     for (let y = bsStart.year; y <= bsEnd.year; y++) years.push(y);
@@ -1191,16 +1204,21 @@ const DutyRosterDeptWise = () => {
 
   // BS Year for the config form is derived from the selected Fiscal Year — disabled/auto
   const configFY      = (settings.fiscalYears || []).find(f => f.id === config.fiscalYearId);
-  const configBsStart = configFY ? adToBS(new Date(configFY.startDate)) : null;
-  const configBsYear  = configBsStart?.year ?? todayBS.year;
+  const configBsStart = configFY ? toCal(configFY.startDate, useNP) : null;
+  const configBsEnd   = configFY ? toCal(configFY.endDate, useNP) : null;
+  // English calendar: a fiscal year can straddle two calendar years, so the year follows the month
+  const configBsYear  = (!useNP && configBsStart && configBsEnd && config.bsMonth < configBsStart.month)
+    ? configBsEnd.year : (configBsStart?.year ?? todayBS.year);
   // Keep config.bsYear in sync with FY
   React.useEffect(() => { if (configBsYear !== config.bsYear) setC('bsYear', configBsYear); },
-    [configBsYear]);
+    [configBsYear, config.bsYear]);
 
   // BS Year for View Roster = derived from selected FY in Advanced Search (disabled — fixed by FY)
   const advFY      = (settings.fiscalYears || []).find(f => f.id === advSearch.fiscalYearId);
-  const advBsStart = advFY ? adToBS(new Date(advFY.startDate)) : null;
-  const advBsYear  = advBsStart?.year ?? todayBS.year;
+  const advBsStart = advFY ? toCal(advFY.startDate, useNP) : null;
+  const advBsEnd   = advFY ? toCal(advFY.endDate, useNP) : null;
+  const advBsYear  = (!useNP && advBsStart && advBsEnd && advSearch.bsMonth < advBsStart.month)
+    ? advBsEnd.year : (advBsStart?.year ?? todayBS.year);
   // Keep viewBsYear in sync
   React.useEffect(() => { setViewBsYear(advBsYear); }, [advBsYear]);
 
@@ -1290,7 +1308,7 @@ const DutyRosterDeptWise = () => {
       // Close create modal and show view grid with current week
       setShowCreateModal(false);
       setGridVisible(false);
-      const nowBS = adToBS(getNepalTodayISO()) || todayBS;
+      const nowBS = toCal(getNepalTodayISO(), useNP) || todayBS;
       const currentWeek = Math.min(4, Math.ceil(nowBS.day / 7));
       setPageMode('view');
       setViewType('weekly');
@@ -1453,7 +1471,7 @@ const DutyRosterDeptWise = () => {
             <div style={{ flex:'1 1 280px' }}>
               <div style={{ fontSize:11, fontWeight:700, color:'#374151', marginBottom:4 }}>Month</div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
-                {BS_MONTHS_EN.map((m, i) => (
+                {MONTHS.map((m, i) => (
                   <button key={m} onClick={() => { setAS('bsMonth', i + 1); setViewBsMonth(i + 1); }}
                     style={{ padding:'4px 9px', border:`1.5px solid ${advSearch.bsMonth === i+1 ? '#1a56db' : '#e5e7eb'}`,
                       borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600,
@@ -1662,16 +1680,16 @@ const DutyRosterDeptWise = () => {
               {printBranchNames.length > 0 && <span> &nbsp;|&nbsp; Branch : {printBranchNames.join(', ')}</span>}
             </div>
             <div style={{ fontSize:10, color:'#374151', display:'flex', gap:10, flexWrap:'wrap' }}>
-              <span>BS Year: {advBsYear}</span>
+              <span>{useNP ? 'BS Year' : 'Year'}: {advBsYear}</span>
               <span>|</span>
-              <span>Month: {BS_MONTHS_EN[viewBsMonth - 1]}</span>
+              <span>Month: {MONTHS[viewBsMonth - 1]}</span>
               <span>|</span>
               <span>{viewType === 'monthly' ? (viewPeriodNum === 1 ? '1st Half' : '2nd Half') : `${['1st','2nd','3rd','4th'][viewPeriodNum-1]} Week`}</span>
               <span>|</span>
               <span>
-                {String(viewDates[0].bsDay).padStart(2,'0')}-{BS_MONTHS_EN[viewBsMonth - 1]}-{advBsYear}
+                {String(viewDates[0].bsDay).padStart(2,'0')}-{MONTHS[viewBsMonth - 1]}-{advBsYear}
                 {' '}to{' '}
-                {String(viewDates[viewDates.length-1].bsDay).padStart(2,'0')}-{BS_MONTHS_EN[viewBsMonth - 1]}-{advBsYear}
+                {String(viewDates[viewDates.length-1].bsDay).padStart(2,'0')}-{MONTHS[viewBsMonth - 1]}-{advBsYear}
               </span>
             </div>
           </div>
@@ -1738,7 +1756,7 @@ const DutyRosterDeptWise = () => {
                       const cellHeader = {
                         name: emp.full_name || emp.fullName,
                         post: emp.position,
-                        dateLabel: `${String(bsDay).padStart(2,'0')}-${BS_MONTHS_EN[viewBsMonth-1]}-${viewBsYear} - ${DAY_KEYS_FULL[dayKey]}`,
+                        dateLabel: `${String(bsDay).padStart(2,'0')}-${MONTHS[viewBsMonth-1]}-${viewBsYear} - ${DAY_KEYS_FULL[dayKey]}`,
                       };
                       return (
                         <td key={adDateStr} style={{ ...tdSt(false,-1), textAlign:'left', padding:'3px 4px',
@@ -1986,7 +2004,7 @@ const DutyRosterDeptWise = () => {
                     const cellHeader = {
                       name: emp.full_name || emp.fullName,
                       post: emp.position,
-                      dateLabel: `${String(bsDay).padStart(2,'0')}-${BS_MONTHS_EN[config.bsMonth-1]}-${config.bsYear} - ${DAY_KEYS_FULL[dayKey]}`,
+                      dateLabel: `${String(bsDay).padStart(2,'0')}-${MONTHS[config.bsMonth-1]}-${config.bsYear} - ${DAY_KEYS_FULL[dayKey]}`,
                     };
                     return (
                       <td key={adDateStr} style={{ ...tdSt(false,-1), textAlign:'left', padding:'3px 4px', background: bgColor }}>
@@ -2150,7 +2168,7 @@ const DutyRosterDeptWise = () => {
 
                   {/* BS Year — auto-derived from Fiscal Year, disabled */}
                   <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                    <span style={{ fontSize:11, fontWeight:700, color:'#6b7280' }}>BS Year</span>
+                    <span style={{ fontSize:11, fontWeight:700, color:'#6b7280' }}>{useNP ? 'BS Year' : 'Year'}</span>
                     <div style={{ height:36, padding:'0 14px', border:'1.5px solid #e5e7eb', borderRadius:7,
                       background:'#f9fafb', fontSize:13, fontWeight:700, color:'#374151',
                       display:'flex', alignItems:'center', cursor:'not-allowed', userSelect:'none', minWidth:64 }}>
@@ -2165,7 +2183,7 @@ const DutyRosterDeptWise = () => {
                   <div style={{ marginBottom:14 }}>
                     <div style={{ fontSize:11, fontWeight:700, color:'#374151', marginBottom:4 }}>Month</div>
                     <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                      {BS_MONTHS_EN.map((m, i) => (
+                      {MONTHS.map((m, i) => (
                         <button key={m} onClick={() => setC('bsMonth', i + 1)}
                           style={{ padding:'5px 10px', border:`1.5px solid ${config.bsMonth === i+1 ? '#1a56db' : '#e5e7eb'}`,
                             borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600,
@@ -2184,7 +2202,7 @@ const DutyRosterDeptWise = () => {
                     <div style={{ fontSize:11, fontWeight:700, color:'#374151', marginBottom:6 }}>Select Week</div>
                     <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                       {[1,2,3,4].map(w => {
-                        const totalDays = getBSDays(config.bsYear, config.bsMonth);
+                        const totalDays = calMonthDays(useNP, config.bsYear, config.bsMonth);
                         const start = (w-1)*7+1, end = w===4 ? totalDays : Math.min(w*7, totalDays);
                         return (
                           <button key={w} onClick={() => setC('weekOrHalf', w)}
@@ -2207,7 +2225,7 @@ const DutyRosterDeptWise = () => {
                     <div style={{ fontSize:11, fontWeight:700, color:'#374151', marginBottom:6 }}>Select Half</div>
                     <div style={{ display:'flex', gap:8 }}>
                       {[1,2].map(h => {
-                        const totalDays = getBSDays(config.bsYear, config.bsMonth);
+                        const totalDays = calMonthDays(useNP, config.bsYear, config.bsMonth);
                         const start = h===1 ? 1 : 16, end = h===1 ? Math.min(15, totalDays) : totalDays;
                         return (
                           <button key={h} onClick={() => setC('weekOrHalf', h)}
@@ -2230,7 +2248,7 @@ const DutyRosterDeptWise = () => {
                   <span style={{ fontWeight:700 }}>Preview: </span>
                   {periodLabel} &nbsp;·&nbsp;
                   {(() => {
-                    const dates = getPeriodDates(config.bsYear, config.bsMonth, config.periodType, config.weekOrHalf);
+                    const dates = getPeriodDates(config.bsYear, config.bsMonth, config.periodType, config.weekOrHalf, useNP);
                     return `${dates.length} days (${dates[0]?.adDateStr || '?'} to ${dates[dates.length-1]?.adDateStr || '?'})`;
                   })()}
                 </div>

@@ -23,6 +23,8 @@ const STYLES = `
   .adb-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.05); overflow:hidden; }
   .adb-head { display:flex; justify-content:space-between; align-items:center; gap:10px;
     padding:16px 20px; border-left:3px solid #f97316; border-bottom:1px solid #eef1f5; }
+  .adb-hbox { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:14px;
+    padding:10px 12px 10px 14px; background:#fff; border:1px solid #e2e8f0; border-left:3px solid #f97316; border-radius:6px; }
   .adb-title { margin:0; font-size:15px; font-weight:800; color:#1e293b; }
   .adb-btn { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#475569;
     background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:7px 13px; cursor:pointer; white-space:nowrap; }
@@ -553,7 +555,8 @@ export default function Dashboard() {
         : api.post('/overtime/approve-inline', { employeeId: item.employeeId, date: item.otDate, otMinutes: item.otMinutes, action: 'approve', comment });
       return req.then(refreshOtPending);
     }
-    return (item.kind === 'leave' ? approveLeave : approveVisit)(item.id, currentUser?.id, comment);
+    return (item.kind === 'leave' ? approveLeave : approveVisit)(item.id, currentUser?.id, comment)
+      .catch(err => alert(err?.message || 'Approve failed'));   // row is rolled back by DataContext
   };
   const handleDecline = (item, comment = '') => {
     const finalComment = comment || 'Declined from dashboard';
@@ -566,7 +569,8 @@ export default function Dashboard() {
         : api.post('/overtime/approve-inline', { employeeId: item.employeeId, date: item.otDate, otMinutes: item.otMinutes, action: 'reject', comment: finalComment });
       return req.then(refreshOtPending);
     }
-    return (item.kind === 'leave' ? rejectLeave : rejectVisit)(item.id, currentUser?.id, finalComment);
+    return (item.kind === 'leave' ? rejectLeave : rejectVisit)(item.id, currentUser?.id, finalComment)
+      .catch(err => alert(err?.message || 'Decline failed'));
   };
 
   // Pending Approvals card visibility — Super Admin/Admin always see it; everyone
@@ -614,12 +618,12 @@ export default function Dashboard() {
   // for admin/manager, or beside "Notice / Message to Me" for an employee
   // (whose version of that row otherwise only has one other card in it).
   const renderUpcomingHolidayCard = (extraStyle) => (
-    <div className="adb-card" style={extraStyle}>
-      <div className="adb-head">
+    <div className="adb-card" style={{ padding: '16px 18px', ...extraStyle }}>
+      <div className="adb-hbox">
         <p className="adb-title">{L('आगामी सार्वजनिक बिदा', 'Upcoming Public Holiday')}</p>
         <button className="adb-btn" onClick={() => navigate('/settings')}>{L('सबै हेर्नुहोस्', 'View All')}</button>
       </div>
-      <div style={{ padding: '14px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {upHolidays.length === 0 ? <Empty msg={L('आगामी बिदा छैन', 'No upcoming holidays')} /> : upHolidays.map((h, i) => {
           const box = getDayMonthBox(h.startDate);
           return (
@@ -660,7 +664,7 @@ export default function Dashboard() {
     const next = new Date(now.getFullYear(), dob.getMonth(), dob.getDate());
     if (next < now) next.setFullYear(now.getFullYear() + 1);
     return { ...e, daysUntil: Math.round((next - now) / 86400000) };
-  }).filter(e => e.daysUntil <= 30).sort((a, b) => a.daysUntil - b.daysUntil).slice(0, 8);
+  }).filter(e => e.daysUntil <= 30).sort((a, b) => a.daysUntil - b.daysUntil);
   const birthdayGroups = useMemo(() => {
     const groups = {};
     upBirthdays.forEach(e => {
@@ -760,8 +764,7 @@ export default function Dashboard() {
       {!isEmployee && (
       <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 16 }}>
         <div className="adb-card" style={{ padding: '16px 18px', flex: '1.4 1 360px', minWidth: 360 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            paddingBottom: 10, marginBottom: 12, borderBottom: '1px solid #eef1f5' }}>
+          <div className="adb-hbox">
             <p className="adb-title">{L('ढिलो आगमन र सूचनाहरू', 'Late Arrivals & Alerts')}</p>
             <button className="adb-btn"><StatIcon name="calendar" size={13} />{L('आज', 'Today')}</button>
           </div>
@@ -793,8 +796,7 @@ export default function Dashboard() {
         </div>
 
         <div className="adb-card" style={{ padding: '16px 18px', flex: '1 1 280px', minWidth: 280 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            paddingBottom: 10, marginBottom: 12, borderBottom: '1px solid #eef1f5' }}>
+          <div className="adb-hbox">
             <p className="adb-title">{L('बिदामा', 'On Leave')}</p>
             <button className="adb-btn" onClick={() => navigate('/leave/approval')}><StatIcon name="calendar" size={13} />{L('आज', 'Today')}</button>
           </div>
@@ -820,8 +822,7 @@ export default function Dashboard() {
         </div>
 
         <div className="adb-card" style={{ padding: '16px 18px', flex: '1 1 280px', minWidth: 280 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            paddingBottom: 10, marginBottom: 12, borderBottom: '1px solid #eef1f5' }}>
+          <div className="adb-hbox">
             <p className="adb-title">{L('कार्यालय भ्रमणमा', 'On Office Visit')}</p>
             <button className="adb-btn" onClick={() => navigate('/office-visit/approval')}><StatIcon name="calendar" size={13} />{L('आज', 'Today')}</button>
           </div>
@@ -859,17 +860,43 @@ export default function Dashboard() {
                   paddingBottom: 10, marginBottom: 4, borderBottom: '1px solid #eef1f5' }}>
                   <p className="adb-title">{L('मेरो मासिक उपस्थिति सिंहावलोकन', 'My Monthly Attendance Overview')}</p>
                 </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8px 4px', minHeight: 0 }}>
-                  <HalfDonut segments={myAttendanceOverview.arc} size={160} thickness={20}
-                    centerLabel={myAttendanceOverview.arc[0]?.value || 0}
-                    centerSub={L('यो महिना उपस्थित', 'Present This Month')}
-                    centerCaption={myAttendanceOverviewTotal > 0 ? `${myAttendanceOverviewPct}%` : null} />
-                  <div style={{ width: '100%', marginTop: 10 }}>
-                    <ChartLegend segments={myAttendanceOverview.arc} showPercent />
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 2px', minHeight: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
+                    <HalfDonut segments={myAttendanceOverview.arc} size={176} thickness={22}
+                      centerLabel={myAttendanceOverview.arc[0]?.value || 0}
+                      centerSub={L('यो महिना उपस्थित', 'Present This Month')}
+                      centerCaption={myAttendanceOverviewTotal > 0 ? `${myAttendanceOverviewPct}%` : null} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+                    {myAttendanceOverview.arc.map((seg, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+                        background: `${seg.color}14`, border: `1px solid ${seg.color}33`, borderRadius: 10, padding: '7px 10px' }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 3, background: seg.color, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 10.5, color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {seg.label}
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', lineHeight: 1.3 }}>
+                            {seg.value}
+                            {myAttendanceOverviewTotal > 0 && (
+                              <span style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', marginLeft: 4 }}>
+                                ({Math.round((seg.value / myAttendanceOverviewTotal) * 100)}%)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   {myAttendanceOverview.extra.some(s => s.value > 0) && (
-                    <div style={{ width: '100%', marginTop: 10, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
-                      <ChartLegend segments={myAttendanceOverview.extra} />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
+                      {myAttendanceOverview.extra.filter(s => s.value > 0).map((s, i) => (
+                        <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
+                          color: s.color, background: `${s.color}14`, border: `1px solid ${s.color}33`, borderRadius: 20, padding: '3px 9px' }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+                          {s.label}: {s.value}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -991,8 +1018,7 @@ export default function Dashboard() {
       <div className="adb-grid3">
         {!isEmployee && (
         <div className="adb-card" style={{ padding: '16px 18px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            paddingBottom: 12, marginBottom: 12, borderBottom: '1px solid #eef1f5' }}>
+          <div className="adb-hbox">
             <p className="adb-title">{L('कर्मचारी स्थिति', 'Employee Status')}</p>
             <button className="adb-btn"><StatIcon name="calendar" size={13} />{L('यो हप्ता', 'This Week')}</button>
           </div>
@@ -1048,8 +1074,7 @@ export default function Dashboard() {
 
         {!isEmployee && (
         <div className="adb-card" style={{ padding: '16px 18px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            paddingBottom: 10, marginBottom: 4, borderBottom: '1px solid #eef1f5' }}>
+          <div className="adb-hbox">
             <p className="adb-title">{L('उपस्थिति सिंहावलोकन', 'Attendance Overview')}</p>
             <button className="adb-btn"><StatIcon name="calendar" size={13} />{L('आज', 'Today')}</button>
           </div>
@@ -1109,12 +1134,13 @@ export default function Dashboard() {
 
       {/* Notice/Message + Pending Approvals + Birthday Alerts — same row, Birthdays kept narrow (~30%) at the end */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 16 }}>
-        <div className="adb-card" style={{ flex: '1 1 0%', minWidth: 320 }}>
-          <div className="adb-head">
+        <div className="adb-card" style={{ padding: '16px 18px', flex: '1 1 0%', minWidth: 320 }}>
+          <div className="adb-hbox">
             <p className="adb-title">{isEmployee ? L('सूचना / मलाई सन्देश', 'Notice / Message to Me') : L('सूचना / सन्देश', 'Notice / Message')}</p>
+            <button className="adb-btn" onClick={() => navigate('/staff/message')}>{L('सबै हेर्नुहोस्', 'View All')}</button>
           </div>
-          <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {messages.length === 0 ? <Empty msg={L('अझै सूचना छैन', 'No notices yet')} /> : messages.slice(0, 5).map(m => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+            {messages.length === 0 ? <Empty msg={L('अझै सूचना छैन', 'No notices yet')} /> : messages.map(m => (
               <div key={m.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12,
                 background: m.is_read ? '#fff' : '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 14px' }}>
                 <Av name={m.sender_name} photo={m.sender_photo} size={34} />
@@ -1132,25 +1158,17 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-          {messages.length > 5 && (
-            <div style={{ padding: '0 16px 16px' }}>
-              <button className="adb-btn" style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => navigate('/staff/message')}>
-                {L(`थप हेर्नुहोस् (थप ${messages.length - 5})`, `View More (${messages.length - 5} more)`)}
-              </button>
-            </div>
-          )}
         </div>
 
         {isEmployee && renderUpcomingHolidayCard({ flex: '1 1 0%', minWidth: 320 })}
 
         {canSeePendingApprovals && (
-        <div className="adb-card" style={{ flex: '1 1 0%', minWidth: 320 }}>
-          <div className="adb-head">
+        <div className="adb-card" style={{ padding: '16px 18px', flex: '1 1 0%', minWidth: 320 }}>
+          <div className="adb-hbox">
             <p className="adb-title">{L('विचाराधीन स्वीकृतिहरू', 'Pending Approvals')}</p>
             <button className="adb-btn" onClick={() => navigate(APPROVAL_TAB_ROUTES[approvalTab])}>{L('सबै हेर्नुहोस्', 'View All')}</button>
           </div>
-          <div style={{ padding: '14px 16px 0' }}>
+          <div>
             <div style={{ display: 'flex', gap: 4, padding: 4, background: '#f1f5f9', borderRadius: 9 }}>
               {[
                 { key: 'leave', label: L('बिदा', 'Leave') },
@@ -1168,7 +1186,7 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-          <div style={{ padding: '12px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ padding: '12px 4px 0 0', display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto' }}>
             {(() => {
               // Only items the logged-in user is actually the configured
               // recommender or approver for — not every pending item
@@ -1177,7 +1195,7 @@ export default function Dashboard() {
               const items = pendingApprovals.filter(i =>
                 i.kind === approvalTab && (isRecommenderFor(i.employeeId) || isApproverFor(i.employeeId))
               );
-              return items.length === 0 ? <Empty msg={L('केही विचाराधीन छैन', 'Nothing pending')} /> : items.slice(0, 5).map(item => (
+              return items.length === 0 ? <Empty msg={L('केही विचाराधीन छैन', 'Nothing pending')} /> : items.map(item => (
                 <div key={`${item.kind}-${item.id}`}
                   onClick={() => { setApprovalItemModal(item); setApprovalModalComment(''); }}
                   style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
@@ -1245,12 +1263,12 @@ export default function Dashboard() {
         )}
 
         {!isEmployee && (
-        <div className="adb-card" style={{ flex: '0 1 30%', minWidth: 300 }}>
-          <div className="adb-head">
+        <div className="adb-card" style={{ padding: '16px 18px', flex: '0 1 30%', minWidth: 300 }}>
+          <div className="adb-hbox">
             <p className="adb-title">{L('जन्मदिनहरू', 'Birthdays')}</p>
-            <button className="adb-btn">{L('सबै हेर्नुहोस्', 'View All')}</button>
+            <button className="adb-btn" onClick={() => navigate('/users')}>{L('सबै हेर्नुहोस्', 'View All')}</button>
           </div>
-          <div style={{ padding: '12px 18px 18px' }}>
+          <div style={{ maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
             {birthdayGroups.length === 0 ? <Empty msg={L('आगामी ३० दिनमा जन्मदिन छैन', 'No birthdays in the next 30 days')} /> : birthdayGroups.map(([groupLabel, people]) => (
               <div key={groupLabel}>
                 <p style={{ margin: '12px 0 8px', fontSize: 14, fontWeight: 800, color: '#1e293b' }}>

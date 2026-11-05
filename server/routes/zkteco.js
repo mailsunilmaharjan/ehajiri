@@ -12,6 +12,7 @@
 import express from 'express';
 import pool   from '../db.js';
 import { logError } from '../utils/logError.js';
+import { rateLimit, safeEqual } from '../middleware/security.js';
 import {
   upsertDevice,
   getDevice,
@@ -38,6 +39,7 @@ import {
   checkTimezoneAccess,
   checkValidityWindow,
   consumeValidityUse,
+  saveLanIp,
 } from '../services/zktecoService.js';
 
 /** Push a freshly-captured fingerprint/face template to every other active
@@ -78,6 +80,32 @@ const router = express.Router();
 
 // Raw text body — ADMS bodies are plain text
 router.use(express.text({ type: '*/*', limit: '10mb' }));
+
+// ── Ingestion hardening ────────────────────────────────────────────────────
+// 1. Serial numbers are alphanumeric; reject anything else before it can reach
+//    the auto-register upsert / any query.
+// 2. Optional gateway key: on a hosted tenant the only legitimate caller is the
+//    LicenseAdmin gateway (which has already matched the SN to this tenant).
+//    Set ICLOCK_REQUIRE_GATEWAY_KEY=true (after LicenseAdmin is restarted with
+//    the same INTERNAL_API_KEY) to stop anyone who reaches this port directly
+//    from injecting punches under an invented serial number.
+// 3. Per-device request cap so one noisy/abusive client can't hammer the DB.
+const SN_RE = /^[A-Za-z0-9]{4,32}$/;
+const requireGatewayKey = process.env.ICLOCK_REQUIRE_GATEWAY_KEY === 'true' && !!process.env.INTERNAL_API_KEY;
+const iclockLimiter = rateLimit({
+  windowMs: 60_000, max: 600,
+  key: (req) => (req.query.SN || '').toString().slice(0, 40) || (req.socket?.remoteAddress || 'unknown'),
+  message: 'Too many requests',
+});
+router.use((req, res, next) => {
+  if (requireGatewayKey && !safeEqual(req.headers['x-internal-key'], process.env.INTERNAL_API_KEY)) {
+    return res.status(403).type('text/plain').send('Forbidden');
+  }
+  const sn = (req.query.SN || '').toString().trim();
+  if (sn && !SN_RE.test(sn)) return res.status(400).type('text/plain').send('Invalid SN');
+  next();
+});
+router.use(iclockLimiter);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const getSN    = (req) => (req.query.SN || '').trim();
@@ -171,10 +199,13 @@ async function autoRestoreTemplates(sn) {
   );
   if (pending[0]) return;
 
+  // archived_at IS NULL — a template archived by "Delete User" must stay gone
+  // until an explicit Restore action, not silently resurrect itself the next
+  // time this device reboots (see /devices/:id/delete-user and /restore-user).
   const { rows: templates } = await pool.query(
     `SELECT pin, finger_id, template_size, valid, template_data
      FROM   zkteco_fingerprints
-     WHERE  device_sn=$1 AND template_data IS NOT NULL
+     WHERE  device_sn=$1 AND template_data IS NOT NULL AND archived_at IS NULL
      ORDER  BY pin::int, finger_id`,
     [sn]
   );
@@ -257,6 +288,26 @@ async function handleZkteco(req, res) {
           if (parsed.fpCount === -1) {
             console.warn(`[ZK] WARNING: SN=${sn} FPCount=-1 — hardware does not support FP export`);
           }
+          if (parsed.faceCount === -1) {
+            console.warn(`[ZK] WARNING: SN=${sn} FaceCount=-1 — hardware does not support face template export`);
+          }
+          // Persist both counts (same -1 = "not supported" convention for
+          // each) so "does this unit actually have a camera?" is a stored,
+          // queryable fact instead of a guess from the model name — this
+          // arrives on every poll, so an upsert here is always freshest.
+          const fpVal   = Number.isInteger(parsed.fpCount)   ? parsed.fpCount   : null;
+          const faceVal = Number.isInteger(parsed.faceCount) ? parsed.faceCount : null;
+          if (fpVal !== null || faceVal !== null) {
+            await pool.query(
+              `INSERT INTO zkteco_device_info (device_sn, fp_count, face_count, updated_at)
+               VALUES ($1, $2, $3, NOW())
+               ON CONFLICT (device_sn) DO UPDATE SET
+                 fp_count   = COALESCE(EXCLUDED.fp_count,   zkteco_device_info.fp_count),
+                 face_count = COALESCE(EXCLUDED.face_count, zkteco_device_info.face_count),
+                 updated_at = NOW()`,
+              [sn, fpVal, faceVal]
+            );
+          }
         } catch { /* ignore parse errors */ }
       }
 
@@ -273,6 +324,7 @@ async function handleZkteco(req, res) {
       // list despite polling successfully (confirmed: SN=GED7240401865 on
       // lmcedu, approved well after its only handshake, stuck exactly here).
       await upsertDevice(sn, ip);
+      if (req.query.INFO) await saveLanIp(sn, req.query.INFO).catch(() => {});
 
       const cmd = await getNextCommand(sn);
       if (cmd) {
@@ -528,6 +580,7 @@ async function handleZkteco(req, res) {
         if (info.length || body.includes('~UserCount') || body.includes('~MaxUser')) {
           const parsed = parseDeviceInfo(body);
           if (Object.keys(parsed).length) await saveDeviceInfo(sn, parsed);
+          await saveLanIp(sn, parsed.IPAddress || parsed.IP || parsed.DeviceIP).catch(() => {});
         }
 
         // ATTLOG must return count (device uses it to advance stamp pointer).
