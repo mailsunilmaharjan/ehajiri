@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { userCanAccessTask, notifyOnCompletion, notifyStatusChanged } from './tasks.js';
-import { estimateBikeTrip } from '../utils/geoUtils.js';
+import { estimateBikeTrip, trackDistanceKm } from '../utils/geoUtils.js';
 import { resolveEmployeeScope } from './attendanceScope.js';
 import { reverseGeocode } from '../services/geocode.js';
 
@@ -54,6 +54,7 @@ const SESSION_SEL = `
   fs.office_in_at AS "officeInAt", fs.office_in_lat AS "officeInLat", fs.office_in_lng AS "officeInLng",
   fs.office_in_accuracy AS "officeInAccuracy", fs.office_in_place AS "officeInPlace",
   fs.travel_km AS "travelKm", fs.travel_minutes AS "travelMinutes", fs.estimated_minutes AS "estimatedMinutes",
+  fs.distance_source AS "distanceSource",
   fs.status, fs.created_at AS "createdAt"
 `;
 
@@ -64,6 +65,7 @@ const STOP_SEL = `
   s.check_in_remarks AS "checkInRemarks",
   s.check_in_client_name AS "checkInClientName", s.check_in_location_name AS "checkInLocationName",
   s.travel_km AS "travelKm", s.travel_minutes AS "travelMinutes", s.estimated_minutes AS "estimatedMinutes",
+  s.distance_source AS "distanceSource",
   s.check_out_at AS "checkOutAt", s.check_out_lat AS "checkOutLat", s.check_out_lng AS "checkOutLng",
   s.check_out_accuracy AS "checkOutAccuracy", s.check_out_work_progress AS "checkOutWorkProgress",
   s.check_out_remarks AS "checkOutRemarks",
@@ -78,6 +80,7 @@ const STOP_SEL = `
   fs.office_in_lat AS "sessionOfficeInLat", fs.office_in_lng AS "sessionOfficeInLng",
   fs.travel_km AS "sessionReturnTravelKm", fs.travel_minutes AS "sessionReturnTravelMinutes",
   fs.estimated_minutes AS "sessionReturnEstimatedMinutes",
+  fs.distance_source AS "sessionReturnDistanceSource",
   (s.id = (SELECT MIN(s2.id) FROM field_visit_stops s2 WHERE s2.session_id = s.session_id)) AS "isFirstStopOfSession",
   (s.id = (SELECT MAX(s2.id) FROM field_visit_stops s2 WHERE s2.session_id = s.session_id)) AS "isLastStopOfSession"
 `;
@@ -100,6 +103,20 @@ async function assertEligibleFieldVisitTask(taskId, userId, queryable = pool) {
     [taskId, userId]
   );
   return rows.length > 0;
+}
+
+// Real travelled distance for one leg, summed from the GPS breadcrumbs recorded
+// between two moments of this trip. null when there aren't enough usable fixes
+// (tracking off / denied / a very short leg) — callers then keep the
+// straight-line estimate.
+async function trackedLegKm(queryable, sessionId, fromAt, toAt) {
+  if (!fromAt) return null;
+  const { rows } = await queryable.query(
+    `SELECT lat, lng, accuracy, recorded_at AS "recordedAt" FROM field_visit_track_points
+     WHERE session_id=$1 AND recorded_at >= $2 AND recorded_at <= $3 ORDER BY recorded_at ASC`,
+    [sessionId, fromAt, toAt]
+  );
+  return trackDistanceKm(rows).km;
 }
 
 async function getActiveSessionFull(employeeId, queryable = pool) {
@@ -210,16 +227,19 @@ router.post('/stops/:id/check-in', async (req, res) => {
     if (fromLat != null && fromLng != null) {
       ({ km: travelKm, minutes: estimatedMinutes } = estimateBikeTrip(fromLat, fromLng, lat, lng));
     }
+    let distanceSource = 'estimated';
+    const tracked = await trackedLegKm(client, existing[0].session_id, fromAt, checkInAt);
+    if (tracked != null) { travelKm = tracked; distanceSource = 'tracked'; }
 
     await client.query('BEGIN');
     await client.query(
       `UPDATE field_visit_stops
        SET check_in_at=$1, check_in_lat=$2, check_in_lng=$3, check_in_accuracy=$4, check_in_device=$5,
            check_in_remarks=$6, check_in_client_name=$7, check_in_location_name=$8,
-           travel_km=$9, travel_minutes=$10, estimated_minutes=$11
-       WHERE id=$12`,
+           travel_km=$9, travel_minutes=$10, estimated_minutes=$11, distance_source=$12
+       WHERE id=$13`,
       [checkInAt, lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), remarks || null,
-       clientName || null, locationName || null, travelKm, travelMinutes, estimatedMinutes, id]
+       clientName || null, locationName || null, travelKm, travelMinutes, estimatedMinutes, distanceSource, id]
     );
     // Refresh the client's stored coordinates from this real GPS fix — future
     // reference for travel-time estimation, see the "Note" in the feature request.
@@ -381,17 +401,20 @@ router.post('/sessions/:id/office-in', async (req, res) => {
     if (fromLat != null && fromLng != null) {
       ({ km: travelKm, minutes: estimatedMinutes } = estimateBikeTrip(fromLat, fromLng, lat, lng));
     }
+    let distanceSource = 'estimated';
+    const tracked = await trackedLegKm(client, id, fromAt, officeInAt);
+    if (tracked != null) { travelKm = tracked; distanceSource = 'tracked'; }
 
     await client.query(
       `UPDATE field_visit_sessions
        SET office_in_at=$1, office_in_lat=$2, office_in_lng=$3, office_in_accuracy=$4, office_in_device=$5,
-           travel_km=$6, travel_minutes=$7, estimated_minutes=$8, status='completed'
-       WHERE id=$9`,
-      [officeInAt, lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), travelKm, travelMinutes, estimatedMinutes, id]
+           travel_km=$6, travel_minutes=$7, estimated_minutes=$8, distance_source=$9, status='completed'
+       WHERE id=$10`,
+      [officeInAt, lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), travelKm, travelMinutes, estimatedMinutes, distanceSource, id]
     );
     savePlaceLater('field_visit_sessions', 'office_in_place', id, lat, lng);
     rememberOfficeLocation(lat, lng);
-    res.json({ success: true, officeInAt, travelKm, travelMinutes, estimatedMinutes });
+    res.json({ success: true, officeInAt, travelKm, travelMinutes, estimatedMinutes, distanceSource });
   } catch (e) {
     res.status(500).json({ error: e.message });
   } finally { client.release(); }
@@ -413,6 +436,95 @@ router.get('/tasks/:taskId/stops', async (req, res) => {
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── Route tracking ───────────────────────────────────────────────────────────
+// GPS breadcrumbs are recorded ONLY while a field-visit trip is open (Office Out
+// -> Office In) — the apps start tracking at "Check Out from Office" and stop at
+// "Check In at Office". Points arrive in batches from the device; the trip's
+// real distance is summed from them at each Check In / Office In (see
+// trackedLegKm above). Points older than TRACK_RETENTION_DAYS are purged daily.
+const MAX_POINTS_PER_BATCH = 300;
+const TRACK_RETENTION_DAYS = 90;
+const POST_TRIP_GRACE_MS = 15 * 60 * 1000;   // a late flush right after Office In is still accepted
+
+router.post('/sessions/:id/track-points', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  const raw = Array.isArray(req.body?.points) ? req.body.points : null;
+  if (!raw) return res.status(400).json({ error: 'points array is required' });
+  if (raw.length > MAX_POINTS_PER_BATCH) return res.status(400).json({ error: `At most ${MAX_POINTS_PER_BATCH} points per request` });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, status, office_out_at AS "officeOutAt", office_in_at AS "officeInAt"
+       FROM field_visit_sessions WHERE id=$1 AND employee_id=$2`, [id, req.user.id]);
+    const sess = rows[0];
+    if (!sess) return res.status(404).json({ error: 'Field visit trip not found' });
+    const now = Date.now();
+    if (sess.status !== 'active' && !(sess.officeInAt && now - new Date(sess.officeInAt).getTime() <= POST_TRIP_GRACE_MS)) {
+      return res.status(409).json({ error: 'This trip is closed — tracking has stopped.' });
+    }
+    const minT = new Date(sess.officeOutAt).getTime() - 60 * 1000;
+    const maxT = (sess.officeInAt ? new Date(sess.officeInAt).getTime() + POST_TRIP_GRACE_MS : now + 2 * 60 * 1000);
+    const lat = [], lng = [], acc = [], spd = [], at = [];
+    for (const p of raw) {
+      const la = Number(p?.lat), lo = Number(p?.lng), t = new Date(p?.recordedAt).getTime();
+      if (!Number.isFinite(la) || !Number.isFinite(lo) || la < -90 || la > 90 || lo < -180 || lo > 180) continue;
+      if (!Number.isFinite(t) || t < minT || t > maxT) continue;
+      lat.push(la); lng.push(lo); at.push(new Date(t).toISOString());
+      acc.push(p.accuracy != null && Number.isFinite(Number(p.accuracy)) ? Number(p.accuracy) : null);
+      spd.push(p.speed != null && Number.isFinite(Number(p.speed)) ? Number(p.speed) : null);
+    }
+    let saved = 0;
+    if (at.length) {
+      const r = await pool.query(
+        `INSERT INTO field_visit_track_points (session_id, employee_id, recorded_at, lat, lng, accuracy, speed)
+         SELECT $1, $2, t, la, lo, ac, sp
+         FROM unnest($3::timestamptz[], $4::float8[], $5::float8[], $6::real[], $7::real[]) AS x(t, la, lo, ac, sp)
+         ON CONFLICT (session_id, recorded_at) DO NOTHING`,
+        [id, req.user.id, at, lat, lng, acc, spd]);
+      saved = r.rowCount;
+    }
+    res.json({ received: raw.length, accepted: at.length, saved });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Same audience as the Trip Log report: the trip's owner, admin/superAdmin,
+// and branchManager/departmentHead for staff in their own branch/department.
+async function canViewSession(user, sessionId) {
+  const { rows } = await pool.query(
+    `SELECT fs.employee_id AS "employeeId", eu.branch, eu.department
+     FROM field_visit_sessions fs JOIN users eu ON eu.id = fs.employee_id WHERE fs.id=$1`, [sessionId]);
+  const s = rows[0];
+  if (!s) return false;
+  const role = user.role || 'employee';
+  if (Number(s.employeeId) === Number(user.id)) return true;
+  if (role === 'admin' || role === 'superAdmin') return true;
+  if (role === 'branchManager' || role === 'departmentHead') {
+    const mine = ((role === 'branchManager' ? user.branch : user.department) || '').trim().toLowerCase();
+    const theirs = ((role === 'branchManager' ? s.branch : s.department) || '').trim().toLowerCase();
+    return !!mine && mine === theirs;
+  }
+  return false;
+}
+
+// The recorded path of one trip, oldest first — for drawing it on the map.
+router.get('/sessions/:id/track', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    if (!(await canViewSession(req.user, id))) return res.status(404).json({ error: 'Field visit trip not found' });
+    const { rows } = await pool.query(
+      `SELECT lat, lng, accuracy, recorded_at AS "recordedAt" FROM field_visit_track_points
+       WHERE session_id=$1 ORDER BY recorded_at ASC`, [id]);
+    res.json({ sessionId: id, points: rows, distanceKm: trackDistanceKm(rows).km });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Daily purge of old breadcrumbs (the trip's stored distances/times stay).
+setInterval(() => {
+  pool.query(`DELETE FROM field_visit_track_points WHERE recorded_at < NOW() - ($1 || ' days')::interval`, [String(TRACK_RETENTION_DAYS)])
+    .catch(() => {});
+}, 24 * 60 * 60 * 1000).unref();
 
 // Trip Log report — every trip (Office Out -> stops -> Office In) that STARTED
 // within a Nepal-calendar date range, with each stop's check-in/out, status,

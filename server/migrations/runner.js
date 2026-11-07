@@ -3384,6 +3384,42 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE field_visit_stops ADD COLUMN IF NOT EXISTS check_out_place TEXT`);
     },
   },
+  {
+    version    : 162,
+    description: 'duty_roster.double_duty: when TRUE a multi-shift roster row means ALL its shifts are worked on the same day (double duty) instead of rotating one per day. Additive, defaults FALSE (existing rotation rosters unchanged).',
+    up: async (client) => {
+      await client.query(`ALTER TABLE duty_roster ADD COLUMN IF NOT EXISTS double_duty BOOLEAN NOT NULL DEFAULT FALSE`);
+    },
+  },
+  {
+    version    : 163,
+    description: 'push_devices.punch_alerts: per-device switch for the attendance (punch) push alerts, so a user can mute them from the mobile app. Additive, defaults TRUE.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE push_devices ADD COLUMN IF NOT EXISTS punch_alerts BOOLEAN NOT NULL DEFAULT TRUE`);
+    },
+  },
+  {
+    version    : 164,
+    description: 'Field Visit route tracking: field_visit_track_points (GPS breadcrumbs recorded ONLY while a field-visit trip is open) + distance_source on stops/sessions (tracked = summed GPS path, estimated = straight-line x detour factor). Additive; existing rows stay "estimated".',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS field_visit_track_points (
+          id          BIGSERIAL PRIMARY KEY,
+          session_id  INTEGER NOT NULL REFERENCES field_visit_sessions(id) ON DELETE CASCADE,
+          employee_id INTEGER NOT NULL REFERENCES users(id),
+          recorded_at TIMESTAMPTZ NOT NULL,
+          lat         DOUBLE PRECISION NOT NULL,
+          lng         DOUBLE PRECISION NOT NULL,
+          accuracy    REAL,
+          speed       REAL,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`);
+      await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_fv_track_session_time ON field_visit_track_points(session_id, recorded_at)`);
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_fv_track_recorded ON field_visit_track_points(recorded_at)`);
+      await client.query(`ALTER TABLE field_visit_stops    ADD COLUMN IF NOT EXISTS distance_source VARCHAR(10) NOT NULL DEFAULT 'estimated'`);
+      await client.query(`ALTER TABLE field_visit_sessions ADD COLUMN IF NOT EXISTS distance_source VARCHAR(10) NOT NULL DEFAULT 'estimated'`);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

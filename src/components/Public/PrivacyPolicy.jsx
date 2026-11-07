@@ -18,7 +18,7 @@ export default function PrivacyPolicy() {
       <ul style={P}>
         <li><b>Account information:</b> name, username or email, and employee details your organization enters (department, designation, photo, phone).</li>
         <li><b>Attendance data:</b> check-in and check-out times, leave, office visit and late/early requests, tasks, messages and notes you submit.</li>
-        <li><b>Location:</b> precise location is read only when you use Online Attendance (check in / check out) or a field-visit journey, to confirm where the punch happened. It is not collected when you are not using these features.</li>
+        <li><b>Location:</b> precise location is read only when you use Online Attendance (check in / check out) or a field-visit journey, to confirm where the punch happened. During a field-visit journey the app also records your route (a location point roughly every 20 to 60 seconds) from the moment you check out of the office until you check in at the office again, to calculate travel time and distance; route points are visible to your organisation's authorised managers and are deleted after 90 days. It is not collected when you are not on a field-visit journey or using these features.</li>
         <li><b>Device and notification data:</b> a push notification token so we can send you approval and announcement alerts.</li>
         <li><b>Biometrics:</b> fingerprint / face sign-in is handled by your phone's operating system. We never receive or store your fingerprint or face data. If you enable it, your password is stored encrypted on your phone only.</li>
       </ul>

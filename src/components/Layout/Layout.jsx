@@ -12,6 +12,7 @@ import { OfficeVisitApplyProvider } from '../../context/OfficeVisitApplyContext.
 import { MissingAttendanceApplyProvider } from '../../context/MissingAttendanceApplyContext.jsx';
 import { ManualPostingApplyProvider } from '../../context/ManualPostingApplyContext.jsx';
 import { OnlineAttendanceApplyProvider } from '../../context/OnlineAttendanceApplyContext.jsx';
+import TripTrackerHost from '../Common/TripTrackerHost.jsx';
 import { AttendanceNotificationProvider } from '../Notifications/AttendanceToasts.jsx';
 import { ChatProvider } from '../../context/ChatContext.jsx';
 import ChatDock from '../Chat/ChatDock.jsx';
@@ -129,6 +130,8 @@ const Layout = ({ children }) => {
             <OnlineAttendanceApplyProvider>
               <AttendanceNotificationProvider>
                 <ChatProvider>
+                  {/* Field Visit route tracking — only records while a trip is open; shows a chip while on */}
+                  <TripTrackerHost {...(isMobileMode() ? { bottom: 76, left: 10 } : {})} />
                   {isMobileMode() ? (
                     <React.Suspense fallback={null}><MobileFrame>{children}</MobileFrame></React.Suspense>
                   ) : (

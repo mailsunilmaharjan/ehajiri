@@ -28,7 +28,7 @@ function readAppVersion() {
 }
 
 export const APP_VERSION = readAppVersion();
-export const DB_VERSION  = 161;
+export const DB_VERSION  = 164;
 
 /** Human-readable changelog shown in the UI */
 export const VERSION_HISTORY = [

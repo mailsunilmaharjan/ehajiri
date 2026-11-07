@@ -3,6 +3,7 @@ import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatNepalTime, getNepalTodayISO } from '../utils/dateUtils.js';
 import { Sheet, Spinner, useMT } from './kit.jsx';
+import { tripTracker, notifyTripChanged } from '../utils/tripTracker.js';
 
 /* Field Visit journey on the phone — same server flow and rules as the website's panel (server/routes/fieldVisit.js):
    Check out from Office → Check in at the client → Make Check out (remarks + status) → Next field visit, or Move to Office.
@@ -80,6 +81,8 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
     try {
       const c = await getLocation();     // a fresh fix at the moment of the tap
       const gps = { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, deviceInfo: deviceInfo() };
+      // Upload buffered GPS points first so the server sums the real route for the leg being closed.
+      if ((cp === 'site' && !activeStop?.checkInAt) || cp === 'check-in' || cp === 'office-in') await tripTracker.flush();
       if (cp === 'site') {
         if (!activeStop.checkInAt) {
           setSession(await api.post(`/field-visit/stops/${activeStop.id}/check-in`, { ...gps, remarks: f.remarks || null, clientName: f.client || null, locationName: loc.place || null }));
@@ -93,13 +96,14 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
         }
         onChanged?.(); return;
       }
-      if (cp === 'office-out') setSession(await api.post('/field-visit/session/start', { taskId: task.id, ...gps }));
+      if (cp === 'office-out') { setSession(await api.post('/field-visit/session/start', { taskId: task.id, ...gps })); notifyTripChanged(); }
       else if (cp === 'check-in') setSession(await api.post(`/field-visit/stops/${activeStop.id}/check-in`, { ...gps, remarks: f.remarks || null, clientName: f.client || null, locationName: f.place || loc.place || null }));
       else if (cp === 'check-out') setSession(await api.post(`/field-visit/stops/${activeStop.id}/check-out`, { ...gps, workProgress: f.status, remarks: f.remarks || null }));
       else if (cp === 'office-in') {
         const r = await api.post(`/field-visit/sessions/${session.id}/office-in`, gps);
-        setDone({ officeInAt: r.officeInAt, travelMinutes: r.travelMinutes, travelKm: r.travelKm, tripMinutes: mins(session.officeOutAt, r.officeInAt) });
+        setDone({ officeInAt: r.officeInAt, travelMinutes: r.travelMinutes, travelKm: r.travelKm, tracked: r.distanceSource === 'tracked', tripMinutes: mins(session.officeOutAt, r.officeInAt) });
         setSession(null);
+        notifyTripChanged();   // trip closed -> stop tracking
       }
       setCp(null); onChanged?.();
     } catch (e) { setErr(e?.message || mt('Failed')); } finally { setBusy(false); }
@@ -168,7 +172,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
       {done && (
         <div className="m-okbox" style={{ marginBottom: 8 }}>
           🏢 {mt('Back at office')} · {formatNepalTime(done.officeInAt)}<br />
-          {mt('Travel back')}: {dur(done.travelMinutes)}{done.travelKm != null ? ` · ${Number(done.travelKm).toFixed(1)} km` : ''} · {mt('Total trip')}: <b>{dur(done.tripMinutes)}</b>
+          {mt('Travel back')}: {dur(done.travelMinutes)}{done.travelKm != null ? ` · ${Number(done.travelKm).toFixed(1)} km${done.tracked ? ' (GPS)' : ' (est.)'}` : ''} · {mt('Total trip')}: <b>{dur(done.tripMinutes)}</b>
         </div>
       )}
       {body}
@@ -181,7 +185,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
             const travel = s.checkInAt ? (s.travelMinutes ?? mins(prevAt, s.checkInAt)) : null;
             return (
               <React.Fragment key={s.id}>
-                {s.checkInAt && <Gap text={`${mt('Travel')}: ${dur(travel)}${s.estimatedMinutes != null ? ` (${mt('est.')} ${s.estimatedMinutes}m)` : ''}${s.travelKm != null ? ` · ${Number(s.travelKm).toFixed(1)} km` : ''}`} />}
+                {s.checkInAt && <Gap text={`${mt('Travel')}: ${dur(travel)}${s.estimatedMinutes != null ? ` (${mt('est.')} ${s.estimatedMinutes}m)` : ''}${s.travelKm != null ? ` · ${Number(s.travelKm).toFixed(1)} km${s.distanceSource === 'tracked' ? ' (GPS)' : ' (est.)'}` : ''}`} />}
                 {s.checkInAt && <Where label={`${mt('Check in')} · ${s.checkInClientName || s.customerName || s.taskTitle}`} at={s.checkInAt} place={s.checkInPlace || s.checkInLocationName} lat={s.checkInLat} lng={s.checkInLng}
                   extra={s.checkInRemarks && <div className="m-jsub">“{s.checkInRemarks}”</div>} />}
                 {s.checkInAt && <Gap text={`${mt('Time here')}: ${dur(mins(s.checkInAt, s.checkOutAt || now))}${s.checkOutAt ? '' : ' …'}`} />}
@@ -220,7 +224,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
           {loc.status === 'ready' && <>✅ {mt('Location verified')}{loc.place ? ` · ${loc.place}` : ''}<div className="m-jsub">{Number(loc.lat).toFixed(5)}, {Number(loc.lng).toFixed(5)} · ±{Math.round(loc.accuracy || 0)} m</div></>}
           {loc.status === 'error' && <>📍 {loc.error} <button className="m-link" onClick={locate}>{mt('Retry')}</button></>}
         </div>
-        {cp === 'office-out' && <div className="m-muted" style={{ marginBottom: 8 }}>{mt('Your office location and the time are recorded now.')}</div>}
+        {cp === 'office-out' && <div className="m-muted" style={{ marginBottom: 8 }}>{mt('Your office location and the time are recorded now.')}<br />📡 {mt('Your route is recorded while this field visit trip is open — until you check in at the office.')}</div>}
         {cp === 'site' && (<>
           <div className="m-field"><label>{mt('Check in Time')}</label>
             <input className="m-input m-locked" readOnly value={formatNepalTime(siteIn ? activeStop.checkInAt : new Date(now).toISOString())} />

@@ -4,6 +4,7 @@ import SaveButton from '../Common/SaveButton.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { formatNepalTime, getNepalTodayISO } from '../../utils/dateUtils.js';
 import { getCurrentLocation, deviceInfo, estimateBikeTrip } from '../../utils/geoUtils.js';
+import { tripTracker, notifyTripChanged } from '../../utils/tripTracker.js';
 
 /* Field Visit journey panel — replaces Followup History/Description in the
    side panel on the dedicated Field Visit page (Staff > Field Visit) only;
@@ -49,9 +50,9 @@ const pinLink = (lat, lng) => `https://www.google.com/maps?q=${lat},${lng}`;
 // Distance/duration readout shared by the "just checked in" and "back at
 // office" moments — actual (from real timestamps/GPS) next to the pre-visit
 // bike-speed estimate, since the gap between them is the useful part.
-const TravelStat = ({ km, minutes, estimatedMinutes, mapHref }) => (
+const TravelStat = ({ km, minutes, estimatedMinutes, mapHref, tracked }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11.5, color: '#6b7280' }}>
-    <span>🚗 {km != null ? `${km.toFixed(1)} km` : '—'}</span>
+    <span>🚗 {km != null ? `${km.toFixed(1)} km` : '—'}{km != null && (tracked ? ' (GPS route)' : ' (est.)')}</span>
     <span>·</span>
     <span>Taken {minutes != null ? `${minutes}m` : '—'}{estimatedMinutes != null ? ` (est. ${estimatedMinutes}m)` : ''}</span>
     {mapHref && <a href={mapHref} target="_blank" rel="noopener noreferrer" style={{ color: '#1a56db', fontWeight: 600, textDecoration: 'none' }}>🗺️ Map</a>}
@@ -110,12 +111,16 @@ const FieldVisitJourneyPanel = ({ task, tasks, currentUser, showToast }) => {
       if (checkpoint === 'check-in') { payload.clientName = cpClientName || null; payload.locationName = cpLocationName || null; }
       if (checkpoint === 'check-out') payload.workProgress = cpStatus;
 
+      // Upload any buffered GPS points first so the server can sum the real route for this leg.
+      if (checkpoint === 'check-in' || checkpoint === 'office-in') await tripTracker.flush();
+
       if (checkpoint === 'office-in') {
         const result = await api.post(`/field-visit/sessions/${session.id}/office-in`, payload);
         setSession(null);
+        notifyTripChanged();   // trip closed -> stop tracking
         showToast?.(
           result.travelKm != null
-            ? `Back at office — ${result.travelKm.toFixed(1)} km · ${result.travelMinutes}m from your last stop`
+            ? `Back at office — ${result.travelKm.toFixed(1)} km${result.distanceSource === 'tracked' ? ' (GPS route)' : ' (est.)'} · ${result.travelMinutes}m from your last stop`
             : 'Back at office — trip complete'
         );
       } else {
@@ -136,6 +141,7 @@ const FieldVisitJourneyPanel = ({ task, tasks, currentUser, showToast }) => {
       try { const c = await getCurrentLocation(); fix = { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, deviceInfo: deviceInfo() }; } catch { /* no GPS */ }
       const result = await api.post('/field-visit/session/start', { taskId: task.id, ...fix });
       setSession(result);
+      notifyTripChanged();   // trip opened -> start recording the route
       showToast?.('Checked out from office');
     } catch (e) { showToast?.(e.message || 'Failed to check out from office', 'error'); }
     finally { setStarting(false); }
@@ -225,6 +231,9 @@ const FieldVisitJourneyPanel = ({ task, tasks, currentUser, showToast }) => {
             📍 Estimated from office: ~{tripEstimate.km.toFixed(1)} km · ~{tripEstimate.minutes} min by bike
           </span>
         )}
+        <span style={{ fontSize: 11.5, color: '#6b7280' }}>
+          📡 Your location is recorded while this field visit trip is open — until you check in at the office.
+        </span>
         {actionBtn(starting ? 'Checking Out…' : '🚗 Check Out from Office', startTrip, '#1a56db', starting)}
       </>
     );
@@ -256,7 +265,7 @@ const FieldVisitJourneyPanel = ({ task, tasks, currentUser, showToast }) => {
           const prevStop = stops.length > 1 ? stops[stops.length - 2] : null;
           const fromLoc = prevStop ? { lat: prevStop.checkOutLat, lng: prevStop.checkOutLng } : officeLoc;
           return (
-            <TravelStat km={activeStop.travelKm} minutes={activeStop.travelMinutes} estimatedMinutes={activeStop.estimatedMinutes}
+            <TravelStat km={activeStop.travelKm} minutes={activeStop.travelMinutes} estimatedMinutes={activeStop.estimatedMinutes} tracked={activeStop.distanceSource === 'tracked'}
               mapHref={fromLoc ? mapsLink(fromLoc.lat, fromLoc.lng, activeStop.checkInLat, activeStop.checkInLng) : null} />
           );
         })()}

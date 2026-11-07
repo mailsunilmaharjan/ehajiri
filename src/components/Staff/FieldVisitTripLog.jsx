@@ -11,6 +11,7 @@ import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import { formatNepalTime, getNepalTodayISO, toNepalISO } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
 import { CHECKOUT_STATUS_LABEL } from './FieldVisitJourneyPanel.jsx';
+import TripRouteMap from './TripRouteMap.jsx';
 
 /**
  * Field Visit Trip Log — one complete log of every trip in a date range:
@@ -26,9 +27,9 @@ const dur = (mins) => {
 };
 const minsBetween = (a, b) => (a && b ? Math.max(0, Math.round((new Date(b) - new Date(a)) / 60000)) : null);
 const kmText = (km) => (km != null ? `${Number(km).toFixed(1)} km` : '—');
-const travelText = (min, km, est) => {
+const travelText = (min, km, est, tracked) => {
   if (min == null && km == null) return '—';
-  return `${dur(min)}${km != null ? ` · ${kmText(km)}` : ''}${est != null ? ` (est. ${dur(est)})` : ''}`;
+  return `${dur(min)}${km != null ? ` · ${kmText(km)} ${tracked ? '(GPS route)' : '(est.)'}` : ''}${est != null && !tracked ? ` · est. ${dur(est)}` : ''}`;
 };
 
 const TH = { padding: '7px 8px', background: '#efefef', color: '#374151', fontSize: 12, fontWeight: 700,
@@ -50,6 +51,7 @@ const FieldVisitTripLog = ({ onClose }) => {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
+  const [routeSession, setRouteSession] = useState(null);   // trip whose route popup is open
 
   useEffect(() => {
     if (!from || !to) return;
@@ -69,7 +71,7 @@ const FieldVisitTripLog = ({ onClose }) => {
     (data?.sessions || []).forEach(sess => {
       trips += 1;
       const date = fd(toNepalISO(sess.officeOutAt));
-      out.push({ kind: 'trip', staff: sess.employeeName, date, visit: `Office Out · ${sess.officeOutPlace || '—'}`,
+      out.push({ kind: 'trip', session: sess, staff: sess.employeeName, date, visit: `Office Out · ${sess.officeOutPlace || '—'}`,
         checkIn: formatNepalTime(sess.officeOutAt), checkOut: '', stayed: '', travel: '', status: '', remarks: '' });
       sess.stops.forEach(s => {
         sn += 1;
@@ -82,7 +84,7 @@ const FieldVisitTripLog = ({ onClose }) => {
           checkIn: s.checkInAt ? `${formatNepalTime(s.checkInAt)}${s.checkInPlace ? ` · ${s.checkInPlace}` : ''}` : '—',
           checkOut: s.checkOutAt ? `${formatNepalTime(s.checkOutAt)}${s.checkOutPlace ? ` · ${s.checkOutPlace}` : ''}` : '—',
           stayed: stayMin != null ? dur(stayMin) : '—',
-          travel: travelText(s.travelMinutes, s.travelKm, s.estimatedMinutes),
+          travel: travelText(s.travelMinutes, s.travelKm, s.estimatedMinutes, s.distanceSource === 'tracked'),
           status: s.checkOutWorkProgress ? (CHECKOUT_STATUS_LABEL[s.checkOutWorkProgress] || s.checkOutWorkProgress) : (s.checkInAt ? 'In progress' : 'Not started'),
           remarks: [s.checkInRemarks, s.checkOutRemarks].filter(Boolean).join(' | ') });
       });
@@ -92,7 +94,7 @@ const FieldVisitTripLog = ({ onClose }) => {
         out.push({ kind: 'office', staff: sess.employeeName, date, visit: `Back at Office · ${sess.officeInPlace || '—'}`,
           checkIn: formatNepalTime(sess.officeInAt), checkOut: '',
           stayed: `Total trip ${dur(minsBetween(sess.officeOutAt, sess.officeInAt))}`,
-          travel: travelText(sess.travelMinutes, sess.travelKm, sess.estimatedMinutes), status: '', remarks: '' });
+          travel: travelText(sess.travelMinutes, sess.travelKm, sess.estimatedMinutes, sess.distanceSource === 'tracked'), status: '', remarks: '' });
       } else {
         out.push({ kind: 'office', staff: sess.employeeName, date, visit: 'Not yet back at Office (trip open)',
           checkIn: '', checkOut: '', stayed: '', travel: '', status: '', remarks: '' });
@@ -101,9 +103,9 @@ const FieldVisitTripLog = ({ onClose }) => {
     return { rows: out, totals: { trips, stops: sn, km, travel, stay } };
   }, [data, fd]);
 
-  const HEAD = ['SN', 'Staff', 'Date', 'Visit / Location', 'Check In', 'Check Out', 'Stayed / Trip', 'Travel (time · est. km)', 'Task Status', 'Remarks'];
+  const HEAD = ['SN', 'Staff', 'Date', 'Visit / Location', 'Check In', 'Check Out', 'Stayed / Trip', 'Travel (time · km)', 'Task Status', 'Remarks'];
   const cells = (r) => [r.sn ?? '', r.staff, r.date, r.visit, r.checkIn, r.checkOut, r.stayed, r.travel, r.status, r.remarks];
-  const summaryText = `Trips: ${totals.trips} · Visits: ${totals.stops} · Total travel: ${dur(totals.travel)} · Est. distance: ${totals.km.toFixed(1)} km · Time at clients: ${dur(totals.stay)}`;
+  const summaryText = `Trips: ${totals.trips} · Visits: ${totals.stops} · Total travel: ${dur(totals.travel)} · Distance: ${totals.km.toFixed(1)} km · Time at clients: ${dur(totals.stay)}`;
   const periodText = `${fd(from)} → ${fd(to)}`;
 
   const doPrint = () => {
@@ -181,7 +183,17 @@ const FieldVisitTripLog = ({ onClose }) => {
                     <tbody>
                       {rows.map((r, i) => (
                         <tr key={i} style={{ background: r.kind === 'trip' ? '#f1f5f9' : r.kind === 'office' ? '#f9fafb' : '#fff', fontWeight: r.kind === 'stop' ? 400 : 700 }}>
-                          {cells(r).map((c, j) => <td key={j} style={{ ...TD, whiteSpace: j === 9 ? 'pre-wrap' : 'normal' }}>{c}</td>)}
+                          {cells(r).map((c, j) => (
+                            <td key={j} style={{ ...TD, whiteSpace: j === 9 ? 'pre-wrap' : 'normal' }}>
+                              {c}
+                              {j === 3 && r.kind === 'trip' && (
+                                <button onClick={() => setRouteSession(r.session)} title="Show the recorded route of this trip"
+                                  style={{ marginLeft: 8, height: 22, padding: '0 8px', border: '1px solid #bfdbfe', background: '#eff6ff', color: '#1a56db', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                                  🗺️ Route
+                                </button>
+                              )}
+                            </td>
+                          ))}
                         </tr>
                       ))}
                     </tbody>
@@ -191,6 +203,7 @@ const FieldVisitTripLog = ({ onClose }) => {
             )}
         </div>
       </div>
+      {routeSession && <TripRouteMap session={routeSession} onClose={() => setRouteSession(null)} />}
     </div>
   );
 };
