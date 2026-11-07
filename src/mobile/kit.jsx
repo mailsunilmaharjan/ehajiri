@@ -63,7 +63,7 @@ export function Sheet({ title, onClose, children, footer }) {
 }
 
 export const Empty = ({ icon = '📭', text }) => <div className="m-empty"><div className="m-empty-ico">{icon}</div>{text}</div>;
-export const Spinner = ({ dark }) => <span className={`m-spin${dark ? ' dark' : ''}`} />;
+export const Spinner = ({ dark }) => (dark ? <img className="m-brandspin" src="/icons/ehajiri-logo.png" alt="eHajiri" /> : <span className="m-spin" />);
 
 export const STATUS_CHIP = { pending: ['warn', 'Pending'], recommended: ['info', 'Recommended'], approved: ['ok', 'Approved'], rejected: ['bad', 'Rejected'], cancelled: ['gray', 'Cancelled'] };
 export const StatusChip = ({ status }) => { const [c, l] = STATUS_CHIP[status] || ['gray', status]; return <span className={`m-chip ${c}`}>{l}</span>; };

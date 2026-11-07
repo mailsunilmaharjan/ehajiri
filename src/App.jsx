@@ -1,4 +1,5 @@
 import React, { lazy, Suspense } from 'react';
+import LoadingIndicator from './components/Common/LoadingIndicator.jsx';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import { ModuleFlagsProvider, useModuleFlags } from './context/ModuleFlagsContext.jsx';
@@ -112,7 +113,7 @@ const RecoApprovalPage               = lazy(() => import('./components/Users/Rec
 const RecoApproverGate = ({ children }) => {
   const { currentUser } = useAuth();
   const { assignments, loaded } = useRecoApproval();
-  if (!loaded) return <Layout><div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div></Layout>;
+  if (!loaded) return <Layout><LoadingIndicator label="Loading…" /></Layout>;
   const isConfiguredRecoOrApprover = Object.entries(assignments || {}).some(([key, cfg]) => {
     if (key === '_settings') return false;
     const reco     = Array.isArray(cfg?.reco)     ? cfg.reco     : (cfg?.reco     != null ? [cfg.reco]     : []);
@@ -123,7 +124,7 @@ const RecoApproverGate = ({ children }) => {
   // children here can be a React.lazy() page (LeaveApproval/OfficeVisitApproval/
   // ManualPostings, the only allowRecoApprover routes) — needs its own Suspense
   // boundary since this return bypasses Protected's own one below.
-  return <Suspense fallback={<div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>}>{children}</Suspense>;
+  return <Suspense fallback={<LoadingIndicator label="Loading…" />}>{children}</Suspense>;
 };
 
 /*
@@ -176,7 +177,7 @@ const Protected = ({
   if (requireReports && !canViewReports) return <Navigate to="/dashboard" replace />;
   if (!hasPageAccess) return <Navigate to="/dashboard" replace />;
   if (moduleKey) {
-    if (moduleFlagsLoading) return <Layout><div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div></Layout>;
+    if (moduleFlagsLoading) return <Layout><LoadingIndicator label="Loading…" /></Layout>;
     if (!moduleFlags[`${moduleKey}Enabled`]) {
       return (
         <Layout>
@@ -196,7 +197,7 @@ const Protected = ({
   }
   return (
     <Layout>
-      <Suspense fallback={<div style={{ padding: 60, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>}>
+      <Suspense fallback={<LoadingIndicator label="Loading…" />}>
         {children}
       </Suspense>
     </Layout>

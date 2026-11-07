@@ -705,3 +705,7 @@ html { -webkit-text-size-adjust: 100%; }
 .m-task .m-drag { flex: none; width: 40px; align-self: stretch; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #94a3b8; touch-action: none; cursor: grab; -webkit-user-select: none; user-select: none; }
 .m-task.m-dragging { box-shadow: 0 8px 24px rgba(26,86,219,.28); border-color: #6f9bf5; transform: scale(1.015); position: relative; z-index: 5; }
 .m-pill.ok { background: #d1fae5; color: #065f46; }
+
+/* page-level "loading / processing" mark = the eHajiri logo, pulsing */
+.m-brandspin { height: 34px; width: auto; display: block; margin: 0 auto; animation: m-brandpulse 1.3s ease-in-out infinite; }
+@keyframes m-brandpulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(1.07); } }
