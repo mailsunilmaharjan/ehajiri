@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLanguage } from '../context/LanguageContext.jsx';
 
 /* Shared pieces for the phone screens: icons, bottom sheet, labels in English / नेपाली. */
@@ -48,7 +49,8 @@ export function Sheet({ title, onClose, children, footer }) {
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
   }, [onClose]);
-  return (
+  // Drawn on <body> like the pick lists: inside .m-app the sheet can end up under the tab bar on iPhone Safari (the scroll area makes its own layer), hiding Save / Cancel.
+  return createPortal(
     <div className="m-sheet-back" onClick={onClose} style={vv ? { top: vv.top, bottom: 'auto', height: vv.height } : undefined}>
       <div className="m-sheet" onClick={e => e.stopPropagation()} role="dialog" aria-label={title} style={vv ? { maxHeight: vv.height - 6 } : undefined}>
         <div className="m-sheet-grab" />
@@ -57,8 +59,7 @@ export function Sheet({ title, onClose, children, footer }) {
         <div className="m-sheet-body">{children}</div>
         {footer && <div className="m-sheet-foot">{footer}</div>}
       </div>
-    </div>
-  );
+    </div>, document.body);
 }
 
 export const Empty = ({ icon = '📭', text }) => <div className="m-empty"><div className="m-empty-ico">{icon}</div>{text}</div>;
@@ -84,7 +85,7 @@ const NP = {
   'Basic': 'आधारभूत', 'Access': 'पहुँच', 'Next': 'अर्को', 'Back': 'पछाडि', 'Name': 'नाम', 'Login': 'लगइन',
   'Sign in to continue': 'जारी राख्न साइन इन गर्नुहोस्', 'or': 'वा', 'Enter username or email': 'युजरनेम वा इमेल लेख्नुहोस्', 'Enter password': 'पासवर्ड लेख्नुहोस्',
   'Fingerprint / Face': 'फिंगरप्रिन्ट / अनुहार',
-  'Seen by': 'हेर्नुभयो', 'React': 'प्रतिक्रिया', 'Nobody yet': 'अहिलेसम्म कसैले छैन', 'Journey': 'यात्रा', 'You are at the office': 'तपाईं कार्यालयमा हुनुहुन्छ', 'Check out from Office': 'कार्यालयबाट चेक आउट', 'Heading here': 'यहाँ जाँदै', 'Left office at': 'कार्यालय छोडेको', 'ago': 'अघि', 'Make Check out': 'चेक आउट गर्नुहोस्', 'Time here': 'यहाँ बसेको समय', 'Visit finished': 'भ्रमण सकियो', 'Next field visit': 'अर्को फिल्ड भिजिट', 'Move to Office': 'कार्यालय फर्कनुहोस्', 'Move to Office instead': 'बरु कार्यालय फर्कनुहोस्', 'Head here next': 'अर्को यही जाऊँ', 'You just finished a visit': 'तपाईंले भ्रमण सक्नुभयो', 'You are on another field visit': 'तपाईं अर्को फिल्ड भिजिटमा हुनुहुन्छ', 'Open that visit': 'त्यो भ्रमण खोल्नुहोस्', 'Location is not match': 'लोकेसन मिलेन', 'you are about': 'तपाईं करिब', 'away from where you checked in': 'चेक इन गरेको ठाउँभन्दा टाढा हुनुहुन्छ', 'Head here instead': 'बरु यहाँ जाऊँ', 'Cancel this trip': 'यात्रा रद्द गर्नुहोस्', 'Cancel this trip? Nothing was checked in, so nothing is lost.': 'यात्रा रद्द गर्ने? कुनै चेक इन भएको छैन, केही हराउँदैन।', 'Back at office': 'कार्यालयमा फर्कियो', 'Travel back': 'फर्कने यात्रा', 'Total trip': 'कुल यात्रा', 'Travel': 'यात्रा', 'est.': 'अनुमान', 'Office Out': 'कार्यालयबाट बाहिर', 'Check out': 'चेक आउट', 'Client Office Name': 'ग्राहक कार्यालयको नाम', 'Location Name': 'स्थानको नाम', 'Status': 'स्थिति', 'Work Done': 'काम सकियो', 'Pending for Next Day': 'भोलिका लागि बाँकी', 'Getting your location…': 'तपाईंको स्थान खोज्दै…', 'Location ready': 'स्थान तयार', 'Retry': 'फेरि प्रयास', 'Your office location and the time are recorded now.': 'तपाईंको कार्यालयको स्थान र समय अहिले रेकर्ड हुन्छ।',
+  'Seen by': 'हेर्नुभयो', 'React': 'प्रतिक्रिया', 'Nobody yet': 'अहिलेसम्म कसैले छैन', 'Journey': 'यात्रा', 'You are at the office': 'तपाईं कार्यालयमा हुनुहुन्छ', 'Check out from Office': 'कार्यालयबाट चेक आउट', 'Heading here': 'यहाँ जाँदै', 'Left office at': 'कार्यालय छोडेको', 'ago': 'अघि', 'Make Check out': 'चेक आउट गर्नुहोस्', 'Time here': 'यहाँ बसेको समय', 'Visit finished': 'भ्रमण सकियो', 'Next field visit': 'अर्को फिल्ड भिजिट', 'Move to Office': 'कार्यालय फर्कनुहोस्', 'Move to Office instead': 'बरु कार्यालय फर्कनुहोस्', 'Head here next': 'अर्को यही जाऊँ', 'You just finished a visit': 'तपाईंले भ्रमण सक्नुभयो', 'You are on another field visit': 'तपाईं अर्को फिल्ड भिजिटमा हुनुहुन्छ', 'Open that visit': 'त्यो भ्रमण खोल्नुहोस्', 'Location is not match': 'लोकेसन मिलेन', 'you are about': 'तपाईं करिब', 'away from where you checked in': 'चेक इन गरेको ठाउँभन्दा टाढा हुनुहुन्छ', 'Check out from Office': 'कार्यालयबाट चेक आउट', 'Check in at Office': 'कार्यालयमा चेक इन', 'Trip in progress': 'यात्रा जारी छ', 'Today’s Journey': 'आजको यात्रा', 'on the way': 'बाटोमा', 'Office In': 'कार्यालयमा फर्कियो', 'Not reached yet': 'अझै पुगेको छैन', 'Select a field visit first': 'पहिले फिल्ड भिजिट छान्नुहोस्', 'Go to which field visit first?': 'पहिले कुन फिल्ड भिजिटमा जाने?', 'No field visit is due today': 'आज कुनै फिल्ड भिजिट बाँकी छैन', 'Check out from your current visit first': 'पहिले हालको भिजिटबाट चेक आउट गर्नुहोस्', 'Finish the trip with Check in at Office': 'कार्यालयमा चेक इन गरेर यात्रा सक्नुहोस्', 'Head here instead': 'बरु यहाँ जाऊँ', 'Cancel this trip': 'यात्रा रद्द गर्नुहोस्', 'Cancel this trip? Nothing was checked in, so nothing is lost.': 'यात्रा रद्द गर्ने? कुनै चेक इन भएको छैन, केही हराउँदैन।', 'Back at office': 'कार्यालयमा फर्कियो', 'Travel back': 'फर्कने यात्रा', 'Total trip': 'कुल यात्रा', 'Travel': 'यात्रा', 'est.': 'अनुमान', 'Office Out': 'कार्यालयबाट बाहिर', 'Check out': 'चेक आउट', 'Client Office Name': 'ग्राहक कार्यालयको नाम', 'Location Name': 'स्थानको नाम', 'Status': 'स्थिति', 'Work Done': 'काम सकियो', 'Pending for Next Day': 'भोलिका लागि बाँकी', 'Getting your location…': 'तपाईंको स्थान खोज्दै…', 'Location ready': 'स्थान तयार', 'Retry': 'फेरि प्रयास', 'Your office location and the time are recorded now.': 'तपाईंको कार्यालयको स्थान र समय अहिले रेकर्ड हुन्छ।',
   'Duty Roster': 'ड्युटी रोस्टर', 'No duty roster assigned': 'कुनै ड्युटी रोस्टर तोकिएको छैन', 'Current': 'हालको', 'Off days': 'बिदा दिन',
   'Approvals': 'स्वीकृतिहरू', 'Recommend, approve or reject requests': 'सिफारिस, स्वीकृत वा अस्वीकृत गर्नुहोस्', 'For recommendation': 'सिफारिसका लागि', 'For approval': 'स्वीकृतिका लागि',
   'Overtime': 'ओभरटाइम', 'Remarks': 'टिप्पणी', 'optional': 'ऐच्छिक', 'Recommended': 'सिफारिस गरियो', 'Approved': 'स्वीकृत भयो', 'Rejected': 'अस्वीकृत भयो', 'Reject': 'अस्वीकृत',

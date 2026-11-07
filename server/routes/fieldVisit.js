@@ -600,13 +600,13 @@ router.get('/report', async (req, res) => {
     } else if (role === 'branchManager' || role === 'departmentHead') {
       const col = role === 'branchManager' ? 'branch' : 'department';
       const val = ((role === 'branchManager' ? me.branch : me.department) || '').trim();
-      if (val) { params.push(val); where += ` AND (fs.employee_id = ${Number(me.id)} OR LOWER(TRIM(eu.${col})) = LOWER(${params.length}))`; }
+      if (val) { params.push(val); where += ` AND (fs.employee_id = ${Number(me.id)} OR LOWER(TRIM(eu.${col})) = LOWER($${params.length}))`; }
       else where += ` AND fs.employee_id = ${Number(me.id)}`;
     } else {
       where += ` AND fs.employee_id = ${Number(me.id)}`;
     }
     const wanted = parseInt(req.query.employeeId);
-    if (Number.isInteger(wanted)) { params.push(wanted); where += ` AND fs.employee_id = ${params.length}`; }
+    if (Number.isInteger(wanted)) { params.push(wanted); where += ` AND fs.employee_id = $${params.length}`; }
 
     const { rows: sessions } = await pool.query(
       `SELECT ${SESSION_SEL}, eu.full_name AS "employeeName"

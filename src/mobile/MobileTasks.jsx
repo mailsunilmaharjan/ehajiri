@@ -7,6 +7,7 @@ import useDateFormat from '../hooks/useDateFormat.js';
 import Avatar from '../components/Common/Avatar.jsx';
 import { getNepalTodayISO, formatNepalTime } from '../utils/dateUtils.js';
 import Journey from './MobileJourney.jsx';
+import TripBar from './MobileTripBar.jsx';
 import { useNotifications } from '../components/Notifications/AttendanceToasts.jsx';
 import { Empty, Icon, Sheet, Spinner, useMT } from './kit.jsx';
 import { DateField } from './fields.jsx';
@@ -297,19 +298,7 @@ export default function MobileTasks({ fieldVisitOnly = false }) {
     .filter(t => !q.trim() || `${t.title} ${t.customerName || ''} ${t.personName || ''}`.toLowerCase().includes(q.trim().toLowerCase()));
   const current = rows?.find(t => t.id === open) || null;
 
-  return (
-    <div style={{ padding: 14, paddingBottom: 90 }}>
-      <div className="m-seg m-seg4" style={{ marginBottom: 10 }}>
-        {[['task', 'Tasks'], ['visit', 'Field Visit']].map(([k, l]) => <button key={k} className={seg === k ? 'on' : ''} onClick={() => setSeg(k)}>{mt(l)}{unseen(k) > 0 && <i className="m-seg-n">{unseen(k)}</i>}</button>)}
-      </div>
-      <input className="m-input" placeholder={`🔍 ${mt('Search')}`} value={q} onChange={e => setQ(e.target.value)} style={{ marginBottom: 10 }} />
-      <div className="m-chipbar">{[['open', 'Open'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => <button key={k} className={flt === k ? 'on' : ''} onClick={() => setFlt(k)}>{mt(l)}</button>)}
-        <button onClick={() => { setRows(null); load(); }} aria-label="Refresh">↻</button></div>
-
-      {err && <div className="m-err">{err}</div>}
-      {rows === null && <div className="m-empty"><Spinner dark /></div>}
-      {rows && list.length === 0 && !err && <div className="m-card"><Empty icon={seg === 'visit' ? '🚗' : '✅'} text={mt('Nothing here yet')} /></div>}
-      {list.map(t => {
+  const listJsx = list.map(t => {
         const od = t.dueDate && dOnly(t.dueDate) < today && !['completed', 'cancelled'].includes(t.status);
         return (
           <button key={t.id} className={`m-task${t.hasUnreadNotification ? ' m-blink' : ''}`} onClick={() => setOpen(t.id)}>
@@ -327,7 +316,21 @@ export default function MobileTasks({ fieldVisitOnly = false }) {
             {t.hasUnreadNotification && <span className="m-unread-dot" />}
           </button>
         );
-      })}
+      });
+
+  return (
+    <div style={{ padding: 14, paddingBottom: 90 }}>
+      <div className="m-seg m-seg4" style={{ marginBottom: 10 }}>
+        {[['task', 'Tasks'], ['visit', 'Field Visit']].map(([k, l]) => <button key={k} className={seg === k ? 'on' : ''} onClick={() => setSeg(k)}>{mt(l)}{unseen(k) > 0 && <i className="m-seg-n">{unseen(k)}</i>}</button>)}
+      </div>
+      <input className="m-input" placeholder={`🔍 ${mt('Search')}`} value={q} onChange={e => setQ(e.target.value)} style={{ marginBottom: 10 }} />
+      <div className="m-chipbar">{[['open', 'Open'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => <button key={k} className={flt === k ? 'on' : ''} onClick={() => setFlt(k)}>{mt(l)}</button>)}
+        <button onClick={() => { setRows(null); load(); }} aria-label="Refresh">↻</button></div>
+
+      {err && <div className="m-err">{err}</div>}
+      {rows === null && <div className="m-empty"><Spinner dark /></div>}
+      {rows && list.length === 0 && !err && <div className="m-card"><Empty icon={seg === 'visit' ? '🚗' : '✅'} text={mt('Nothing here yet')} /></div>}
+      {seg === 'visit' ? <TripBar tasks={rows} onOpenTask={(id) => { load(); setOpen(id); }} onChanged={load}>{listJsx}</TripBar> : listJsx}
 
       <button className="m-addfab" onClick={() => setEdit({})} aria-label={mt('New Task')}>＋</button>
 

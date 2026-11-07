@@ -310,13 +310,17 @@ html.mobile-mode .alert { border-radius: 12px; }
 .m-pill.bad { background: #fee2e2; color: #991b1b; }
 
 /* Pop-ups drawn on <body> (calendar, pick lists, update prompt) sit outside .m-app, so give them the same colours and font. */
-html.mobile-mode, .m-pick-back, .m-cal-back {
+html.mobile-mode, .m-pick-back, .m-cal-back, .m-sheet-back {
   --m-primary: #1a56db; --m-primary-dark: #1341a8; --m-primary-soft: #e8f0fe;
   --m-ok: #059669; --m-ok-soft: #d1fae5; --m-warn: #d97706; --m-warn-soft: #fef3c7;
   --m-bad: #dc2626; --m-bad-soft: #fee2e2; --m-info: #2563eb; --m-info-soft: #dbeafe;
   --m-ink: #111827; --m-sub: #6b7280; --m-line: #e5e7eb; --m-bg: #f3f5f9; --m-card: #fff;
   --m-top: env(safe-area-inset-top, 0px); --m-bottom: env(safe-area-inset-bottom, 0px);
 }
+.m-sheet-back { font-family: 'Noto Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 15px; line-height: 1.4; color: var(--m-ink); user-select: none; -webkit-user-select: none; }
+.m-sheet-back *, .m-sheet-back *::before, .m-sheet-back *::after { box-sizing: border-box; }
+.m-sheet-back input, .m-sheet-back textarea, .m-sheet-back select { user-select: text; -webkit-user-select: text; font-family: inherit; }
+.m-sheet-back button { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .m-pick-back, .m-cal-back { font-family: 'Noto Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 15px; line-height: 1.4; color: var(--m-ink); user-select: none; -webkit-user-select: none; }
 .m-pick-back *, .m-cal-back * { box-sizing: border-box; }
 .m-pick-back .m-input { user-select: text; -webkit-user-select: text; }
