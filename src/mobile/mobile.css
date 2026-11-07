@@ -105,7 +105,7 @@
 
 /* ── bottom sheet ── */
 .m-sheet-back { position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 2000; display: flex; align-items: flex-end; animation: m-fade .18s ease; }
-.m-sheet { width: 100%; max-height: 88vh; background: #fff; border-radius: 22px 22px 0 0; display: flex; flex-direction: column; animation: m-up .22s cubic-bezier(.2,.8,.2,1); padding-bottom: var(--m-bottom); }
+.m-sheet { width: 100%; max-height: 88vh; max-height: 88dvh; background: #fff; border-radius: 22px 22px 0 0; display: flex; flex-direction: column; animation: m-up .22s cubic-bezier(.2,.8,.2,1); padding-bottom: var(--m-bottom); }
 .m-sheet-grab { width: 42px; height: 5px; border-radius: 3px; background: #d1d5db; margin: 8px auto 4px; flex: none; }
 .m-sheet-head { padding: 6px 18px 10px; font-size: 18px; font-weight: 800; flex: none; }
 .m-sheet-body { padding: 4px 18px 16px; overflow-y: auto; }
@@ -123,6 +123,8 @@ textarea.m-input { padding: 12px 14px; min-height: 90px; resize: none; }
 .m-login-top { text-align: center; margin: 4vh 0 26px; }
 .m-login-logo { width: 84px; height: 84px; border-radius: 24px; background: #fff; color: var(--m-primary); font-size: 30px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 12px 30px rgba(0,0,0,.25); overflow: hidden; }
 .m-login-logo img { width: 100%; height: 100%; object-fit: contain; padding: 8px; }
+.m-login-logo.m-login-logo-brand { width: 210px; height: 96px; border-radius: 20px; }
+.m-login-logo.m-login-logo-brand img { padding: 10px 14px; }
 .m-login h1 { margin: 16px 0 4px; font-size: 26px; font-weight: 800; } .m-login p.m-tag { margin: 0; opacity: .8; font-size: 14px; }
 .m-login-card { background: #fff; color: var(--m-ink); border-radius: 24px; padding: 22px 18px 20px; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
 .m-login-card h2 { margin: 0 0 14px; font-size: 18px; }
@@ -688,3 +690,9 @@ i.m-cd { width: 14px; height: 14px; border-radius: 4px; vertical-align: middle; 
 .m-login-foot { padding: 14px 22px calc(8px + var(--m-bottom, 0px)); background: #fff; color: #94a3b8; opacity: 1; margin-top: 0; }
 .m-login-top { margin-bottom: 0; padding-bottom: 54px; }
 .m-login { padding-bottom: 0; }
+
+/* iPhone Safari zooms the whole page when a field with text under 16px is focused — keep sheet fields at 16px there */
+@supports (-webkit-touch-callout: none) {
+  .m-sheet-body .m-field .m-input, .m-sheet-body .m-field .m-datebtn, .m-sheet-body .m-field select.m-input, .m-sheet-body .m-field textarea.m-input, .m-input { font-size: 16px; }
+}
+html { -webkit-text-size-adjust: 100%; }

@@ -378,6 +378,43 @@ router.post('/sessions/:id/next-stop', async (req, res) => {
   } finally { client.release(); }
 });
 
+// "Head here instead" — the current stop was only a destination (not yet
+// checked in): point it at a different task. Nothing recorded is lost.
+router.post('/stops/:id/retarget', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const taskId = parseInt(req.body.taskId);
+  if (isNaN(id) || !Number.isInteger(taskId)) return res.status(400).json({ error: 'Invalid request' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT st.id, st.check_in_at FROM field_visit_stops st JOIN field_visit_sessions s ON s.id = st.session_id
+       WHERE st.id=$1 AND s.employee_id=$2 AND s.status='active'`, [id, req.user.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Active field visit stop not found' });
+    if (rows[0].check_in_at) return res.status(409).json({ error: 'You already checked in there — check out first.' });
+    if (!(await assertEligibleFieldVisitTask(taskId, req.user.id))) return res.status(404).json({ error: 'Field visit task not found or not assigned to you' });
+    await pool.query(`UPDATE field_visit_stops SET task_id=$1 WHERE id=$2`, [taskId, id]);
+    res.json(await getActiveSessionFull(req.user.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Abandon a trip that was started by mistake / left open: only allowed when
+// no stop has been checked in (nothing worth keeping). Frees the user to start again.
+router.post('/sessions/:id/abandon', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(`SELECT id FROM field_visit_sessions WHERE id=$1 AND employee_id=$2 AND status='active' FOR UPDATE`, [id, req.user.id]);
+    if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Active field visit trip not found' }); }
+    const { rows: ci } = await client.query(`SELECT 1 FROM field_visit_stops WHERE session_id=$1 AND check_in_at IS NOT NULL LIMIT 1`, [id]);
+    if (ci[0]) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This trip already has a check-in — finish it with Check out to Office instead.' }); }
+    await client.query(`DELETE FROM field_visit_sessions WHERE id=$1`, [id]);
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+
 // "Move to Office" — closes the trip. Mirrors a client Check In: mandatory
 // GPS (confirms they're actually back), and the same real-duration +
 // estimated-distance/time computed for the return leg (from the last stop's

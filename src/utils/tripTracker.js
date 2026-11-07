@@ -1,4 +1,5 @@
 import api from '../api/client.js';
+import { isMobileMode } from './native.js';
 
 /**
  * Field Visit route tracker (web + mobile share this).
@@ -127,6 +128,7 @@ export const tripTracker = {
   getStatus: () => ({ ...status }),
   /** Re-read the server's active trip and start/stop tracking to match. */
   async sync() {
+    if (isMobileMode()) { stop(); return; }   // phone app: GPS only at the Check in / Check out taps, never a continuous route
     try {
       const s = await api.get('/field-visit/session/active');
       if (s?.id) start(s.id); else stop();
