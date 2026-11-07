@@ -10,6 +10,7 @@ import ViewMonthlyBtn from './ViewMonthlyBtn.jsx';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import ExcelJS from 'exceljs';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
@@ -234,11 +235,14 @@ const MonthlySummaryReport = () => {
   const [filters,     setFilters]     = useState({ ...EMPTY_FILTERS, staffId: myEmpId });
   const [staffStatus, setStaffStatus] = useState('working'); // 'working' | 'notworking'
 
+  const dr = useReportDateRange();
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
       let apiUrl;
-      if (useNP) {
+      if (dr.active) {
+        apiUrl = `/attendance/half-monthly?startDate=${dr.from}&endDate=${dr.to}`;
+      } else if (useNP) {
         const startAD = bsToAD(year, month, 1);
         const endAD   = bsToAD(year, month, getBSDays(year, month));
         if (startAD && endAD) {
@@ -256,7 +260,7 @@ const MonthlySummaryReport = () => {
       setData(await api.get(apiUrl));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
-  }, [year, month, useNP, staffStatus]);
+  }, [year, month, useNP, staffStatus, dr.active, dr.from, dr.to]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -316,6 +320,7 @@ const MonthlySummaryReport = () => {
   const activeFilterCount = Object.entries(filters).filter(([k,v]) => k !== '_status' && Boolean(v)).length;
 
   const periodLabel = () => {
+    if (dr.active) return `${dr.from} → ${dr.to}`;
     const mn     = useNP ? (BS_MONTHS_NP[month-1] || '') : MONTHS_EN[month-1];
     const yr     = settings.nepaliDigits ? toNepaliDigits(year) : String(year);
     const calStr = useNP ? ' BS' : '';
@@ -526,8 +531,9 @@ const MonthlySummaryReport = () => {
 
       {/* ── Period selector + controls (right-aligned) ── */}
       <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap',justifyContent:'flex-end' }}>
+        <ReportDateRange ctl={dr} />
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
-          value={year} onChange={e=>setYear(+e.target.value)}>
+          disabled={dr.active} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>
@@ -538,7 +544,7 @@ const MonthlySummaryReport = () => {
           }
         </select>
         <select className="form-control" style={{ width:useNP?120:140,height:36,fontSize:13 }}
-          value={month} onChange={e=>setMonth(+e.target.value)}>
+          disabled={dr.active} value={month} onChange={e=>setMonth(+e.target.value)}>
           {useNP
             ? BS_MONTHS_NP.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
             : MONTHS_EN.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)

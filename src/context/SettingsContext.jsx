@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
   defaultDateFormat: 'dd-MMM-yyyy',
   nepaliDigits     : false,
   defaultLanguage  : 'en', // fallback display language for a browser that has never had one explicitly chosen — see LanguageContext.jsx's applyTenantDefault
+  reportDateRangeEnabled: false, // On = Monthly reports show an optional From Date -> To Date range (Settings -> Date)
   leaveBackdateEnabled: true, // Off = block picking a past From Date on Leave/Office Visit apply (Super Admin only)
   recoApprovalCompulsory: false, // On = Leave/Office Visit approve button stays disabled until the assigned recommendator has recommended first (Staff Detail → Set Recommendator & Approval)
   fiscalYears      : [

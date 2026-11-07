@@ -8,6 +8,7 @@ import api             from '../../api/client.js';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
 import ReportIcon from './ReportIcon.jsx';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -212,6 +213,7 @@ const MonthlyReport = () => {
 
   const currentFY = getCurrentFiscalYear(settings.fiscalYears || []);
 
+  const dr = useReportDateRange();
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
@@ -220,16 +222,17 @@ const MonthlyReport = () => {
         const adDate = bsToAD(year, month, 15);
         if (adDate) { apiYear = adDate.getFullYear(); apiMonth = adDate.getMonth() + 1; }
       }
-      const query = `/attendance/monthly?year=${apiYear}&month=${apiMonth}&orgScope=1${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
+      const query = `/attendance/monthly?${dr.active ? `startDate=${dr.from}&endDate=${dr.to}` : `year=${apiYear}&month=${apiMonth}`}&orgScope=1${myEmpId ? `&employeeId=${myEmpId}` : ''}`;
       setData(await api.get(query));
     } catch(err) { setError(err.message); }
     finally { setLoading(false); }
-  }, [year, month, useNP]);
+  }, [year, month, useNP, dr.active, dr.from, dr.to]);
 
   useEffect(() => { load(); }, [load, rosterVersion]);
 
   // Period label
   const periodLabel = (() => {
+    if (dr.active) return `${dr.from} → ${dr.to}`;
     if (useNP) {
       const mnLabel = language==='np' ? BS_MONTHS_NP[month-1] : BS_MONTHS_EN[month-1];
       return `${mnLabel} ${settings.nepaliDigits ? toNepaliDigits(year) : year} BS`;
@@ -278,8 +281,9 @@ const MonthlyReport = () => {
 
       {/* ── Period selector ── */}
       <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:18,flexWrap:'wrap' }}>
+        <ReportDateRange ctl={dr} />
         <select className="form-control" style={{ width:useNP?115:85,height:34,fontSize:13 }}
-          value={year} onChange={e=>setYear(+e.target.value)}>
+          disabled={dr.active} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(bsY=>(
                 <option key={bsY} value={bsY}>{settings.nepaliDigits?toNepaliDigits(bsY):bsY} BS</option>
@@ -291,7 +295,7 @@ const MonthlyReport = () => {
         </select>
 
         <select className="form-control" style={{ width:useNP?120:140,height:34,fontSize:13 }}
-          value={month} onChange={e=>setMonth(+e.target.value)}>
+          disabled={dr.active} value={month} onChange={e=>setMonth(+e.target.value)}>
           {useNP
             ? BS_MONTHS_NP.map((bsName,i)=>(
                 <option key={i+1} value={i+1}>{settings.nepaliDigits?toNepaliDigits(bsName):bsName}</option>
