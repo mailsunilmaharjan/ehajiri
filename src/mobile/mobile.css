@@ -700,3 +700,8 @@ i.m-cd { width: 14px; height: 14px; border-radius: 4px; vertical-align: middle; 
   .m-sheet-body .m-field .m-input, .m-sheet-body .m-field .m-datebtn, .m-sheet-body .m-field select.m-input, .m-sheet-body .m-field textarea.m-input, .m-input { font-size: 16px; }
 }
 html { -webkit-text-size-adjust: 100%; }
+
+/* drag handle to re-order Tasks / Field Visits (step-wise plan) */
+.m-task .m-drag { flex: none; width: 40px; align-self: stretch; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #94a3b8; touch-action: none; cursor: grab; -webkit-user-select: none; user-select: none; }
+.m-task.m-dragging { box-shadow: 0 8px 24px rgba(26,86,219,.28); border-color: #6f9bf5; transform: scale(1.015); position: relative; z-index: 5; }
+.m-pill.ok { background: #d1fae5; color: #065f46; }

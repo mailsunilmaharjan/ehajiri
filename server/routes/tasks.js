@@ -55,6 +55,7 @@ const viewsSubquery = (targetType, targetIdCol) => `
 // anyone looking at the row.
 const SEL = (userId) => `
   t.id, t.title, t.description, t.status,
+  (SELECT o.position FROM user_task_order o WHERE o.user_id = ${Number(userId) || 0} AND o.task_id = t.id) AS "myOrder",
   t.due_date    AS "dueDate",
   t.is_field_visit AS "isFieldVisit",
   t.contact_id  AS "contactId",
@@ -476,6 +477,20 @@ router.post('/', validateBody({ title: { max: 500 }, description: { max: 2000000
     await client.query('ROLLBACK');
     res.status(500).json({ error: e.message });
   } finally { client.release(); }
+});
+
+// Save my own drag-and-drop order (ids in the order I want them, top first).
+router.put('/order', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
+  if (!ids.length || ids.length > 1000) return res.status(400).json({ error: 'ids required' });
+  try {
+    await pool.query(
+      `INSERT INTO user_task_order (user_id, task_id, position)
+       SELECT $1, t.id, o.pos::int FROM unnest($2::int[]) WITH ORDINALITY AS o(id, pos) JOIN tasks t ON t.id = o.id
+       ON CONFLICT (user_id, task_id) DO UPDATE SET position = EXCLUDED.position`,
+      [req.user.id, ids]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.put('/:id', validateBody({ title: { max: 500 }, description: { max: 2000000 }, contactId: {"type":"scalar","max":100}, contactPersonId: {"type":"scalar","max":100}, categoryId: {"type":"scalar","max":100}, priorityId: {"type":"scalar","max":100}, dueDate: {"type":"scalar","max":40}, status: { type: 'scalar', max: 40 }, assignedTo: { type: 'array', max: 500 } }), async (req, res) => {

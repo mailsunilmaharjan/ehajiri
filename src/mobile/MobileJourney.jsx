@@ -109,7 +109,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged, onAddVisit
           if (catId && String(task.categoryId || '') !== catId) {   // category changed on the form → reclassify the task (same as "Transfer for next task")
             try { await api.post(`/tasks/${task.id}/followups`, { mode: 'phone', description: f.remarks || mt('Field visit update'), nextCategoryId: Number(catId) }); } catch { /* the visit itself is saved */ }
           }
-          setCp(null); setAsk('choose');
+          setCp(null); setAsk('list');
         }
         onChanged?.(); return;
       }
@@ -137,8 +137,29 @@ export default function Journey({ task, tasks, onOpenTask, onChanged, onAddVisit
   if (!isCurrent && !done && ['completed', 'cancelled'].includes(task.status)) return null;
 
   const today = getNepalTodayISO();
-  const others = (tasks || []).filter(t => t.id !== task.id && t.isFieldVisit && !['completed', 'cancelled'].includes(t.status)
-    && (t.assignees || []).some(a => String(a.id) === String(currentUser?.id)) && t.dueDate && String(t.dueDate).slice(0, 10) <= today);
+  const ord = (t) => (t.myOrder == null ? 1e9 : t.myOrder);
+  const visitOf = (t) => stops.find(x => String(x.taskId) === String(t.id));
+  // every field visit due today (my own drag order) — the ones already visited on this trip stay in the list so the whole day is visible
+  const fullList = (tasks || []).filter(t => t.isFieldVisit && (t.assignees || []).some(a => String(a.id) === String(currentUser?.id))
+    && (visitOf(t) || (t.status !== 'cancelled' && t.status !== 'completed' && t.dueDate && String(t.dueDate).slice(0, 10) <= today)))
+    .sort((a, b) => ord(a) - ord(b));
+  const others = fullList.filter(t => t.id !== task.id && !visitOf(t));
+  const visitName = (t) => (t.customerName ? `${t.customerName} — ${t.title}` : t.title);
+  const VisitList = ({ onPick }) => (<>
+    {fullList.length === 0 && <div className="m-muted" style={{ marginBottom: 10 }}>{mt('No other field visit is due today')}</div>}
+    {fullList.map(t => {
+      const v = visitOf(t);
+      if (v && v.checkOutAt) return <div key={t.id} className="m-okbox" style={{ marginBottom: 8 }}>✅ <b>{visitName(t)}</b><div className="m-jsub">{mt('Checked out')} · {formatNepalTime(v.checkOutAt)} · {mt('Task Status')}: <b>{mt(STATUS_LABEL[v.checkOutWorkProgress] || '')}</b></div></div>;
+      if (v) return <div key={t.id} className="m-locbox ready" style={{ marginBottom: 8 }}>{v.checkInAt ? '📍' : '➡️'} <b>{visitName(t)}</b><div className="m-jsub">{v.checkInAt ? mt('Checked in') + ' · ' + formatNepalTime(v.checkInAt) : mt('Moving here')}</div></div>;
+      return <button key={t.id} className="m-btn m-block" style={{ marginBottom: 8 }} disabled={busy} onClick={() => onPick(t.id)}>➡️ {visitName(t)}</button>;
+    })}
+  </>);
+  const reopen = async () => {
+    if (!window.confirm(mt('Already checked out. Do you want to reopen again?'))) return;
+    setBusy(true); setErr('');
+    try { setSession(await api.post(`/field-visit/stops/${activeStop.id}/reopen`, {})); onChanged?.(); }
+    catch (e) { setErr(e?.message || mt('Failed')); } finally { setBusy(false); }
+  };
 
   let body;
   if (!session) {
@@ -161,8 +182,9 @@ export default function Journey({ task, tasks, onOpenTask, onChanged, onAddVisit
   } else if (isCurrent) {
     body = (<>
       <div className="m-jhead">✅ {mt('Visit finished')} · {mt('Time here')} {dur(mins(activeStop.checkInAt, activeStop.checkOutAt))}</div>
-      {others.length > 0 && <div className="m-muted" style={{ marginTop: 4 }}>{mt('Next field visit')}</div>}
-      {others.map(t => <button key={t.id} className="m-btn m-block" disabled={busy} onClick={() => headNext(t.id)}>➡️ {t.customerName ? `${t.customerName} — ${t.title}` : t.title}</button>)}
+      <button className="m-btn m-block m-ghost" disabled={busy} style={{ opacity: .75 }} onClick={reopen}>🔒 {mt('Check out')} · {mt('Already checked out')}</button>
+      <div className="m-muted" style={{ margin: '8px 0 4px' }}>{mt('Next field visit')}</div>
+      <VisitList onPick={headNext} />
       <button className="m-btn m-block m-warn" onClick={() => openCp('office-in')}>🏢 {mt('Check out to Office')}</button>
     </>);
   } else if (activeStop?.checkOutAt) {
@@ -212,6 +234,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged, onAddVisit
       {session && (
         <div className="m-jtl">
           {stops.map((s, i) => {
+            if (String(s.taskId) !== String(task.id)) return null;
             const prevAt = i === 0 ? session.officeOutAt : stops[i - 1].checkOutAt;
             const travel = s.checkInAt ? (s.travelMinutes ?? mins(prevAt, s.checkInAt)) : null;
             return (
@@ -239,9 +262,8 @@ export default function Journey({ task, tasks, onOpenTask, onChanged, onAddVisit
           <button className="m-btn m-block m-warn" onClick={() => { setAsk(false); openCp('office-in'); }}>🏢 {mt('No, check out to Office')}</button>
         </>)}
         {ask === 'list' && (<>
-          {others.length === 0 && <div className="m-muted" style={{ marginBottom: 10 }}>{mt('No other field visit is due today')}</div>}
           {onAddVisit && <button className="m-btn m-block m-ghost" style={{ marginBottom: 10 }} onClick={() => { setAsk(false); onAddVisit(); }}>＋ {mt('Add a new field visit')}</button>}
-          {others.map(t => <button key={t.id} className="m-btn m-block" style={{ marginBottom: 10 }} disabled={busy} onClick={async () => { await headNext(t.id); setAsk(false); }}>➡️ {t.customerName ? `${t.customerName} — ${t.title}` : t.title}</button>)}
+          <VisitList onPick={async (id) => { await headNext(id); setAsk(false); }} />
           <button className="m-btn m-block m-warn" onClick={() => { setAsk(false); openCp('office-in'); }}>🏢 {mt('No, check out to Office')}</button>
         </>)}
       </Sheet>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -294,14 +294,55 @@ export default function MobileTasks({ fieldVisitOnly = false }) {
   const today = getNepalTodayISO();
   const mine = useMemo(() => (rows || []).filter(t => !!t.isFieldVisit === (seg === 'visit')), [rows, seg]);
   const unseen = (v) => (rows || []).filter(t => !!t.isFieldVisit === (v === 'visit') && t.hasUnreadNotification).length;
-  const list = mine.filter(t => (flt === 'open' ? !['completed', 'cancelled'].includes(t.status) : flt === 'done' ? ['completed', 'cancelled'].includes(t.status) : true))
+  const [fvSession, setFvSession] = useState(null);
+  const onTrip = (t) => (fvSession?.stops || []).some(x => String(x.taskId) === String(t.id));   // visits already done on today's open trip stay visible
+  const list = mine.filter(t => (flt === 'open' ? (!['completed', 'cancelled'].includes(t.status) || (seg === 'visit' && onTrip(t))) : flt === 'done' ? ['completed', 'cancelled'].includes(t.status) : true))
     .filter(t => !q.trim() || `${t.title} ${t.customerName || ''} ${t.personName || ''}`.toLowerCase().includes(q.trim().toLowerCase()));
   const current = rows?.find(t => t.id === open) || null;
 
-  const listJsx = list.map(t => {
+  /* My own order (drag the ⠿ handle). Saved per person on the server (PUT /tasks/order). */
+  const [dragIds, setDragIds] = useState(null); const [dragging, setDragging] = useState(null);
+  const listRef = useRef(null);
+  const shown = (() => {
+    const base = [...list].sort((a, b) => (a.myOrder == null ? 1e9 : a.myOrder) - (b.myOrder == null ? 1e9 : b.myOrder));
+    if (!dragIds) return base;
+    const m = new Map(base.map(t => [t.id, t])); return dragIds.map(id => m.get(id)).filter(Boolean);
+  })();
+  const startDrag = (e, id) => {
+    e.preventDefault(); e.stopPropagation();
+    const sc = e.currentTarget.closest('.m-content');
+    let cur = shown.map(t => t.id); setDragIds(cur); setDragging(id);
+    const move = (ev) => {
+      const y = ev.clientY;
+      if (sc) { const r = sc.getBoundingClientRect(); if (y < r.top + 70) sc.scrollTop -= 14; else if (y > r.bottom - 70) sc.scrollTop += 14; }
+      const els = [...(listRef.current?.querySelectorAll('[data-tid]') || [])];
+      let before = null;
+      for (const el of els) { const r = el.getBoundingClientRect(); if (y < r.top + r.height / 2) { before = el.dataset.tid; break; } }
+      if (before === String(id)) return;
+      const without = cur.filter(x => String(x) !== String(id));
+      const at = before == null ? without.length : without.findIndex(x => String(x) === before);
+      const next = [...without.slice(0, at), id, ...without.slice(at)];
+      if (next.join() !== cur.join()) { cur = next; setDragIds(next); }
+    };
+    const end = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end);
+      const ids = cur; setDragIds(null); setDragging(null);
+      setRows(rs => (rs || []).map(t => { const p = ids.indexOf(t.id); return p >= 0 ? { ...t, myOrder: p } : t; }));
+      api.put('/tasks/order', { ids }).catch(() => load());
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+  };
+  const markOf = (t) => {
+    const v = (fvSession?.stops || []).find(x => String(x.taskId) === String(t.id));
+    if (!v) return null;
+    if (v.checkOutAt) return '✅ ' + mt('Checked out') + ' · ' + mt(({ work_done: 'Complete', pending_next_day: 'Pending', cancelled: 'Cancelled' })[v.checkOutWorkProgress] || '');
+    return v.checkInAt ? '📍 ' + mt('Checked in') : '➡️ ' + mt('Moving here');
+  };
+
+  const listJsx = <div ref={listRef}>{shown.map(t => {
         const od = t.dueDate && dOnly(t.dueDate) < today && !['completed', 'cancelled'].includes(t.status);
         return (
-          <button key={t.id} className={`m-task${t.hasUnreadNotification ? ' m-blink' : ''}`} onClick={() => setOpen(t.id)}>
+          <button key={t.id} data-tid={t.id} className={`m-task${t.hasUnreadNotification ? ' m-blink' : ''}${dragging === t.id ? ' m-dragging' : ''}`} onClick={() => setOpen(t.id)}>
             <span className="m-task-bar" style={{ background: t.priorityColor || (STATUS[t.status]?.fg || '#9ca3af') }} />
             <span className="m-grow" style={{ minWidth: 0 }}>
               <b className="m-ell" style={{ display: 'block', fontSize: 14, fontWeight: 700 }}>{t.title}</b>
@@ -311,12 +352,14 @@ export default function MobileTasks({ fieldVisitOnly = false }) {
                 {t.dueDate && <span className={`m-pill ${od ? 'bad' : ''}`}>{fd(dOnly(t.dueDate))}</span>}
                 {t.followupCount > 0 && <span className="m-pill">💬 {t.followupCount}</span>}
                 {(t.assignees || []).length > 1 && <span className="m-pill">👥 {t.assignees.length}</span>}
+                {seg === 'visit' && markOf(t) && <span className="m-pill ok">{markOf(t)}</span>}
               </span>
             </span>
             {t.hasUnreadNotification && <span className="m-unread-dot" />}
+            <span className="m-drag" role="button" aria-label="Drag to re-order" onPointerDown={(e) => startDrag(e, t.id)} onClick={(e) => e.stopPropagation()}>⠿</span>
           </button>
         );
-      });
+      })}</div>;
 
   return (
     <div style={{ padding: 14, paddingBottom: 90 }}>
@@ -330,7 +373,7 @@ export default function MobileTasks({ fieldVisitOnly = false }) {
       {err && <div className="m-err">{err}</div>}
       {rows === null && <div className="m-empty"><Spinner dark /></div>}
       {rows && list.length === 0 && !err && <div className="m-card"><Empty icon={seg === 'visit' ? '🚗' : '✅'} text={mt('Nothing here yet')} /></div>}
-      {seg === 'visit' ? <TripBar tasks={rows} onOpenTask={(id) => { load(); setOpen(id); }} onChanged={load}>{listJsx}</TripBar> : listJsx}
+      {seg === 'visit' ? <TripBar tasks={rows} onOpenTask={(id) => { load(); setOpen(id); }} onChanged={load} onSession={setFvSession}>{listJsx}</TripBar> : listJsx}
 
       <button className="m-addfab" onClick={() => setEdit({})} aria-label={mt('New Task')}>＋</button>
 

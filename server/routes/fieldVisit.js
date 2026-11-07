@@ -378,6 +378,32 @@ router.post('/sessions/:id/next-stop', async (req, res) => {
   } finally { client.release(); }
 });
 
+// "Reopen" — the latest stop of the open trip was checked out by mistake / needs
+// another update: clear the check-out so it can be done again. Task goes back to In Progress.
+router.post('/stops/:id/reopen', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT st.id, st.task_id AS "taskId", st.check_out_at, st.session_id,
+              (SELECT MAX(x.id) FROM field_visit_stops x WHERE x.session_id = st.session_id) AS "lastId"
+       FROM field_visit_stops st JOIN field_visit_sessions s ON s.id = st.session_id
+       WHERE st.id=$1 AND s.employee_id=$2 AND s.status='active' FOR UPDATE OF st`, [id, req.user.id]);
+    if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Active field visit stop not found' }); }
+    if (!rows[0].check_out_at) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This visit is not checked out.' }); }
+    if (rows[0].lastId !== rows[0].id) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'You already moved on to another visit — only the latest visit can be reopened.' }); }
+    await client.query(
+      `UPDATE field_visit_stops SET check_out_at=NULL, check_out_lat=NULL, check_out_lng=NULL, check_out_accuracy=NULL, check_out_device=NULL,
+              check_out_work_progress=NULL, check_out_remarks=NULL WHERE id=$1`, [id]);
+    await client.query(`UPDATE tasks SET status='in_progress', completed_at=NULL, updated_at=NOW() WHERE id=$1 AND status='completed'`, [rows[0].taskId]);
+    await client.query('COMMIT');
+    res.json(await getActiveSessionFull(req.user.id));
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+
 // "Head here instead" — the current stop was only a destination (not yet
 // checked in): point it at a different task. Nothing recorded is lost.
 router.post('/stops/:id/retarget', async (req, res) => {

@@ -19,7 +19,7 @@ const getLocation = () => new Promise((res, rej) => {
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
 });
 
-export default function TripBar({ tasks, onOpenTask, onChanged, children }) {
+export default function TripBar({ tasks, onOpenTask, onChanged, onSession, children }) {
   const mt = useMT();
   const { currentUser } = useAuth();
   const [session, setSession] = useState(undefined);        // undefined loading · null none open
@@ -36,10 +36,12 @@ export default function TripBar({ tasks, onOpenTask, onChanged, children }) {
     try { const r = await api.get(`/field-visit/report?startDate=${iso}&endDate=${iso}&employeeId=${currentUser.id}`); setToday(r?.sessions || []); } catch { setToday([]); }
   }, [iso, currentUser?.id]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { onSession?.(session || null); }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!sheet) return undefined; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [sheet]);
 
   const mineDue = (tasks || []).filter(t => t.isFieldVisit && !['completed', 'cancelled'].includes(t.status)
-    && (t.assignees || []).some(a => String(a.id) === String(currentUser?.id)) && t.dueDate && String(t.dueDate).slice(0, 10) <= iso);
+    && (t.assignees || []).some(a => String(a.id) === String(currentUser?.id)) && t.dueDate && String(t.dueDate).slice(0, 10) <= iso)
+    .sort((a, b) => (a.myOrder == null ? 1e9 : a.myOrder) - (b.myOrder == null ? 1e9 : b.myOrder));
 
   const locate = useCallback(async () => {
     setLoc({ status: 'checking' });

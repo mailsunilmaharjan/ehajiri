@@ -3420,6 +3420,19 @@ const MIGRATIONS = [
       await client.query(`ALTER TABLE field_visit_sessions ADD COLUMN IF NOT EXISTS distance_source VARCHAR(10) NOT NULL DEFAULT 'estimated'`);
     },
   },
+  {
+    version    : 165,
+    description: 'user_task_order — each person\'s own drag-and-drop order of their Tasks / Field Visits (step-wise plan). Per user, so one person re-ordering never changes anyone else\'s list. Additive.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_task_order (
+          user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          PRIMARY KEY (user_id, task_id)
+        )`);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════
