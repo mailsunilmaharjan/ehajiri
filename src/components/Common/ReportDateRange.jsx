@@ -28,6 +28,8 @@ export const useReportDateRange = () => {
   const valid = !!from && !!to && days >= 1 && days <= MAX_RANGE_DAYS;
   return {
     enabled, on, setOn, from, setFrom, to, setTo, days, valid,
+    // Year/Month dropdowns are disabled as soon as the checkbox is ticked
+    locked: enabled && on,
     // true only when the feature is enabled, switched on and the range is valid
     active: enabled && on && valid,
   };

@@ -14,6 +14,8 @@ import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
+// BS day-of-month for an AD ISO date: headers must show the real BS day, not a 1..N counter (a custom range may start mid-month)
+const bsDay = (iso) => adToBS(iso)?.day ?? 0;
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -515,7 +517,7 @@ const MonthlyPresentAbsentReport = () => {
     const printTitle = L('मासिक उपस्थित/अनुपस्थित रिपोर्ट', rptTitle);
     // Sequential day numbers: BS mode = 1,2,...N; AD mode = actual AD day
     const dayHeaders = dates.map((d, idx) => {
-      const num = useNP ? (idx + 1) : d.dayNum;
+      const num = useNP ? bsDay(d.date) : d.dayNum;
       const dispNum = settings.nepaliDigits ? toNepaliDigits(num) : num;
       const dow = language === 'np' ? (DOW_NP[d.dayKey] || d.dayKey.slice(0,3)) : d.dayKey.slice(0,3);
       return `<th style="padding:2px 3px;border:1px solid #dedede;background:#efefef;font-size:9px;text-align:center;white-space:nowrap">${dispNum}<br/><span style="font-weight:500;color:#6b7280">${dow}</span></th>`;
@@ -580,7 +582,7 @@ const MonthlyPresentAbsentReport = () => {
     const companyPhone = settings.companyPhone ? `Tel: ${settings.companyPhone}` : '';
 
     const FIXED_COLS = ['SN', 'Staff ID', 'Staff', 'Post', 'Dept.', 'Branch'];
-    const dayCols = dates.map((d, idx) => useNP ? (idx + 1) : d.dayNum);
+    const dayCols = dates.map((d, idx) => useNP ? bsDay(d.date) : d.dayNum);
     const dayDows = dates.map(d => d.dayKey.slice(0, 3));
     const dayIsWeekendHoliday = dates.map(d => d.isWeekend || d.isHoliday);
     const lastCol = FIXED_COLS.length + dayCols.length + 3; // + P, AB, OT
@@ -763,7 +765,7 @@ const MonthlyPresentAbsentReport = () => {
       <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap',justifyContent:'flex-end' }}>
         <ReportDateRange ctl={dr} />
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
-          disabled={dr.active} value={year} onChange={e=>setYear(+e.target.value)}>
+          disabled={dr.locked} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>
@@ -774,7 +776,7 @@ const MonthlyPresentAbsentReport = () => {
           }
         </select>
         <select className="form-control" style={{ width:useNP?120:140,height:36,fontSize:13 }}
-          disabled={dr.active} value={month} onChange={e=>setMonth(+e.target.value)}>
+          disabled={dr.locked} value={month} onChange={e=>setMonth(+e.target.value)}>
           {useNP
             ? BS_MONTHS_NP.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
             : MONTHS_EN.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
@@ -870,7 +872,7 @@ const MonthlyPresentAbsentReport = () => {
                   // BS mode: sequential day number (1…N for the BS month)
                   // AD mode: the actual AD day of month
                   const dispNum = useNP
-                    ? (settings.nepaliDigits ? toNepaliDigits(dateIdx + 1) : dateIdx + 1)
+                    ? (settings.nepaliDigits ? toNepaliDigits(bsDay(date)) : bsDay(date))
                     : dayNum;
                   return (
                     <th key={date} style={{

@@ -15,6 +15,8 @@ import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
+// BS day-of-month for an AD ISO date: headers must show the real BS day, not a 1..N counter (a custom range may start mid-month)
+const bsDay = (iso) => adToBS(iso)?.day ?? 0;
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -486,7 +488,7 @@ const MonthlyInOutReport = () => {
   const handlePrint = () => {
     if (!employees.length) return;
     const dayHeaders = dates.map((d, idx) => {
-      const n = useNP ? (idx + 1) : d.dayNum;
+      const n = useNP ? bsDay(d.date) : d.dayNum;
       return `<th style="padding:2px 3px;border:1px solid #dedede;background:#efefef;font-size:8px">${n}<br/>${d.dayKey.slice(0,3)}</th>`;
     }).join('');
     const rowColors = { in:'#1a56db', out:'#059669', wh:'#374151', ot:'#7c3aed' };
@@ -558,7 +560,7 @@ const MonthlyInOutReport = () => {
     const companyPhone = settings.companyPhone ? `Tel: ${settings.companyPhone}` : '';
 
     const FIXED_COLS = ['SN', 'Staff', ''];
-    const dayCols = dates.map((d, idx) => useNP ? (idx + 1) : d.dayNum);
+    const dayCols = dates.map((d, idx) => useNP ? bsDay(d.date) : d.dayNum);
     const dayDows = dates.map(d => d.dayKey.slice(0, 3));
     const nCols = FIXED_COLS.length + dayCols.length + 2;
     const lastCol = nCols; // 1-indexed
@@ -709,7 +711,7 @@ const MonthlyInOutReport = () => {
       <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap',justifyContent:'flex-end' }}>
         <ReportDateRange ctl={dr} />
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
-          disabled={dr.active} value={year} onChange={e=>setYear(+e.target.value)}>
+          disabled={dr.locked} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>))
@@ -718,7 +720,7 @@ const MonthlyInOutReport = () => {
           }
         </select>
         <select className="form-control" style={{ width:useNP?120:140,height:36,fontSize:13 }}
-          disabled={dr.active} value={month} onChange={e=>setMonth(+e.target.value)}>
+          disabled={dr.locked} value={month} onChange={e=>setMonth(+e.target.value)}>
           {useNP
             ? BS_MONTHS_NP.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
             : MONTHS_EN.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
@@ -800,7 +802,7 @@ const MonthlyInOutReport = () => {
                 {dates.map(({ date, dayNum, dayKey, isWeekend, isHoliday }, dateIdx) => {
                   // BS mode: sequential 1…N; AD mode: actual AD day number
                   const dispNum = useNP
-                    ? (settings.nepaliDigits ? toNepaliDigits(dateIdx + 1) : dateIdx + 1)
+                    ? (settings.nepaliDigits ? toNepaliDigits(bsDay(date)) : bsDay(date))
                     : dayNum;
                   return (
                     <th key={date} style={thDay(isWeekend, isHoliday)}>{dispNum}</th>

@@ -21,6 +21,9 @@ import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { getNepalTodayISO, toNepalISO, isoToNepalLocalInput, formatNepalDateTime, formatNepalTime, addDaysISO } from '../../utils/dateUtils.js';
+import MultiCheckSelect from '../Common/MultiCheckSelect.jsx';
+import FieldVisitTripLog from './FieldVisitTripLog.jsx';
+import CompanyTaskLedger from './CompanyTaskLedger.jsx';
 import FieldVisitJourneyPanel, { CHECKOUT_STATUS_LABEL } from './FieldVisitJourneyPanel.jsx';
 import { haversineKm } from '../../utils/geoUtils.js';
 // Temporarily disabled — the Leaflet import chain breaks the production
@@ -454,6 +457,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // (see openEdit/saveFollowup below) — NOT cleared in bulk just from opening
   // this list page. (Previously this cleared every unread notification the
   // instant the page mounted, so the blink never had a chance to mean
+  const [tripLogOpen, setTripLogOpen] = useState(false);   // Field Visit page: Trip Log report popup
   // anything.) The local setTasks update here is what stops THIS row's own
   // blink immediately, without waiting on a full reload — refreshTaskCounts
   // only re-syncs the aggregate nav badge, not each row's own flag.
@@ -495,6 +499,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // Advance Search — a fuller filter form (branch/department/post/assignee/
   // category/title/priority/customer/date range), applied on top of
   // whatever Filter by Staff + quick filters already narrowed down.
+  // Filter Task Status — multi-select, defaults to Pending + In Progress.
+  // Picked statuses show every task in them, however old. Clearing it (the
+  // dropdown's "All") shows open tasks plus anything completed/cancelled
+  // within the last day.
+  const [statusFilter, setStatusFilter] = useState(['pending', 'in_progress']);
+  // Company Task Ledger popup — opened by clicking the company name in the side panel.
+  const [ledgerCompany, setLedgerCompany] = useState(null);
   const emptyAdvSearch = { branch: '', department: '', post: '', staffId: '', categoryId: '', title: '', priorityId: '', customerName: '', dateFrom: '', dateTo: '' };
   const [advSearchOpen, setAdvSearchOpen] = useState(false);
   const [advSearchDraft, setAdvSearchDraft] = useState(emptyAdvSearch);
@@ -796,8 +807,15 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     // here forever, struck-through, next to the ones still open.
     const todayNepal = getNepalTodayISO();
     let result = tasks.filter(t => {
-      if (t.status !== 'completed' || !t.completedAt) return true;
-      return daysBetweenISO(toNepalISO(t.completedAt), todayNepal) <= 1;
+      // Explicit status pick: show every task in that status (no age limit).
+      if (statusFilter.length) return statusFilter.includes(t.status);
+      if (t.status !== 'completed' && t.status !== 'cancelled') return true;
+      // Completed / cancelled: visible on that day and the next one only.
+      // completedAt is set on completion; cancelled tasks have no such column,
+      // so their last-change time (set when the status changes) is used.
+      const when = t.status === 'completed' ? t.completedAt : t.updatedAt;
+      if (!when) return false;
+      return daysBetweenISO(toNepalISO(when), todayNepal) <= 1;
     });
 
     if (yesterdayOnly || tomorrowOnly) {
@@ -834,7 +852,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     }
 
     return result;
-  }, [tasks, yesterdayOnly, tomorrowOnly, quickPriorityId, quickCategoryId, fieldVisitOnly, advSearch, advSearchActive, employeeById, currentUser]);
+  }, [tasks, statusFilter, yesterdayOnly, tomorrowOnly, quickPriorityId, quickCategoryId, fieldVisitOnly, advSearch, advSearchActive, employeeById, currentUser]);
 
   // Per-category header chip stats — followup count + "has an unseen new
   // task" per category, both scoped to today's tasks (same taskDateBucket
@@ -1491,6 +1509,16 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Company Name :</span> {followupTask?.customerName || '—'}</span>
         <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Task :</span> {followupTask?.title || '—'}</span>
         <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Description :</span> {descNode}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter Task Status</label>
+        <div style={{ minWidth: 150 }}>
+          <MultiCheckSelect value={statusFilter} onChange={setStatusFilter}
+            options={STATUS_OPTIONS.map(o => o.value)}
+            displayFn={v => STATUS_OPTIONS.find(o => o.value === v)?.label || v}
+            placeholder="All" />
+        </div>
+      </div>
+
       </div>
     );
   })();
@@ -1598,6 +1626,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 compact={true}
                 ultraCompact={true}
                 className="task-list-grid"
+          {fieldVisitOnly && (
+            <button onClick={() => setTripLogOpen(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 30, background: '#fff',
+                color: '#374151', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              📋 Trip Log
+            </button>
+          )}
                 showFilterButton={false}
                 toolbarLeft={taskFilterToolbar}
                 footerLeft={taskFooterLeft}
@@ -1663,7 +1698,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                   </div>
                   <div style={{ marginTop: 6, padding: '6px 10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 7 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#166534' }}>
-                      {followupTask.customerName || 'No client linked'}
+                      {followupTask.customerName && followupTask.contactId ? (
+                        <span onClick={() => setLedgerCompany({ id: followupTask.contactId, name: followupTask.customerName })}
+                          title="Open Task Ledger of this company"
+                          style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3 }}>
+                          {followupTask.customerName}
+                        </span>
+                      ) : (followupTask.customerName || 'No client linked')}
                       {followupTask.personName ? ` — ${followupTask.personName}` : ''}
                     </div>
                     {(followupTask.customerMobile || followupTask.customerPhone) && (
@@ -1943,6 +1984,12 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 8 }}>
                   Replies
+      {tripLogOpen && <FieldVisitTripLog onClose={() => setTripLogOpen(false)} />}
+
+      {ledgerCompany && (
+        <CompanyTaskLedger contactId={ledgerCompany.id} name={ledgerCompany.name} onClose={() => setLedgerCompany(null)} />
+      )}
+
                 </div>
                 <div style={{ flex: 1, minHeight: 0, maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {renderReplyBubbles()}

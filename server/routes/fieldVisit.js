@@ -414,6 +414,55 @@ router.get('/tasks/:taskId/stops', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Trip Log report — every trip (Office Out -> stops -> Office In) that STARTED
+// within a Nepal-calendar date range, with each stop's check-in/out, status,
+// remarks and the computed durations/distances. Scope: admin/superAdmin see
+// everyone; branchManager/departmentHead see their own branch/department;
+// anyone else sees only their own trips. Optional ?employeeId= narrows further
+// (silently ignored if outside the caller's scope).
+router.get('/report', async (req, res) => {
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  const { startDate, endDate } = req.query;
+  if (!re.test(startDate || '') || !re.test(endDate || '')) return res.status(400).json({ error: 'startDate and endDate (YYYY-MM-DD) are required' });
+  const dayMs = 24 * 60 * 60 * 1000;
+  const fromUtc = new Date(`${startDate}T00:00:00.000Z`).getTime() - NEPAL_OFFSET_MS;
+  const toUtc   = new Date(`${endDate}T00:00:00.000Z`).getTime() - NEPAL_OFFSET_MS + dayMs;
+  if (!(toUtc > fromUtc)) return res.status(400).json({ error: 'endDate must be on or after startDate' });
+  if ((toUtc - fromUtc) / dayMs > 93) return res.status(400).json({ error: 'Date range cannot exceed 92 days' });
+  try {
+    const me = req.user;
+    const role = me.role || 'employee';
+    const params = [new Date(fromUtc), new Date(toUtc)];
+    let where = 'fs.office_out_at >= $1 AND fs.office_out_at < $2';
+    if (role === 'admin' || role === 'superAdmin') {
+      /* everyone */
+    } else if (role === 'branchManager' || role === 'departmentHead') {
+      const col = role === 'branchManager' ? 'branch' : 'department';
+      const val = ((role === 'branchManager' ? me.branch : me.department) || '').trim();
+      if (val) { params.push(val); where += ` AND (fs.employee_id = ${Number(me.id)} OR LOWER(TRIM(eu.${col})) = LOWER(${params.length}))`; }
+      else where += ` AND fs.employee_id = ${Number(me.id)}`;
+    } else {
+      where += ` AND fs.employee_id = ${Number(me.id)}`;
+    }
+    const wanted = parseInt(req.query.employeeId);
+    if (Number.isInteger(wanted)) { params.push(wanted); where += ` AND fs.employee_id = ${params.length}`; }
+
+    const { rows: sessions } = await pool.query(
+      `SELECT ${SESSION_SEL}, eu.full_name AS "employeeName"
+       FROM field_visit_sessions fs JOIN users eu ON eu.id = fs.employee_id
+       WHERE ${where} ORDER BY fs.office_out_at ASC, fs.id ASC`, params);
+    let stops = [];
+    if (sessions.length) {
+      ({ rows: stops } = await pool.query(
+        `SELECT ${STOP_SEL} ${STOP_JOINS} WHERE s.session_id = ANY($1::int[]) ORDER BY s.id ASC`,
+        [sessions.map(x => x.id)]));
+    }
+    const bySession = new Map();
+    stops.forEach(st => { if (!bySession.has(st.sessionId)) bySession.set(st.sessionId, []); bySession.get(st.sessionId).push(st); });
+    res.json({ startDate, endDate, sessions: sessions.map(x => ({ ...x, stops: bySession.get(x.id) || [] })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Employee movement track for one Nepal-calendar day — every session (trip)
 // and its stops, in chronological order, feeding the "Track Flow of Staff"
 // map. Any management role (admin/superAdmin/branchManager/departmentHead)

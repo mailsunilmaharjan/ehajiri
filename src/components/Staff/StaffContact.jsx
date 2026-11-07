@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage }  from '../../context/LanguageContext.jsx';
 import api              from '../../api/client.js';
 import DataGrid         from '../DataGrid/DataGrid.jsx';
+import CompanyTaskLedger from './CompanyTaskLedger.jsx';
 import ContactFormModal, { CONTACT_EMPTY as EMPTY } from './ContactFormModal.jsx';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -289,6 +290,7 @@ const StaffContact = () => {
   const [loading,  setLoading]  = useState(true);
   const [modal,    setModal]    = useState(null);
   const [selected, setSelected] = useState(null);
+  const [ledger,   setLedger]   = useState(null);   // contact whose Task Ledger popup is open
   const [toast,    setToast]    = useState(null);
 
   const showToast = (msg, color='#059669') => {
@@ -331,7 +333,13 @@ const StaffContact = () => {
   const columns = [
     {
       field:'name', header:'Name', width:180,
-      render:(_,row) => <span style={{ fontWeight:600, color:'#1f2937' }}>{displayName(row)}</span>,
+      render:(_,row) => (
+        <span onClick={(e) => { e.stopPropagation(); setLedger(row); }}
+          title="Open Task Ledger"
+          style={{ fontWeight:600, color:'#1f2937', cursor:'pointer', textDecoration:'underline', textDecorationStyle:'dotted', textUnderlineOffset:3 }}>
+          {displayName(row)}
+        </span>
+      ),
     },
     {
       field:'mobile1', header:'Mobile 1', width:130,
@@ -366,6 +374,7 @@ const StaffContact = () => {
   const contextMenu = [
     { label:'Add New', icon:'➕', onClick:() => setModal({ initial:EMPTY }) },
     { label:'Edit',    icon:'✏️', onClick:(row) => setModal({ initial:row }) },
+    { label:'Task Ledger', icon:'📒', onClick:(row) => setLedger(row) },
     { label:'Share',   icon:'📤', onClick:shareContactOnWhatsApp },
     { label:'Delete',  icon:'🗑️', className:'danger', onClick:handleDelete },
   ];
@@ -422,6 +431,10 @@ const StaffContact = () => {
           onDelete={handleDelete}
           onClose={() => setSelected(null)}
         />
+      )}
+
+      {ledger && (
+        <CompanyTaskLedger contactId={ledger.id} name={displayName(ledger)} subtitle={displayMob1(ledger) !== '—' ? displayMob1(ledger) : ''} onClose={() => setLedger(null)} />
       )}
 
       {modal && (

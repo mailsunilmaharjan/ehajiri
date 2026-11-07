@@ -563,7 +563,7 @@ const MonthlyAbsentReport = () => {
       <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:14,flexWrap:'wrap' }}>
         <ReportDateRange ctl={dr} />
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
-          disabled={dr.active} value={year} onChange={e=>setYear(+e.target.value)}>
+          disabled={dr.locked} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>))
@@ -572,7 +572,7 @@ const MonthlyAbsentReport = () => {
           }
         </select>
         <select className="form-control" style={{ width:useNP?120:140,height:36,fontSize:13 }}
-          disabled={dr.active} value={month} onChange={e=>setMonth(+e.target.value)}>
+          disabled={dr.locked} value={month} onChange={e=>setMonth(+e.target.value)}>
           {useNP
             ? BS_MONTHS_NP.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
             : MONTHS_EN.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)

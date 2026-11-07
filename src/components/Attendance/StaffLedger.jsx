@@ -14,6 +14,7 @@ import useDateFormat   from '../../hooks/useDateFormat.js';
 import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import ViewMonthlyBtn    from './ViewMonthlyBtn.jsx';
 import SearchableSelect  from '../Common/SearchableSelect.jsx';
+import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
@@ -268,8 +269,14 @@ const StaffLedger = () => {
 
   /* ── Compute EXACT AD date range ── */
   const getDateRange = useCallback(() => {
+  /* Optional From/To range (Settings → Report Custom Date Range) — Monthly ledger only */
+  const dr = useReportDateRange();
+  const rangeActive = !isHalfMonthlyCtx && dr.active;
+  const rangeLocked  = !isHalfMonthlyCtx && dr.locked;
+
     if (isHalfMonthlyCtx) {
       // Half-monthly: 1st half = 1–15, 2nd half = 16–end
+    if (rangeActive) return { startDate: dr.from, endDate: dr.to };
       if (useNP) {
         const halfStartDay = half === 1 ? 1 : 16;
         const halfEndDay   = half === 1 ? 15 : getBSDays(year, month);
@@ -294,7 +301,7 @@ const StaffLedger = () => {
       startDate: `${year}-${pad(month)}-01`,
       endDate  : `${year}-${pad(month)}-${pad(lastDay)}`,
     };
-  }, [year, month, half, useNP, isHalfMonthlyCtx]);
+  }, [year, month, half, useNP, isHalfMonthlyCtx, rangeActive, dr.from, dr.to]);
 
   /* ── Load data ── */
   const load = useCallback(async () => {
@@ -308,12 +315,13 @@ const StaffLedger = () => {
     finally { setLoading(false); }
   }, [year, month, half, empId, getDateRange]);
 
-  useEffect(() => { if (empId) load(); }, [year, month, half, empId]);
+  useEffect(() => { if (empId) load(); }, [year, month, half, empId, rangeActive, dr.from, dr.to]);
 
   /* ── Period label ── */
   const periodLabel = () => {
     let label;
     if (useNP) {
+    if (rangeActive) return `${dr.from} → ${dr.to}`;
       const bsM = BS_MONTHS_NP[month-1] || '';
       const fmt  = n => settings.nepaliDigits ? toNepaliDigits(n) : String(n);
       label = `${bsM} ${fmt(year)} BS`;
@@ -739,10 +747,11 @@ const StaffLedger = () => {
         )}
         {/* Year */}
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
-          value={year} onChange={e=>setYear(+e.target.value)}>
+          disabled={rangeLocked} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>
+        {!isHalfMonthlyCtx && <ReportDateRange ctl={dr} />}
               ))
             : [now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
                 <option key={y} value={y}>{y}</option>
@@ -751,7 +760,7 @@ const StaffLedger = () => {
         </select>
         {/* Month */}
         <select className="form-control" style={{ width:useNP?120:140,height:36,fontSize:13 }}
-          value={month} onChange={e=>setMonth(+e.target.value)}>
+          disabled={rangeLocked} value={month} onChange={e=>setMonth(+e.target.value)}>
           {useNP
             ? BS_MONTHS_NP.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)
             : MONTHS_EN.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)

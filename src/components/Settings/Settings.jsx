@@ -3585,6 +3585,26 @@ const Settings = () => {
                 </div>
               </div>
 
+              <div className="card" style={{ marginTop:16 }}>
+                <div className="card-header">
+                  <div>
+                    <h3>📅 {L('रिपोर्ट मिति दायरा','Report Custom Date Range')}</h3>
+                    <div style={{ fontSize:11, color:'#9ca3af', marginTop:2 }}>
+                      {L('सक्रिय हुँदा मासिक रिपोर्टहरूमा From Date → To Date छान्ने विकल्प देखिन्छ (अधिकतम ९२ दिन)',
+                        'When On, the Monthly reports show a From Date → To Date option (max 92 days). When Off, reports work by Year + Month as before.')}
+                    </div>
+                  </div>
+                  <div style={{ width:40, height:22, background:local.reportDateRangeEnabled?'#1a56db':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
+                    onClick={() => set('reportDateRangeEnabled', !local.reportDateRangeEnabled)}>
+                    <div style={{ position:'absolute', top:2, left:local.reportDateRangeEnabled?20:2, width:18, height:18, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
+                  </div>
+                </div>
+                <div className="card-body" style={{ display:'flex', justifyContent:'flex-end' }}>
+                  <button className="btn btn-primary btn-sm" onClick={handleSave}>
+                    💾 {L('सुरक्षित','Save')}
+                  </button>
+                </div>
+              </div>
               {/* ── Leave/Office Visit Backdate toggle — Super Admin only.
                    Off blocks picking yesterday-or-earlier as the From Date on
                    any Leave or Office Visit application (all 5 apply surfaces,
@@ -3711,26 +3731,6 @@ const Settings = () => {
                       </div>
                     </div>
                   )}
-                </div>
-              </div>
-              <div className="card" style={{ marginBottom:16 }}>
-                <div className="card-header">
-                  <div>
-                    <h3>📅 {L('रिपोर्ट मिति दायरा','Report Custom Date Range')}</h3>
-                    <div style={{ fontSize:11, color:'#9ca3af', marginTop:2 }}>
-                      {L('सक्रिय हुँदा मासिक रिपोर्टहरूमा From Date → To Date छान्ने विकल्प देखिन्छ (अधिकतम ९२ दिन)',
-                        'When On, the Monthly reports show a From Date → To Date option (max 92 days). When Off, reports work by Year + Month as before.')}
-                    </div>
-                  </div>
-                  <div style={{ width:40, height:22, background:local.reportDateRangeEnabled?'#1a56db':'#d1d5db', borderRadius:11, position:'relative', cursor:'pointer', transition:'background .2s', flexShrink:0 }}
-                    onClick={() => set('reportDateRangeEnabled', !local.reportDateRangeEnabled)}>
-                    <div style={{ position:'absolute', top:2, left:local.reportDateRangeEnabled?20:2, width:18, height:18, background:'white', borderRadius:'50%', transition:'left .2s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' }}></div>
-                  </div>
-                </div>
-                <div className="card-body" style={{ display:'flex', justifyContent:'flex-end' }}>
-                  <button className="btn btn-primary btn-sm" onClick={handleSave}>
-                    💾 {L('सुरक्षित','Save')}
-                  </button>
                 </div>
               </div>
               <div className="card">
