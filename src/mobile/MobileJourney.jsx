@@ -9,7 +9,7 @@ import { tripTracker, notifyTripChanged } from '../utils/tripTracker.js';
    Check out from Office → Check in at the client → Make Check out (remarks + status) → Next field visit, or Move to Office.
    Every point records the phone's GPS fix (and the server adds the place name) and the time spent between points is shown. */
 
-const STATUS_OPTIONS = [['work_done', 'Work Done'], ['pending_next_day', 'Pending for Next Day'], ['cancelled', 'Cancelled']];
+const STATUS_OPTIONS = [['work_done', 'Complete'], ['pending_next_day', 'Pending'], ['cancelled', 'Cancelled']];
 const STATUS_LABEL = Object.fromEntries(STATUS_OPTIONS);
 
 const mins = (from, to) => (from && to ? Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60000)) : null);
@@ -42,7 +42,7 @@ function Where({ label, at, place, lat, lng, extra }) {
 }
 const Gap = ({ text }) => <div className="m-jgap"><span>⏱</span>{text}</div>;
 
-export default function Journey({ task, tasks, onOpenTask, onChanged }) {
+export default function Journey({ task, tasks, onOpenTask, onChanged, onAddVisit }) {
   const mt = useMT();
   const { currentUser } = useAuth();
   const [session, setSession] = useState(undefined);       // undefined loading · null no active trip
@@ -117,7 +117,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
   // only the assignee runs the trip; show it once the visit is In Progress (or while a trip is already heading to / at this task)
   if (!task.isFieldVisit || !isAssignee) return null;
   if (session === undefined) return <div className="m-jcard"><Spinner dark /></div>;
-  if (!isCurrent && task.status !== 'in_progress' && !done) return null;
+  if (!isCurrent && !done && ['completed', 'cancelled'].includes(task.status)) return null;
 
   const today = getNepalTodayISO();
   const others = (tasks || []).filter(t => t.id !== task.id && t.isFieldVisit && !['completed', 'cancelled'].includes(t.status)
@@ -127,19 +127,19 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
   if (!session) {
     body = (<>
       <div className="m-jhead">🏢 {mt('You are at the office')}</div>
-      <button className="m-btn m-block" onClick={() => openCp('office-out')}>🚗 {mt('Check out from Office')}</button>
+      <button className="m-btn m-block" onClick={() => openCp('office-out')}>🚗 {mt('Moving from Office')} · {mt('Check out')}</button>
     </>);
   } else if (isCurrent && !activeStop.checkInAt) {
     body = (<>
       <div className="m-jhead">🚗 {mt('Heading here')}</div>
       <div className="m-muted">{mt('Left office at')} {formatNepalTime(session.officeOutAt)} · {dur(mins(stops.length > 1 ? stops[stops.length - 2].checkOutAt : session.officeOutAt, now))} {mt('ago')}</div>
-      <button className="m-btn m-block m-ok" onClick={() => openCp('site')}>📝 {mt('Open site form')}</button>
+      <button className="m-btn m-block m-ok" onClick={() => openCp('site')}>📍 {mt('Reached here')} · {mt('Check in')}</button>
     </>);
   } else if (isCurrent && !activeStop.checkOutAt) {
     body = (<>
       <div className="m-jhead">📍 {mt('Checked in')} · {formatNepalTime(activeStop.checkInAt)}</div>
       <div className="m-muted">{mt('Time here')}: <b>{dur(mins(activeStop.checkInAt, now))}</b></div>
-      <button className="m-btn m-block m-bad" onClick={() => openCp('site')}>📝 {mt('Site form')} · {mt('Make Check out')}</button>
+      <button className="m-btn m-block m-bad" onClick={() => openCp('site')}>🚪 {mt('Check out')} · {mt('Task Status')} &amp; {mt('Remarks')}</button>
     </>);
   } else if (isCurrent) {
     body = (<>
@@ -162,7 +162,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
   }
 
   const siteIn = !!activeStop?.checkInAt;
-  const cpTitle = { site: '📝 ' + mt('Site form'), 'office-out': '🚗 ' + mt('Check out from Office'), 'check-in': '📍 ' + mt('Check in'), 'check-out': '🚪 ' + mt('Make Check out'), 'office-in': '🏢 ' + mt('Check out to Office') }[cp];
+  const cpTitle = { site: siteIn ? '🚪 ' + mt('Check out') + ' · ' + mt('Task Status') : '📍 ' + mt('Reached here') + ' · ' + mt('Check in'), 'office-out': '🚗 ' + mt('Moving from Office'), 'check-in': '📍 ' + mt('Check in'), 'check-out': '🚪 ' + mt('Make Check out'), 'office-in': '🏢 ' + mt('Check out to Office') }[cp];
   const cpGo = { site: siteIn ? mt('Check out') : mt('Check in'), 'office-out': mt('Check out'), 'check-in': mt('Check in'), 'check-out': mt('Check out'), 'office-in': mt('Check in') }[cp];
 
   return (<>
@@ -204,10 +204,12 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
         {err && <div className="m-err">{err}</div>}
         {ask === 'choose' && (<>
           <button className="m-btn m-block" style={{ marginBottom: 10 }} onClick={() => setAsk('list')}>➡️ {mt('Yes, another field visit')}</button>
+          {onAddVisit && <button className="m-btn m-block m-ghost" style={{ marginBottom: 10 }} onClick={() => { setAsk(false); onAddVisit(); }}>＋ {mt('Add a new field visit')}</button>}
           <button className="m-btn m-block m-warn" onClick={() => { setAsk(false); openCp('office-in'); }}>🏢 {mt('No, check out to Office')}</button>
         </>)}
         {ask === 'list' && (<>
           {others.length === 0 && <div className="m-muted" style={{ marginBottom: 10 }}>{mt('No other field visit is due today')}</div>}
+          {onAddVisit && <button className="m-btn m-block m-ghost" style={{ marginBottom: 10 }} onClick={() => { setAsk(false); onAddVisit(); }}>＋ {mt('Add a new field visit')}</button>}
           {others.map(t => <button key={t.id} className="m-btn m-block" style={{ marginBottom: 10 }} disabled={busy} onClick={async () => { await headNext(t.id); setAsk(false); }}>➡️ {t.customerName ? `${t.customerName} — ${t.title}` : t.title}</button>)}
           <button className="m-btn m-block m-warn" onClick={() => { setAsk(false); openCp('office-in'); }}>🏢 {mt('No, check out to Office')}</button>
         </>)}
@@ -224,7 +226,7 @@ export default function Journey({ task, tasks, onOpenTask, onChanged }) {
           {loc.status === 'ready' && <>✅ {mt('Location verified')}{loc.place ? ` · ${loc.place}` : ''}<div className="m-jsub">{Number(loc.lat).toFixed(5)}, {Number(loc.lng).toFixed(5)} · ±{Math.round(loc.accuracy || 0)} m</div></>}
           {loc.status === 'error' && <>📍 {loc.error} <button className="m-link" onClick={locate}>{mt('Retry')}</button></>}
         </div>
-        {cp === 'office-out' && <div className="m-muted" style={{ marginBottom: 8 }}>{mt('Your office location and the time are recorded now.')}<br />📡 {mt('Your route is recorded while this field visit trip is open — until you check in at the office.')}</div>}
+        {cp === 'office-out' && <div className="m-muted" style={{ marginBottom: 8 }}>{mt('Your office location and the time are recorded now.')}<br />📍 {mt('Your location is captured only when you tap Check out / Check in on a field visit.')}</div>}
         {cp === 'site' && (<>
           <div className="m-field"><label>{mt('Check in Time')}</label>
             <input className="m-input m-locked" readOnly value={formatNepalTime(siteIn ? activeStop.checkInAt : new Date(now).toISOString())} />

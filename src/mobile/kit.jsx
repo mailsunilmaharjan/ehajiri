@@ -68,6 +68,11 @@ export const STATUS_CHIP = { pending: ['warn', 'Pending'], recommended: ['info',
 export const StatusChip = ({ status }) => { const [c, l] = STATUS_CHIP[status] || ['gray', status]; return <span className={`m-chip ${c}`}>{l}</span>; };
 
 const NP = {
+  'Your location is captured only when you tap Check out / Check in on a field visit.': 'फिल्ड भिजिटमा Check out / Check in थिच्दा मात्र तपाईंको लोकेसन लिइन्छ।',
+  'Moving from Office': 'कार्यालयबाट हिँड्दै',
+  'Reached here': 'यहाँ पुग्यो',
+  'Task Status': 'कार्य स्थिति',
+  'Add a new field visit': 'नयाँ फिल्ड भिजिट थप्नुहोस्',
   'Your route is recorded while this field visit trip is open — until you check in at the office.': 'फिल्ड भिजिट यात्रा खुला रहँदासम्म — कार्यालयमा चेक इन नगरेसम्म तपाईंको बाटो रेकर्ड हुन्छ।',
   'Open site form': 'साइट फारम खोल्नुहोस्', 'Site form': 'साइट फारम', 'Check out to Office': 'कार्यालयमा चेक आउट', 'Another field visit?': 'अर्को फिल्ड भिजिट?', 'Yes, another field visit': 'हो, अर्को फिल्ड भिजिट', 'No, check out to Office': 'होइन, कार्यालय फर्कने', 'No other field visit is due today': 'आज अर्को फिल्ड भिजिट छैन',
   'Notices': 'सूचनाहरू', 'Reports': 'रिपोर्टहरू', 'Monthly Ledger': 'मासिक खाता', 'Summary': 'सारांश', 'Present / Absent': 'उपस्थित / अनुपस्थित', 'IN & OUT': 'आगमन र प्रस्थान', 'Late In / Early Out': 'ढिलो आगमन / चाँडो प्रस्थान', 'Absent Days': 'अनुपस्थित दिन', 'Overtime': 'ओभरटाइम', 'Reports menu': 'रिपोर्ट मेनु', 'Working days': 'कार्य दिन', 'Office Visit': 'कार्यालय भ्रमण', 'Worked': 'काम गरेको', 'Weekend': 'साप्ताहिक बिदा', 'Holiday': 'सार्वजनिक बिदा', 'Late in': 'ढिलो आगमन', 'Early out': 'चाँडो प्रस्थान', 'Day by day record': 'दिनको विवरण', 'Totals and attendance rate': 'जम्मा र उपस्थिति दर', 'Calendar colours': 'क्यालेन्डर रङ', 'Check in and out times': 'आगमन र प्रस्थान समय', 'Days you were late or left early': 'ढिलो आएका वा चाँडै गएका दिन', 'Days marked absent': 'अनुपस्थित भएका दिन', 'Approved and worked extra hours': 'थप घण्टाको काम', 'No records this month': 'यो महिना कुनै विवरण छैन', 

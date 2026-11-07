@@ -19,6 +19,7 @@ import { startStandaloneBridge, stopStandaloneBridge } from './services/standalo
 import { startStandaloneScheduler, stopStandaloneScheduler } from './services/standaloneScheduler.js';
 import { startAttendanceNotificationScheduler, stopAttendanceNotificationScheduler } from './services/attendanceNotificationScheduler.js';
 import { startBirthdayNotificationScheduler, stopBirthdayNotificationScheduler } from './services/birthdayNotificationScheduler.js';
+import { startFieldVisitReminderScheduler, stopFieldVisitReminderScheduler } from './services/fieldVisitReminderScheduler.js';
 import { requireModuleEnabled } from './middleware/moduleGuard.js';
 import { getModuleFlags, FLAG_KEYS } from './utils/moduleFlags.js';
 
@@ -281,6 +282,7 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
 
     startAttendanceNotificationScheduler();
     startBirthdayNotificationScheduler();
+    startFieldVisitReminderScheduler();
 
     // Validity / Expiry: take staff whose end date has passed off the attendance
     // devices (and put them back once extended) without anyone having to save
@@ -334,9 +336,9 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
   }
 })();
 
-process.on('exit', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); });
-process.on('SIGINT', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); process.exit(0); });
-process.on('SIGTERM', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); process.exit(0); });
+process.on('exit', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); stopFieldVisitReminderScheduler(); });
+process.on('SIGINT', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); stopFieldVisitReminderScheduler(); process.exit(0); });
+process.on('SIGTERM', () => { stopStandaloneScheduler(); stopStandaloneBridge(); stopAttendanceNotificationScheduler(); stopBirthdayNotificationScheduler(); stopFieldVisitReminderScheduler(); process.exit(0); });
 
 /* ── Bug Finder — catch crashes that happen outside any request (e.g. a
    scheduler tick, a stray promise) so they still show up in the DB list

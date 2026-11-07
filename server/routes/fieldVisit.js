@@ -188,7 +188,8 @@ router.post('/stops/:id/check-in', async (req, res) => {
   const client = await pool.connect();
   try {
     const { rows: existing } = await client.query(
-      `SELECT s.id, s.check_in_at, s.session_id, t.contact_id AS "contactId", fs.office_out_at AS "officeOutAt"
+      `SELECT s.id, s.check_in_at, s.session_id, s.task_id AS "taskId", t.contact_id AS "contactId", fs.office_out_at AS "officeOutAt",
+              t.status AS "taskStatus", t.title AS "taskTitle", t.created_by AS "taskCreatedBy"
        FROM field_visit_stops s
        JOIN field_visit_sessions fs ON fs.id = s.session_id
        JOIN tasks t ON t.id = s.task_id
@@ -246,8 +247,19 @@ router.post('/stops/:id/check-in', async (req, res) => {
     if (existing[0].contactId) {
       await client.query(`UPDATE staff_contacts SET latitude=$1, longitude=$2, updated_at=NOW() WHERE id=$3`, [lat, lng, existing[0].contactId]);
     }
+    // Reaching the client starts the work: a still-Pending task becomes In Progress.
+    const startsTask = existing[0].taskStatus === 'pending';
+    if (startsTask) {
+      await client.query(`UPDATE tasks SET status='in_progress', completed_at=NULL, updated_at=NOW() WHERE id=$1 AND status='pending'`, [existing[0].taskId]);
+    }
     await client.query('COMMIT');
     savePlaceLater('field_visit_stops', 'check_in_place', id, lat, lng);
+    if (startsTask) {
+      try {
+        const { rows: asg } = await client.query('SELECT user_id FROM task_assignees WHERE task_id=$1', [existing[0].taskId]);
+        await notifyStatusChanged(existing[0].taskId, existing[0].taskTitle, 'in_progress', existing[0].taskCreatedBy, asg.map(r => r.user_id), req.user.id, true);
+      } catch { /* the check-in itself is saved */ }
+    }
     res.json(await getActiveSessionFull(req.user.id, client));
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});

@@ -1,3 +1,5 @@
+> **Update:** the mobile app now captures GPS ONLY at the Check out / Check in taps on a field visit (no continuous route recording on the phone). Everything below is therefore NOT needed unless continuous background tracking on the phone is requested again. The web version still records a route while a trip is open and the tab is open.
+
 # Field Visit route tracking — Android background setup
 
 The web app already records the route (`src/utils/tripTracker.js`, started/stopped

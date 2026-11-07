@@ -220,7 +220,7 @@ function RemarkCard({ r, taskId, myId, onEdit }) {
 const waNumber = (v = '') => { let d = String(v).replace(/[^\d]/g, ''); if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = d.slice(1); if (d.length === 10 && d.startsWith('9')) d = '977' + d; return d; };
 
 /* ───────────── Task detail ───────────── */
-function TaskDetail({ task, tasks, onClose, onChanged, onEdit, onOpenTask }) {
+function TaskDetail({ task, tasks, onClose, onChanged, onEdit, onOpenTask, onAddVisit }) {
   const mt = useMT(); const fd = useDateFormat();
   const { currentUser } = useAuth();
   const noti = useNotifications();
@@ -266,7 +266,7 @@ function TaskDetail({ task, tasks, onClose, onChanged, onEdit, onOpenTask }) {
         <button className="m-btn m-sm m-ghost" style={{ flex: 1 }} onClick={onEdit}>✎ {mt('Edit')}</button>
       </div>
 
-      <Journey task={task} tasks={tasks} onOpenTask={onOpenTask} onChanged={() => onChanged()} />
+      <Journey task={task} tasks={tasks} onOpenTask={onOpenTask} onChanged={() => onChanged()} onAddVisit={onAddVisit} />
 
       <div className="m-row" style={{ margin: '4px 0 8px' }}><b className="m-grow" style={{ fontSize: 16 }}>{mt('Remarks')} {rems ? `(${rems.length})` : ''}</b>
         <button className="m-btn m-sm" onClick={() => setForm({})}>＋ {mt('Add remark')}</button></div>
@@ -331,8 +331,8 @@ export default function MobileTasks({ fieldVisitOnly = false }) {
 
       <button className="m-addfab" onClick={() => setEdit({})} aria-label={mt('New Task')}>＋</button>
 
-      {current && !edit && <TaskDetail key={current.id} task={current} tasks={rows} onOpenTask={(id) => { load(); setOpen(id); }} onClose={() => setOpen(null)} onChanged={(closeToo) => { load(); if (closeToo === true) setOpen(null); }} onEdit={() => setEdit(current)} />}
-      {edit && <TaskForm task={edit.id ? edit : null} fieldVisit={seg === 'visit'} onClose={() => setEdit(null)} onSaved={(saved) => { setEdit(null); load(); if (saved?.id) setOpen(saved.id); }} />}
+      {current && !edit && <TaskDetail key={current.id} task={current} tasks={rows} onOpenTask={(id) => { load(); setOpen(id); }} onClose={() => setOpen(null)} onChanged={(closeToo) => { load(); if (closeToo === true) setOpen(null); }} onEdit={() => setEdit(current)} onAddVisit={() => setEdit({ newVisit: true })} />}
+      {edit && <TaskForm task={edit.id ? edit : null} fieldVisit={seg === 'visit' || !!edit.newVisit} onClose={() => setEdit(null)} onSaved={(saved) => { setEdit(null); load(); if (saved?.id) setOpen(saved.id); }} />}
     </div>
   );
 }

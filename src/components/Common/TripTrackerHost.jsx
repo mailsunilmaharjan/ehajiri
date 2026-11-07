@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { tripTracker } from '../../utils/tripTracker.js';
+import { isMobileMode } from '../../utils/native.js';
 
 /**
  * Keeps the Field Visit route tracker in step with the server's open trip, app-wide
@@ -16,7 +17,8 @@ const TripTrackerHost = ({ bottom = 24, left = 150 }) => {
   useEffect(() => tripTracker.subscribe(setSt), []);
 
   useEffect(() => {
-    if (!currentUser?.id) { tripTracker.stop(); return undefined; }
+    // The mobile app captures GPS ONLY at the Check out / Check in taps — no continuous route recording.
+    if (!currentUser?.id || isMobileMode()) { tripTracker.stop(); return undefined; }
     tripTracker.sync();
     const t = setInterval(() => tripTracker.sync(), 5 * 60 * 1000);
     const onFocus = () => tripTracker.sync();
