@@ -14,12 +14,13 @@
   },
   "android": {
     "allowMixedContent": false,
+    "appendUserAgent": "eHajiriPlay",
     "backgroundColor": "#1a56db"
   },
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 1200,
-      "backgroundColor": "#1a56db",
+      "backgroundColor": "#FFFFFF",
       "showSpinner": false
     },
     "PushNotifications": {
