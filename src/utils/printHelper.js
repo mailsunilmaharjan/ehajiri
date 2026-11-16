@@ -8,14 +8,16 @@ export function getPrintCSS(isLandscape = false) {
   return `
     @page { size: A4 ${isLandscape ? 'landscape' : 'portrait'}; margin: 8mm; }
     * { -webkit-print-color-adjust:exact; print-color-adjust:exact; box-sizing:border-box; }
-    body { font-family:Arial,Helvetica,sans-serif; font-size:10px; margin:0; padding:0; }
+    body { font-family:Arial,Helvetica,sans-serif; font-size:10px; margin:0; padding:2mm 5mm 5mm; }
 
-    /* Header: logo left, info centred, spacer balances */
+    /* Header: logo left, info centred, spacer balances.
+       A thin light rule (not a heavy black one) with breathing room under the text. */
     .print-header {
       display:grid; grid-template-columns:48px 1fr 48px;
       align-items:center; gap:0;
-      margin-bottom:8px; padding-bottom:8px; border-bottom:2px solid #374151;
+      margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #d1d5db;
     }
+    .ph-info .rpt-sub { line-height:1.4; }
     .ph-logo  { grid-column:1; align-self:flex-start; }
     .ph-info  { grid-column:2; text-align:center; }
     .ph-space { grid-column:3; }
@@ -26,7 +28,7 @@ export function getPrintCSS(isLandscape = false) {
     .ph-info .rpt-sub   { font-size:11px; color:#374151; font-weight:600; margin:2px 0; }
 
     /* Footer */
-    .print-footer { margin-top:36px; display:flex; justify-content:space-between; gap:24px; }
+    .print-footer { margin-top:36px; display:flex; justify-content:space-between; gap:24px; padding:0 6mm; page-break-inside:avoid; }
     .pf-col       { flex:1; text-align:center; }
     .pf-line      { border-bottom:1.5px dotted #374151; height:28px; margin-bottom:6px; }
     .pf-label     { font-size:11px; font-weight:700; color:#374151; }

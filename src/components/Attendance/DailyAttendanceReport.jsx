@@ -679,7 +679,7 @@ const DailyAttendanceReport = () => {
 <style>
   @page { size: A4 portrait; margin: 8mm; }
   * { -webkit-print-color-adjust:exact; print-color-adjust:exact; box-sizing:border-box; }
-  body { font-family:Arial,sans-serif; font-size:10px; margin:0; padding:0; }
+  body { font-family:Arial,sans-serif; font-size:10px; margin:0; padding:2mm 5mm 5mm; }
   /* Header: grid keeps logo left + info truly centered on page */
   .header { display:grid; grid-template-columns:48px 1fr 48px; align-items:center;
             gap:0; margin-bottom:8px; padding-bottom:8px; border-bottom:2px solid #374151; }

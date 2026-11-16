@@ -630,7 +630,7 @@ const YearlyPresentAbsentReport = () => {
 <style>
   @page { size: A4 landscape; margin: 8mm; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; margin: 0; padding: 2mm 5mm 5mm; }
   .header       { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 8px; }
   .company-name { font-size: 15px; font-weight: 800; color: #1f2937; margin-bottom: 2px; }
   .company-sub  { font-size: 10px; color: #6b7280; margin-bottom: 6px; }

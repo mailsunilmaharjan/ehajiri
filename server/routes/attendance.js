@@ -2908,6 +2908,7 @@ router.get('/present-absent', async (req, res) => {
 
       let totalP=0, totalAB=0, totalL=0, totalOV=0, totalPH=0, totalH=0;
       const days = {};
+      const holidayNamesPA = {};
       const attStartPA = dateOnlyStr(emp.attendanceDate);
 
       for (const { date, dayKey } of dates) {
@@ -2922,7 +2923,9 @@ router.get('/present-absent', async (req, res) => {
         const punches  = log?.punches || 0;
         // Per-employee, not the shared dates[] flag — a holiday scoped to
         // e.g. Gender=Female must not mark everyone else's day as PH too.
-        const isHoliday = !!getHoliday(date, emp);
+        const holidayNamePA = getHoliday(date, emp);
+        const isHoliday = !!holidayNamePA;
+        if (isHoliday) holidayNamesPA[date] = holidayNamePA;   // hover text on the grid
         let st;
 
         // Roster override: once a roster entry covers this date, it's
@@ -2977,7 +2980,7 @@ router.get('/present-absent', async (req, res) => {
         eligibleForOt: !!emp.eligible_for_ot,
         otApprovedMins,
         otApprovedFormatted: (emp.eligible_for_ot && otApprovedMins > 0) ? minsToHHMM(otApprovedMins) : '—',
-        days, leaveCodes: leaveCodeMap[emp.id] || {}, totalP, totalAB, totalL, totalOV, totalPH, totalH,
+        days, leaveCodes: leaveCodeMap[emp.id] || {}, holidayNames: holidayNamesPA, totalP, totalAB, totalL, totalOV, totalPH, totalH,
       };
     });
 

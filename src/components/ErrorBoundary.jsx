@@ -1,5 +1,6 @@
 import React from 'react';
 import { reportBug } from '../utils/bugReporter.js';
+import { isChunkLoadError, reloadOnceForChunkError } from '../utils/chunkReload.js';
 
 /**
  * Catches render-time crashes anywhere in the tree below it, reports them to
@@ -18,6 +19,9 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
+    // Stale tab after a deploy: reload to pick up the new build instead of
+    // showing the error screen (no Bug Finder noise for this expected case).
+    if (isChunkLoadError(error) && reloadOnceForChunkError()) return;
     reportBug({ message: error.message, stack: error.stack || info?.componentStack });
   }
 

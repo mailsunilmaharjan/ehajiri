@@ -93,7 +93,17 @@ const withLeaveCode = (disp, st, code) => {
   return disp;
 };
 
-const StatusCell = ({ st, language, code }) => {
+// Hover text: the holiday's own name for H, the leave type's full name for a
+// leave code, otherwise the generic status title.
+const statusTip = (st, language, holidayName, leaveName) => {
+  const base = statusTitle(st, language);
+  if (st === 'PH') return holidayName || base;
+  if (st === 'PP' || st === 'PP1') return holidayName ? `${base} (${holidayName})` : base;
+  if ((st === 'L' || st === 'LH' || st === 'PLH') && leaveName) return st === 'L' ? leaveName : `${base} (${leaveName})`;
+  return base;
+};
+
+const StatusCell = ({ st, language, code, tip }) => {
   const s = STATUS[st] || STATUS.AB;
   const disp = withLeaveCode(statusDisplay(st, language), st, code);
   return (
@@ -114,6 +124,17 @@ const statusText = (st, code) => {
   if (!s) return '';
   const d = withLeaveCode(s, st, code);
   return d.sup ? `${d.main}(${d.sup})` : d.main;
+};
+
+/* Print-only HTML variant: the "1P" marker is a small superscript at the
+   top-right of the status, like the on-screen grid. */
+const statusHtml = (st, code) => {
+  const s = STATUS[st];
+  if (!s) return '';
+  const d = withLeaveCode(s, st, code);
+  return d.sup
+    ? `${d.main}<sup style="font-size:6.5px;font-weight:700;vertical-align:top;position:relative;top:-1px;margin-left:1px">${d.sup}</sup>`
+    : d.main;
 };
 
 /* ── Advanced Search Modal ───────────────────────────────────── */
@@ -294,7 +315,7 @@ const PresentAbsentReport = () => {
   const [searchParams] = useSearchParams();
   const { language }   = useLanguage();
   const { settings }   = useSettings();
-  const { filteredEmployees: allEmployees, shifts, getApprovedLeaveForDate, rosterVersion } = useData();
+  const { filteredEmployees: allEmployees, shifts, getApprovedLeaveForDate, getLeaveTypeName, rosterVersion } = useData();
   const fd             = useDateFormat();
   const L = (np, en)   => language === 'np' ? np : en;
 
@@ -518,13 +539,18 @@ const PresentAbsentReport = () => {
 
   const handlePrint = () => {
     if (!employees.length) return;
-    const dayHeaders = dates.map((d, idx) => `<th style="padding:3px 4px;border:1px solid #dedede;background:#efefef;font-size:10px">${dispDayNum(d.dayNum, idx)}<br/>${d.dayKey.slice(0,3)}</th>`).join('');
+    const dayHeaders = dates.map((d, idx) => {
+      const hbg  = d.isWeekend ? '#e5e7eb' : d.isHoliday ? '#fef3c7' : '#efefef';
+      const hcol = d.isWeekend ? '#111827' : d.isHoliday ? '#92400e' : '#374151';
+      return `<th style="padding:3px 4px;border:1px solid #dedede;background:${hbg};color:${hcol};font-size:10px">${dispDayNum(d.dayNum, idx)}<br/><span style="font-weight:500">${d.dayKey.slice(0,3)}</span></th>`;
+    }).join('');
     const dataRows = employees.map((e,i) => {
       const dayCells = dates.map(d => {
-        const lbl = statusText(e.days[d.date], e.leaveCodes?.[d.date]);
-        return `<td style="padding:2px 3px;border:1px solid #dedede;text-align:center;font-size:10px">${lbl}</td>`;
+        const lbl = statusHtml(e.days[d.date], e.leaveCodes?.[d.date]);
+        const col = STATUS[e.days[d.date]]?.color || '#374151';
+        return `<td style="padding:2px 3px;border:1px solid #dedede;text-align:center;font-size:10px;font-weight:800;color:${col}">${lbl}</td>`;
       }).join('');
-      return `<tr>
+      return `<tr style="background:${i%2===0?'white':'#f7f8fa'}">
         <td style="padding:3px 5px;border:1px solid #dedede;text-align:center">${i+1}</td>
         <td style="padding:3px 5px;border:1px solid #dedede">${e.fullName}</td>
         <td style="padding:3px 5px;border:1px solid #dedede;text-align:center">${e.postShort||''}</td>
@@ -550,7 +576,14 @@ const PresentAbsentReport = () => {
       </tr></thead>
       <tbody>${dataRows}</tbody>
     </table>`;
-    openPrintWindow(buildPrintDoc({ settings, language, reportTitle, reportSub: reportSub(), contentHtml, isLandscape: true }), true);
+    openPrintWindow(buildPrintDoc({ settings, language, reportTitle, reportSub: reportSub(), contentHtml, isLandscape: true,
+      extraStyle: `
+        .print-header { border-bottom:1px solid #d1d5db !important; padding-bottom:10px !important; margin-bottom:10px !important; }
+        .print-footer { padding:0 6mm; page-break-inside:avoid; }
+        table td, table th { white-space:nowrap; }
+        table tr { page-break-inside:avoid; }
+        table thead { display:table-header-group; }
+      ` }), true);
   };
 
   // Real .xlsx via ExcelJS (not a CSV) — matches the on-screen DataGrid
@@ -613,10 +646,16 @@ const PresentAbsentReport = () => {
       row.eachCell({ includeEmpty: true }, (cell, colNum) => {
         const dayIdx = colNum - FIXED_COLS.length - 1;
         const isDayCol = dayIdx >= 0 && dayIdx < dayCols.length;
-        const weekendHoliday = isDayCol && dayIsWeekendHoliday[dayIdx];
-        cell.font = { bold: true, size: 10.5, color: { argb: weekendHoliday ? 'FF111827' : 'FF374151' } };
-        cell.fill = { type: 'pattern', pattern: 'solid',
-          fgColor: { argb: weekendHoliday ? 'FFE5E7EB' : 'FFEFEFEF' } };
+        // Same header colours as the on-screen grid.
+        const dd = isDayCol ? dates[dayIdx] : null;
+        let hFill = 'FFEFEFEF', hFont = 'FF374151';
+        if (dd?.isWeekend)      { hFill = 'FFE5E7EB'; hFont = 'FF111827'; }
+        else if (dd?.isHoliday) { hFill = 'FFFEF3C7'; hFont = 'FF92400E'; }
+        else if (colNum === lastCol - 2) { hFill = 'FFD1FAE5'; hFont = 'FF065F46'; }
+        else if (colNum === lastCol - 1) { hFill = 'FFFEE2E2'; hFont = 'FF991B1B'; }
+        else if (colNum === lastCol)     { hFill = 'FFD1FAE5'; hFont = 'FF059669'; }
+        cell.font = { bold: true, size: 10.5, color: { argb: hFont } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hFill } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         cell.border = { right: thin, bottom: rowIdx === 1 ? heavy : thin };
       });
@@ -629,13 +668,36 @@ const PresentAbsentReport = () => {
         ...dates.map(d => statusText(e.days[d.date], e.leaveCodes?.[d.date])),
         e.totalP, e.totalAB, e.eligibleForOt ? (e.otApprovedFormatted || '—') : '—',
       ]);
+      const rowFill = i % 2 === 0 ? 'FFFFFFFF' : 'FFF7F8FA';   // same striping as the grid
       row.eachCell({ includeEmpty: true }, (cell, colNum) => {
         cell.alignment = { horizontal: colNum === 2 ? 'left' : 'center', vertical: 'middle' };
         cell.border = { right: thin, bottom: { style: 'thin', color: { argb: 'FFF3F4F6' } } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colNum === 1 ? 'FFEFEFEF' : rowFill } };
+        cell.font = { color: { argb: 'FF1F2937' } };
       });
+      // Day cells: coloured bold text; "1P"/½ as a real superscript, like the grid.
+      dates.forEach((d, di) => {
+        const st = e.days[d.date];
+        const s = STATUS[st];
+        if (!s) return;
+        const disp = withLeaveCode(s, st, e.leaveCodes?.[d.date]);
+        const color = { argb: 'FF' + s.color.slice(1).toUpperCase() };
+        const cell = row.getCell(FIXED_COLS.length + 1 + di);
+        cell.value = disp.sup
+          ? { richText: [
+              { text: disp.main, font: { bold: true, color } },
+              { text: disp.sup,  font: { bold: true, color, size: 7, vertAlign: 'superscript' } },
+            ] }
+          : disp.main;
+        cell.font = { bold: true, color };
+      });
+      const otOn = e.eligibleForOt && e.otApprovedFormatted && e.otApprovedFormatted !== '—';
       row.getCell(lastCol - 2).font = { bold: true, color: { argb: 'FF065F46' } };
+      row.getCell(lastCol - 2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
       row.getCell(lastCol - 1).font = { bold: true, color: { argb: e.totalAB > 0 ? 'FF991B1B' : 'FFD1D5DB' } };
-      row.getCell(lastCol).font = { bold: true, color: { argb: 'FF059669' } };
+      row.getCell(lastCol - 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: e.totalAB > 0 ? 'FFFFF5F5' : 'FFFFFFFF' } };
+      row.getCell(lastCol).font = { bold: true, color: { argb: otOn ? 'FF059669' : 'FFD1D5DB' } };
+      row.getCell(lastCol).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: otOn ? 'FFF0FDF4' : 'FFFFFFFF' } };
     });
 
     if (grandL > 0) {
@@ -828,12 +890,15 @@ const PresentAbsentReport = () => {
                 <th style={{ ...thBase, minWidth:60 }}>{L('विभाग','Dept.')}</th>
                 <th style={{ ...thBase, minWidth:52 }}>{L('शाखा','Branch')}</th>
 
-                {dates.map(({ date, dayNum, isWeekend, isHoliday }, idx) => (
+                {dates.map(({ date, dayNum, dayKey, isWeekend, isHoliday }, idx) => (
                   <th key={date} style={{
                     ...(isWeekend ? thWeekend : isHoliday ? thHoliday : thBase),
-                    minWidth:32, fontSize:11,
+                    minWidth:32, fontSize:11, lineHeight:1.25,
                   }}>
                     {dispDayNum(dayNum, idx)}
+                    <div style={{ fontSize:10, fontWeight:500, opacity:.85 }}>
+                      {language === 'np' ? (DOW_NP[dayKey] || dayKey.slice(0,3)) : dayKey.slice(0,3)}
+                    </div>
                   </th>
                 ))}
                 <th style={{ ...thTotalP,  minWidth:38 }}>P</th>
@@ -841,27 +906,6 @@ const PresentAbsentReport = () => {
                 <th style={{ ...thTotalOT, minWidth:44 }}>OT</th>
               </tr>
 
-              {/* Row 2 — day abbreviations */}
-              <tr>
-                <th style={{ ...thSub, left:0, position:'sticky', zIndex:4 }}></th>
-                <th style={{ ...thSub, textAlign:'left', position:'sticky', left:34, zIndex:4 }}></th>
-                <th style={{ ...thSub, textAlign:'left', position:'sticky', left:34+STAFF_ID_COL_WIDTH, zIndex:4 }}></th>
-                <th style={thSub}></th>
-                <th style={thSub}></th>
-                <th style={thSub}></th>
-
-                {dates.map(({ date, dayKey, isWeekend, isHoliday }) => (
-                  <th key={date} style={{
-                    ...(isWeekend ? thSubWeekend : isHoliday ? thSubHoliday : thSub),
-                    fontSize:10,
-                  }}>
-                    {language === 'np' ? (DOW_NP[dayKey] || dayKey.slice(0,3)) : dayKey.slice(0,3)}
-                  </th>
-                ))}
-                <th style={{ ...thSub, background:'#d1fae5', color:'#065f46' }}>Total</th>
-                <th style={{ ...thSub, background:'#fee2e2', color:'#991b1b' }}>Total</th>
-                <th style={{ ...thSub, background:'#d1fae5', color:'#059669' }}>Total</th>
-              </tr>
             </thead>
 
             <tbody>
@@ -906,11 +950,15 @@ const PresentAbsentReport = () => {
                   </td>
                   <td style={{ ...tdBase, color:'#1f2937', textAlign:'left' }} title={emp.branch}>{resolveShort(emp)}</td>
 
-                  {dates.map(({ date }) => (
-                    <td key={date} style={{ ...tdBase, padding:'3px' }}>
-                      <StatusCell st={emp.days[date]} language={language} code={emp.leaveCodes?.[date]} />
-                    </td>
-                  ))}
+                  {dates.map(({ date, holidayName }) => {
+                    const code = emp.leaveCodes?.[date];
+                    return (
+                      <td key={date} style={{ ...tdBase, padding:'3px' }}>
+                        <StatusCell st={emp.days[date]} language={language} code={code}
+                          tip={statusTip(emp.days[date], language, emp.holidayNames?.[date] || holidayName, code ? getLeaveTypeName(code) : null)} />
+                      </td>
+                    );
+                  })}
 
                   <td style={{ ...tdBase, fontWeight:800, color:'#065f46',
                     background:'#f0fdf4' }}>{emp.totalP}</td>

@@ -657,7 +657,19 @@ const StaffLedger = () => {
                   </tr></thead>
                   <tbody>${tableRows}</tbody>
                 </table>`;
-              openPrintWindow(buildPrintDoc({ settings, language, reportTitle, reportSub, contentHtml, isLandscape:false }), false);
+              openPrintWindow(buildPrintDoc({ settings, language, reportTitle, reportSub, contentHtml, isLandscape:false,
+                extraStyle:`
+
+                  .print-header { border-bottom:1px solid #d1d5db !important; padding-bottom:10px !important; margin-bottom:10px !important; }
+                  .ph-info .rpt-sub { margin:4px 0 0 !important; line-height:1.4; }
+                  .lg th, .lg td { white-space:nowrap; font-size:10px; line-height:1.25; padding:3.5px 5px !important; }
+                  .lg td:last-child { white-space:normal; font-size:9px !important; }
+                  .lg th:last-child { width:auto; }
+                  .lg tr { page-break-inside:avoid; }
+                  .lg thead { display:table-header-group; }
+                  .lg tbody tr:nth-child(even) td:not(:first-child) { background:#fafafa; }
+                  .print-footer { page-break-inside:avoid; margin-top:28px; }
+                ` }), false);
             }}
             title="Print"
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
@@ -745,13 +757,13 @@ const StaffLedger = () => {
             </div>
           </div>
         )}
+        {!isHalfMonthlyCtx && <ReportDateRange ctl={dr} />}
         {/* Year */}
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
           disabled={rangeLocked} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>
-        {!isHalfMonthlyCtx && <ReportDateRange ctl={dr} />}
               ))
             : [now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
                 <option key={y} value={y}>{y}</option>

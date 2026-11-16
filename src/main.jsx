@@ -9,12 +9,19 @@ import { SettingsProvider } from './context/SettingsContext.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { installGlobalErrorReporting } from './utils/bugReporter.js'
 import { getTenantPrefix } from './utils/tenantPath.js'
+import { reloadOnceForChunkError } from './utils/chunkReload.js'
 import './index.css'
 
 // Bug Finder (Settings → Bug Finder): catches crashes outside React's render
 // cycle (event handlers, timers, fetches) — render-time crashes are caught
 // by <ErrorBoundary> below instead.
 installGlobalErrorReporting()
+
+// A lazy page chunk that no longer exists (new build deployed while this tab
+// was open) → reload once to get the new build. See utils/chunkReload.js.
+window.addEventListener('vite:preloadError', (e) => {
+  if (reloadOnceForChunkError()) e.preventDefault()
+})
 
 // Registers the (deliberately no-op / non-caching) service worker so the
 // browser recognizes the app as installable — see public/service-worker.js
