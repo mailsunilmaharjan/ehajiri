@@ -849,9 +849,10 @@ const StaffLedger = () => {
           padding:'10px 16px', borderLeft:'4px solid #1a56db' }}>
           {/* Name + Post | Dept | Branch | Grade | Mode — all on one line */}
           <div style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:10 }}>
-            <span style={{ fontSize:15, fontWeight:800, color:'#1f2937', whiteSpace:'nowrap' }}>{emp.fullName}</span>
+            <span style={{ fontSize:15, fontWeight:800, color:'#1f2937', whiteSpace:'nowrap' }}><span style={{ fontWeight:600, color:'#6b7280' }}>{L('कर्मचारीको नाम','Staff Name')} : </span>{emp.fullName}</span>
             <div style={{ display:'flex', gap:0, flexWrap:'wrap', fontSize:12,
-              border:'1px solid #e2e8f0', borderRadius:8, overflow:'hidden', width:'fit-content' }}>
+              border:'1px solid #bfdbfe', borderRadius:8, overflow:'hidden', width:'fit-content',
+              marginLeft:14 }}>
               {[
                 { show: !!emp.empCode,
                   icon:'🆔', label:L('स्टाफ आईडी','Staff ID'),
@@ -871,8 +872,8 @@ const StaffLedger = () => {
                 <div key={f.label} style={{
                   display:'inline-flex', flexDirection:'row', alignItems:'center', gap:5,
                   padding:'6px 14px',
-                  borderRight: i < arr.length - 1 ? '1px solid #e2e8f0' : 'none',
-                  background: '#f8fafc',
+                  borderRight: i < arr.length - 1 ? '1px solid #bfdbfe' : 'none',
+                  background: '#eff6ff',
                 }}>
                   <span style={{ display:'inline-flex', alignItems:'center', gap:4,
                     fontSize:11, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>
@@ -891,27 +892,37 @@ const StaffLedger = () => {
           {summary.totalWorkingDays>0&&(
             <div style={{ display:'flex', gap:6, marginTop:8, flexWrap:'wrap' }}>
               {[
-                { label:L('उपस्थित','Present'),        value:summary.presentCount,           c:'#d1fae5', tc:'#065f46' },
-                { label:L('अनुपस्थित','Absent'),        value:summary.absentCount,            c:'#fee2e2', tc:'#991b1b' },
-                { label:L('बिदा','Leave'),              value:summary.leaveCount,             c:'#ede9fe', tc:'#5b21b6' },
-                { label:L('कार्यालय भ्रमण','Office Visit'), value:summary.visitCount||0,       c:'#dbeafe', tc:'#1e40af' },
-                { label:L('ढिलो','Late'),                value:summary.lateCount,              c:'#fef3c7', tc:'#92400e' },
-                { label:L('चाँडो गएको','OUT Issues'),   value:summary.earlyCount,             c:'#fef3c7', tc:'#92400e' },
+                { f:'', label:L('सबै','All'),                     value:days.length,                    c:'#f3f4f6', tc:'#374151' },
+                { f:'Present', label:L('उपस्थित','Present'),        value:summary.presentCount,           c:'#d1fae5', tc:'#065f46' },
+                { f:'Absent', label:L('अनुपस्थित','Absent'),        value:summary.absentCount,            c:'#fee2e2', tc:'#991b1b' },
+                { f:'Leave', label:L('बिदा','Leave'),              value:summary.leaveCount,             c:'#ede9fe', tc:'#5b21b6' },
+                { f:'Office Visit', label:L('कार्यालय भ्रमण','Office Visit'), value:summary.visitCount||0,       c:'#dbeafe', tc:'#1e40af' },
+                { f:'_late', label:L('ढिलो','Late'),                value:summary.lateCount,              c:'#fef3c7', tc:'#92400e' },
+                { f:'_early', label:L('चाँडो गएको','OUT Issues'),   value:summary.earlyCount,             c:'#fef3c7', tc:'#92400e' },
                 { label:L('उपस्थिति दर','Att. Rate'),   value:`${summary.attendanceRate}%`,    c:'#eff6ff', tc:'#1a56db' },
-                { label:L('सार्वजनिक बिदा','Public Holiday'), value:days.filter(r=>r.isPublicHoliday).length, c:'#fef3c7', tc:'#92400e' },
-                { label:L('बिदामा उपस्थित','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
-                { label:L('सप्ताहन्त','Weekend'), value:days.filter(r=>r.isWeekend).length, c:'#f3f4f6', tc:'#6b7280' },
-                { label:L('सप्ताहन्तमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
+                { f:'Public Holiday', label:L('सार्वजनिक बिदा','Public Holiday'), value:days.filter(r=>r.isPublicHoliday).length, c:'#fef3c7', tc:'#92400e' },
+                { f:'Day Off', label:L('डे अफ','Day Off'), value:days.filter(r=>r.status==='Day Off').length, c:'#f3f4f6', tc:'#6b7280' },
+                { f:'Night Off', label:L('नाइट अफ','Night Off'), value:days.filter(r=>r.status==='Night Off').length, c:'#e0e7ff', tc:'#4338ca' },
+                { f:'_holiday_punch', label:L('बिदामा उपस्थित','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
+                { f:'Weekend', label:L('सप्ताहन्त','Weekend'), value:days.filter(r=>r.isWeekend).length, c:'#f3f4f6', tc:'#6b7280' },
+                { f:'_weekend_punch', label:L('सप्ताहन्तमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
                 ...(emp?.eligibleForOt ? [
                   { label:L('जम्मा ओटी','Total OT'), value:summary.otApprovedFormatted || '0:00', c:'#d1fae5', tc:'#059669' },
                 ] : []),
-              ].map(s=>(
-                <div key={s.label} style={{ background:s.c, border:`1px solid ${s.tc}22`,
-                  borderRadius:6, padding:'3px 10px', textAlign:'center' }}>
+              ].map(s=>{
+                const active = s.f !== undefined && statusFilter===s.f;
+                return (
+                <div key={s.label}
+                  onClick={s.f !== undefined ? () => setStatusFilter(active ? '' : s.f) : undefined}
+                  title={s.f !== undefined ? L('फिल्टर गर्न क्लिक गर्नुहोस्','Click to filter') : undefined}
+                  style={{ background:s.c, border:`1px solid ${active ? s.tc : s.tc+'22'}`,
+                    boxShadow: active ? `0 0 0 2px ${s.tc}55` : 'none',
+                    cursor: s.f !== undefined ? 'pointer' : 'default', userSelect:'none',
+                    borderRadius:6, padding:'3px 10px', textAlign:'center' }}>
                   <span style={{ fontSize:13, fontWeight:800, color:s.tc }}>{s.value} </span>
                   <span style={{ fontSize:10, color:s.tc, opacity:.75 }}>{s.label}</span>
                 </div>
-              ))}
+              );})}
             </div>
           )}
         </div>
@@ -1026,60 +1037,8 @@ const StaffLedger = () => {
               },
             ] : []),
           ]}
-          toolbarLeft={
-            <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
-              <span style={{ fontSize:12, fontWeight:700, color:'#374151', whiteSpace:'nowrap' }}>
-                {L('फिल्टर','Filter By')} :
-              </span>
-              {[
-                { value:'',               label:L('सबै','All'),                  color:'#374151' },
-                { value:'Present',        label:L('उपस्थित','Present'),          color:'#065f46' },
-                { value:'Absent',         label:L('अनुपस्थित','Absent'),         color:'#991b1b' },
-                { value:'Weekend',        label:L('सप्ताहन्त','Weekend'),           color:'#6b7280' },
-                { value:'Day Off',        label:L('डे अफ','Day Off'),             color:'#6b7280' },
-                { value:'Night Off',      label:L('नाइट अफ','Night Off'),         color:'#4338ca' },
-                { value:'Leave',          label:L('बिदा','Leave'),                color:'#5b21b6' },
-                { value:'Public Holiday', label:L('सार्व. बिदा','P. Holiday'),   color:'#92400e' },
-                { value:'_late',          label:L('ढिला','Late In'),              color:'#dc2626' },
-                { value:'_early',         label:L('चाँडो','Early Out'),           color:'#d97706' },
-                { value:'_holiday_punch', label:L('P in Holiday','P in Holiday'), color:'#92400e' },
-                { value:'_weekend_punch', label:L('P in Weekend','P in Weekend'), color:'#6b7280' },
-              ].map(opt => (
-                <button key={opt.value} onClick={() => setStatusFilter(opt.value)}
-                  style={{ padding:'3px 10px',
-                    border:`1.5px solid ${statusFilter===opt.value ? opt.color : '#e5e7eb'}`,
-                    borderRadius:20, fontSize:11,
-                    fontWeight: statusFilter===opt.value ? 700 : 500,
-                    background: statusFilter===opt.value ? opt.color+'15' : 'white',
-                    color: statusFilter===opt.value ? opt.color : '#6b7280',
-                    cursor:'pointer', transition:'all .12s', fontFamily:'inherit' }}>
-                  {opt.label}
-                </button>
-              ))}
-              {statusFilter && (
-                <button onClick={() => setStatusFilter('')}
-                  style={{ padding:'3px 9px', border:'1px solid #fca5a5', borderRadius:20,
-                    fontSize:11, color:'#dc2626', background:'#fff5f5',
-                    cursor:'pointer', fontWeight:600, fontFamily:'inherit' }}>
-                  ✕ {L('रिसेट','Reset')}
-                </button>
-              )}
-            </div>
-          }
           toolbar={null}
         />
-      )}
-
-      {/* ── Legend ── */}
-      {emp&&days.length>0&&(
-        <div style={{ marginTop:10,display:'flex',gap:12,flexWrap:'wrap',fontSize:11,
-          color:'#6b7280',padding:'7px 12px',background:'#f9fafb',
-          borderRadius:8,border:'1px solid #e5e7eb' }}>
-          <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
-          <span><strong style={{ color:'#dc2626' }}>Late: HH:mm</strong> = {L('ढिलो आएको','Late arrival')}</span>
-          <span><strong style={{ color:'#d97706' }}>Early: HH:mm</strong> = {L('चाँडो गएको','Left early')}</span>
-          <span><strong style={{ color:'#059669' }}>OT HH:mm</strong> = {L('ओभरटाइम','Overtime')}</span>
-        </div>
       )}
     </div>
   );
