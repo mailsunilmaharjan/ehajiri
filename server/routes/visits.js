@@ -5,7 +5,7 @@ import { logAudit } from '../services/auditLog.js';
 import { sendOfficeVisitApplication, sendOfficeVisitStatusUpdate } from '../services/emailService.js';
 import { logError } from '../utils/logError.js';
 import { pushLater } from '../services/pushService.js';
-import { notifyPeople, notifyApproversNext, notifyApplicantOf } from '../services/approvalNotify.js';
+import { notifyPeople, notifyApproversNext, notifyApplicantOf, resolveApplicationRecipients } from '../services/approvalNotify.js';
 import { isLeaveBackdateEnabled } from '../utils/appSettings.js';
 import { authorizeRecoAction, authorizeOwnEditDelete } from '../services/recoApprovalGuard.js';
 import { findLeaveVisitConflict } from '../services/leaveVisitConflicts.js';
@@ -42,9 +42,8 @@ const isAdminManualBackdate = (req) =>
 /* Best-effort email lookup + send — never let a notification failure affect the request. */
 async function notifyVisitApplication(visit) {
   try {
-    const recommendedBy = Array.isArray(visit.reco) ? visit.reco[0] : (visit.recommendedBy || visit.reco || null);
-    const approvedBy    = Array.isArray(visit.approval) ? visit.approval[0] : (visit.approval || null);
-    const ids = [recommendedBy, approvedBy].filter(Boolean).map(Number);
+    // Picked recommender/approver + everyone configured for this staff member (admins if none).
+    const ids = await resolveApplicationRecipients(visit.employeeId, [visit.reco, visit.approval, visit.recommendedBy]);
     if (!ids.length) return;
 
     const [{ rows: recipients }, { rows: [requester] }] = await Promise.all([
@@ -266,7 +265,7 @@ router.post('/import', requireRole('admin', 'superAdmin'), async (req, res) => {
         try {
           if (v.status !== 'rejected') {
             const clash = await findLeaveVisitConflict({ kind: 'visit', employeeId: internalId, fromDate: v.fromDate, toDate: v.toDate });
-            if (clash) { errors.push({ employeeId: staffId, error: clash.error }); continue; }
+            if (clash) { errors.push({ employeeId: staffId, error: clash.error, duplicate: true, fromDate: v.fromDate, toDate: v.toDate }); continue; }
           }
           await client.query(
             `INSERT INTO office_visits

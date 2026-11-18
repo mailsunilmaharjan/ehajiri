@@ -117,7 +117,7 @@ const LeaveApplyModal = () => {
         const used     = (leaves || [])
           .filter(l => String(l.employeeId) === empId
                     && l.leaveTypeCode === lt.shortName
-                    && l.status === 'approved')
+                    && (l.status === 'approved' || l.status === 'pending'))
           .reduce((s, l) => s + Number(l.days || 0), 0);
         // Server-side credits (e.g. OT-to-leave grants from the Overtime
         // Approval page) live in leave_balances, not the opening/used math

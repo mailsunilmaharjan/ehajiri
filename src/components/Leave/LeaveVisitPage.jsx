@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth }      from '../../context/AuthContext.jsx';
 import { useLanguage }  from '../../context/LanguageContext.jsx';
 import { useData }      from '../../context/DataContext.jsx';
 import useSaveShortcut  from '../../hooks/useSaveShortcut.js';
 import { useSettings }  from '../../context/SettingsContext.jsx';
 import { useOfficeVisitApply } from '../../context/OfficeVisitApplyContext.jsx';
-import { makeDateFormatter, getNepalTodayISO, formatNepalDateTime } from '../../utils/dateUtils.js';
+import { makeDateFormatter, getNepalTodayISO, formatNepalDateTime, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
@@ -18,10 +19,16 @@ import { getDeviceInfo } from '../../utils/deviceInfo.js';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 import useLeaveOpening from '../../hooks/useLeaveOpening.js';
 import LeaveApproval from './LeaveApproval.jsx';
+import LeaveManualBulkImportModal from './LeaveManualBulkImportModal.jsx';
+import OfficeVisitImportModal from '../OfficeVisit/OfficeVisitImportModal.jsx';
 import OfficeVisitApproval from '../OfficeVisit/OfficeVisitApproval.jsx';
 import { LeaveAdvancedFilter, DEFAULT_ADV_FILTERS } from './LeaveCalculation.jsx';
 import { countLeaveDays } from '../../utils/holidayScope.js';
 import AlertPopup, { alertFromSaveError } from '../Common/AlertPopup.jsx';
+
+// True when a date lies in none of the defined fiscal years — such rows must never be
+// hidden by the untouched default FY filter (the admin just hasn't created that year yet).
+const inNoFY = (d, list) => !list.some(fy => d >= String(fy.startDate).slice(0, 10) && d <= String(fy.endDate).slice(0, 10));
 
 /* date picker that respects settings.defaultCalendar and settings.leaveBackdateEnabled —
    allowPast overrides the block regardless of that setting, for Admin Manual Posting
@@ -194,7 +201,7 @@ const PURPOSES = [
    LEAVE PANEL
 ══════════════════════════════════════════════════ */
 const LeavePanel = () => {
-  const { currentUser, isManager, canManageStaff, isAdmin } = useAuth();
+  const { currentUser, isManager, canManageStaff, isAdmin, isSuperAdmin } = useAuth();
   const { t, language } = useLanguage();
   const { settings, refreshSettings } = useSettings();
   const fd = makeDateFormatter(settings);
@@ -212,11 +219,37 @@ const LeavePanel = () => {
     deleteLeave, addLeave, updateLeave, approveLeave, rejectLeave, recommendLeave, getEmployeeName, getEmployeeById, getLeaveTypeName, getLeaveTypeColor, leaveTypes, getLeaveBalance, refreshLeaveBalances, filteredEmployees: employees, employees: allEmployees,
   } = useData();
 
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState([]);   // [] = All; otherwise the ticked statuses
+  const [stOpen, setStOpen] = useState(false);
+  const stRef = useRef(null);
+  useEffect(() => {
+    const h = e => { if (stRef.current && !stRef.current.contains(e.target)) setStOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
   const [showForApprovalLeave, setShowForApprovalLeave] = useState(false);
   const [selectedLeaveIds, setSelectedLeaveIds] = useState([]);
   const [filterTypes,  setFilterTypes]  = useState([]);
   const [filterAccum,  setFilterAccum]  = useState('all');
+  // Fiscal Year filter (multi-select). null = untouched -> the current/default fiscal
+  // year; [] = "All Fiscal Years"; otherwise the chosen fiscal-year ids.
+  const [filterFYs,    setFilterFYs]    = useState(null);
+  const [fyOpen,       setFyOpen]       = useState(false);
+  const fyRef = useRef(null);
+  useEffect(() => {
+    const h = e => { if (fyRef.current && !fyRef.current.contains(e.target)) setFyOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const fyList = settings.fiscalYears || [];   // already in the admin's Rank Order (SettingsContext)
+  const defaultFYId = useMemo(() => {
+    // The fiscal year that contains today wins over the admin's stale "default" flag
+    // (otherwise, after the year rolls over, every new application falls outside the
+    // default filter and the grid looks empty).
+    const f = getCurrentFiscalYear(fyList) || fyList[0];
+    return f ? String(f.id) : null;
+  }, [fyList]);
+  const effFYs = filterFYs === null ? (defaultFYId ? [defaultFYId] : []) : filterFYs;
   const [advFilters,   setAdvFilters]   = useState({ ...DEFAULT_ADV_FILTERS });
   const [advTempF,     setAdvTempF]     = useState({ ...DEFAULT_ADV_FILTERS });
   const [advFilterOpen, setAdvFilterOpen] = useState(false);
@@ -309,6 +342,7 @@ const LeavePanel = () => {
   // Approval page) wouldn't show up in "days remaining" here without this.
   useEffect(() => { if (showApply) refreshLeaveBalances(); }, [showApply]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showManual,   setShowManual]   = useState(false);
+  const [showBulkLeave, setShowBulkLeave] = useState(false); // Super Admin bulk migrate (see LeaveManualBulkImportModal)
   const [manualForm,   setManualForm]   = useState({ employeeId:'', leaveTypeCode:'', fromDate:'', toDate:'', halfDay:false, reason:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualErrors, setManualErrors] = useState({});
   const [manualToast,  setManualToast]  = useState(null);
@@ -480,7 +514,7 @@ const LeavePanel = () => {
         const used     = (leaves || [])
           .filter(l => String(l.employeeId) === empId
                     && l.leaveTypeCode === lt.shortName
-                    && l.status === 'approved')
+                    && (l.status === 'approved' || l.status === 'pending'))
           .reduce((s, l) => s + Number(l.days || 0), 0);
         // Server-side credits (e.g. OT-to-leave grants from the Overtime
         // Approval page) live in leave_balances, not the opening/used math
@@ -627,8 +661,17 @@ const LeavePanel = () => {
     } else if (!isManager && String(l.employeeId) !== String(currentUser.id)) {
       return false;
     }
-    if (filterStatus !== 'all' && l.status !== filterStatus) return false;
+    if (filterStatus.length > 0 && !filterStatus.includes(l.status)) return false;
     if (filterTypes.length > 0 && !filterTypes.includes(l.leaveTypeCode)) return false;
+    if (effFYs.length > 0) {
+      // A leave belongs to the fiscal year its From Date falls in.
+      const d = String(l.fromDate || '').slice(0, 10);
+      const inFY = effFYs.some(id => {
+        const fy = fyList.find(f => String(f.id) === String(id));
+        return fy && d >= String(fy.startDate).slice(0, 10) && d <= String(fy.endDate).slice(0, 10);
+      });
+      if (!inFY && !(filterFYs === null && inNoFY(d, fyList))) return false;
+    }
     if (filterAccum !== 'all') {
       const ltc = ltConfigs.find(lt => lt.shortName === l.leaveTypeCode);
       if (filterAccum === 'accumulate'    && ltc && !ltc.carryForward)  return false;
@@ -753,58 +796,9 @@ const LeavePanel = () => {
       render: (_, row) => personCellForLeave(row.approvedBy || row.approvalId || (row.status === 'pending' ? [].concat(recoConfig[String(row.employeeId)]?.approval || [])[0] : null)) },
   ];
 
-  /* ── Rejection notifications ── */
-  const ACK_KEY = 'ehajiri_ack_rejections';
-  const ackedIds = useMemo(() => {
-    try { return new Set(JSON.parse(localStorage.getItem(ACK_KEY) || '[]')); } catch { return new Set(); }
-  }, []);
-  const rejectedNotifications = useMemo(() =>
-    leaves.filter(l =>
-      String(l.employeeId) === String(currentUser.id) &&
-      l.status === 'rejected' &&
-      !ackedIds.has(String(l.id))
-    ),
-  [leaves, currentUser.id, ackedIds]);
-
-  const dismissNotification = (id) => {
-    const next = [...ackedIds, String(id)];
-    localStorage.setItem(ACK_KEY, JSON.stringify(next));
-    ackedIds.add(String(id));
-  };
-
   return (
     <div>
       <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
-      {/* ── Rejection Notifications ── */}
-      {rejectedNotifications.map(l => (
-        <div key={l.id} style={{ display:'flex', alignItems:'flex-start', gap:12, background:'#fef2f2',
-          border:'1px solid #fca5a5', borderRadius:10, padding:'12px 16px', marginBottom:12 }}>
-          <span style={{ fontSize:22, flexShrink:0 }}>❌</span>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:14, fontWeight:700, color:'#991b1b', marginBottom:4 }}>
-              Your leave application was rejected
-            </div>
-            <div style={{ fontSize:13, color:'#374151' }}>
-              <strong>{getLeaveTypeName(l.leaveTypeCode)}</strong> — {l.fromDate} to {l.toDate} ({l.days} days)
-            </div>
-            {l.comment && (
-              <div style={{ fontSize:13, color:'#7f1d1d', marginTop:4, background:'#fff5f5',
-                borderRadius:6, padding:'6px 10px', border:'1px solid #fecaca' }}>
-                💬 <strong>Reason:</strong> {l.comment}
-              </div>
-            )}
-            {l.approvedBy && (
-              <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>
-                Rejected by: {getEmployeeName(l.approvedBy)} {l.approvedDate ? `on ${l.approvedDate}` : ''}
-              </div>
-            )}
-          </div>
-          <button onClick={() => dismissNotification(l.id)}
-            style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:18, flexShrink:0 }}
-            title="Dismiss notification">×</button>
-        </div>
-      ))}
-
       {/* Sub-header */}
       {(() => {
         /* ── Multi-checkbox leave type dropdown ── */
@@ -876,8 +870,8 @@ const LeavePanel = () => {
               <div tabIndex={0} onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
                 onKeyDown={handleTriggerKeyDown}
                 style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'5px 12px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
-                  borderRadius:7, background:'white', cursor:'pointer', fontSize:13, minWidth:200, minHeight:34,
+                  padding:'2px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+                  borderRadius:7, background:'white', cursor:'pointer', fontSize:12.5, minWidth:200, minHeight:28,
                   color: filterTypes.length > 0 ? '#1e40af' : '#374151',
                   fontWeight: filterTypes.length > 0 ? 600 : 400,
                   boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none' }}>
@@ -899,7 +893,7 @@ const LeavePanel = () => {
               </div>
               {open && (
                 <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+                  background:'white', border:'1.5px solid #1a56db', borderRadius:4,
                   boxShadow:'0 8px 24px rgba(0,0,0,.18)', minWidth:280, maxHeight:280,
                   display:'flex', flexDirection:'column' }}>
                   {/* Search */}
@@ -951,47 +945,125 @@ const LeavePanel = () => {
 
         return (
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-            flexWrap:'wrap', gap:8, marginBottom:14 }}>
+            flexWrap:'wrap', gap:8, marginBottom:8 }}>
 
             {/* Left: status + leave type filter — all on one line */}
             <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-              {/* Status buttons */}
-              {['all','pending','approved','rejected'].map(s => (
-                <button key={s} onClick={() => setFilterStatus(s)}
-                  className={`btn btn-sm ${filterStatus===s ? 'btn-primary' : 'btn-outline'}`}>
-                  {s==='all' ? t('All') : s==='pending' ? t('Pending') : s==='approved' ? t('Approved') : t('Rejected')}
-                  <span style={{ marginLeft:4, background:'rgba(0,0,0,.1)', borderRadius:10, padding:'1px 6px', fontSize:11 }}>
-                    {countByStatus(s)}
+              {/* Fiscal Year - multi-select, defaults to the current fiscal year */}
+              <span style={{ fontSize:13, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>Fiscal Year:</span>
+              <div ref={fyRef} style={{ position:'relative' }}>
+                <div tabIndex={0} onClick={() => setFyOpen(o => !o)}
+                  style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6,
+                    padding:'2px 10px', border:`1.5px solid ${fyOpen ? '#1a56db' : '#d1d5db'}`, borderRadius:4,
+                    background:'white', cursor:'pointer', fontSize:12.5, minWidth:150, minHeight:28, userSelect:'none',
+                    color: effFYs.length ? '#1e40af' : '#374151', fontWeight: effFYs.length ? 600 : 400,
+                    boxShadow: fyOpen ? '0 0 0 2px #bfdbfe' : 'none', outline:'none' }}>
+                  <span style={{ flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                    {effFYs.length === 0 ? 'All Fiscal Years'
+                      : effFYs.length === 1 ? (fyList.find(f => String(f.id) === String(effFYs[0]))?.name || '-')
+                      : `${effFYs.length} selected`}
                   </span>
-                </button>
-              ))}
+                  <span style={{ fontSize:9, color:'#9ca3af' }}>{fyOpen ? '\u25B2' : '\u25BC'}</span>
+                </div>
+                {fyOpen && (
+                  <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, zIndex:9999, background:'white',
+                    border:'1.5px solid #1a56db', borderRadius:4, boxShadow:'0 8px 24px rgba(0,0,0,.18)', minWidth:200, maxHeight:280, overflowY:'auto' }}>
+                    {[{ id:null, name:'All Fiscal Years' }, ...fyList].map(fy => {
+                      const isAll = fy.id === null;
+                      const sel = isAll ? effFYs.length === 0 : effFYs.includes(String(fy.id));
+                      return (
+                        <div key={isAll ? '__all' : fy.id}
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            if (isAll) { setFilterFYs([]); return; }
+                            const id = String(fy.id);
+                            setFilterFYs(effFYs.includes(id) ? effFYs.filter(x => x !== id) : [...effFYs, id]);
+                          }}
+                          style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                            background: sel ? '#eff6ff' : 'white', borderBottom:'1px solid #f3f4f6' }}>
+                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+                            border:`2px solid ${sel ? '#1a56db' : '#d1d5db'}`, background: sel ? '#1a56db' : 'white' }}>
+                            {sel && <svg viewBox="0 0 12 12" fill="none" width="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
+                          </span>
+                          <span style={{ fontSize:13, color: sel ? '#1e40af' : '#374151', fontWeight: sel ? 600 : 400 }}>
+                            {fy.name}{!isAll && String(fy.id) === defaultFYId ? <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:6, background:'#dbeafe', color:'#1e40af' }}>Current</span> : null}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <span style={{ color:'#d1d5db', fontSize:18, lineHeight:1 }}>|</span>
+              {/* Leave Status - multi-select, default All */}
+              <span style={{ fontSize:13, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>Leave Status:</span>
+              <div ref={stRef} style={{ position:'relative' }}>
+                <div tabIndex={0} onClick={() => setStOpen(o => !o)}
+                  style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6,
+                    padding:'2px 10px', border:`1.5px solid ${stOpen ? '#1a56db' : '#d1d5db'}`, borderRadius:4,
+                    background:'white', cursor:'pointer', fontSize:12.5, minWidth:150, minHeight:28, userSelect:'none',
+                    color: filterStatus.length ? '#1e40af' : '#374151', fontWeight: filterStatus.length ? 600 : 400,
+                    boxShadow: stOpen ? '0 0 0 2px #bfdbfe' : 'none', outline:'none' }}>
+                  <span style={{ flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                    {filterStatus.length === 0 ? t('All')
+                      : filterStatus.length === 1 ? t(filterStatus[0].charAt(0).toUpperCase() + filterStatus[0].slice(1))
+                      : `${filterStatus.length} selected`}
+                  </span>
+                  <span style={{ fontSize:9, color:'#9ca3af' }}>{stOpen ? '\u25B2' : '\u25BC'}</span>
+                </div>
+                {stOpen && (
+                  <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, zIndex:9999, background:'white',
+                    border:'1.5px solid #1a56db', borderRadius:4, boxShadow:'0 8px 24px rgba(0,0,0,.18)', minWidth:190 }}>
+                    {['all','pending','approved','rejected'].map(st => {
+                      const isAll = st === 'all';
+                      const sel = isAll ? filterStatus.length === 0 : filterStatus.includes(st);
+                      return (
+                        <div key={st}
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            if (isAll) { setFilterStatus([]); return; }
+                            setFilterStatus(filterStatus.includes(st) ? filterStatus.filter(x => x !== st) : [...filterStatus, st]);
+                          }}
+                          style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                            background: sel ? '#eff6ff' : 'white', borderBottom:'1px solid #f3f4f6' }}>
+                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+                            border:`2px solid ${sel ? '#1a56db' : '#d1d5db'}`, background: sel ? '#1a56db' : 'white' }}>
+                            {sel && <svg viewBox="0 0 12 12" fill="none" width="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
+                          </span>
+                          <span style={{ flex:1, fontSize:13, color: sel ? '#1e40af' : '#374151', fontWeight: sel ? 600 : 400 }}>
+                            {isAll ? t('All') : st === 'pending' ? t('Pending') : st === 'approved' ? t('Approved') : t('Rejected')}
+                          </span>
+                          <span style={{ background:'#f3f4f6', borderRadius:10, padding:'1px 7px', fontSize:11, color:'#374151' }}>{countByStatus(st)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* Separator */}
               <span style={{ color:'#d1d5db', fontSize:18, lineHeight:1 }}>|</span>
 
               {/* Leave Type label + accum chips + MCS */}
               <span style={{ fontSize:13, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>Leave Type:</span>
-              {[
-                { key:'all',           label:'All' },
-                { key:'accumulate',    label:'Accumulate' },
-                { key:'nonAccumulate', label:'Non-Accumulate' },
-              ].map(opt => (
-                <button key={opt.key} type="button"
-                  onClick={() => { setFilterAccum(opt.key); setFilterTypes([]); }}
-                  style={{ padding:'4px 12px', fontSize:12, borderRadius:20, cursor:'pointer',
-                    border:`1.5px solid ${filterAccum===opt.key?'#1a56db':'#d1d5db'}`,
-                    background: filterAccum===opt.key ? '#eff6ff' : 'white',
-                    color: filterAccum===opt.key ? '#1a56db' : '#374151',
-                    fontWeight: filterAccum===opt.key ? 700 : 400, transition:'all .12s' }}>
-                  {opt.label}
-                </button>
-              ))}
+              <select className="form-control" value={filterAccum}
+                onChange={e => { setFilterAccum(e.target.value); setFilterTypes([]); }}
+                title="Accumulate / Non-Accumulate"
+                style={{ width:140, height:28, minHeight:28, boxSizing:'border-box', lineHeight:'20px', padding:'0 8px', borderRadius:4, fontSize:12.5, fontWeight:600,
+                  color: filterAccum==='accumulate' ? '#065f46' : filterAccum==='nonAccumulate' ? '#9a3412' : '#374151',
+                  background: filterAccum==='accumulate' ? '#d1fae5' : filterAccum==='nonAccumulate' ? '#ffedd5' : 'white' }}>
+                <option value="all">All</option>
+                <option value="accumulate">Accumulate</option>
+                <option value="nonAccumulate">Non-Accumulate</option>
+              </select>
               <LeaveMCS />
+
             </div>
 
             {/* Right: action buttons */}
             <div style={{ display:'flex', gap:8, flexShrink:0, flexWrap:'wrap' }}>
               {(isManager || hasAnyRecoAssignmentLeave) && (
+                <TabBarSlot>{/* sits in the tab bar, just left of Bulk Import */}
                 <button className={`btn btn-sm ${showForApprovalLeave ? 'btn-primary' : 'btn-outline'}`}
                   onClick={() => {
                     // A configured recommender/approver gets an inline toggle
@@ -1007,16 +1079,11 @@ const LeavePanel = () => {
                     ? `Pending for Approvals${pendingForApprovalCountLeave ? ` (${pendingForApprovalCountLeave})` : ''}`
                     : t('Leave Approval')}
                 </button>
+                </TabBarSlot>
               )}
-              {canManageStaff && (
-                <button className="btn btn-sm" onClick={() => { setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today, approvedDate:today }); setManualErrors({}); setManualLastSaved(null); setShowManual(true); }}
-                  style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
-                  ✍️ Manual Posting
-                </button>
+              {isSuperAdmin && (
+                <TabBarBulkButton onClick={() => setShowBulkLeave(true)} language={language} />
               )}
-              <button className="btn btn-primary btn-sm" onClick={openApply}>
-                + {t('Apply for Leave')}
-              </button>
             </div>
           </div>
         );
@@ -1043,6 +1110,15 @@ const LeavePanel = () => {
               </svg>
               {t('Advance Search')}{advFilterCount > 0 ? ` (${advFilterCount})` : ''}
             </button>
+            {canManageStaff && (
+              <button className="btn btn-sm" onClick={() => { setManualForm({ employeeId:'', leaveTypeCode:'', fromDate:today, toDate:today, halfDay:false, days:'1', reason:'', status:'approved', appliedDate:today, approvedDate:today }); setManualErrors({}); setManualLastSaved(null); setShowManual(true); }}
+                style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                ✍️ Manual Posting
+              </button>
+            )}
+            <button className="btn btn-primary btn-sm" onClick={openApply}>
+              + {t('Apply for Leave')}
+            </button>
             {showForApprovalLeave && (
               <>
                 <button className="btn btn-sm btn-success" disabled={!selectedLeaveIds.length} onClick={bulkApproveLeaves}
@@ -1055,15 +1131,19 @@ const LeavePanel = () => {
                 </button>
               </>
             )}
+            {selectedLeaveIds.length === 1 && (
             <button className="btn btn-sm btn-outline" disabled={selectedLeaveIds.length !== 1}
               onClick={() => { const row = displayLeaves.find(l => l.id === selectedLeaveIds[0]); if (row) openEditFormLeave(row); }}
               style={{ opacity: selectedLeaveIds.length === 1 ? 1 : 0.45, cursor: selectedLeaveIds.length === 1 ? 'pointer' : 'not-allowed' }}>
               ✏️ {t('Edit')}
             </button>
+            )}
+            {selectedLeaveIds.length > 0 && (
             <button className="btn btn-sm btn-outline" disabled={!selectedLeaveIds.length} onClick={bulkDeleteLeaves}
               style={{ opacity: selectedLeaveIds.length ? 1 : 0.45, cursor: selectedLeaveIds.length ? 'pointer' : 'not-allowed' }}>
               🗑 {t('Delete')} {selectedLeaveIds.length ? `(${selectedLeaveIds.length})` : ''}
             </button>
+            )}
           </div>
         }
       />
@@ -1361,6 +1441,46 @@ const LeavePanel = () => {
           </div>
         );
       })()}
+
+      {/* ── Bulk Import (Super Admin): migrate many manual leave postings from Excel ── */}
+      {isSuperAdmin && (
+        <LeaveManualBulkImportModal
+          open={showBulkLeave}
+          onClose={() => setShowBulkLeave(false)}
+          employees={employees}
+          allEmployees={allEmployees}
+          leaveTypes={ltConfigs}
+          existingLeaves={allLeaves}
+          calendar={settings.defaultCalendar || 'en'}
+          formatDate={fd}
+          today={today}
+          countDays={(emp, lt, from, to) => countLeaveDays(settings, lt, from, to, emp)}
+          onImport={async (items) => {
+            // One POST per row through the same addLeave the Manual Posting form
+            // uses (Approved + isManual). The server re-checks every row (same-day
+            // conflicts, scope), so a row it refuses is reported and the rest go on.
+            const savedDevice = getDeviceInfo();
+            let added = 0; const notes = [];
+            for (const it of items) {
+              try {
+                await addLeave({
+                  employeeId: it.empId, leaveTypeCode: it.leaveTypeCode,
+                  fromDate: it.fromDate, toDate: it.toDate, halfDay: it.halfDay, days: it.days,
+                  reason: 'Bulk migrated posting', status: 'approved', appliedDate: today, isManual: true,
+                  recommendedBy: it.recommendedBy, recommendedDate: it.recommendedDate,
+                  approvedBy: it.approvedBy, approvedDate: it.approvedDate,
+                  deviceInfo: savedDevice,
+                }, { throwOnReject: true });
+                added++;
+              } catch (err) {
+                notes.push(`${it.empName} (${fd(it.fromDate)}): ${err?.message || err?.error || 'could not be saved'}`);
+              }
+            }
+            try { refreshLeaveBalances(); } catch { /* balances refresh on next load */ }
+            return { added, failed: items.length - added, notes: notes.slice(0, 8) };
+          }}
+        />
+      )}
 
       {/* ── Manual Posting Modal (Leave) ── */}
       {showManual && (() => {
@@ -2251,7 +2371,7 @@ const LeavePanel = () => {
    OFFICE VISIT PANEL
 ══════════════════════════════════════════════════ */
 const VisitPanel = () => {
-  const { currentUser, isManager, canManageStaff, isAdmin } = useAuth();
+  const { currentUser, isManager, canManageStaff, isAdmin, isSuperAdmin } = useAuth();
   // Apply for Office Visit now opens the single, globally-shared modal (also
   // used by the floating "+" quick-action button) instead of this page's own
   // separate copy of the form — two copies had drifted out of sync before
@@ -2268,10 +2388,15 @@ const VisitPanel = () => {
     // Raw, company-wide visits — needed only for the "Pending for Approvals"
     // toggle below. See LeavePanel's identical comment on allLeaves.
     officeVisits: allVisits,
-    deleteVisit, addVisit, updateVisit, approveVisit, rejectVisit, recommendVisit, getEmployeeName, getEmployeeById, filteredEmployees: employees, employees: allEmployees,
+    deleteVisit, addVisit, updateVisit, approveVisit, rejectVisit, recommendVisit, getEmployeeName, getEmployeeById, filteredEmployees: employees, employees: allEmployees, refreshOfficeVisits,
   } = useData();
 
-  const [filterStatus,   setFilterStatus]  = useState('all');
+  const [filterStatus,   setFilterStatus]  = useState([]);   // Office Visit Status — [] = All
+  // Fiscal Year (null = current/default FY, [] = all), Office Visit Type (National/International)
+  // and Office Visit (name from Settings) filters — [] means All.
+  const [ovFYs,   setOvFYs]   = useState(null);
+  const [ovTypes, setOvTypes] = useState([]);
+  const [ovNames, setOvNames] = useState([]);
   const [showForApprovalVisit, setShowForApprovalVisit] = useState(false);
   const [selectedVisitIds, setSelectedVisitIds] = useState([]);
   const [advFilters,   setAdvFilters]   = useState({ ...DEFAULT_ADV_FILTERS });
@@ -2369,6 +2494,7 @@ const VisitPanel = () => {
   // Same reasoning, for the Edit Visit modal — see LeavePanel's identical effect above.
   useEffect(() => { if (editVisit) refreshVisitRecoApproval(); }, [editVisit]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showManualV,    setShowManualV]   = useState(false);
+  const [showBulkVisit,  setShowBulkVisit]  = useState(false); // Super Admin bulk migrate — reuses OfficeVisitImportModal (server POST /visits/import)
   const [manualVForm,    setManualVForm]   = useState({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:'', toDate:'', status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:'' });
   const [manualVErrors,  setManualVErrors] = useState({});
   const [manualVToast,   setManualVToast]  = useState(null);
@@ -2469,6 +2595,10 @@ const VisitPanel = () => {
     (settings.officeVisitTypes || []).map(v => v.name || v).filter(Boolean),
   [settings.officeVisitTypes]);
 
+  const ovFyList = settings.fiscalYears || [];   // already in the admin's Rank Order
+  const ovDefaultFY = (getCurrentFiscalYear(ovFyList) || ovFyList[0])?.id;
+  const ovEffFYs = ovFYs === null ? (ovDefaultFY != null ? [String(ovDefaultFY)] : []) : ovFYs;
+
   /* ── Grid data ── */
   // Newest first (by Applied Date, falling back to From Date) — same as the
   // Leave grid above.
@@ -2481,7 +2611,16 @@ const VisitPanel = () => {
     } else if (!isManager && String(v.employeeId) !== String(currentUser.id)) {
       return false;
     }
-    if (filterStatus !== 'all' && v.status !== filterStatus) return false;
+    if (filterStatus.length > 0 && !filterStatus.includes(v.status)) return false;
+    if (ovEffFYs.length > 0) {
+      const d = String(v.fromDate || '').slice(0, 10);
+      if (!ovEffFYs.some(id => {
+        const fy = ovFyList.find(f => String(f.id) === String(id));
+        return fy && d >= String(fy.startDate).slice(0, 10) && d <= String(fy.endDate).slice(0, 10);
+      }) && !(ovFYs === null && inNoFY(d, ovFyList))) return false;
+    }
+    if (ovTypes.length > 0 && !ovTypes.includes(v.visitType || 'National')) return false;
+    if (ovNames.length > 0 && !ovNames.includes(v.officialVisit || v.purpose)) return false;
     if (advFilterCount > 0) {
       const emp = getEmployeeById(v.employeeId);
       if (advFilters.branches.length     && !advFilters.branches.includes(emp?.branch))          return false;
@@ -2553,72 +2692,33 @@ const VisitPanel = () => {
       render: (_, row) => personCellForVisit(row.approvedBy || row.approvalId || (row.status === 'pending' ? [].concat(visitRecoConfig[String(row.employeeId)]?.approval || [])[0] : null)) },
   ];
 
-  /* ── OV rejection notifications ── */
-  const OV_ACK_KEY = 'ehajiri_ack_ov_rejections';
-  const ovAckedIds = useMemo(() => {
-    try { return new Set(JSON.parse(localStorage.getItem(OV_ACK_KEY) || '[]')); } catch { return new Set(); }
-  }, []);
-  const ovRejectedNotifications = useMemo(() =>
-    officeVisits.filter(v =>
-      String(v.employeeId) === String(currentUser.id) &&
-      v.status === 'rejected' &&
-      !ovAckedIds.has(String(v.id))
-    ),
-  [officeVisits, currentUser.id, ovAckedIds]);
-  const dismissOVNotification = (id) => {
-    const next = [...ovAckedIds, String(id)];
-    localStorage.setItem(OV_ACK_KEY, JSON.stringify(next));
-    ovAckedIds.add(String(id));
-  };
-
   return (
     <div>
       <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
-      {/* ── OV Rejection Notifications ── */}
-      {ovRejectedNotifications.map(v => (
-        <div key={v.id} style={{ display:'flex', alignItems:'flex-start', gap:12, background:'#fef2f2',
-          border:'1px solid #fca5a5', borderRadius:10, padding:'12px 16px', marginBottom:12 }}>
-          <span style={{ fontSize:22, flexShrink:0 }}>❌</span>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:14, fontWeight:700, color:'#991b1b', marginBottom:4 }}>
-              Your office visit application was rejected
-            </div>
-            <div style={{ fontSize:13, color:'#374151' }}>
-              <strong>{v.purpose || v.officialVisit}</strong> — {v.fromDate} to {v.toDate}
-            </div>
-            {v.comment && (
-              <div style={{ fontSize:13, color:'#7f1d1d', marginTop:4, background:'#fff5f5',
-                borderRadius:6, padding:'6px 10px', border:'1px solid #fecaca' }}>
-                💬 <strong>Reason:</strong> {v.comment}
-              </div>
-            )}
-            {v.approvedBy && (
-              <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>
-                Rejected by: {getEmployeeName(v.approvedBy)} {v.approvedDate ? `on ${v.approvedDate}` : ''}
-              </div>
-            )}
-          </div>
-          <button onClick={() => dismissOVNotification(v.id)}
-            style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:18, flexShrink:0 }}
-            title="Dismiss">×</button>
-        </div>
-      ))}
+      {/* Filters: Fiscal Year / Office Visit Type / Office Visit */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:6 }}>
+        <MultiDrop label="Fiscal Year" allLabel="All Fiscal Years" selected={ovEffFYs} onChange={setOvFYs}
+          options={ovFyList.map(f => ({ value:f.id, label:f.name, badge: String(f.id) === String(ovDefaultFY) ? 'Current' : null }))} />
+        <span style={{ color:'#d1d5db', fontSize:18, lineHeight:1 }}>|</span>
+        <MultiDrop label="Office Visit Type" selected={ovTypes} onChange={setOvTypes} width={150}
+          options={[{ value:'National', label:'National' }, { value:'International', label:'International' }]} />
+        <span style={{ color:'#d1d5db', fontSize:18, lineHeight:1 }}>|</span>
+        <MultiDrop label="Office Visit" selected={ovNames} onChange={setOvNames} width={200}
+          options={visitTypeOptions.map(n => ({ value:n, label:n }))} />
+        <span style={{ color:'#d1d5db', fontSize:18, lineHeight:1 }}>|</span>
+        <MultiDrop label="Office Visit Status" selected={filterStatus} onChange={setFilterStatus} width={150}
+          options={['pending','approved','rejected'].map(st => ({
+            value: st,
+            label: `${st === 'pending' ? t('Pending') : st === 'approved' ? t('Approved') : t('Rejected')} (${countByStatus(st)})`,
+          }))} />
+      </div>
 
       {/* Sub-header */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14, flexWrap:'wrap', gap:8 }}>
-        <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-          {['all','pending','approved','rejected'].map(s => (
-            <button key={s} onClick={() => setFilterStatus(s)}
-              className={`btn btn-sm ${filterStatus===s ? 'btn-primary' : 'btn-outline'}`}>
-              {s==='all' ? t('All') : s==='pending' ? t('Pending') : s==='approved' ? t('Approved') : t('Rejected')}
-              <span style={{ marginLeft:4, background:'rgba(0,0,0,.1)', borderRadius:10, padding:'1px 6px', fontSize:11 }}>
-                {countByStatus(s)}
-              </span>
-            </button>
-          ))}
-        </div>
+        <div />
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
           {(isManager || hasAnyRecoAssignmentVisit) && (
+            <TabBarSlot>{/* sits in the tab bar, just left of Bulk Import */}
             <button className={`btn btn-sm ${showForApprovalVisit ? 'btn-primary' : 'btn-outline'}`}
               onClick={() => {
                 // Same as LeavePanel's identical button — a configured
@@ -2632,16 +2732,11 @@ const VisitPanel = () => {
                 ? `Pending for Approvals${pendingForApprovalCountVisit ? ` (${pendingForApprovalCountVisit})` : ''}`
                 : t('Visit Approval')}
             </button>
+            </TabBarSlot>
           )}
-          {canManageStaff && (
-            <button className="btn btn-sm" onClick={() => { setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:today }); setManualVErrors({}); setManualVLastSaved(null); setShowManualV(true); }}
-              style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
-              ✍️ Manual Posting
-            </button>
+          {isSuperAdmin && (
+            <TabBarBulkButton onClick={() => setShowBulkVisit(true)} language={language} />
           )}
-          <button className="btn btn-primary btn-sm" onClick={() => openOfficeVisitApply()}>
-            + {t('Apply for Office Visit')}
-          </button>
         </div>
       </div>
 
@@ -2666,6 +2761,15 @@ const VisitPanel = () => {
               </svg>
               {t('Advance Search')}{advFilterCount > 0 ? ` (${advFilterCount})` : ''}
             </button>
+            {canManageStaff && (
+              <button className="btn btn-sm" onClick={() => { setManualVForm({ employeeId:'', officialVisit:'', visitType:'National', country:'', address:'', description:'', fromDate:today, toDate:today, status:'approved', recommendedBy:'', recommendedDate:'', approvedBy:'', approvedDate:today }); setManualVErrors({}); setManualVLastSaved(null); setShowManualV(true); }}
+                style={{ background:'linear-gradient(135deg,#7c3aed,#6d28d9)', color:'white', border:'none', borderRadius:6, padding:'5px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                ✍️ Manual Posting
+              </button>
+            )}
+            <button className="btn btn-primary btn-sm" onClick={() => openOfficeVisitApply()}>
+              + {t('Apply for Office Visit')}
+            </button>
             {showForApprovalVisit && (
               <>
                 <button className="btn btn-sm btn-success" disabled={!selectedVisitIds.length} onClick={bulkApproveVisits}
@@ -2678,15 +2782,19 @@ const VisitPanel = () => {
                 </button>
               </>
             )}
+            {selectedVisitIds.length === 1 && (
             <button className="btn btn-sm btn-outline" disabled={selectedVisitIds.length !== 1}
               onClick={() => { const row = displayVisits.find(v => v.id === selectedVisitIds[0]); if (row) openEditFormVisit(row); }}
               style={{ opacity: selectedVisitIds.length === 1 ? 1 : 0.45, cursor: selectedVisitIds.length === 1 ? 'pointer' : 'not-allowed' }}>
               ✏️ {t('Edit')}
             </button>
+            )}
+            {selectedVisitIds.length > 0 && (
             <button className="btn btn-sm btn-outline" disabled={!selectedVisitIds.length} onClick={bulkDeleteVisits}
               style={{ opacity: selectedVisitIds.length ? 1 : 0.45, cursor: selectedVisitIds.length ? 'pointer' : 'not-allowed' }}>
               🗑 {t('Delete')} {selectedVisitIds.length ? `(${selectedVisitIds.length})` : ''}
             </button>
+            )}
           </div>
         }
       />
@@ -2765,6 +2873,14 @@ const VisitPanel = () => {
             <span>{visitActionToast.type === 'success' ? '✅' : '❌'}</span>{visitActionToast.msg}
           </div>
         </div>
+      )}
+
+      {/* ── Bulk Import (Super Admin): migrate many office visits — same import as Office Visit Management ── */}
+      {isSuperAdmin && showBulkVisit && (
+        <OfficeVisitImportModal
+          onClose={() => setShowBulkVisit(false)}
+          onImported={refreshOfficeVisits}
+        />
       )}
 
       {/* ── Manual Posting Modal (Office Visit) ── */}
@@ -3397,6 +3513,77 @@ const VisitPanel = () => {
 /* ══════════════════════════════════════════════════
    COMBINED PAGE
 ══════════════════════════════════════════════════ */
+/* Bulk Import button for the active tab, drawn in the tab bar's right-hand slot
+   (#lv-tab-actions, rendered by LeaveVisitPage) instead of the filter row. */
+/* Multi-select dropdown used by the Office Visit filters. selected = [] means "All". */
+const MultiDrop = ({ label, options, selected, onChange, allLabel = 'All', width = 190 }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const text = selected.length === 0 ? allLabel
+    : selected.length === 1 ? (options.find(o => String(o.value) === String(selected[0]))?.label || '-')
+    : `${selected.length} selected`;
+  return (
+    <>
+      <span style={{ fontSize:13, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>{label}:</span>
+      <div ref={ref} style={{ position:'relative' }}>
+        <div tabIndex={0} onClick={() => setOpen(o => !o)}
+          style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6,
+            padding:'2px 10px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`, borderRadius:4,
+            background:'white', cursor:'pointer', fontSize:12.5, minWidth:width, minHeight:28, userSelect:'none',
+            color: selected.length ? '#1e40af' : '#374151', fontWeight: selected.length ? 600 : 400,
+            boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none' }}>
+          <span style={{ flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{text}</span>
+          <span style={{ fontSize:9, color:'#9ca3af' }}>{open ? '\u25B2' : '\u25BC'}</span>
+        </div>
+        {open && (
+          <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, zIndex:9999, background:'white',
+            border:'1.5px solid #1a56db', borderRadius:4, boxShadow:'0 8px 24px rgba(0,0,0,.18)', minWidth:width + 10, maxHeight:280, overflowY:'auto' }}>
+            {[{ value:null, label:allLabel }, ...options].map(o => {
+              const isAll = o.value === null;
+              const sel = isAll ? selected.length === 0 : selected.map(String).includes(String(o.value));
+              return (
+                <div key={isAll ? '__all' : o.value}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    if (isAll) { onChange([]); return; }
+                    const v = String(o.value);
+                    onChange(selected.map(String).includes(v) ? selected.filter(x => String(x) !== v) : [...selected, v]);
+                  }}
+                  style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                    background: sel ? '#eff6ff' : 'white', borderBottom:'1px solid #f3f4f6' }}>
+                  <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+                    border:`2px solid ${sel ? '#1a56db' : '#d1d5db'}`, background: sel ? '#1a56db' : 'white' }}>
+                    {sel && <svg viewBox="0 0 12 12" fill="none" width="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
+                  </span>
+                  <span style={{ fontSize:13, color: sel ? '#1e40af' : '#374151', fontWeight: sel ? 600 : 400 }}>{o.label}{o.badge ? <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:6, background:'#dbeafe', color:'#1e40af' }}>{o.badge}</span> : null}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+const TabBarSlot = ({ children }) => {
+  const [slot, setSlot] = useState(null);
+  useEffect(() => { setSlot(document.getElementById('lv-tab-actions')); }, []);
+  return slot ? createPortal(children, slot) : null;
+};
+const TabBarBulkButton = ({ onClick, language }) => (
+  <TabBarSlot>
+    <button className="btn btn-outline btn-sm" onClick={onClick}>
+      {'📋'} {language === 'np' ? 'बल्क आयात' : 'Bulk Import'}
+    </button>
+  </TabBarSlot>
+);
+
 const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
   const { t } = useLanguage();
   const { stats } = useData();
@@ -3412,7 +3599,7 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
     <div className="page-container fade-in">
 
       {/* ── Page Title ── */}
-      <div style={{ marginBottom:12 }}>
+      <div style={{ marginBottom:2 }}>
         <h1 style={{ fontSize:15, fontWeight:600, color:'var(--text-primary)', margin:0, display:'flex', alignItems:'center', gap:6 }}>
           <span style={{ fontSize:13 }}>📅</span> Leave
           <span style={{ color:'#d1d5db', fontWeight:300, fontSize:14 }}>|</span>
@@ -3421,7 +3608,7 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
       </div>
 
       {/* ── Tab Bar ── */}
-      <div className="tabs" style={{ marginBottom: 0 }}>
+      <div className="tabs" style={{ marginBottom: 0, alignItems:'center' }}>
         {tabs.map(tab => {
           const isActive = activeTab === tab.key;
           return (
@@ -3443,6 +3630,8 @@ const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
             </button>
           );
         })}
+        {/* right-hand slot: the active tab's Bulk Import button is portalled in here */}
+        <div id="lv-tab-actions" style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center', paddingRight:4 }} />
       </div>
 
       {/* ── Tab Content ── */}

@@ -5,10 +5,11 @@ import { logAudit } from '../services/auditLog.js';
 import { sendLeaveApplication, sendLeaveStatusUpdate } from '../services/emailService.js';
 import { logError } from '../utils/logError.js';
 import { pushLater } from '../services/pushService.js';
-import { notifyPeople, notifyApproversNext, notifyApplicantOf } from '../services/approvalNotify.js';
+import { notifyPeople, notifyApproversNext, notifyApplicantOf, resolveApplicationRecipients } from '../services/approvalNotify.js';
 import { isLeaveBackdateEnabled } from '../utils/appSettings.js';
 import { authorizeRecoAction, authorizeOwnEditDelete } from '../services/recoApprovalGuard.js';
 import { findLeaveVisitConflict } from '../services/leaveVisitConflicts.js';
+import { sandwichLeaveDays, loadLeaveOffDayRule, loadPublicHolidays, makeHolidayChecker } from './attendance.js';
 import { resolveOrgScope, resolveOrgEmployeeIds, resolveRecoApprovalEmployeeIds, canManagerPostFor, canManagerManualPost, canManagerApplyFor } from './orgScope.js';
 
 const router = Router();
@@ -41,9 +42,8 @@ const isAdminManualBackdate = (req) =>
 /* Best-effort email lookup + send — never let a notification failure affect the request. */
 async function notifyLeaveApplication(leave) {
   try {
-    const recommendedBy = Array.isArray(leave.reco) ? leave.reco[0] : (leave.recommendedBy || leave.reco || null);
-    const approvedBy    = Array.isArray(leave.approval) ? leave.approval[0] : (leave.approval || null);
-    const ids = [recommendedBy, approvedBy].filter(Boolean).map(Number);
+    // Picked recommender/approver + everyone configured for this staff member (admins if none).
+    const ids = await resolveApplicationRecipients(leave.employeeId, [leave.reco, leave.approval, leave.recommendedBy]);
     if (!ids.length) return;
 
     const [{ rows: recipients }, { rows: [requester] }, { rows: [lt] }] = await Promise.all([
@@ -186,6 +186,100 @@ router.put('/openings', async (req, res) => {
   }
 });
 
+
+/* Sandwich days — a weekend / public-holiday run sitting directly between two
+   approved leave days whose type has Reduce Weekend + Reduce Public Holiday OFF
+   is part of the leave, so it is deducted from the balance too (the attendance
+   reports already show it as leave). Returns Map(leaveId -> extra days), the
+   extra being credited to the leave that ends right before the gap. Derived at
+   read time — never stored — so editing/rejecting/deleting a leave updates it. */
+export const leaveSandwichExtras = async (leaveRows) => {
+  const extras = new Map();
+  try {
+    const byEmp = new Map();
+    for (const r of leaveRows) {
+      if (r.status !== 'approved') continue;
+      if (!byEmp.has(r.employee_id)) byEmp.set(r.employee_id, []);
+      byEmp.get(r.employee_id).push(r);
+    }
+    const cands = [...byEmp.entries()].filter(([, ls]) => ls.length > 1);
+    if (!cands.length) return extras;
+    const rule = await loadLeaveOffDayRule();
+    const [wk, holidays, users] = await Promise.all([
+      pool.query('SELECT weekends, effective_date FROM weekend_history ORDER BY effective_date, id'),
+      loadPublicHolidays(),
+      pool.query('SELECT id, gender, branch, department, religion, handicapped FROM users WHERE id = ANY($1)', [cands.map(([id]) => id)]),
+    ]);
+    const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const wkHist = wk.rows.map(r => ({ eff: String(r.effective_date instanceof Date ? r.effective_date.toISOString() : r.effective_date).slice(0, 10), w: r.weekends || [] }));
+    const weekendsOn = ds => { let w = null; for (const h of wkHist) if (h.eff <= ds) w = h.w; return w || ['Sat']; };
+    const getHoliday = await makeHolidayChecker(holidays);
+    const userById = new Map(users.rows.map(u => [u.id, u]));
+    const day = v => (v instanceof Date ? v.toISOString() : String(v)).slice(0, 10);
+    for (const [empId, ls] of cands) {
+      const emp = userById.get(empId); if (!emp) continue;
+      const codeByDate = new Map(), idByDate = new Map();
+      let min = null, max = null;
+      for (const l of ls) {
+        const f = day(l.from_date), t = day(l.to_date);
+        for (let d = new Date(f + 'T00:00:00Z'); d <= new Date(t + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) {
+          const ds = d.toISOString().slice(0, 10);
+          codeByDate.set(ds, l.leave_type_code); idByDate.set(ds, l.id);
+        }
+        if (!min || f < min) min = f; if (!max || t > max) max = t;
+      }
+      const dates = [];
+      for (let d = new Date(min + 'T00:00:00Z'); d <= new Date(max + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) dates.push(d.toISOString().slice(0, 10));
+      const sw = sandwichLeaveDays(dates, ds => codeByDate.get(ds) || null,
+        ds => weekendsOn(ds).includes(DOW[new Date(ds + 'T00:00:00Z').getUTCDay()]),
+        ds => !!getHoliday(ds, emp), rule);
+      for (const [ds] of sw) {
+        const owner = idByDate.get(dates[dates.indexOf(ds) - 1]) ?? idByDate.get([...dates.slice(0, dates.indexOf(ds))].reverse().find(d => idByDate.has(d)));
+        if (owner != null) extras.set(owner, (extras.get(owner) || 0) + 1);
+      }
+    }
+  } catch (e) { logError?.('leaveSandwichExtras', e); }
+  return extras;
+};
+
+/* 'Provide Only on Balance' — enforced server-side for EVERY save path (apply,
+   manual posting, bulk import, edit). Balance = previous-year + current-year
+   opening (Leave Calculation) + credits, minus approved AND pending leaves of
+   the default fiscal year (pending counts, so stacking applications can't
+   overrun it). Returns an error string, or null when OK / not applicable. */
+async function checkLeaveBalance({ employeeId, leaveTypeCode, days, excludeId = null }) {
+  const want = Number(days);
+  if (!employeeId || !leaveTypeCode || !(want > 0)) return null;
+  const { rows: sr } = await pool.query("SELECT value FROM app_settings WHERE key='main'");
+  let main = sr[0]?.value; if (typeof main === 'string') { try { main = JSON.parse(main); } catch { main = null; } }
+  const lt = (main?.leaveTypeConfigs || []).find(l => l.shortName === leaveTypeCode);
+  if (!lt?.provideOnlyOnBalance) return null;
+  const fys = main?.fiscalYears || [];
+  const fy = fys.find(f => f.isDefault) || fys[0];
+  if (!fy) return null;
+  const fyId = String(fy.id);
+  const { rows: op } = await pool.query(
+    'SELECT fy_key, days FROM leave_openings WHERE employee_id=$1 AND leave_type_short=$2 AND fy_key = ANY($3)',
+    [employeeId, leaveTypeCode, [fyId, 'prev_' + fyId]]);
+  const opening = op.reduce((s, r) => s + Number(r.days || 0), 0);
+  const { rows: cr } = await pool.query('SELECT balance FROM leave_balances WHERE employee_id=$1 AND leave_type_code=$2', [employeeId, leaveTypeCode]);
+  const credit = Number(cr[0]?.balance || 0);
+  const { rows: us } = await pool.query(
+    "SELECT COALESCE(SUM(days),0) AS used FROM leaves WHERE employee_id=$1 AND leave_type_code=$2 AND status IN ('approved','pending') AND from_date >= $3 AND from_date <= $4 AND ($5::int IS NULL OR id <> $5)",
+    [employeeId, leaveTypeCode, fy.startDate, fy.endDate, excludeId]);
+  const { rows: mine } = await pool.query(
+    "SELECT id, employee_id, leave_type_code, from_date, to_date, status FROM leaves WHERE employee_id=$1 AND status='approved' AND from_date >= $2 AND from_date <= $3",
+    [employeeId, fy.startDate, fy.endDate]);
+  const sandwichUsed = [...(await leaveSandwichExtras(mine))].reduce((sum, [id, x]) => {
+    const l = mine.find(m => m.id === id);
+    return l && l.leave_type_code === leaveTypeCode && id !== excludeId ? sum + x : sum;
+  }, 0);
+  const avail = Math.max(0, opening + credit - Number(us[0].used || 0) - sandwichUsed);
+  return want > avail
+    ? `Insufficient balance for ${lt.name || leaveTypeCode} — requested ${want} day(s), available ${avail} day(s).`
+    : null;
+}
+
 /* ── Leaves CRUD ── */
 router.get('/', async (req, res) => {
   try {
@@ -210,7 +304,8 @@ router.get('/', async (req, res) => {
     const { rows } = ids
       ? await pool.query('SELECT * FROM leaves WHERE employee_id = ANY($1) ORDER BY id', [ids])
       : await pool.query('SELECT * FROM leaves ORDER BY id');
-    res.json(rows.map(toLeave));
+    const extras = await leaveSandwichExtras(rows);
+    res.json(rows.map(r => { const l = toLeave(r); const x = extras.get(r.id); if (x) { l.sandwichDays = x; l.days = Number(l.days) + x; } return l; }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -274,6 +369,10 @@ router.post('/', validateBody({ employeeId: {"type":"scalar","max":100}, leaveTy
       const clash = await findLeaveVisitConflict({ kind: 'leave', employeeId: employeeId, fromDate, toDate, leaveTypeCode });
       if (clash) return res.status(409).json(clash);
     }
+    if (finalStatus !== 'rejected') {
+      const balErr = await checkLeaveBalance({ employeeId, leaveTypeCode, days });
+      if (balErr) return res.status(409).json({ error: balErr });
+    }
     const { rows } = await pool.query(
       `INSERT INTO leaves
          (employee_id,leave_type_code,from_date,to_date,days,reason,half_day,status,recommended_by,recommended_date,approved_by,approved_date,is_manual,reco_id,approval_id,updated_by,updated_at,updated_device)
@@ -325,6 +424,10 @@ router.put('/:id', validateBody({ employeeId: {"type":"scalar","max":100}, leave
     if (finalStatus !== 'rejected') {
       const clash = await findLeaveVisitConflict({ kind: 'leave', employeeId: finalEmployeeId, fromDate, toDate, leaveTypeCode, excludeId: Number(req.params.id) });
       if (clash) return res.status(409).json(clash);
+    }
+    if (finalStatus !== 'rejected') {
+      const balErr = await checkLeaveBalance({ employeeId: finalEmployeeId, leaveTypeCode, days, excludeId: Number(req.params.id) });
+      if (balErr) return res.status(409).json({ error: balErr });
     }
     const { rows } = await pool.query(
       `UPDATE leaves

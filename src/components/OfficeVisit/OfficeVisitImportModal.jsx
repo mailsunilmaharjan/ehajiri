@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import api from '../../api/client.js';
 import { useData } from '../../context/DataContext.jsx';
+import DuplicateStaffPicker from '../Common/DuplicateStaffPicker.jsx';
 import { bsToAD, getBSDays } from '../../utils/dateUtils.js';
 
 /* Super Admin only — see server/routes/visits.js POST /import, which enforces
@@ -152,18 +153,32 @@ function looksLikeHeaderRow(cells) {
   return /व्यक्ति|^staff$|^name$|^person$/i.test(String(cells[0] || '').trim());
 }
 
-function parsePasteRows(text, employees, calendar) {
+function parsePasteRows(text, employees, calendar, overrides = {}) {
   const lines = text.split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim());
   if (!lines.length) return [];
   const dataLines = looksLikeHeaderRow(lines[0].split('\t')) ? lines.slice(1) : lines;
   const toISO = calendar === 'bs' ? bsSlashToISO : adSlashToISO;
 
-  const findPerson = (name) => {
-    const n = String(name || '').trim().toLowerCase();
+  // Duplicate names resolve by (1) a trailing "[ID]" in the pasted text, then (2) the
+  // Staff ID picked in the popup (overrides, keyed by name), else stay 'ambiguous'.
+  const findPerson = (name, scope = 'p') => {
+    // Some tenants store the Staff ID inside the full name ("Alina Shakya [256]") —
+    // compare names without that trailing "[id]" on both sides.
+    const key = (s) => String(s || '').replace(/\s*\[[^\]]*\]\s*$/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const n = key(name);
     if (!n) return { status: 'empty', match: null };
-    const matches = employees.filter(e => String(e.fullName || '').trim().toLowerCase() === n);
+    let matches = employees.filter(e => key(e.fullName) === n);
+    if (matches.length > 1) {
+      const idm = String(name || '').match(/\[([^\]]+)\]\s*$/);
+      if (idm) { const byId = matches.filter(e => String(e.employeeId).trim().toLowerCase() === idm[1].trim().toLowerCase()); if (byId.length === 1) matches = byId; }
+    }
     if (matches.length === 1) return { status: 'ok', match: matches[0] };
-    if (matches.length > 1)   return { status: 'ambiguous', match: null };
+    if (matches.length > 1) {
+      const k = scope + '|' + n;
+      const pick = matches.find(e => String(e.id) === String(overrides[k]));
+      if (pick) return { status: 'ok', match: pick };
+      return { status: 'ambiguous', match: null, ambig: { k, role: scope, name: String(name).replace(/\s*\[[^\]]*\]\s*$/, '').trim(), cands: matches } };
+    }
     return { status: 'notfound', match: null };
   };
 
@@ -173,8 +188,8 @@ function parsePasteRows(text, employees, calendar) {
     const approvedByName    = c[5] || '';
     const recommendedByName = c[7] || '';
     const person     = findPerson(personName);
-    const approver    = approvedByName    ? findPerson(approvedByName)    : { status: 'empty', match: null };
-    const recommender = recommendedByName ? findPerson(recommendedByName) : { status: 'empty', match: null };
+    const approver    = approvedByName    ? findPerson(approvedByName, 'a')    : { status: 'empty', match: null };
+    const recommender = recommendedByName ? findPerson(recommendedByName, 'a') : { status: 'empty', match: null };
 
     return {
       employeeId:    person.match?.employeeId || '',
@@ -193,6 +208,7 @@ function parsePasteRows(text, employees, calendar) {
       _personName: personName,           _personStatus: person.status,
       _approvedByName: approvedByName,    _approvedByStatus: approver.status,
       _recommendedByName: recommendedByName, _recommendedByStatus: recommender.status,
+      _ambig: [person.ambig, approver.ambig, recommender.ambig].filter(Boolean),
     };
   });
 }
@@ -215,10 +231,25 @@ export default function OfficeVisitImportModal({ onClose, onImported }) {
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [result, setResult]     = useState(null);
+  const [dupPopup, setDupPopup]   = useState(false); // duplicate (already-posted) rows shown in a popup after import
   const [parseError, setParseError] = useState('');
   const [pasteText, setPasteText]   = useState('');
   const [pasteCalendar, setPasteCalendar] = useState('bs');
   const fileRef = useRef(null);
+  const [overrides, setOverrides] = useState({});     // 'p|name' / 'a|name' → chosen staff id
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Unresolved duplicate names (one per name + scope) for the Staff ID popup.
+  const ambigItems = useMemo(() => {
+    const m = new Map();
+    rows.forEach(r => (r._ambig || []).forEach(a => { if (!m.has(a.k)) m.set(a.k, a); }));
+    return [...m.values()];
+  }, [rows]);
+  const pickStaff = (k, e) => {
+    const next = { ...overrides, [k]: e.id };
+    setOverrides(next);
+    setRows(parsePasteRows(pasteText, employees || [], pasteCalendar, next));
+  };
 
   const pastePreviewCount = useMemo(
     () => pasteText.split('\n').filter(l => l.trim()).length,
@@ -257,9 +288,11 @@ export default function OfficeVisitImportModal({ onClose, onImported }) {
 
   const handlePastePreview = () => {
     setParseError('');
-    const parsed = parsePasteRows(pasteText, employees || [], pasteCalendar);
+    setOverrides({});
+    const parsed = parsePasteRows(pasteText, employees || [], pasteCalendar, {});
     if (!parsed.length) { setParseError('No rows detected — paste tab-separated rows copied from Excel or a table.'); return; }
     setRows(parsed);
+    setPickerOpen(parsed.some(r => r._ambig?.length));   // open the Staff ID popup straight away
     setFileName(`Pasted (${parsed.length} rows)`);
     setStep('preview');
   };
@@ -268,8 +301,11 @@ export default function OfficeVisitImportModal({ onClose, onImported }) {
     const errors = [];
     if (r._personName !== undefined) {
       if (r._personStatus === 'notfound')  errors.push(`"${r._personName}" not found in staff list`);
-      if (r._personStatus === 'ambiguous') errors.push(`"${r._personName}" matches multiple staff — use Staff ID instead`);
+      if (r._personStatus === 'ambiguous') errors.push(`"${r._personName}" matches multiple staff — assign Staff ID`);
       if (r._personStatus === 'empty')     errors.push('Person name missing');
+      // An unresolved duplicate approver/recommender would silently fall back to the importing admin.
+      if (r._approvedByStatus === 'ambiguous')    errors.push(`Approved By "${r._approvedByName}" matches multiple staff — assign Staff ID`);
+      if (r._recommendedByStatus === 'ambiguous') errors.push(`Recommended By "${r._recommendedByName}" matches multiple staff — assign Staff ID`);
     } else if (!String(r.employeeId || '').trim()) {
       errors.push('Staff ID missing');
     }
@@ -304,6 +340,7 @@ export default function OfficeVisitImportModal({ onClose, onImported }) {
       const data = await api.post('/visits/import', { visits: payload });
       setResult(data);
       setStep('result');
+      if ((data.errors || []).some(e => e.duplicate)) setDupPopup(true);
       if (data.created > 0 && onImported) onImported();
     } catch (err) {
       setParseError('Import failed: ' + err.message);
@@ -493,7 +530,13 @@ export default function OfficeVisitImportModal({ onClose, onImported }) {
                     ✗ {invalidRows.length} invalid (will be skipped)
                   </span>
                 )}
-                <button onClick={() => { setStep('upload'); setRows([]); setFileName(''); }}
+                {ambigItems.length > 0 && (
+                  <button onClick={() => setPickerOpen(true)}
+                    style={{ padding: '3px 12px', borderRadius: 10, background: '#fef3c7', border: '1px solid #fcd34d', color: '#92400e', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    ⚠ {ambigItems.length} duplicate name{ambigItems.length > 1 ? 's' : ''} — Assign Staff ID
+                  </button>
+                )}
+                <button onClick={() => { setStep('upload'); setRows([]); setFileName(''); setOverrides({}); }}
                   style={{ marginLeft: 'auto', background: 'none', border: '1px solid #d1d5db', borderRadius: 6,
                     fontSize: 12, color: '#6b7280', cursor: 'pointer', padding: '4px 12px' }}>
                   ← Back
@@ -586,16 +629,23 @@ export default function OfficeVisitImportModal({ onClose, onImported }) {
                 </div>
                 <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 10,
                   padding: '12px 24px', minWidth: 100 }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#991b1b' }}>{result.errors?.length || 0}</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#991b1b' }}>{(result.errors || []).filter(e => !e.duplicate).length}</div>
                   <div style={{ fontSize: 12, color: '#991b1b', fontWeight: 600 }}>Errors</div>
                 </div>
+                {(result.errors || []).some(e => e.duplicate) && (
+                  <div onClick={() => setDupPopup(true)} style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 10,
+                    padding: '12px 24px', minWidth: 100, cursor: 'pointer' }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: '#92400e' }}>{result.errors.filter(e => e.duplicate).length}</div>
+                    <div style={{ fontSize: 12, color: '#92400e', fontWeight: 600 }}>Duplicates</div>
+                  </div>
+                )}
               </div>
 
-              {result.errors?.length > 0 && (
+              {result.errors?.filter(e => !e.duplicate).length > 0 && (
                 <div style={{ background: '#fff5f5', border: '1px solid #fecaca', borderRadius: 8,
                   padding: '12px 16px', textAlign: 'left', maxHeight: 140, overflowY: 'auto' }}>
                   <div style={{ fontWeight: 700, fontSize: 12, color: '#dc2626', marginBottom: 6 }}>Errors:</div>
-                  {result.errors.map((e, i) => (
+                  {result.errors.filter(e => !e.duplicate).map((e, i) => (
                     <div key={i} style={{ fontSize: 12, color: '#7f1d1d', marginBottom: 3 }}>
                       <strong>{e.employeeId}</strong>: {e.error}
                     </div>
@@ -609,6 +659,30 @@ export default function OfficeVisitImportModal({ onClose, onImported }) {
           </>
         )}
       </div>
+      {dupPopup && result && (
+        <div className="modal-overlay" style={{ zIndex: 10001 }} onClick={e => { e.stopPropagation(); setDupPopup(false); }}>
+          <div className="modal" style={{ maxWidth: 640, width: '94%' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⚠ Duplicate Entries ({result.errors.filter(e => e.duplicate).length})</h2>
+              <button className="modal-close" onClick={() => setDupPopup(false)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: 360, overflow: 'auto' }}>
+              <div style={{ fontSize: 12.5, color: '#92400e', marginBottom: 8 }}>These rows were NOT posted — a leave/visit already exists for those dates.</div>
+              <ul style={{ fontSize: 12.5, paddingLeft: 18, margin: 0 }}>
+                {result.errors.filter(e => e.duplicate).map((e, i) => (
+                  <li key={i} style={{ marginBottom: 4 }}>
+                    <strong>{e.employeeId}</strong>{e.fromDate ? ` · ${e.fromDate}${e.toDate && e.toDate !== e.fromDate ? ' → ' + e.toDate : ''}` : ''} — <span style={{ color: '#991b1b' }}>{e.error}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="modal-footer"><button className="btn btn-primary" onClick={() => setDupPopup(false)}>OK</button></div>
+          </div>
+        </div>
+      )}
+      {pickerOpen && (
+        <DuplicateStaffPicker items={ambigItems} onPick={pickStaff} onClose={() => setPickerOpen(false)} />
+      )}
     </div>
   );
 }

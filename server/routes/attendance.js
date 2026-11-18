@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Attendance Routes
  * GET /api/attendance/daily?date=YYYY-MM-DD
  * Returns all active staff with their attendance data for the given date.
@@ -6,7 +6,7 @@
 import express from 'express';
 import pool    from '../db.js';
 import { registerClient, broadcastNotification } from '../services/liveNotifications.js';
-import { buildPunchNotification }                from '../services/punchNotification.js';
+import { buildPunchNotification, pushPunchAlert } from '../services/punchNotification.js';
 import { logError } from '../utils/logError.js';
 
 // A DATE column value (JS Date at local midnight, or a string) as 'YYYY-MM-DD'.
@@ -16,7 +16,7 @@ const dateOnlyStr = (v) => !v ? null : (v instanceof Date
 import { resolveEmployeeScope } from './attendanceScope.js';
 import { resolveOrgEmployeeIds, canManagerManualPost } from './orgScope.js';
 import { notifyUsers } from '../services/internalMessages.js';
-import { notifyApproversOf, notifyApplicantOf } from '../services/approvalNotify.js';
+import { notifyApproversOf, notifyApplicantOf, notifyApproversNext, notifyPeople, resolveApplicationRecipients } from '../services/approvalNotify.js';
 import { sendMissingAttendanceApplication, sendManualPostingApplication } from '../services/emailService.js';
 import { requireRole } from '../middleware/roleGuard.js';
 import { logAudit } from '../services/auditLog.js';
@@ -113,8 +113,52 @@ const abbrev = (name) => {
   return name.slice(0, 5).toUpperCase();  // single word â†’ e.g. "pokhara" â†’ "POKHA"
 };
 
+// Leave type settings 'Reduce Weekend' / 'Reduce Public Holiday': when OFF the
+// leave type COUNTS weekends/holidays inside the leave range (they are taken
+// as leave days, exactly as stored in leaves.days); when ON they are skipped.
+// Returns (code, isWeekend, isHoliday) => true when a leave of this type must
+// show/count as leave on such an off day. Unknown type => false (old behaviour).
+export const loadLeaveOffDayRule = async () => {
+  let cfgs = [];
+  try {
+    const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='main'");
+    let v = rows[0]?.value; if (typeof v === 'string') v = JSON.parse(v);
+    cfgs = v?.leaveTypeConfigs || [];
+  } catch { /* keep empty */ }
+  const byCode = new Map(cfgs.map(c => [c.shortName, c]));
+  return (code, isWeekend, isHoliday) => {
+    const c = byCode.get(code);
+    if (!c || !(isWeekend || isHoliday)) return false;
+    return (!isWeekend || !c.reduceWeekend) && (!isHoliday || !c.reducePublicHoliday);
+  };
+};
+
+// Sandwich days: a run of weekend/public-holiday days that has NO leave of its
+// own but sits directly between two leave days whose type has Reduce Weekend /
+// Reduce Public Holiday OFF is part of that leave (the staff was away the whole
+// stretch). dates = ascending YYYY-MM-DD list; getCode(ds) = leave type code or
+// null; isWkd/isHol = per-date off-day tests. Returns Map(ds -> leave type code).
+export const sandwichLeaveDays = (dates, getCode, isWkd, isHol, rule) => {
+  const out = new Map();
+  let i = 0;
+  while (i < dates.length) {
+    const ds = dates[i];
+    if (getCode(ds) || !(isWkd(ds) || isHol(ds))) { i++; continue; }
+    let j = i;
+    while (j + 1 < dates.length && !getCode(dates[j + 1]) && (isWkd(dates[j + 1]) || isHol(dates[j + 1]))) j++;
+    const before = i > 0 ? getCode(dates[i - 1]) : null;
+    const after  = j + 1 < dates.length ? getCode(dates[j + 1]) : null;
+    if (before && after) {
+      const run = dates.slice(i, j + 1);
+      if (run.every(d => rule(before, isWkd(d), isHol(d)) && rule(after, isWkd(d), isHol(d)))) run.forEach(d => out.set(d, before));
+    }
+    i = j + 1;
+  }
+  return out;
+};
+
 // Load public holidays once per request from app_settings main blob
-const loadPublicHolidays = async () => {
+export const loadPublicHolidays = async () => {
   try {
     const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='main'");
     return rows[0]?.value?.publicHolidays || [];
@@ -176,7 +220,7 @@ const loadHolidayScopeLookups = async () => {
 // (no employee in view yet) only matches fully-unscoped holidays. Async —
 // loads the id→name lookups once (cached) — so every call site now does
 // `await makeHolidayChecker(publicHolidays)` instead of a plain call.
-const makeHolidayChecker = async (holidays) => {
+export const makeHolidayChecker = async (holidays) => {
   const { branchNameById, deptNameById, religionNameById } = await loadHolidayScopeLookups();
   return (dateStr, emp = null) => {
     const h = holidays.find(ph => {
@@ -263,6 +307,156 @@ function resolveRotationShift(entry, dateStr, shiftsById) {
   return { ...shift, startTime: eff.shiftStart, endTime: eff.shiftEnd, graceSt: eff.graceStart, graceEd: eff.graceEnd };
 }
 
+// ── Double duty ─────────────────────────────────────────────────────────────
+// A roster entry is "double duty" when its double_duty flag is set, or when it
+// is a single-day row carrying 2+ shifts (Department Wise cells / Calendar view:
+// rotating over a one-day range is meaningless, so it can only mean "both").
+// Returns the day's duties (off shifts dropped, sorted by start time, winter
+// policy applied per duty) or null when the day is not a double-duty day.
+function resolveDuties(entry, dateStr, shiftsById) {
+  const ids = (entry.shiftIds && entry.shiftIds.length) ? entry.shiftIds : [];
+  if (ids.length < 2) return null;
+  if (!(entry.doubleDuty || entry.dateFrom === entry.dateTo)) return null;
+  const seen = new Set();
+  const duties = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue; seen.add(id);
+    const s = shiftsById[id];
+    if (!s || s.isOff) continue;
+    const eff = resolveWinterShift(dateStr, s.startTime, s.endTime, s.graceSt, s.graceEd, s.winterPolicyEnabled, s.winterPolicy);
+    duties.push({ ...s, startTime: eff.shiftStart, endTime: eff.shiftEnd, graceSt: eff.graceStart, graceEd: eff.graceEnd });
+  }
+  if (duties.length < 2) return null;
+  duties.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+  return duties;
+}
+
+// Splits ONE shift-day's punches between that day's duties and works out each
+// duty's own in/out, late, early and worked time.
+//  - A punch belongs to the duty whose window it is nearest to; the boundary
+//    between two duties is the middle of the break between them.
+//  - A duty with no punch at all is `missing`.
+//  - A duty with a single punch records only the IN or only the OUT (whichever
+//    end of the shift the punch is closer to) — a missing punch is never
+//    counted as late or early.
+//  - `gapMs` is the company "Log Duration for Time Out" setting (a punch this
+//    close behind the duty's first punch is a duplicate, not a time out).
+// punches: Date[] (any order). Returns null when `duties` is empty.
+export function evaluateDuties(duties, punches, dateStr, gapMs = 0) {
+  if (!duties?.length) return null;
+  const [Y, M, D] = dateStr.split('-').map(Number);
+  const hm = (t) => String(t).split(':').map(Number);
+  const win = duties.map(d => {
+    const [sH, sM] = hm(d.startTime), [eH, eM] = hm(d.endTime);
+    const s = shiftToUTC(Y, M, D, sH, sM), e = shiftToUTC(Y, M, D, eH, eM);
+    if (e <= s) e.setUTCDate(e.getUTCDate() + 1);
+    return { s, e };
+  });
+  const cuts = [];
+  for (let i = 0; i < win.length - 1; i++) cuts.push(new Date((win[i].e.getTime() + win[i + 1].s.getTime()) / 2));
+  const sorted = (punches || []).filter(Boolean).map(p => (p instanceof Date ? p : new Date(p))).sort((a, b) => a - b);
+  const seg = duties.map(() => []);
+  for (const p of sorted) {
+    let i = 0; while (i < cuts.length && p >= cuts[i]) i++;
+    seg[i].push(p);
+  }
+  const mins = (a, b) => Math.round((b - a) / 60000);
+  const out = duties.map((d, i) => {
+    const ps = seg[i], { s, e } = win[i];
+    const r = { shiftId: d.id, name: d.name, start: d.startTime, end: d.endTime, timeIn: null, timeOut: null,
+                lateMins: 0, earlyMins: 0, lateOutMins: 0, earlyInMins: 0, workedMins: 0, missing: !ps.length };
+    if (!ps.length) return r;
+    const first = ps[0];
+    const outs = ps.filter(t => t - first >= Math.max(gapMs, 60000));
+    if (outs.length) {
+      r.timeIn = first;
+      // Staff often press twice when leaving: punches that close together (company
+      // "Log Duration for Time Out", at least 5 min — same window the overnight rule
+      // uses) are ONE press, and the first of that final cluster is the OUT.
+      const clusterMs = Math.max(gapMs, 5 * 60000);
+      let k = outs.length - 1;
+      while (k > 0 && outs[k] - outs[k - 1] <= clusterMs) k--;
+      r.timeOut = outs[k];
+    }
+    else if (Math.abs(first - s) <= Math.abs(first - e)) r.timeIn = first;   // lone punch near the start = IN
+    else r.timeOut = first;                                                 // lone punch near the end   = OUT
+    if (r.timeIn) {
+      const diff = mins(s, r.timeIn);
+      if (diff < 0) r.earlyInMins = -diff; else r.lateMins = Math.max(0, diff - (d.graceSt || 0));
+    }
+    if (r.timeOut) {
+      const diff = mins(r.timeOut, e);
+      if (diff > 0) r.earlyMins = Math.max(0, diff - (d.graceEd || 0)); else r.lateOutMins = -diff;
+    }
+    if (r.timeIn && r.timeOut) r.workedMins = Math.max(0, mins(r.timeIn, r.timeOut));
+    return r;
+  });
+  // In the very first duty and out of the very last one, with nothing in between
+  // (staff punched only on arrival and departure): count the time between them
+  // minus the break, and do not blame either duty for the "missing" punches.
+  let workedMins = out.reduce((a, r) => a + r.workedMins, 0);
+  if (!workedMins) {
+    const inD = out.find(r => r.timeIn), outD = [...out].reverse().find(r => r.timeOut);
+    if (inD && outD && inD !== outD && outD.timeOut > inD.timeIn) {
+      let total = mins(inD.timeIn, outD.timeOut);
+      for (let i = 0; i < win.length - 1; i++) {
+        const bs = Math.max(win[i].e.getTime(), inD.timeIn.getTime()), be = Math.min(win[i + 1].s.getTime(), outD.timeOut.getTime());
+        if (be > bs) total -= Math.round((be - bs) / 60000);
+      }
+      workedMins = Math.max(0, total);
+    }
+  }
+  const attended = out.filter(r => !r.missing).length;
+  return {
+    duties: out,
+    workedMins,
+    lateMins: out.reduce((a, r) => a + r.lateMins, 0),
+    earlyMins: out.reduce((a, r) => a + r.earlyMins, 0),
+    lateOutMins: out[out.length - 1].lateOutMins,       // overtime only counts after the LAST duty
+    lateCount: out.filter(r => r.lateMins > 0).length,
+    earlyCount: out.filter(r => r.earlyMins > 0).length,
+    missingCount: out.length - attended,
+    attended,
+  };
+}
+
+// One call for every report: how a double-duty day reads. Returns null when the day is
+// not double duty (or has no punch) so callers keep their normal single-shift logic.
+//   inStatus / outStatus  — same wording the single-shift reports use ("Late By 00:10" …)
+//   lateMins / earlyMins  — totals across both duties (null when 0)
+//   lateCount / earlyCount — number of DUTIES that were late / left early
+//   workedMins            — time actually on duty (the break is not counted)
+//   lateOutMins           — time past the LAST duty's end (the only overtime candidate)
+export function doubleDutyDay(roster, punches, dateStr, gapMs = 0) {
+  if (!roster?.duties || !punches?.length) return null;
+  const e = evaluateDuties(roster.duties, punches, dateStr, gapMs);
+  if (!e) return null;
+  const hasIn = e.duties.some(d => d.timeIn), hasOut = e.duties.some(d => d.timeOut);
+  const earlyIn = e.duties.find(d => d.earlyInMins > 0);
+  const inStatus = !hasIn ? null
+    : e.lateMins > 0 ? `Late By ${minsToHHMM(e.lateMins)}`
+    : (earlyIn && !e.lateCount ? `Early In ${minsToHHMM(earlyIn.earlyInMins)}` : 'On Time');
+  const outStatus = !hasOut ? null
+    : e.earlyMins > 0 ? `Early Out ${minsToHHMM(e.earlyMins)}`
+    : (e.lateOutMins > 0 ? `Late Out ${minsToHHMM(e.lateOutMins)}` : 'On Time');
+  return {
+    e, inStatus, outStatus,
+    lateMins: e.lateMins || null, earlyMins: e.earlyMins || null,
+    workedMins: e.workedMins, lateOutMins: e.lateOutMins,
+    lateCount: e.lateCount, earlyCount: e.earlyCount,
+    firstIn: (e.duties.find(d => d.timeIn) || {}).timeIn || null,
+    lastOut: ([...e.duties].reverse().find(d => d.timeOut) || {}).timeOut || null,
+  };
+}
+
+// JSON shape of a double-duty day's duties, shared by every report that shows per-duty times.
+export const dutiesForOutput = (duties) => (duties || []).map(d => ({
+  name: d.name, start: d.start, end: d.end,
+  timeIn: d.timeIn ? d.timeIn.toISOString() : null, timeOut: d.timeOut ? d.timeOut.toISOString() : null,
+  lateMins: d.lateMins, earlyMins: d.earlyMins, earlyInMins: d.earlyInMins, lateOutMins: d.lateOutMins,
+  workedMins: d.workedMins, missing: d.missing,
+}));
+
 // Among roster entries that all directly cover the same date (e.g. a
 // single-day Calendar View override landing inside a broader date-range
 // roster), the most specific one should win — the narrower the date span,
@@ -309,7 +503,8 @@ export const loadRosterMap = async (startDate, endDate) => {
                dr.day_off_days,
                dr.night_off_days,
                dr.shift_id,
-               dr.shift_ids
+               dr.shift_ids,
+               dr.double_duty
         FROM   duty_roster dr
         WHERE  (dr.date_from <= $2 AND dr.date_to >= $1)
             OR dr.id IN (
@@ -335,6 +530,7 @@ export const loadRosterMap = async (startDate, endDate) => {
         nightOffDays:  Array.isArray(r.night_off_days) ? r.night_off_days : [],
         shiftIds: Array.isArray(r.shift_ids) ? r.shift_ids : (r.shift_id ? [r.shift_id] : []),
         shiftId:  r.shift_id,
+        doubleDuty: !!r.double_duty,
       });
     }
     Object.defineProperty(map, '_shiftsById', { value: loadShiftsById(shiftsRes.rows), enumerable: false });
@@ -369,6 +565,22 @@ export const getEffectiveRoster = (rosterMap, empId, dateStr) => {
     const dayKey = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(gy, gm - 1, gd).getDay()];
     if (entry.nightOffDays?.includes(dayKey))    shift = findOffShiftByType(shiftsById, 'night');
     else if (entry.dayOffDays?.includes(dayKey)) shift = findOffShiftByType(shiftsById, 'day');
+  }
+  // Double duty: every shift on the entry is worked the SAME day (instead of
+  // rotating one per day). Only for an entry that really covers dateStr, and not
+  // when a Day Off/Night Off day-of-week override already picked an off shift.
+  const duties = (!shift && exact) ? resolveDuties(entry, dateStr, shiftsById) : null;
+  if (duties) {
+    const first = duties[0], last = duties[duties.length - 1];
+    return {
+      dateFrom: entry.dateFrom, dateTo: entry.dateTo, offDays: entry.offDays,
+      shiftId: first.id, shiftName: duties.map(d => d.name).join('\n'),   // one duty per line
+      shiftStart: first.startTime, shiftEnd: last.endTime,
+      graceSt: first.graceSt ?? 0, graceEd: last.graceEd ?? 0,
+      workHours: duties.reduce((a, d) => a + (Number(d.workHours) || 0), 0) || 8,
+      isOff: false, hasExactEntry: true,
+      duties,
+    };
   }
   if (!shift) shift = resolveRotationShift(entry, dateStr, shiftsById);
   return {
@@ -470,6 +682,19 @@ export function bucketPunchesByShiftDay(punchTimestamps, empId, rosterMap, defau
   const shiftCrossesMidnight = (dateStr) => shiftTimes(dateStr).crosses;
   const localHHMM = (ts) => new Date(ts.getTime() + NEPAL_MS).toISOString().slice(11, 16);
 
+  // A 24h-style roster shift (e.g. 08:00-07:59) "crosses midnight" only on
+  // paper: its start is in the MORNING, so a before-noon punch that comes after
+  // the previous day's shift end (+30min) is the NEXT shift's check-in, not the
+  // tail of last night. Rolling it back left the real day with no punches →
+  // Absent (dgh, 13-Nov-2026). Evening-start night shifts are unaffected.
+  const isNewShiftStartPunch = (prevDateStr, ts) => {
+    const { start, end } = shiftTimes(prevDateStr);
+    if (!start || !end) return false;
+    const toMin = (hhmm) => +hhmm.slice(0, 2) * 60 + +hhmm.slice(3, 5);
+    if (toMin(start) >= 12 * 60) return false;           // evening/night start → normal rollback
+    return toMin(localHHMM(ts)) > toMin(end) + 30;
+  };
+
   // Is `prev`'s bucket an evening check-in still open for this morning punch?
   const openOvernight = (prevDateStr, ts) => {
     const b = buckets.get(prevDateStr);
@@ -505,7 +730,7 @@ export function bucketPunchesByShiftDay(punchTimestamps, empId, rosterMap, defau
     const noon = shiftToUTC(Y, M, D, 12, 0);
     if (ts < noon) {
       const prevDateStr = new Date(Date.UTC(Y, M - 1, D - 1)).toISOString().split('T')[0];
-      if (shiftCrossesMidnight(prevDateStr)) dateStr = prevDateStr;
+      if (shiftCrossesMidnight(prevDateStr) && !isNewShiftStartPunch(prevDateStr, ts)) dateStr = prevDateStr;
       else if (openOvernight(prevDateStr, ts)) {
         dateStr = prevDateStr;
         buckets.get(prevDateStr)._overnightOut = ts;
@@ -530,6 +755,7 @@ export function bucketPunchesByShiftDay(punchTimestamps, empId, rosterMap, defau
       bucket.punchCount = 1 + outs.length;
       bucket.timeOut = outs.length ? bucket.timeOut : bucket.timeIn;
     }
+    bucket.punches = bucket._all;   // every punch of this shift-day (double-duty reports split these between duties)
     delete bucket._all;
     delete bucket._overnightOut;
   }
@@ -571,6 +797,7 @@ export async function computeDailyAttendance(date) {
     // makeHolidayChecker), so this is resolved per row further down instead
     // of once here.
     const getHoliday  = await makeHolidayChecker(publicHolidays);
+    const leaveCountsOffDay = await loadLeaveOffDayRule();
 
     const DOW_KEYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     // Use local interpretation of the date to avoid UTC-shift problems
@@ -769,6 +996,19 @@ export async function computeDailyAttendance(date) {
           row.time_out    = today?.timeOut    ?? null;
           row.punch_count = today?.punchCount ?? null;
           row.ot_approved_mins = otSumMap.get(row.id) || 0;
+          // Double duty: this staff member works 2+ shifts today — swap the single
+          // (rotation) shift the SQL picked for the combined day, keep the duties
+          // so the late/early/hours below are worked out per duty.
+          const eff = getEffectiveRoster(rosterMap, row.id, date);
+          if (eff?.duties) {
+            row.eff_duties = eff.duties;
+            row.day_punches = today?.punches || [];
+            row.gap_ms = (rosterMap._timeOutMinGap || 0) * 60000;
+            row.shift_name = eff.shiftName; row.shift_start = eff.shiftStart; row.shift_end = eff.shiftEnd;
+            row.grace_start = eff.graceSt; row.grace_end = eff.graceEd; row.work_hours = eff.workHours;
+            row.winter_policy_enabled = false;   // already applied per duty
+            row.roster_is_off = false;
+          }
         }
       }
     }
@@ -848,7 +1088,20 @@ export async function computeDailyAttendance(date) {
       // Only use time_out when there are at least 2 punches (first punch â‰  last punch)
       const hasCheckOut = r.punch_count >= 2;
 
-      if (time_in && shift_start && shift_end) {
+      // Double duty: judge each duty on its own, then roll the day up.
+      let dutyEval = null;
+      if (r.eff_duties && time_in) {
+        const dd = doubleDutyDay({ duties: r.eff_duties }, r.day_punches, date, r.gap_ms);
+        if (dd) {
+          dutyEval = dd.e;
+          if (dd.workedMins > 0) totalHrs = minsToHHMM(dd.workedMins);
+          lateIn = dd.inStatus;
+          earlyOut = dd.outStatus;
+          if (!dd.earlyMins && dd.lateOutMins > 0) ot = minsToHHMM(dd.lateOutMins);
+        }
+      }
+
+      if (!dutyEval && time_in && shift_start && shift_end) {
         const inDt  = new Date(time_in);
         const outDt = (time_out && hasCheckOut) ? new Date(time_out) : null;
 
@@ -905,7 +1158,9 @@ export async function computeDailyAttendance(date) {
       // day doesn't count as leave taken (it isn't a working day to begin
       // with regardless of the leave application), it's simply a holiday.
       // Leave detail is still preserved in remarks below either way.
-      if (roster_is_off)        status = r.shift_name || 'Weekend';
+      const leaveOnOffDay = !!leave_id && leaveCountsOffDay(r.leave_type_code, !!(roster_is_off || isEmpWeekend), !!holidayName);
+      if (leaveOnOffDay)        status = leave_type_name || 'Leave';
+      else if (roster_is_off)   status = r.shift_name || 'Weekend';
       else if (isEmpWeekend)    status = 'Weekend';
       else if (time_in)         status = 'Present';
       else if (holidayName)     status = 'Public Holiday';
@@ -961,6 +1216,8 @@ export async function computeDailyAttendance(date) {
         lateIn,
         earlyOut,
         ot,
+        // Double duty only (null otherwise): one entry per duty with its own punches/late/early.
+        duties              : dutyEval ? dutiesForOutput(dutyEval.duties) : null,
         eligibleForOt       : !!r.eligible_for_ot,
         otApprovedMins      : r.ot_approved_mins || 0,
         otApprovedFormatted : r.eligible_for_ot && r.ot_approved_mins ? minsToHHMM(r.ot_approved_mins) : null,
@@ -1081,7 +1338,7 @@ router.get('/staff-ledger', async (req, res) => {
       pool.query(`
         SELECT dr.id, dr.date_from::text AS date_from, dr.date_to::text AS date_to,
                dr.off_days, dr.day_off_days, dr.night_off_days,
-               dr.shift_id, dr.shift_ids
+               dr.shift_id, dr.shift_ids, dr.double_duty
         FROM   duty_roster dr
         WHERE  dr.employee_id = $1
           AND  ((dr.date_from <= $2 AND dr.date_to >= $3)
@@ -1101,44 +1358,13 @@ router.get('/staff-ledger', async (req, res) => {
       nightOffDays: Array.isArray(r.night_off_days) ? r.night_off_days : [],
       shiftIds: Array.isArray(r.shift_ids) ? r.shift_ids : (r.shift_id ? [r.shift_id] : []),
       shiftId:  r.shift_id,
+      doubleDuty: !!r.double_duty,
     }));
-    // Resolves rotation + Day Off/Night Off for the given date — same flat
-    // shape (shiftName/shiftStart/shiftEnd/graceSt/graceEd/offDays/isOff)
-    // every consumer below already expects.
-    const getEmpRoster = (ds) => {
-      const covering = rosterEntries.filter(e => e.dateFrom <= ds && e.dateTo >= ds);
-      const exact = pickMostSpecificEntry(covering);
-      const entry = exact ||
-                    rosterEntries.filter(e => e.dateTo < ds).sort((a, b) => b.dateTo.localeCompare(a.dateTo))[0] ||
-                    null;
-      if (!entry) return null;
-      // Day-of-week Day Off/Night Off override — see getEffectiveRoster's
-      // identical comment above for why.
-      let shift = null;
-      if (exact) {
-        const [gy, gm, gd] = ds.split('-').map(Number);
-        const dayKey = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(gy, gm - 1, gd).getDay()];
-        if (entry.nightOffDays?.includes(dayKey))    shift = findOffShiftByType(ledgerShiftsById, 'night');
-        else if (entry.dayOffDays?.includes(dayKey)) shift = findOffShiftByType(ledgerShiftsById, 'day');
-      }
-      if (!shift) shift = resolveRotationShift(entry, ds, ledgerShiftsById);
-      return {
-        offDays: entry.offDays,
-        shiftId:    shift?.id        ?? null,
-        shiftName:  shift?.name      ?? null,
-        shiftStart: shift?.startTime ?? null,
-        shiftEnd:   shift?.endTime   ?? null,
-        graceSt:    shift?.graceSt   ?? 0,
-        graceEd:    shift?.graceEd   ?? 0,
-        // Only honor Day Off/Night Off when this entry actually covers ds —
-        // see getEffectiveRoster's comment above for why the past-entry
-        // fallback must never carry isOff forward.
-        isOff:      exact ? !!shift?.isOff : false,
-        // Same distinction — isRosterWeekend uses this to know whether the
-        // roster is authoritative for this exact date (see its own comment).
-        hasExactEntry: !!exact,
-      };
-    };
+    // Resolves rotation / double duty + Day Off/Night Off for the given date through the
+    // shared getEffectiveRoster (one implementation for every report).
+    const ledgerRosterMap = { [emp.id]: rosterEntries };
+    Object.defineProperty(ledgerRosterMap, '_shiftsById', { value: ledgerShiftsById, enumerable: false });
+    const getEmpRoster = (ds) => getEffectiveRoster(ledgerRosterMap, emp.id, ds);
 
     // â”€â”€ Attendance logs for the period, shift-day bucketed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Widened by a day on each side: a shift crossing midnight (e.g.
@@ -1171,12 +1397,13 @@ router.get('/staff-ledger', async (req, res) => {
     const shiftBuckets = bucketPunchesByShiftDay(rawLogsRes.rows.map(r => r.check_time), emp.id, rosterMapForBucketing, defShift);
     const logsByDay = {};
     for (const [dateStr, b] of shiftBuckets) {
-      logsByDay[dateStr] = { time_in: b.timeIn, time_out: b.timeOut, punches: b.punchCount };
+      logsByDay[dateStr] = { time_in: b.timeIn, time_out: b.timeOut, punches: b.punchCount, all: b.punches };
     }
+    const ledgerGapMs = (rosterMapForBucketing._timeOutMinGap || 0) * 60000;
 
     // â”€â”€ Approved leaves â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const leaveRes = await pool.query(`
-      SELECT l.from_date, l.to_date, lt.name AS leave_type, l.half_day,
+      SELECT l.from_date, l.to_date, lt.name AS leave_type, l.leave_type_code, l.half_day,
              ru.full_name AS reco_name, au.full_name AS appr_name
       FROM   leaves l
       LEFT   JOIN leave_types lt ON lt.code = l.leave_type_code
@@ -1189,6 +1416,8 @@ router.get('/staff-ledger', async (req, res) => {
     const leaveDates = {};
     const leaveHalfDates = {}; // ds -> true when that leave record is a half-day application
     const leaveRecoMap = {};
+    const leaveCodeDates = {}; // ds -> leave type code
+    const leaveCountsOffDayL = await loadLeaveOffDayRule();
     for (const l of leaveRes.rows) {
       const from=new Date(l.from_date), to=new Date(l.to_date);
       for (let d=new Date(from);d<=to;d.setDate(d.getDate()+1)) {
@@ -1196,6 +1425,7 @@ router.get('/staff-ledger', async (req, res) => {
         if (ds>=startDate&&ds<=endDate) {
           leaveDates[ds] = l.leave_type || 'Leave';
           leaveHalfDates[ds] = !!l.half_day;
+          leaveCodeDates[ds] = l.leave_type_code;
           if (l.reco_name || l.appr_name) leaveRecoMap[ds] = { recoName: l.reco_name, apprName: l.appr_name };
         }
       }
@@ -1281,6 +1511,20 @@ router.get('/staff-ledger', async (req, res) => {
       });
     } catch (_) {}
 
+    // Weekend/holiday days sandwiched between two leave days (Reduce Weekend/Holiday OFF) count as leave.
+    {
+      const ds0 = []; const dEnd = new Date(endDate + 'T00:00:00Z');
+      for (let d = new Date(startDate + 'T00:00:00Z'); d <= dEnd; d.setUTCDate(d.getUTCDate() + 1)) ds0.push(d.toISOString().slice(0, 10));
+      const sw = sandwichLeaveDays(ds0, ds => leaveCodeDates[ds] || (leaveDates[ds] ? 'Leave' : null),
+        ds => isRosterWeekend(getEmpRoster(ds), DOW[new Date(ds + 'T00:00:00Z').getUTCDay()], weekends, defShift?.id),
+        ds => !!getHoliday(ds, emp), leaveCountsOffDayL);
+      for (const [ds, code] of sw) {
+        const src = ds0[ds0.indexOf(ds) - 1];
+        leaveDates[ds] = leaveDates[src] || 'Leave'; leaveHalfDates[ds] = false; leaveCodeDates[ds] = code;
+        if (leaveRecoMap[src]) leaveRecoMap[ds] = leaveRecoMap[src];
+      }
+    }
+
     // â”€â”€ Build per-day records — date-range iterator (works with any start/endDate) â”€â”€â”€
     const days = []; let totalWorkingDays=0;
     let presentCount=0,absentCount=0,leaveCount=0,visitCount=0,lateCount=0,earlyCount=0,otMins=0,totalMins=0;
@@ -1304,7 +1548,10 @@ router.get('/staff-ledger', async (req, res) => {
 
       // Roster override for this specific day
       const dayRoster    = getEmpRoster(dateStr);
-      const isWeekend    = isRosterWeekend(dayRoster, dayKey, weekends, defShift?.id);
+      const isWeekendRaw = isRosterWeekend(dayRoster, dayKey, weekends, defShift?.id);
+      // A leave whose type has Reduce Weekend/Holiday OFF counts those days as leave.
+      const leaveOnOff   = !!leaveDates[dateStr] && leaveCountsOffDayL(leaveCodeDates[dateStr], isWeekendRaw, !!getHoliday(dateStr, emp));
+      const isWeekend    = isWeekendRaw && !leaveOnOff;
       // Effective shift times: roster (already winter-adjusted by resolveRotationShift)
       // > employee default/system default, winter-adjusted here per-date.
       const fallbackShift = resolveWinterShift(dateStr, shiftStart, shiftEnd, graceSt, graceEd, shiftWinterEnabled, shiftWinterPolicy);
@@ -1323,6 +1570,7 @@ router.get('/staff-ledger', async (req, res) => {
       let status='Absent', timeIn=null, timeOut=null, lateMins=null,
           earlyMins=null, otMinDay=null, totalMinDay=null, remarks='';
       let inStatusStr=null, outStatusStr=null;
+      let dayDuties = null;   // double duty only: per-duty in/out/late/early for the Time In / Time Out cells
       let isHalfDayLeave = false;
 
       if (isWeekend) {
@@ -1353,6 +1601,22 @@ router.get('/staff-ledger', async (req, res) => {
         // Only set time_out when there are at least 2 punch records
         timeOut = (log.punches >= 2) ? (log.time_out || null) : null;
 
+        // Double duty: each duty judged on its own (see doubleDutyDay)
+        const ddDay = doubleDutyDay(dayRoster, log.all, dateStr, ledgerGapMs);
+        if (ddDay) {
+          dayDuties = dutiesForOutput(ddDay.e.duties);
+          inStatusStr = ddDay.inStatus; outStatusStr = ddDay.outStatus;
+          if (ddDay.lateMins)  { lateMins = ddDay.lateMins;  lateCount  += ddDay.lateCount; }
+          if (ddDay.earlyMins) { earlyMins = ddDay.earlyMins; earlyCount += ddDay.earlyCount; }
+          if (ddDay.workedMins > 0) { totalMinDay = ddDay.workedMins; totalMins += ddDay.workedMins; }
+          if (!ddDay.earlyMins && ddDay.lateOutMins > 0) {
+            const otKey = `${emp.id}-${dateStr}`;
+            if (approvedOTSet.has(otKey)) {
+              const approvedMins = approvedOTDetails.get(otKey)?.otMins ?? ddDay.lateOutMins;
+              outStatusStr = `OT ${minsToHHMM(approvedMins)}`; otMinDay = approvedMins; otMins += approvedMins;
+            }
+          }
+        }
         // â”€â”€ Time calculation using Nepal-local shift times â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         const [sh,sm] = effShiftStart.split(':').map(Number);
         const [eh,em] = effShiftEnd.split(':').map(Number);
@@ -1365,7 +1629,8 @@ router.get('/staff-ledger', async (req, res) => {
 
         // IN Status: Early In / On Time / Late By
         const rawInDiff = Math.round((inDt - sDt) / 60000);
-        if (rawInDiff < 0) {
+        if (ddDay) { /* already worked out per duty above */ }
+        else if (rawInDiff < 0) {
           inStatusStr = `Early In ${minsToHHMM(Math.abs(rawInDiff))}`;
         } else if (rawInDiff <= effGraceSt) {
           inStatusStr = `On Time`;
@@ -1376,7 +1641,7 @@ router.get('/staff-ledger', async (req, res) => {
         }
 
         // OUT Status: Early Out / On Time / Late Out
-        if (timeOut) {
+        if (timeOut && !ddDay) {
           const outDt      = new Date(timeOut);
           const rawOutDiff = Math.round((outDt - eDt) / 60000);
 
@@ -1416,7 +1681,7 @@ router.get('/staff-ledger', async (req, res) => {
         }
         if (phName) remarks = remarks ? `${remarks} | ${phName}` : phName;
         if (empRemarksMap[dateStr]) remarks = remarks ? `${remarks} | ${empRemarksMap[dateStr]}` : `${empRemarksMap[dateStr]}`;
-      } else if (phName) {
+      } else if (phName && !leaveOnOff) {
         // Public Holiday takes priority over a same-day Leave record — the
         // day doesn't count as leave taken (a holiday isn't a working day
         // to begin with), it's simply a holiday. If a leave was also
@@ -1482,6 +1747,7 @@ router.get('/staff-ledger', async (req, res) => {
         shiftEnd        : effShiftEnd,
         hasRoster       : !!dayRoster,
         status, timeIn, timeOut,
+        duties          : dayDuties,
         punches         : log?.punches || 0,
         lateMins, earlyMins, otMins:otMinDay, totalMins:totalMinDay,
         lateFormatted   : inStatusStr,
@@ -1673,13 +1939,13 @@ router.get('/half-monthly', async (req, res) => {
       logsMap[emp.id] = {};
       for (const [dateStr, b] of buckets) {
         if (dateStr < startDate || dateStr > endDate) continue;
-        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount };
+        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount, all: b.punches };
       }
     }
 
     // â”€â”€ Leaves for period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const leavesRes = await pool.query(`
-      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.half_day
+      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.leave_type_code, l.half_day
       FROM   leaves l
       LEFT   JOIN leave_types lt ON lt.code = l.leave_type_code
       WHERE  l.status='approved'
@@ -1687,6 +1953,7 @@ router.get('/half-monthly', async (req, res) => {
         ${effectiveEmployeeId ? 'AND l.employee_id = $3' : ''}
     `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]);
 
+    const leaveCodeMap0 = {}; // empId -> { ds -> leave type code }
     const leaveMap = {};      // empId â†’ [dates]
     const halfLeaveMap = {};  // empId â†’ Set of half-day leave dates (subset of leaveMap)
     for (const l of leavesRes.rows) {
@@ -1698,6 +1965,7 @@ router.get('/half-monthly', async (req, res) => {
         const ds = d.toISOString().split('T')[0];
         if (ds >= startDate && ds <= endDate) {
           leaveMap[l.employee_id].push(ds);
+          (leaveCodeMap0[l.employee_id] ||= {})[ds] = l.leave_type_code;
           if (l.half_day) halfLeaveMap[l.employee_id].add(ds);
         }
       }
@@ -1728,6 +1996,7 @@ router.get('/half-monthly', async (req, res) => {
     const pad2   = (n) => String(Math.round(n)).padStart(2,'0');
     const toHHMM = (mins) => `${pad2(Math.floor(Math.abs(mins)/60))}:${pad2(Math.abs(mins)%60)}`;
 
+    const leaveCountsOffDayS = await loadLeaveOffDayRule();
     const stats = employees.map(emp => {
       const empLogs      = logsMap[emp.id]     || {};
       const empLeave     = new Set(leaveMap[emp.id] || []);
@@ -1736,6 +2005,11 @@ router.get('/half-monthly', async (req, res) => {
 
       // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
       const getEmpRosterH = (ds) => getEffectiveRoster(rosterMapHalf, emp.id, ds);
+      // Weekend/holiday days sandwiched between two leave days (Reduce Weekend/Holiday OFF) count as leave.
+      for (const [ds, code] of sandwichLeaveDays(allDatesHalf.map(x => x.dateStr), ds => leaveCodeMap0[emp.id]?.[ds] || (empLeave.has(ds) ? 'Leave' : null),
+          ds => isRosterWeekend(getEmpRosterH(ds), allDatesHalf.find(x => x.dateStr === ds).dayKey, weekends, defShift?.id), ds => !!getHoliday(ds, emp), leaveCountsOffDayS)) {
+        empLeave.add(ds); (leaveCodeMap0[emp.id] ||= {})[ds] = code;
+      }
 
       // Employee's own shift (fallback to default)
       const empShiftStartH = emp.shift_start?.toString().substring(0,5) || defShift?.start_time?.toString().substring(0,5) || '10:00';
@@ -1749,6 +2023,7 @@ router.get('/half-monthly', async (req, res) => {
       let empTotalWorkingDays = 0;
       const empWorkingDatesH = [];
       const attStartH = dateOnlyStr(emp.attendanceDate);
+      let offDayLeaveH = 0;
       for (const { dateStr, dayKey } of allDatesHalf) {
         // Before the staff's Attendance Date: never counted.
         if (attStartH && dateStr < attStartH) continue;
@@ -1758,10 +2033,13 @@ router.get('/half-monthly', async (req, res) => {
         if (!isEmpWkd && !phName2) {
           empWorkingDatesH.push({ dateStr, dayKey, roster });
           empTotalWorkingDays++;
+        } else if (empLeave.has(dateStr) && leaveCountsOffDayS(leaveCodeMap0[emp.id]?.[dateStr], isEmpWkd, !!phName2)) {
+          // Leave type with Reduce Weekend/Holiday OFF: this off day IS a leave day.
+          offDayLeaveH += empHalfLeave.has(dateStr) ? 0.5 : 1; empTotalWorkingDays++;
         }
       }
 
-      let presentDays = 0, absentDays = 0, leaveDays = 0;
+      let presentDays = 0, absentDays = 0, leaveDays = offDayLeaveH;
       let lateCount = 0, earlyCount = 0, totalMins = 0;
       let lateMinsTotal = 0, earlyMinsTotal = 0;
       // True period total for this employee — a plain sum of approved OT
@@ -1781,12 +2059,20 @@ router.get('/half-monthly', async (req, res) => {
         if (!log || !log.timeIn) { absentDays++; continue; }
 
         presentDays++;
+        // Double duty: judged per duty (shared with Daily/Ledger)
+        const ddH = doubleDutyDay(roster, log.all, dateStr, (rosterMapHalf._timeOutMinGap || 0) * 60000);
+        if (ddH) {
+          if (ddH.lateMins)  { lateCount  += ddH.lateCount;  lateMinsTotal  += ddH.lateMins; }
+          if (ddH.earlyMins) { earlyCount += ddH.earlyCount; earlyMinsTotal += ddH.earlyMins; }
+          if (ddH.workedMins > 0) totalMins += ddH.workedMins;
+          continue;
+        }
         const inDt  = new Date(log.timeIn);
         const outDt = (log.timeOut && log.punches >= 2) ? new Date(log.timeOut) : null;
 
         // Effective shift: roster (already winter-adjusted) > employee > default,
         // with the employee/default fallback winter-adjusted here per-date.
-        const fallbackShiftH = resolveWinterShift(dateStr, empShiftStartH, empShiftEndH, empGraceStH, empGraceEdH, empWinterEnabledH, empWinterPolicyH);
+        const fallbackShiftH =resolveWinterShift(dateStr, empShiftStartH, empShiftEndH, empGraceStH, empGraceEdH, empWinterEnabledH, empWinterPolicyH);
         const shiftStart = roster?.shiftStart || fallbackShiftH.shiftStart;
         const shiftEnd   = roster?.shiftEnd   || fallbackShiftH.shiftEnd;
         const graceSt    = roster?.graceSt    != null ? roster.graceSt    : fallbackShiftH.graceStart;
@@ -1817,7 +2103,7 @@ router.get('/half-monthly', async (req, res) => {
         : 0;
 
       const punctualityScore = presentDays > 0
-        ? Math.round(((presentDays - lateCount) / presentDays) * 100)
+        ? Math.max(0, Math.round(((presentDays - lateCount) / presentDays) * 100))
         : 0;
 
       // Nothing before the staff's Attendance Date counts toward these either.
@@ -2043,16 +2329,17 @@ router.get('/monthly', async (req, res) => {
       logsMap[emp.id] = {};
       for (const [dateStr, b] of buckets) {
         if (dateStr < startDate || dateStr > endDate) continue;
-        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount };
+        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount, all: b.punches };
       }
     }
 
     const leavesRes = await pool.query(`
-      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.half_day
+      SELECT l.employee_id, l.from_date, l.to_date, lt.name AS leave_type, l.leave_type_code, l.half_day
       FROM leaves l LEFT JOIN leave_types lt ON lt.code = l.leave_type_code
       WHERE l.status='approved' AND l.from_date <= $2 AND l.to_date >= $1
     `, [startDate, endDate]);
 
+    const leaveCodeMap0 = {}; // empId -> { ds -> leave type code }
     const leaveMap = {};
     const halfLeaveMap = {}; // empId â†’ Set of half-day leave dates (subset of leaveMap)
     for (const l of leavesRes.rows) {
@@ -2063,6 +2350,7 @@ router.get('/monthly', async (req, res) => {
         const ds = d.toISOString().split('T')[0];
         if (ds >= startDate && ds <= endDate) {
           leaveMap[l.employee_id].push(ds);
+          (leaveCodeMap0[l.employee_id] ||= {})[ds] = l.leave_type_code;
           if (l.half_day) halfLeaveMap[l.employee_id].add(ds);
         }
       }
@@ -2075,6 +2363,7 @@ router.get('/monthly', async (req, res) => {
     // for why this replaces the old per-day-conditional accumulation.
     const monthlyApprovedOTSumMap = await loadApprovedOTSumMap(startDate, endDate);
 
+    const leaveCountsOffDayS = await loadLeaveOffDayRule();
     let stats = employees.map(emp => {
       const empLogs      = logsMap[emp.id] || {};
       const empLeave     = new Set(leaveMap[emp.id] || []);
@@ -2082,6 +2371,10 @@ router.get('/monthly', async (req, res) => {
 
       // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
       const getEmpRosterM = (ds) => getEffectiveRoster(rosterMapMon, emp.id, ds);
+      for (const [ds, code] of sandwichLeaveDays(allDatesMon.map(x => x.dateStr), ds => leaveCodeMap0[emp.id]?.[ds] || (empLeave.has(ds) ? 'Leave' : null),
+          ds => isRosterWeekend(getEmpRosterM(ds), allDatesMon.find(x => x.dateStr === ds).dayKey, weekends, defShift?.id), ds => !!getHoliday(ds, emp), leaveCountsOffDayS)) {
+        empLeave.add(ds); (leaveCodeMap0[emp.id] ||= {})[ds] = code;
+      }
 
       // Employee's own shift (fallback to default)
       const empShiftStartM = emp.shift_start?.toString().substring(0,5) || defShift?.start_time?.toString().substring(0,5) || '10:00';
@@ -2095,6 +2388,7 @@ router.get('/monthly', async (req, res) => {
       let empTotalWorkingDays = 0;
       const empWorkingDatesM = [];
       const attStartM = dateOnlyStr(emp.attendanceDate);
+      let offDayLeaveM = 0;
       for (const { dateStr, dayKey } of allDatesMon) {
         // Before the staff's Attendance Date: never counted.
         if (attStartM && dateStr < attStartM) continue;
@@ -2104,10 +2398,12 @@ router.get('/monthly', async (req, res) => {
         if (!isEmpWkd && !phName3) {
           empWorkingDatesM.push({ dateStr, roster });
           empTotalWorkingDays++;
+        } else if (empLeave.has(dateStr) && leaveCountsOffDayS(leaveCodeMap0[emp.id]?.[dateStr], isEmpWkd, !!phName3)) {
+          offDayLeaveM += empHalfLeave.has(dateStr) ? 0.5 : 1; empTotalWorkingDays++;
         }
       }
 
-      let presentDays=0, absentDays=0, leaveDays=0, lateCount=0, earlyCount=0;
+      let presentDays=0, absentDays=0, leaveDays=offDayLeaveM, lateCount=0, earlyCount=0;
       let totalMins=0, lateMinsTotal=0, earlyMinsTotal=0;
       // Missing Attendance — checked in but never checked out (single punch),
       // so the day counts as Present above but has no real worked-hours data.
@@ -2121,6 +2417,22 @@ router.get('/monthly', async (req, res) => {
         const log = empLogs[dateStr];
         if (!log || !log.timeIn) { absentDays++; continue; }
         presentDays++;
+        // Double duty: judged per duty (shared with Daily/Ledger/Half-Monthly)
+        const ddM = doubleDutyDay(roster, log.all, dateStr, (rosterMapMon._timeOutMinGap || 0) * 60000);
+        if (ddM) {
+          if (!ddM.lastOut) missingAttendanceDays++;
+          if (ddM.lateMins)  { lateCount  += ddM.lateCount;  lateMinsTotal  += ddM.lateMins; }
+          if (ddM.earlyMins) { earlyCount += ddM.earlyCount; earlyMinsTotal += ddM.earlyMins; }
+          if (ddM.workedMins > 0) {
+            totalMins += ddM.workedMins;
+            const scheduled = roster.duties.reduce((a, d) => {
+              const [h1, m1] = String(d.startTime).split(':').map(Number), [h2, m2] = String(d.endTime).split(':').map(Number);
+              let len = (h2 * 60 + m2) - (h1 * 60 + m1); if (len <= 0) len += 1440; return a + len;
+            }, 0);
+            if (ddM.workedMins > scheduled) extraShiftMinutes += (ddM.workedMins - scheduled);
+          }
+          continue;
+        }
         const inDt  = new Date(log.timeIn);
         const outDt = (log.timeOut && log.punches >= 2) ? new Date(log.timeOut) : null;
         if (!outDt) missingAttendanceDays++;
@@ -2152,7 +2464,7 @@ router.get('/monthly', async (req, res) => {
       }
 
       const attendanceRate   = empTotalWorkingDays > 0 ? Math.round(((presentDays+leaveDays)/empTotalWorkingDays)*100) : 0;
-      const punctualityScore = presentDays > 0 ? Math.round(((presentDays-lateCount)/presentDays)*100) : 0;
+      const punctualityScore = presentDays > 0 ? Math.max(0, Math.round(((presentDays-lateCount)/presentDays)*100)) : 0;
       return {
         id:emp.id, empCode:emp.empCode, fullName:emp.fullName,
         department:emp.department||'—', position:emp.position||'—', branch:emp.branch||'—',
@@ -2397,6 +2709,7 @@ router.get('/half-in-out', async (req, res) => {
           timeIn:  b.timeIn,
           timeOut: b.punchCount >= 2 ? b.timeOut : null,
           punches: b.punchCount,
+          all: b.punches,
         };
       }
     }
@@ -2432,6 +2745,9 @@ router.get('/half-in-out', async (req, res) => {
           const wMins = Math.max(0, Math.round((outDt - inDt) / 60000));
           if (wMins > 0) workedHrs = minsToHHMM(wMins);
         }
+        // Double duty: hours on duty, without the break between the two shifts
+        const ddIO = doubleDutyDay(getEffectiveRoster(rosterMapIO, emp.id, date), log?.all, date, (rosterMapIO._timeOutMinGap || 0) * 60000);
+        if (ddIO) workedHrs = ddIO.workedMins > 0 ? minsToHHMM(ddIO.workedMins) : null;
         /* Use approved OT (manager-set) — only show if approved */
         const approvedOTMins = approvedOTMap.get(`${emp.id}-${date}`);
         if (approvedOTMins != null && approvedOTMins > 0) {
@@ -2471,6 +2787,7 @@ router.get('/half-in-out', async (req, res) => {
           timeIn:  rawIn,
           timeOut: rawOut,
           punches: log?.punches || 0,
+          duties: ddIO ? dutiesForOutput(ddIO.e.duties) : null,   // double duty: per-duty in/out
           workedHrs, otHrs,
           isWeekend: empIsWeekend, offType,
           isHoliday: !!empHolidayName, holidayName: empHolidayName || null,
@@ -2619,6 +2936,7 @@ router.get('/half-late-early', async (req, res) => {
           timeIn:  b.timeIn,
           timeOut: b.punchCount >= 2 ? b.timeOut : null,
           punches: b.punchCount,
+          all: b.punches,
         };
       }
     }
@@ -2682,9 +3000,12 @@ router.get('/half-late-early', async (req, res) => {
         const eDt   = shiftToUTC(dy, mo, dd, eh, em);
         if (eDt <= sDt) eDt.setUTCDate(eDt.getUTCDate() + 1);
 
-        const lateInMins = Math.round((inDt - sDt) / 60000) - graceSt;
+        // Double duty: lateness / early-out summed over the day's duties (shared helper)
+        const ddLE = doubleDutyDay(roster, log.all, dateStr, (rosterMapLE._timeOutMinGap || 0) * 60000);
+        const lateInMins = ddLE ? (ddLE.lateMins || 0) : Math.round((inDt - sDt) / 60000) - graceSt;
         let   earlyOutMins = 0;
-        if (outDt) {
+        if (ddLE) earlyOutMins = ddLE.earlyMins || 0;
+        else if (outDt) {
           const raw = Math.round((eDt - outDt) / 60000) - graceEd;
           if (raw > 0) earlyOutMins = raw;
         }
@@ -2704,10 +3025,11 @@ router.get('/half-late-early', async (req, res) => {
             timingType : emp.timingType  || '',
             shift      : roster?.shiftName || emp.shiftCode || '',
             date       : dateStr,
-            shiftDisplay: `${shiftStart} - ${shiftEnd}`,
+            shiftDisplay: roster?.duties ? roster.duties.map(d => `${d.startTime} - ${d.endTime}`).join('\n') : `${shiftStart} - ${shiftEnd}`,
             timeIn     : log.timeIn  ? new Date(log.timeIn).toISOString()  : null,
             timeOut    : log.timeOut ? new Date(log.timeOut).toISOString() : null,
             punches    : log.punches,
+            duties     : ddLE ? dutiesForOutput(ddLE.e.duties) : null,   // double duty: per-duty in/out
             lateInMins, earlyOutMins,
             lateInFormatted  : lateInMins   > 0 ? `Late In by ${minsToHHMM(lateInMins)}`   : null,
             earlyOutFormatted: earlyOutMins > 0 ? `Early Out by ${minsToHHMM(earlyOutMins)}` : null,
@@ -2900,9 +3222,10 @@ router.get('/present-absent', async (req, res) => {
 
     // Build per-employee day matrix
     const todayNPPA = new Date(Date.now() + 5.75 * 3600 * 1000).toISOString().slice(0, 10);
+    const leaveCountsOffDayPA = await loadLeaveOffDayRule();
     const employees_out = employees.map(emp => {
       const empLogs      = logsMap[emp.id]      || {};
-      const empLeave     = leaveMap[emp.id]     || new Set();
+      let empLeave       = leaveMap[emp.id]     || new Set();
       const empHalfLeave = halfLeaveMap[emp.id] || new Set();
       const empVisit     = visitMap[emp.id]     || new Set();
 
@@ -2910,6 +3233,16 @@ router.get('/present-absent', async (req, res) => {
       const days = {};
       const holidayNamesPA = {};
       const attStartPA = dateOnlyStr(emp.attendanceDate);
+
+      // Weekend/holiday days sandwiched between two leave days (Reduce Weekend/Holiday OFF) count as leave.
+      const swPA = sandwichLeaveDays(dates.map(x => x.date),
+        ds => leaveCodeMap[emp.id]?.[ds] || ((empLeave.has(ds) || empHalfLeave.has(ds)) ? 'Leave' : null),
+        ds => isRosterWeekend(getEffectiveRoster(rosterMapPA, emp.id, ds), dates.find(x => x.date === ds).dayKey, weekends, defShiftId),
+        ds => !!getHoliday(ds, emp), leaveCountsOffDayPA);
+      if (swPA.size) {
+        empLeave = new Set(empLeave);
+        for (const [ds, code] of swPA) { empLeave.add(ds); (leaveCodeMap[emp.id] ||= {})[ds] = code; }
+      }
 
       for (const { date, dayKey } of dates) {
         const log      = empLogs[date];
@@ -2933,7 +3266,15 @@ router.get('/present-absent', async (req, res) => {
         const roster       = getEffectiveRoster(rosterMapPA, emp.id, date);
         const empIsWeekend = isRosterWeekend(roster, dayKey, weekends, defShiftId);
 
-        if (empIsWeekend) {
+        // Leave type with Reduce Weekend / Reduce Public Holiday OFF: the weekend
+        // or holiday inside the leave range IS a leave day (matches leaves.days).
+        const leaveOnOffDayPA = (leave || halfLeave) && !log?.hasIn
+          && leaveCountsOffDayPA(leaveCodeMap[emp.id]?.[date], empIsWeekend, isHoliday);
+
+        if (leaveOnOffDayPA) {
+          if (leave) { st = 'L'; totalL++; } else { st = 'LH'; totalL += 0.5; }
+        }
+        else if (empIsWeekend) {
           // Distinguish the roster's own Day Off/Night Off from the plain
           // company-wide weekend, same as the other reports. A plain weekend
           // day with an actual punch-in is "Present on Weekend" (WP), same
@@ -3261,7 +3602,7 @@ router.get('/yearly-analytics', async (req, res) => {
       logsMap[emp.id] = {};
       for (const [dateStr, b] of buckets) {
         if (dateStr < startDate || dateStr > endDate) continue;
-        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount };
+        logsMap[emp.id][dateStr] = { timeIn: b.timeIn, timeOut: b.timeOut, punches: b.punchCount, all: b.punches };
       }
     }
 
@@ -3358,6 +3699,18 @@ router.get('/yearly-analytics', async (req, res) => {
         monthlyTrend[mi].present++;
         monthlyTrend[mi].staff++;
 
+        // Double duty: judged per duty (shared with Daily/Ledger/Monthly)
+        const ddY = doubleDutyDay(getEffectiveRoster(rosterMapYr, emp.id, ds), log.all, ds, (rosterMapYr._timeOutMinGap || 0) * 60000);
+        if (ddY) {
+          if (ddY.lateMins)  { lateCount  += ddY.lateCount;  lateMinsTotal  += ddY.lateMins; monthlyTrend[mi].late += ddY.lateCount; }
+          if (ddY.earlyMins) { earlyCount += ddY.earlyCount; earlyMinsTotal += ddY.earlyMins; }
+          if (ddY.lateOutMins > 0) {
+            const approvedMins = yearlyApprovedOTSet.get(`${emp.id}-${ds}`);
+            if (approvedMins !== undefined) { otMins += approvedMins; monthlyTrend[mi].otMins += approvedMins; }
+          }
+          if (ddY.workedMins > 0) totalWorkedMins += ddY.workedMins;
+          continue;
+        }
         const inDt  = new Date(log.timeIn);
         const outDt = (log.timeOut && log.punches >= 2) ? new Date(log.timeOut) : null;
 
@@ -3404,7 +3757,7 @@ router.get('/yearly-analytics', async (req, res) => {
 
       // Rates use the employee's own working day count (from join date)
       const attRate       = empTotalWorkDays > 0 ? Math.round(((presentDays+leaveDays)/empTotalWorkDays)*100) : 0;
-      const punctualScore = presentDays > 0 ? Math.round(((presentDays-lateCount)/presentDays)*100) : 0;
+      const punctualScore = presentDays > 0 ? Math.max(0, Math.round(((presentDays-lateCount)/presentDays)*100)) : 0;
       const leaveTaken    = leaveDaysMap[emp.id] || leaveDays;
       const avgLateMins   = lateCount  > 0 ? Math.round(lateMinsTotal  / lateCount)  : 0;
       const avgEarlyMins  = earlyCount > 0 ? Math.round(earlyMinsTotal / earlyCount) : 0;
@@ -3553,7 +3906,7 @@ router.post('/notify-punch', async (req, res) => {
   if (!employeeId || !checkTime) return res.json({ ok: false });
   try {
     const notification = await buildPunchNotification(employeeId, checkTime);
-    if (notification) broadcastNotification(notification);
+    if (notification) { broadcastNotification(notification); pushPunchAlert(notification, checkTime); }
     res.json({ ok: true });
   } catch (e) {
     logError('[notify-punch]', e);
@@ -3570,6 +3923,8 @@ router.get('/manual-postings', async (req, res) => {
         mp.id, mp.date, mp.check_in, mp.check_out, mp.remark,
         mp.created_at, mp.updated_at, mp.status, mp.comment,
         mp.applied_date AS "appliedDate", mp.approved_date AS "approvedDate",
+        mp.recommended_date  AS "recommendedDate",
+        mp.late_in AS "lateIn", mp.late_by AS "lateBy", mp.early_out AS "earlyOut", mp.early_by AS "earlyBy",
         mp.employee_id       AS "employeeId",
         mp.recommended_by    AS "recommendedById",
         mp.approved_by       AS "approvedById",
@@ -3602,10 +3957,53 @@ router.get('/manual-postings', async (req, res) => {
   }
 });
 
-const isManualPostingAdmin = (req) => ['admin', 'superAdmin'].includes(req.user?.role);
+function isManualPostingAdmin(req) { return ['admin', 'superAdmin'].includes(req.user?.role); }
+
+// ── Shift times for the Late In / Early Out form ─────────────────────────────
+// Same precedence as the daily report: roster shift for that date > the staff's own
+// shift > the company default, with the shift's Winter Facilities Policy applied.
+const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
+const toMinutes = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+const fromMinutes = (m) => { const x = ((Math.round(m) % 1440) + 1440) % 1440; return `${pad2(Math.floor(x / 60))}:${pad2(x % 60)}`; };
+
+async function shiftForDate(employeeId, date) {
+  const rosterMap = await loadRosterMap(date, date);
+  const eff = getEffectiveRoster(rosterMap, Number(employeeId), date);
+  if (eff && eff.shiftStart) {
+    return { shiftName: eff.shiftName, start: hhmm(eff.shiftStart), end: hhmm(eff.shiftEnd), isOff: !!eff.isOff };
+  }
+  const { rows: [r] } = await pool.query(`
+    SELECT COALESCE(s.name, d.name) AS name, COALESCE(s.start_time, d.start_time) AS start_time,
+           COALESCE(s.end_time, d.end_time) AS end_time,
+           COALESCE(s.grace_period_start, d.grace_period_start, 0) AS gs, COALESCE(s.grace_period_end, d.grace_period_end, 0) AS ge,
+           COALESCE(s.winter_policy_enabled, d.winter_policy_enabled, FALSE) AS wpe, COALESCE(s.winter_policy, d.winter_policy) AS wp
+    FROM users u
+    LEFT JOIN shifts s ON s.code = u.shift
+    LEFT JOIN LATERAL (SELECT * FROM shifts WHERE make_default = TRUE LIMIT 1) d ON TRUE
+    WHERE u.id = $1`, [employeeId]);
+  if (!r || !r.start_time) return null;
+  const w = resolveWinterShift(date, r.start_time, r.end_time, r.gs, r.ge, r.wpe, r.wp);
+  return { shiftName: r.name, start: hhmm(w.shiftStart), end: hhmm(w.shiftEnd), isOff: false };
+}
+
+// GET /attendance/shift-for?date=YYYY-MM-DD[&employeeId=] — the shift's check-in / check-out time shown on the form.
+// Staff can only ask about themselves; admins about anyone.
+router.get('/shift-for', async (req, res) => {
+  try {
+    const date = String(req.query.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date is required' });
+    const employeeId = isManualPostingAdmin(req) && req.query.employeeId ? Number(req.query.employeeId) : req.user.id;
+    res.json(await shiftForDate(employeeId, date) || { shiftName: null, start: null, end: null, isOff: false });
+  } catch (e) {
+    logError('[shift-for]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 router.post('/manual-postings', async (req, res) => {
-  let { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy, isManual, deviceInfo } = req.body;
+  let { employeeId, date, checkIn, checkOut, remark, recommendedBy, approvedBy, isManual, deviceInfo,
+        lateIn, lateBy, earlyOut, earlyBy } = req.body;
+  lateIn = lateIn === true; earlyOut = earlyOut === true;
   // Branch Manager / Branch Area Manager posting from the Manual Posting grid
   // (isManual) for their own branch staff or themself lands Approved, same as
   // admin — see canManagerManualPost. The FAB's self-service "Inform Late
@@ -3639,21 +4037,59 @@ router.post('/manual-postings', async (req, res) => {
   const finalRecoBy     = isAdmin ? (recommendedBy || null) : null;
   const finalApprovedBy = status === 'approved' ? (approvedBy || null) : null;
 
+  // "Inform Late In / Early Out" form: the staff ticks Late In and/or Early Out and says by how much
+  // (HH:MM). The punch time that goes into attendance once approved is worked out here from the
+  // shift — shift check-in + late-by, shift check-out − early-by — never trusted from the client.
+  let shiftInfo = null;
+  if (lateIn || earlyOut) {
+    const mins = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || '').trim()); return m && +m[2] < 60 ? (+m[1]) * 60 + (+m[2]) : null; };
+    const lateMin = lateIn ? mins(lateBy) : 0;
+    const earlyMin = earlyOut ? mins(earlyBy) : 0;
+    if (lateIn && !lateMin)   return res.status(400).json({ error: 'Enter how late you will be (HH:MM, more than 00:00).' });
+    if (earlyOut && !earlyMin) return res.status(400).json({ error: 'Enter how early you will leave (HH:MM, more than 00:00).' });
+    if (!String(remark || '').trim()) return res.status(400).json({ error: 'Reason is required.' });
+    try { shiftInfo = await shiftForDate(employeeId, date); } catch (e) { logError('[manual-postings shift]', e); }
+    if (!shiftInfo?.start || !shiftInfo?.end) return res.status(400).json({ error: 'No shift is assigned to you for this date — ask your admin.' });
+    if (shiftInfo.isOff) return res.status(400).json({ error: 'That date is your day off — there is no shift to be late for.' });
+    checkIn  = lateIn   ? fromMinutes(toMinutes(shiftInfo.start) + lateMin)  : null;
+    checkOut = earlyOut ? fromMinutes(toMinutes(shiftInfo.end)   - earlyMin) : null;
+    lateBy   = lateIn   ? fromMinutes(lateMin)  : null;     // normalised "HH:MM"
+    earlyBy  = earlyOut ? fromMinutes(earlyMin) : null;
+  } else { lateBy = null; earlyBy = null; }
+
   try {
     const { rows } = await pool.query(`
       INSERT INTO attendance_manual_postings
-        (employee_id, date, check_in, check_out, remark, recommended_by, approved_by, created_by, status, updated_by, updated_device)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        (employee_id, date, check_in, check_out, remark, recommended_by, approved_by, created_by, status, updated_by, updated_device,
+         late_in, late_by, early_out, early_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       RETURNING *
     `, [employeeId, date, checkIn || null, checkOut || null, remark || null,
         finalRecoBy, finalApprovedBy, req.user?.id || null, status,
-        req.user?.id || null, deviceInfo || null]);
+        req.user?.id || null, deviceInfo || null,
+        lateIn, lateBy, earlyOut, earlyBy]);
 
     // Best-effort notification — never fail the request over email/message issues.
     try {
       const staffRow = (await pool.query('SELECT full_name FROM users WHERE id=$1', [employeeId])).rows[0];
       const notifyIds = [recommendedBy, approvedBy].filter(Boolean).map(Number);
-      if (notifyIds.length) {
+      if (!isAdmin && (lateIn || earlyOut)) {
+        // Self-service Late In / Early Out: tell the picked + configured recommender/approver (or admins) — bell + Message inbox + phone.
+        const bits = [];
+        if (lateIn)   bits.push(`Late In by ${lateBy} (shift ${shiftInfo.start}, expected ${checkIn})`);
+        if (earlyOut) bits.push(`Early Out by ${earlyBy} (shift ends ${shiftInfo.end}, leaving ${checkOut})`);
+        const ids = await resolveApplicationRecipients(employeeId, [recommendedBy, approvedBy]);
+        await notifyPeople(employeeId, ids, {
+          subject: `Late In / Early Out for approval: ${staffRow?.full_name || ''}`,
+          body: `${staffRow?.full_name || 'A staff member'} informed ${bits.join(' and ')} on ${date}. Reason: ${String(remark).trim()}`,
+          path: '/m/approvals',
+        });
+        const { rows: recipients } = ids.length
+          ? await pool.query(`SELECT email FROM users WHERE id = ANY($1::int[]) AND email IS NOT NULL AND email != ''`, [ids]) : { rows: [] };
+        for (const r of recipients) {
+          await sendManualPostingApplication({ to: r.email, fullName: staffRow?.full_name || '', date, checkIn, checkOut, remark: remark || '' });
+        }
+      } else if (notifyIds.length) {
         const { rows: recipients } = await pool.query(
           `SELECT id, email, full_name FROM users WHERE id = ANY($1::int[])`, [notifyIds]
         );
@@ -3754,10 +4190,16 @@ router.patch('/manual-postings/:id/recommend', async (req, res) => {
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(
-      `UPDATE attendance_manual_postings SET recommended_by=$1, comment=COALESCE(NULLIF($3,''), comment), updated_at=NOW() WHERE id=$2 RETURNING *`,
+      `UPDATE attendance_manual_postings SET recommended_by=$1, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($3,''), comment), updated_at=NOW() WHERE id=$2 RETURNING *`,
       [req.user.id, req.params.id, String(req.body?.comment || '').slice(0, 500)]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    {
+      const d = String(rows[0].date).slice(0, 10);
+      const cm = String(req.body?.comment || '').trim();
+      notifyApplicantOf(rows[0].employee_id, req.user.id, { subject: 'Late In / Early Out recommended', body: `Your Late In / Early Out for ${d} was recommended and is waiting for approval.${cm ? ' ' + cm : ''}`, path: '/m/leave' });
+      notifyApproversNext(rows[0].employee_id, req.user.id, { subject: 'Late In / Early Out recommended — needs approval', body: `A Late In / Early Out request for ${d} was recommended and is waiting for your approval.`, path: '/m/approvals' });
+    }
     res.json(rows[0]);
   } catch (e) {
     logError('[manual-postings recommend]', e);
