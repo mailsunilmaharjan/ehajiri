@@ -11,6 +11,7 @@ import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SearchableSelect from '../Common/SearchableSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
+import { SidePanelShell, InfoLine, SectionLabel, DRow, DRowPair, DRowBox, panelBtnStyle } from '../Leave/LeaveVisitPage.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 import { getNepalNow, getNepalTodayISO } from '../../utils/dateUtils.js';
@@ -34,7 +35,7 @@ const StatusBadge = ({ status }) => {
   const c = STATUS_COLOR[status] || STATUS_COLOR.pending;
   return (
     <span style={{ background:c.bg, color:c.color, border:`1px solid ${c.border}`,
-      borderRadius:8, padding:'2px 10px', fontSize:11, fontWeight:700 }}>
+      borderRadius:4, padding:'2px 10px', fontSize:11, fontWeight:700 }}>
       {c.label}
     </span>
   );
@@ -134,6 +135,8 @@ const OvertimePage = () => {
      silently doing what the row-level button itself refuses to do. */
   const canActOnRowApprove = (row) => {
     if (!isApproverFor(row.employeeId)) return false;
+    // recommender sent it to one specific approver: nobody else (except admin / OT poster) may act
+    if (!isOtPoster && row.pickedApproverId && String(row.pickedApproverId) !== String(currentUser.id)) return false;
     // dual-role block — only meaningful when a recommender is configured
     if (!isOtPoster && isRecoCompulsory && hasRecommenderFor(row.employeeId) && isRecommenderFor(row.employeeId)) return false;
     return canApproveRow(row);
@@ -153,6 +156,7 @@ const OvertimePage = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [selected,   setSelected]   = useState(new Set()); // set of "empId-date" keys
   const [actionModal, setActionModal] = useState(null);
+  const [viewRec,     setViewRec]     = useState(null);   // row shown in the right-hand detail panel (like Leave approval)
   const [comment,    setComment]    = useState('');
   const [toast,      setToast]      = useState(null);
 
@@ -174,6 +178,7 @@ const OvertimePage = () => {
   const [leaveComment,  setLeaveComment]  = useState('');
   const [leaveReco,     setLeaveReco]     = useState(''); // selected Recommendator employee id
   const [leaveApproval, setLeaveApproval] = useState(''); // selected Approval Authority employee id
+  const [recoModal, setRecoModal] = useState(null);        // { row, approvalId } — pick which approver a recommended OT goes to
 
   const [showAdvSearchModal, setShowAdvSearchModal] = useState(false);
   const [advFilters, setAdvFilters] = useState({ departments:[], branches:[], positions:[], grades:[], genders:[], modes:[], timingTypes:[] });
@@ -267,13 +272,16 @@ const OvertimePage = () => {
   const applyOtSettings = useCallback((list) => {
     const cfg      = otSettings;
     const wkDays   = settings.defaultWeekends || ['Sat'];
-    /* Map of date → holiday name for tooltip */
-    const holMap   = new Map(
-      (settings.publicHolidays || []).map(h => [
-        (h.date || h.startDate || '').split('T')[0],
-        h.name || h.title || 'Public Holiday',
-      ])
-    );
+    /* Holiday name for a date — holidays are date RANGES (startDate..endDate,
+       e.g. Tihar 7–12 Nov), same rule the server uses in routes/overtime.js.
+       Matching only the start date made every later day of a multi-day
+       holiday look like a plain working day (no Public Holiday tag, no
+       "Select the Leave" action under Provide Next Day Leave). */
+    const holRanges = (settings.publicHolidays || []).map(h => {
+      const s = (h.startDate || h.date || '').split('T')[0];
+      return { s, e: (h.endDate || '').split('T')[0] || s, name: h.name || h.title || 'Public Holiday' };
+    }).filter(h => h.s);
+    const holMap = { get: (ds) => holRanges.find(h => ds >= h.s && ds <= h.e)?.name };
     const parseHM = str => parseHHMM(str);
     const maxOut  = parseHM(cfg.maxOTAfterOut);
     const maxIn   = parseHM(cfg.maxOTBeforeIn);
@@ -477,16 +485,24 @@ const OvertimePage = () => {
   /* ── Recommend a single record — same insert-or-update-by-(employee,date)
      shape as approve-inline handles below, since a calculated record has no
      DB row (and no approvalId) until someone first acts on it. ── */
-  const handleRecommendClick = async (row) => {
+  // The recommender sends the OT to ONE approver: only that person is notified and may approve/reject it.
+  // (Several configured approvers → ask which; exactly one → chosen automatically.)
+  const handleRecommendClick = (row) => {
+    const apprIds = getOtApprovalIds(row.employeeId);
+    if (apprIds.length > 1) { setRecoModal({ row, approvalId: row.pickedApproverId ? String(row.pickedApproverId) : '' }); return; }
+    doRecommend(row, apprIds[0] || null);
+  };
+  const doRecommend = async (row, approvalId) => {
     try {
       if (row.approvalId) {
-        await api.patch(`/overtime/${row.approvalId}/recommend`, {});
+        await api.patch(`/overtime/${row.approvalId}/recommend`, { approvalId: approvalId || null });
       } else {
         await api.post('/overtime/recommend-inline', {
-          employeeId: row.employeeId, date: row.date, otMinutes: getApprovedOT(row),
+          employeeId: row.employeeId, date: row.date, otMinutes: getApprovedOT(row), approvalId: approvalId || null,
         });
       }
       showToast('OT recommended');
+      setRecoModal(null);
       load();
     } catch (e) { showToast(e.message, 'error'); }
   };
@@ -518,7 +534,8 @@ const OvertimePage = () => {
      just the same configured-approver requirement the row's own Reject
      button already uses. Used as the (safe, superset) eligibility for bulk
      selection below; approve narrows further via canActOnRowApprove. */
-  const canActOnRowReject = (row) => isApproverFor(row.employeeId);
+  const canActOnRowReject = (row) => isApproverFor(row.employeeId)
+    && (isOtPoster || !row.pickedApproverId || String(row.pickedApproverId) === String(currentUser.id));
 
   /* ── Bulk approve / reject ── */
   const handleBulk = async (type) => {
@@ -604,84 +621,71 @@ const OvertimePage = () => {
 
   const canAct = isManager || canApprove;
 
+  // "[PH]" public holiday · "[W]" weekend · "[DO]/[NO]" roster day/night off · leave short name when the OT was converted to leave
+  const dayTagOf = (row) => {
+    const off = row._weekendLabel;
+    return row.leaveTypeCode ? { t: row.leaveTypeCode, c: '#1e40af', tip: 'Leave' }
+      : row._dayType === 'holiday' ? { t: 'PH', c: '#065f46', tip: row._holidayName || 'Public Holiday' }
+      : row._dayType === 'weekend' ? { t: off === 'Night Off' ? 'NO' : off === 'Day Off' ? 'DO' : 'W', c: '#92400e', tip: off || 'Weekend' }
+      : null;
+  };
+
   /* ── Column definitions ── */
   const columns = [
-    /* Staff — name + Post, Dept, Branch below */
+    /* Staff ID */
     {
-      field: 'fullName', header: L('नाम','Staff'), width: 170,
+      field: 'empCode', header: L('स्टाफ आईडी','Staff ID'), width: 72,
+      render: (v) => <span style={{ color: '#6b7280' }}>{v || '—'}</span>,
+    },
+
+    /* Staff — photo + name only (post / department / branch have their own columns) */
+    {
+      field: 'fullName', header: L('नाम','Staff'), width: 140,
       render: (v, row) => (
-        <div>
-          <div style={{ color:'#111827', display:'flex', alignItems:'center', gap:6 }}>
-            <Avatar photo={getEmployeeById(row.employeeId)?.profilePhoto} name={v} size={20} />
-            {v}
-          </div>
-          <div style={{ fontSize:10, color:'#9ca3af', marginTop:2,
-            display:'flex', gap:4, flexWrap:'nowrap',
-            overflow:'hidden', maxWidth:'100%' }}>
-            {row.postShort   && row.postShort   !== '—' && (
-              <span title={row.postShort}
-                style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:1 }}>
-                {row.postShort}
-              </span>
-            )}
-            {row.deptShort   && row.deptShort   !== '—' && (
-              <span title={row.deptShort}
-                style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:2, flexGrow:0 }}>
-                · {row.deptShort}
-              </span>
-            )}
-          </div>
-        </div>
+        <span style={{ color: '#111827', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Avatar photo={getEmployeeById(row.employeeId)?.profilePhoto} name={v} size={20} />
+          {v}
+        </span>
       ),
     },
 
-    /* Shift — short name only */
+    { field: 'postShort',   header: L('पद','Post'),        width: 62,  align: 'center', render: (v) => <span style={{ fontSize: 12 }}>{v && v !== '—' ? v : '—'}</span> },
+    { field: 'deptShort',   header: L('विभाग','Dept.'),    width: 72,  align: 'center', render: (v) => <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{v && v !== '—' ? v : '—'}</span> },
+    { field: 'branchShort', header: L('शाखा','Branch'),    width: 62,  align: 'center', render: (v) => <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>{v && v !== '—' ? v : '—'}</span> },
+
+    /* Shift — name only (the 10:00 – 17:30 line is gone) */
     {
       field: 'shiftName', header: L('सिफ्ट','Shift'), width: 100,
-      render: (v, row) => (
-        <div style={{ fontSize:12 }}>
-          <div style={{ fontWeight:600, color:'#374151' }}>{v}</div>
-          <div style={{ color:'#9ca3af', fontSize:10 }}>{row.shiftStart} – {row.shiftEnd}</div>
-        </div>
-      ),
+      render: (v) => <span style={{ display: 'inline-block', maxWidth: 100, fontSize: 12, fontWeight: 600, color: '#374151', lineHeight: 1.3 }}>{String(v ?? '').split('\n')[0]}</span>,
     },
 
     /* Date */
     {
-      field: 'date', header: L('मिति','Date'), width: 110,
+      field: 'date', header: L('मिति','Date'), width: 100,
       render: v => <span style={{ fontWeight:600 }}>{fd(v)}</span>,
     },
 
-    /* Day */
+    /* Day — weekday + one short tag: [PH] public holiday, [W] weekend, [DO]/[NO] day/night off, [leave short name] when the OT was converted to leave */
     {
-      field: 'day', header: L('बार','Day'), width: 90,
-      render: (v, row) => (
-        <div style={{ lineHeight:1.3 }}>
-          <div style={{ color:'#6b7280', fontWeight:700 }}>{v}</div>
-          {row._dayType === 'weekend' && (
-            <span style={{ fontSize:10, fontWeight:700, color:'#92400e',
-              background:'#fef3c7', border:'1px solid #fde68a',
-              borderRadius:4, padding:'1px 6px', marginTop:3, display:'inline-block' }}>
-              {row._weekendLabel || 'Weekend'}
-            </span>
-          )}
-          {row._dayType === 'holiday' && (
-            <OTTooltip text={row._holidayName || 'Public Holiday'}>
-              <span style={{ fontSize:10, fontWeight:700, color:'#065f46',
-                background:'#d1fae5', border:'1px solid #6ee7b7',
-                borderRadius:4, padding:'1px 6px', marginTop:3,
-                display:'inline-block', cursor:'help' }}>
-                Public Holiday
-              </span>
-            </OTTooltip>
-          )}
-        </div>
-      ),
+      field: 'day', header: L('बार','Day'), width: 92,
+      render: (v, row) => {
+        const tag = dayTagOf(row);
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <span style={{ color: '#6b7280', fontWeight: 700 }}>{v}</span>
+            {tag && (
+              <OTTooltip text={tag.tip}>
+                <span style={{ marginLeft: 5, fontWeight: 700, color: tag.c, cursor: 'help' }}>[{tag.t}]</span>
+              </OTTooltip>
+            )}
+          </span>
+        );
+      },
     },
 
     /* Time In */
     {
-      field: 'timeIn', header: L('आगमन','Time In'), width: 80,
+      field: 'timeIn', header: L('आगमन','Time In'), width: 72,
       render: v => (
         <span style={{ background:'#f0fdf4', color:'#065f46', border:'1px solid #bbf7d0',
           borderRadius:6, padding:'2px 8px', fontSize:12, fontWeight:600 }}>
@@ -692,7 +696,7 @@ const OvertimePage = () => {
 
     /* OT in IN: positive (early) = green, negative (late) = red */
     {
-      field: 'otInINFormatted', header: L('OT IN','OT in IN'), width: 80, align:'center',
+      field: 'otInINFormatted', header: L('OT IN','OT in IN'), width: 70, align:'center',
       render: (v, row) => (
         <OTTooltip text={row._tooltipOTIn || null}>
           <SignedOT value={row.otInINMins} formatted={v} />
@@ -702,7 +706,7 @@ const OvertimePage = () => {
 
     /* Time Out */
     {
-      field: 'timeOut', header: L('प्रस्थान','Time Out'), width: 80,
+      field: 'timeOut', header: L('प्रस्थान','Time Out'), width: 72,
       render: v => (
         <span style={{ background:'#eff6ff', color:'#0369a1', border:'1px solid #bfdbfe',
           borderRadius:6, padding:'2px 8px', fontSize:12, fontWeight:600 }}>
@@ -713,7 +717,7 @@ const OvertimePage = () => {
 
     /* OT in OUT: positive (late out) = green, negative (early) = red */
     {
-      field: 'otInOUTFormatted', header: L('OT OUT','OT in OUT'), width: 85, align:'center',
+      field: 'otInOUTFormatted', header: L('OT OUT','OT in OUT'), width: 74, align:'center',
       render: (v, row) => (
         <OTTooltip text={row._tooltipOTOut || null}>
           <SignedOT value={row.otInOUTMins} formatted={v} />
@@ -723,7 +727,7 @@ const OvertimePage = () => {
 
     /* Calculated OT Duration */
     {
-      field: 'otFormatted', header: L('OT अवधि','OT Duration'), width: 90, align:'center',
+      field: 'otFormatted', header: L('OT अवधि','OT Duration'), width: 78, align:'center',
       render: (v, row) => (
         <span style={{
           color: row._dayType ? '#7c3aed' : '#0369a1',
@@ -736,7 +740,7 @@ const OvertimePage = () => {
     /* Approved OT — plain editable text box, or a "Select the Leave" action
        for a weekend/holiday row under the "Provide Next Day Leave" rule */
     {
-      field: 'approvedOTMins', header: L('अनु. OT','Approved OT'), width: 130, align:'center',
+      field: 'approvedOTMins', header: L('अनु. OT','Approved OT'), width: 92, align:'center',
       filterable:false, sortable:false,
       render: (_, row) => {
         if (row._leaveMode) {
@@ -772,7 +776,7 @@ const OvertimePage = () => {
               e.target.value = toHHMM(Math.max(0, mins));
             }}
             className="form-control"
-            style={{ width:75, textAlign:'center', fontSize:12.5, padding:'2px 6px' }}
+            style={{ width:64, height:24, minHeight:0, textAlign:'center', fontSize:12, padding:'0 6px' }}
           />
         );
       },
@@ -780,7 +784,7 @@ const OvertimePage = () => {
 
     /* Status */
     {
-      field: 'status', header: L('स्थिति','Status'), width: 100,
+      field: 'status', header: L('स्थिति','Status'), width: 90,
       render: (v, row) => (
         <OTTooltip text={row.comment ? `💬 ${row.comment}` : null}>
           <div>
@@ -795,24 +799,9 @@ const OvertimePage = () => {
       ),
     },
 
-    /* Approved By — name plus the date the decision was made */
-    {
-      field: 'approvedByName', header: L('स्वीकृतकर्ता','Approved By'), width: 130,
-      render: (v, row) => row.status === 'pending'
-        ? <span style={{ color:'#d1d5db' }}>—</span>
-        : (
-          <div style={{ fontSize:12, lineHeight:1.4 }}>
-            <div>{v || '—'}</div>
-            {row.approvedDate && (
-              <div style={{ fontSize:10, color:'#9ca3af' }}>{fd(row.approvedDate)}</div>
-            )}
-          </div>
-        ),
-    },
-
     /* Actions */
     canAct ? {
-      field: 'actions', header: L('कार्य','Actions'), width: 130, filterable:false, sortable:false,
+      field: 'actions', header: L('कार्य','Actions'), width: 84, filterable:false, sortable:false,
       render: (_, row) => {
         const amReco       = isRecommenderFor(row.employeeId);
         const canReject     = canActOnRowReject(row);
@@ -821,7 +810,7 @@ const OvertimePage = () => {
         if (row.status === 'approved') return canReject ? (
           <button onClick={() => setActionModal({ rec:row, type:'reject' })}
             style={{ background:'none', border:'1px solid #fca5a5', color:'#dc2626',
-              borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:600 }}>
+              borderRadius:6, padding:'1px 6px', fontSize:10, cursor:'pointer', fontWeight:600 }}>
             ✗ Reject
           </button>
         ) : <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>;
@@ -829,32 +818,32 @@ const OvertimePage = () => {
         if (row.status === 'rejected') return canApproveNow ? (
           <button onClick={() => handleApproveClick(row)}
             style={{ background:'none', border:'1px solid #6ee7b7', color:'#059669',
-              borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:600 }}>
+              borderRadius:6, padding:'1px 6px', fontSize:10, cursor:'pointer', fontWeight:600 }}>
             ✓ Approve
           </button>
         ) : <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>;
 
         if (!amReco && !canReject) return <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>;
         return (
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:3, flexWrap:'wrap' }}>
             {amReco && !row.recommendedBy && (
               <button onClick={() => handleRecommendClick(row)} title="Recommend"
                 style={{ background:'#059669', border:'none', color:'#fff',
-                  borderRadius:6, padding:'3px 8px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
+                  borderRadius:6, padding:'1px 6px', fontSize:10, cursor:'pointer', fontWeight:700 }}>
                 👍
               </button>
             )}
             {canApproveNow && (
               <button onClick={() => handleApproveClick(row)}
                 style={{ background:'#d1fae5', border:'none', color:'#065f46',
-                  borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
+                  borderRadius:6, padding:'1px 6px', fontSize:10, cursor:'pointer', fontWeight:700 }}>
                 ✓
               </button>
             )}
             {canReject && (
               <button onClick={() => setActionModal({ rec:row, type:'reject' })}
                 style={{ background:'#fee2e2', border:'none', color:'#dc2626',
-                  borderRadius:6, padding:'3px 10px', fontSize:11, cursor:'pointer', fontWeight:700 }}>
+                  borderRadius:6, padding:'1px 6px', fontSize:10, cursor:'pointer', fontWeight:700 }}>
                 ✗
               </button>
             )}
@@ -862,7 +851,7 @@ const OvertimePage = () => {
         );
       },
     } : null,
-  ].filter(Boolean);
+  ].filter(Boolean).map(c => ({ ...c, minWidth: c.width }));   // DataGrid floors a column at 80px unless told otherwise — use the widths set above so nothing scrolls sideways
 
   return (
     <div className="page-container">
@@ -871,20 +860,13 @@ const OvertimePage = () => {
         <div>
           <h1 className="page-title">⏱️ {L('ओभरटाइम स्वीकृति','Overtime (OT) Approval')}</h1>
         </div>
-        <div style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
-          <div>
-            <div style={{ fontSize:12, fontWeight:600, color:'#374151', marginBottom:4 }}>
-              {L('देखि','From Date')}
-            </div>
-            <DateInput value={startDate} onChange={setStartDate} />
-          </div>
-          <div>
-            <div style={{ fontSize:12, fontWeight:600, color:'#374151', marginBottom:4 }}>
-              {L('सम्म','To Date')}
-            </div>
-            <DateInput value={endDate} onChange={setEndDate} />
-          </div>
-          <button className="btn btn-primary" onClick={load} disabled={loading} style={{ height:36 }}>
+        <div className="ui-compact-controls" style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+          <style>{'.ot-hdr-date{min-width:210px}.ot-hdr-date .form-control{width:100%;min-width:210px}'}</style>
+          <span style={{ fontSize:12, fontWeight:600, color:'#374151' }}>{L('देखि','From Date')}</span>
+          <div className="ot-hdr-date"><DateInput value={startDate} onChange={setStartDate} /></div>
+          <span style={{ fontSize:12, fontWeight:600, color:'#374151' }}>{L('सम्म','To Date')}</span>
+          <div className="ot-hdr-date"><DateInput value={endDate} onChange={setEndDate} /></div>
+          <button className="btn btn-primary" onClick={load} disabled={loading} style={{ height:30, padding:'0 14px', fontSize:12 }}>
             🔃 {loading ? 'Loading…' : L('पुनः लोड','Refresh')}
           </button>
         </div>
@@ -898,7 +880,7 @@ const OvertimePage = () => {
       )}
 
       {/* ── Summary filter chips ── */}
-      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
+      <div style={{ display:'flex', gap:8, marginBottom:8, flexWrap:'wrap', alignItems:'center' }}>
         {[
           { key:'all',      label:L('सबै','All'),            color:'#374151', bg:'#f9fafb' },
           { key:'pending',  label:L('विचाराधीन','Pending'),  color:'#92400e', bg:'#fef3c7' },
@@ -996,7 +978,7 @@ const OvertimePage = () => {
 
       {/* Select all pending */}
       {canAct && counts.pending > 0 && (
-        <div style={{ marginBottom:8 }}>
+        <div style={{ marginBottom:4 }}>
           <button onClick={toggleSelectAll}
             style={{ background:'none', border:'none', color:'#1a56db', fontSize:12,
               fontWeight:600, cursor:'pointer', padding:0 }}>
@@ -1032,6 +1014,18 @@ const OvertimePage = () => {
               columns={columns}
               data={visibleRecords}
               defaultPageSize={20}
+              fillToBottom
+              onRowClick={(row) => setViewRec(row)}
+              onFocusChange={(row) => { if (viewRec) setViewRec(row); }}
+              remarks={(row) => (
+                <>
+                  <div><b>Remarks — {row.fullName}{row.empCode ? ` (${row.empCode})` : ""}:</b> {row.comment ? row.comment : <span className="dg-muted">no remarks on this OT record</span>}</div>
+                  <div style={{ marginTop: 2 }}>
+                    <b>Shift:</b> {row.shiftName || "—"}
+                    {row.status && <> &nbsp;·&nbsp; <b>Status:</b> <span style={{ textTransform: "capitalize" }}>{row.status}</span>{row.approvedByName ? ` by ${row.approvedByName}` : ""}</>}
+                  </div>
+                </>
+              )}
               showSearch
               searchPlaceholder={L('खोज्नुहोस्…','Search staff…')}
               toolbar={
@@ -1039,34 +1033,34 @@ const OvertimePage = () => {
                   {canAct && counts.pending > 0 && (
                     <>
                       <button onClick={() => openBulkApprove('all', 'All Pending OT')}
-                        style={{ display:'flex', alignItems:'center', gap:6, height:34,
-                          padding:'0 14px', background:'#059669', border:'none',
-                          borderRadius:7, fontSize:13, fontWeight:700, color:'#fff', cursor:'pointer' }}>
+                        style={{ display:'flex', alignItems:'center', gap:6, height:30,
+                          padding:'0 12px', background:'#059669', border:'none',
+                          borderRadius:6, fontSize:12, fontWeight:700, color:'#fff', cursor:'pointer' }}>
                         ✅ All Approve
                       </button>
                       {weekendCount > 0 && (
                         <button onClick={() => openBulkApprove('weekend', 'Weekend OT')}
-                          style={{ display:'flex', alignItems:'center', gap:6, height:34,
-                            padding:'0 14px', background:'#f59e0b', border:'none',
-                            borderRadius:7, fontSize:13, fontWeight:700, color:'#fff', cursor:'pointer' }}>
+                          style={{ display:'flex', alignItems:'center', gap:6, height:30,
+                            padding:'0 12px', background:'#f59e0b', border:'none',
+                            borderRadius:6, fontSize:12, fontWeight:700, color:'#fff', cursor:'pointer' }}>
                           🏖 All Approve (Weekend)
                         </button>
                       )}
                       {holidayCount > 0 && (
                         <button onClick={() => openBulkApprove('holiday', 'Public Holiday OT')}
-                          style={{ display:'flex', alignItems:'center', gap:6, height:34,
-                            padding:'0 14px', background:'#10b981', border:'none',
-                            borderRadius:7, fontSize:13, fontWeight:700, color:'#fff', cursor:'pointer' }}>
+                          style={{ display:'flex', alignItems:'center', gap:6, height:30,
+                            padding:'0 12px', background:'#10b981', border:'none',
+                            borderRadius:6, fontSize:12, fontWeight:700, color:'#fff', cursor:'pointer' }}>
                           🎉 All Approve (Public Holiday)
                         </button>
                       )}
                     </>
                   )}
                   <button onClick={() => setShowAdvSearchModal(true)}
-                    style={{ display:'flex', alignItems:'center', gap:6, height:34,
-                      padding:'0 14px', background: activeFilterCount>0 ? '#eff6ff' : '#f9fafb',
+                    style={{ display:'flex', alignItems:'center', gap:6, height:30,
+                      padding:'0 12px', background: activeFilterCount>0 ? '#eff6ff' : '#f9fafb',
                       border:`1.5px solid ${activeFilterCount>0 ? '#1a56db' : '#d1d5db'}`,
-                      borderRadius:7, fontSize:13, fontWeight:600,
+                      borderRadius:6, fontSize:12, fontWeight:600,
                       color: activeFilterCount>0 ? '#1a56db' : '#374151', cursor:'pointer' }}>
                     <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
                       <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.553.894l-4 2A1 1 0 016 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
@@ -1083,6 +1077,37 @@ const OvertimePage = () => {
               }
             />
       }
+
+      {/* ── Recommend → choose the approver this OT is sent to ── */}
+      {recoModal && (
+        <div className="modal-overlay">
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>👍 Recommend Overtime</h2>
+              <button className="modal-close" onClick={() => setRecoModal(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize:13, marginBottom:10 }}>
+                <strong>{recoModal.row.fullName}</strong> · {fd(recoModal.row.date)}
+              </div>
+              <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
+                Send to Approval Authority <span style={{ color:'#dc2626' }}>*</span>
+              </label>
+              <select value={recoModal.approvalId} onChange={e => setRecoModal(m => ({ ...m, approvalId: e.target.value }))}
+                style={{ width:'100%', padding:'8px 10px', borderRadius:8, border:'1px solid #d1d5db', fontSize:13 }}>
+                <option value="">— Select —</option>
+                {getOtApprovalIds(recoModal.row.employeeId).map(id => <option key={id} value={id}>{getEmployeeName(id)}</option>)}
+              </select>
+              <div style={{ fontSize:11.5, color:'#6b7280', marginTop:6 }}>Only this person will be notified and can approve or reject it.</div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setRecoModal(null)}>Cancel</button>
+              <button className="btn btn-primary" disabled={!recoModal.approvalId}
+                onClick={() => doRecommend(recoModal.row, recoModal.approvalId)}>Recommend</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Single action modal ── */}
       {actionModal && (
@@ -1384,6 +1409,68 @@ const OvertimePage = () => {
         </div>
       )}
 
+      {/* ── Right-hand detail panel (same panel as Leave approval) ── */}
+      {viewRec && (() => {
+        const row = (visibleRecords || []).find(r => r.employeeId === viewRec.employeeId && r.date === viewRec.date) || viewRec;
+        const emp = getEmployeeById(row.employeeId);
+        const tag = dayTagOf(row);
+        const amReco = isRecommenderFor(row.employeeId);
+        const canReject = canActOnRowReject(row);
+        const canApproveNow = canActOnRowApprove(row);
+        const decided = row.status === 'approved' || row.status === 'rejected';
+        return (
+          <SidePanelShell
+            icon="⏱️" avatarPhoto={emp?.profilePhoto} avatarName={row.fullName}
+            infoLine={<InfoLine items={[
+              { label: 'Staff ID',   value: row.empCode },
+              { label: 'Post',       value: row.position && row.position !== '—' ? row.position : '' },
+              { label: 'Department', value: row.department && row.department !== '—' ? row.department : '' },
+              { label: 'Branch',     value: row.branchShort && row.branchShort !== '—' ? row.branchShort : '' },
+            ]} />}
+            subtitle={
+              <div style={{ background: '#eff6ff', border: '1.5px solid #bfdbfe', borderRadius: 8, padding: '8px 12px', marginTop: 4, fontSize: 12, color: '#1e40af' }}>
+                Shift: <strong style={{ fontSize: 13.5 }}>{row.shiftName || '—'}</strong>
+                {row.shiftStart && <span> ({row.shiftStart} – {row.shiftEnd})</span>}
+              </div>
+            }
+            statusBadge={<StatusBadge status={row.status} />}
+            onClose={() => setViewRec(null)}
+            footer={<>
+              {row.status === 'pending' && amReco && !row.recommendedBy && (
+                <button style={panelBtnStyle('success')} onClick={() => handleRecommendClick(row)}>👍 Recommend</button>
+              )}
+              {(row.status === 'pending' || row.status === 'rejected') && canApproveNow && (
+                <button style={panelBtnStyle('success')} onClick={() => handleApproveClick(row)}>✓ Approve</button>
+              )}
+              {(row.status === 'pending' || row.status === 'approved') && canReject && (
+                <button style={panelBtnStyle('danger')} onClick={() => setActionModal({ rec: row, type: 'reject' })}>✗ Reject</button>
+              )}
+              {!(canAct) && <span style={{ fontSize: 12, color: '#9ca3af' }}>View only</span>}
+            </>}
+          >
+            <SectionLabel>⏱️ OT Details</SectionLabel>
+            <DRowPair left={{ icon: '📅', label: 'Date', value: fd(row.date) }}
+                      right={{ icon: '🗓️', label: 'Day', value: <span>{row.day}{tag && <b style={{ marginLeft: 5, color: tag.c }}>[{tag.t}]</b>}</span> }} />
+            <DRowPair left={{ icon: '🟢', label: 'Time In', value: row.timeIn }} right={{ icon: '🔵', label: 'Time Out', value: row.timeOut }} />
+            <DRowPair left={{ icon: '➕', label: 'OT in IN', value: row.otInINFormatted }} right={{ icon: '➕', label: 'OT in OUT', value: row.otInOUTFormatted }} />
+            <DRowPair left={{ icon: '⏱️', label: 'OT Duration', value: row.otFormatted }} right={{ icon: '✅', label: 'Approved OT', value: toHHMM(row.approvedOTMins) }} />
+            {row.leaveTypeCode && row.leaveDays != null && (
+              <DRow icon="🏖" label="Leave given instead" value={`${row.leaveTypeCode} · ${row.leaveDays} day${row.leaveDays !== 1 ? 's' : ''}`} />
+            )}
+            <DRowBox icon="💬" label="Remarks" value={row.comment} bg="#f8fafc" border="#e2e8f0" color="#475569" />
+
+            <div style={{ marginTop: 14 }}>
+              <SectionLabel color="#059669">✅ Recommendation &amp; Approval Details</SectionLabel>
+              <DRow icon="👍" label="Recommended by" value={row.recommendedByName || (row.recommendedBy ? getEmployeeName(row.recommendedBy) : '')} />
+              {decided
+                ? <DRow icon={row.status === 'approved' ? '✅' : '❌'} label={row.status === 'approved' ? 'Approved by' : 'Rejected by'}
+                    value={`${row.approvedByName || '—'}${row.approvedDate ? ' · ' + fd(row.approvedDate) : ''}`} />
+                : <DRow icon="⏳" label="Status" value="Waiting for approval" />}
+            </div>
+          </SidePanelShell>
+        );
+      })()}
+
       {/* ── OT Settings Modal ── */}
       {showOTSettings && (
         <div className="modal-overlay">
@@ -1513,110 +1600,7 @@ const OvertimePage = () => {
 
       {/* ── Advanced Search Modal ── */}
       {showAdvSearchModal && (() => {
-        const MCS = ({ label, value, onChange, options }) => {
-          const [open, setOpen] = React.useState(false);
-          const [srch, setSrch] = React.useState('');
-          const [activeIndex, setActiveIndex] = React.useState(-1);
-          const ref = React.useRef(null);
-          const itemRefs = React.useRef([]);
-          React.useEffect(() => {
-            const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-            document.addEventListener('mousedown', h);
-            return () => document.removeEventListener('mousedown', h);
-          }, []);
-          const fo = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
-          // "All" is always row 0 in the navigable list, followed by the filtered options
-          const navItems = [null, ...fo];
-          itemRefs.current = [];
-          const toggle = v => onChange(value.includes(v) ? value.filter(x=>x!==v) : [...value, v]);
-          const selectNav = v => v === null ? onChange([]) : toggle(v);
-          const selLabel = value.length===0 ? 'All' : value.length===1 ? value[0] : `${value.length} selected`;
-          const openWithHighlight = () => {
-            const idx = value.length === 1 ? navItems.findIndex(v => v === value[0]) : 0;
-            setActiveIndex(idx >= 0 ? idx : 0);
-            setOpen(true);
-          };
-          const handleTriggerKeyDown = e => {
-            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-              e.preventDefault();
-              open ? setOpen(false) : openWithHighlight();
-            } else if (e.key === 'Escape') {
-              setOpen(false);
-            }
-          };
-          const handleSearchKeyDown = e => {
-            if (e.key === 'ArrowDown') {
-              e.preventDefault();
-              setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
-            } else if (e.key === 'ArrowUp') {
-              e.preventDefault();
-              setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
-            } else if (e.key === 'Enter') {
-              e.preventDefault();
-              if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              setOpen(false);
-            }
-          };
-          React.useEffect(() => {
-            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
-          }, [activeIndex, open]);
-          React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
-          return (
-            <div ref={ref} style={{ position:'relative' }}>
-              <div style={{ fontSize:12, fontWeight:700, color:'#1f2937', marginBottom:5 }}>{label}</div>
-              <div tabIndex={0}
-                onKeyDown={handleTriggerKeyDown}
-                onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
-                style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
-                  borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
-                  color: value.length>0 ? '#1e40af' : '#9ca3af',
-                  minHeight:42, fontWeight: value.length>0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none' }}>
-                <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
-                <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
-                  {value.length > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>{value.length}</span>}
-                  {value.length > 0 && <span onMouseDown={e=>{e.preventDefault();e.stopPropagation();onChange([]);}} style={{ color:'#9ca3af', fontSize:16, lineHeight:1, cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.color='#ef4444'} onMouseLeave={e=>e.currentTarget.style.color='#9ca3af'}>×</span>}
-                  <span style={{ fontSize:9, color:'#9ca3af' }}>{open?'▲':'▼'}</span>
-                </div>
-              </div>
-              {open && (
-                <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
-                  boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220, display:'flex', flexDirection:'column' }}>
-                  <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
-                    <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search..."
-                      onClick={e=>e.stopPropagation()} onKeyDown={handleSearchKeyDown}
-                      style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px', fontSize:12, outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div style={{ overflowY:'auto', flex:1 }}>
-                    {navItems.map((v, i) => {
-                      const isAll = v === null;
-                      const sel   = isAll ? value.length === 0 : value.includes(v);
-                      const highlighted = i === activeIndex;
-                      return (
-                        <div key={v ?? '__all'} ref={el => itemRefs.current[i] = el}
-                          onMouseDown={e=>{e.preventDefault();selectNav(v);}}
-                          onMouseEnter={() => setActiveIndex(i)}
-                          style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                            background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
-                            borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
-                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`, background:sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                            {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
-                          </span>
-                          <span style={{ fontSize:13, color:sel?'#1e40af':'#374151', fontWeight:sel?600:400 }}>{isAll ? 'All' : v}</span>
-                        </div>
-                      );
-                    })}
-                    {fo.length===0 && <div style={{ padding:'10px 11px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results</div>}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
+        /* MCS lives at module level (bottom of file): defined inside this render it was a new component type every render, so the dropdown remounted and closed after each tick. */
 
         const setAF = (field, val) => setAdvFilters(p => ({ ...p, [field]: val }));
         const handleEnterTab = (e) => {
@@ -1715,3 +1699,109 @@ const OvertimePage = () => {
 };
 
 export default OvertimePage;
+
+/* Multi-checkbox select dropdown — stays open while ticking several options */
+const MCS = ({ label, value, onChange, options }) => {
+  const [open, setOpen] = React.useState(false);
+  const [srch, setSrch] = React.useState('');
+  const [activeIndex, setActiveIndex] = React.useState(-1);
+  const ref = React.useRef(null);
+  const itemRefs = React.useRef([]);
+  React.useEffect(() => {
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const fo = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
+  // "All" is always row 0 in the navigable list, followed by the filtered options
+  const navItems = [null, ...fo];
+  itemRefs.current = [];
+  const toggle = v => onChange(value.includes(v) ? value.filter(x=>x!==v) : [...value, v]);
+  const selectNav = v => v === null ? onChange([]) : toggle(v);
+  const selLabel = value.length===0 ? 'All' : value.length===1 ? value[0] : `${value.length} selected`;
+  const openWithHighlight = () => {
+    const idx = value.length === 1 ? navItems.findIndex(v => v === value[0]) : 0;
+    setActiveIndex(idx >= 0 ? idx : 0);
+    setOpen(true);
+  };
+  const handleTriggerKeyDown = e => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      open ? setOpen(false) : openWithHighlight();
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+  const handleSearchKeyDown = e => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+  React.useEffect(() => {
+    if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+  React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      <div style={{ fontSize:12, fontWeight:700, color:'#1f2937', marginBottom:5 }}>{label}</div>
+      <div tabIndex={0}
+        onKeyDown={handleTriggerKeyDown}
+        onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
+        style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+          padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+          borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
+          color: value.length>0 ? '#1e40af' : '#9ca3af',
+          minHeight:42, fontWeight: value.length>0 ? 600 : 400,
+          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none', outline:'none', userSelect:'none' }}>
+        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
+        <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
+          {value.length > 0 && <span style={{ background:'#1a56db', color:'white', borderRadius:10, fontSize:10, fontWeight:700, padding:'1px 6px' }}>{value.length}</span>}
+          {value.length > 0 && <span onMouseDown={e=>{e.preventDefault();e.stopPropagation();onChange([]);}} style={{ color:'#9ca3af', fontSize:16, lineHeight:1, cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.color='#ef4444'} onMouseLeave={e=>e.currentTarget.style.color='#9ca3af'}>×</span>}
+          <span style={{ fontSize:9, color:'#9ca3af' }}>{open?'▲':'▼'}</span>
+        </div>
+      </div>
+      {open && (
+        <div style={{ position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
+          background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+          boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220, display:'flex', flexDirection:'column' }}>
+          <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
+            <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search..."
+              onClick={e=>e.stopPropagation()} onKeyDown={handleSearchKeyDown}
+              style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px', fontSize:12, outline:'none', boxSizing:'border-box' }} />
+          </div>
+          <div style={{ overflowY:'auto', flex:1 }}>
+            {navItems.map((v, i) => {
+              const isAll = v === null;
+              const sel   = isAll ? value.length === 0 : value.includes(v);
+              const highlighted = i === activeIndex;
+              return (
+                <div key={v ?? '__all'} ref={el => itemRefs.current[i] = el}
+                  onMouseDown={e=>{e.preventDefault();selectNav(v);}}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                    background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
+                    borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
+                  <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`, background:sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
+                  </span>
+                  <span style={{ fontSize:13, color:sel?'#1e40af':'#374151', fontWeight:sel?600:400 }}>{isAll ? 'All' : v}</span>
+                </div>
+              );
+            })}
+            {fo.length===0 && <div style={{ padding:'10px 11px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
