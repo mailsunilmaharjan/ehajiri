@@ -93,31 +93,39 @@ export const DataProvider = ({ children }) => {
     // without a full page reload — so the previous tenant's data can never
     // stay on screen even for the moment before this fetch resolves.
     setEmployees([]); setShifts([]); setLeaveBalances([]); setLeaves([]); setOfficeVisits([]);
-    (async () => {
+    let cancelled = false;
+    const timers = [];
+    // Each list loads independently so one failed request (e.g. a transient
+    // DB "too many clients" 500) can't blank every other list; failed ones
+    // are retried with backoff.
+    const loaders = [
+      ['/employees',       setEmployees],
+      ['/shifts',          setShifts],
+      ['/leaves/types',    setLeaveTypes],
+      ['/leaves/balances', setLeaveBalances],
+      ['/leaves',          setLeaves],
+      ['/visits',          setOfficeVisits],
+    ];
+    const load = async (path, setter, attempt = 0) => {
       try {
-        const [emps, shfts, lvTypes, lvBals, lvs, visits] = await Promise.all([
-          api.get('/employees'),
-          api.get('/shifts'),
-          api.get('/leaves/types'),
-          api.get('/leaves/balances'),
-          api.get('/leaves'),
-          api.get('/visits'),
-        ]);
-        setEmployees(emps);
-        setShifts(shfts);
-        setLeaveTypes(lvTypes);
-        setLeaveBalances(lvBals);
-        setLeaves(lvs);
-        setOfficeVisits(visits);
-        setApiOk(true);
+        const data = await api.get(path);
+        if (!cancelled) setter(data);
+        return true;
       } catch {
-        // API unavailable — fall back to the hardcoded shift defaults only;
-        // no cached-from-disk data (see note above), so this is genuinely
-        // just "the app couldn't reach the server," not real org data.
-        setShifts(FB_SHIFTS);
-        setApiOk(false);
+        if (!cancelled && attempt < 4) {
+          await new Promise(r => timers.push(setTimeout(r, 2000 * (attempt + 1))));
+          if (!cancelled) return load(path, setter, attempt + 1);
+        }
+        return false;
       }
+    };
+    (async () => {
+      const results = await Promise.allSettled(loaders.map(([p, s]) => load(p, s)));
+      if (cancelled) return;
+      if (results.some(r => r.status === 'fulfilled' && r.value === true)) setApiOk(true);
+      else { setShifts(FB_SHIFTS); setApiOk(false); }
     })();
+    return () => { cancelled = true; timers.forEach(clearTimeout); };
   }, [currentUser?.id]);
 
   /* ── Employees ──
