@@ -12,6 +12,7 @@ import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, g
 import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
 import { presentSymbol, leaveShort } from '../../utils/inOutStatus.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
+import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const WEEKDAYS_SHORT  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -340,9 +341,9 @@ const YearlyInOutReport = () => {
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
           value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
-            ? [todayBS?.year-2,todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
+            ? reportBsYears(settings.fiscalYears, todayBS).filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>))
-            : [now.getFullYear()-2,now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
+            : reportAdYears(settings.fiscalYears, now.getFullYear()).map(y=>(
                 <option key={y} value={y}>{y}</option>))}
         </select>
         <div style={{ display:'flex',alignItems:'center',gap:6 }}>

@@ -14,6 +14,7 @@ import ExcelJS from 'exceljs';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import { branchAbbr } from '../../utils/branchUtils.js';
+import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -497,10 +498,10 @@ const HalfSummaryReport = () => {
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
           value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
-            ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
+            ? reportBsYears(settings.fiscalYears, todayBS).filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>
               ))
-            : [now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
+            : reportAdYears(settings.fiscalYears, now.getFullYear()).map(y=>(
                 <option key={y} value={y}>{y}</option>
               ))
           }

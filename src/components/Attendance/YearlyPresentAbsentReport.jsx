@@ -12,6 +12,7 @@ import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, 
 import { staffRankCompare } from '../../utils/branchUtils.js';
 import ExcelJS from 'exceljs';
 import { downloadBlob } from '../../utils/printHelper.js';
+import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const BS_MONTHS_SHORT  = ['Baisakh','Jestha','Asadh','Shrawan','Bhadra','Ashwin',
@@ -37,6 +38,8 @@ const STATUS_BASE = {
   PP1: { bg:'#fef08a', color:'#713f12', label:'H.P¹', title:'Present on Public Holiday – single punch' },
   WP : { bg:'#ccfbf1', color:'#0f766e', label:'W.P', title:'Present on Weekend' },
   WP1: { bg:'#ccfbf1', color:'#0f766e', label:'W.P¹', title:'Present on Weekend – single punch' },
+  PL : { bg:'#dcfce7', color:'#166534', label:'P.L',  title:'Present + Leave' },
+  POV: { bg:'#dcfce7', color:'#166534', label:'P.OV', title:'Present + Office Visit' },
   AB : { bg:'#fee2e2', color:'#991b1b', label:'AB', title:'Absent' },
   H  : { bg:'#f3f4f6', color:'#9ca3af', label:'W',  title:'Weekend' },
   DO : { bg:'#f3f4f6', color:'#6b7280', label:'DO', title:'Day Off' },
@@ -332,7 +335,7 @@ const YearlyPresentAbsentReport = () => {
         return { dayNum, dateStr, st, dayKey };
       });
       // counts for totals
-      const P  = days.filter(d=>d.st==='P'||d.st==='P1'||d.st==='PP'||d.st==='PP1'||d.st==='WP'||d.st==='WP1').length;
+      const P  = days.filter(d=>d.st==='P'||d.st==='P1'||d.st==='PP'||d.st==='PP1'||d.st==='WP'||d.st==='WP1'||d.st==='PL'||d.st==='POV').length;
       const AB = days.filter(d=>d.st==='AB').length;
       const L2 = days.filter(d=>d.st==='L').length;
       const PH = days.filter(d=>d.st==='PH').length;
@@ -355,7 +358,7 @@ const YearlyPresentAbsentReport = () => {
     matrix.forEach(m => m.days.forEach(d => {
       if (!d.dateStr) return;
       total++;
-      if (d.st==='P'||d.st==='P1'||d.st==='PP'||d.st==='PP1'||d.st==='WP'||d.st==='WP1') present++;
+      if (d.st==='P'||d.st==='P1'||d.st==='PP'||d.st==='PP1'||d.st==='WP'||d.st==='WP1'||d.st==='PL'||d.st==='POV') present++;
       else if (d.st==='AB') absent++;
       else if (d.st==='L')  leave++;
       else if (d.st==='OV') ov++;
@@ -715,9 +718,9 @@ ${footerHtml}
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
           value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
-            ? [todayBS?.year-2,todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
+            ? reportBsYears(settings.fiscalYears, todayBS).filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>))
-            : [now.getFullYear()-2,now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
+            : reportAdYears(settings.fiscalYears, now.getFullYear()).map(y=>(
                 <option key={y} value={y}>{y}</option>))
           }
         </select>

@@ -8,6 +8,7 @@ import ViewHalfMonthlyBtn from './ViewHalfMonthlyBtn.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -233,13 +234,13 @@ const HalfMonthlyReport = () => {
           value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
             // Nepali calendar: show BS years (current ±1)
-            ? [todayBS?.year-1, todayBS?.year, todayBS?.year+1].filter(Boolean).map(bsY => (
+            ? reportBsYears(settings.fiscalYears, todayBS).filter(Boolean).map(bsY => (
                 <option key={bsY} value={bsY}>
                   {settings.nepaliDigits ? toNepaliDigits(bsY) : bsY} BS
                 </option>
               ))
             // AD calendar: show AD years
-            : [now.getFullYear()-1, now.getFullYear(), now.getFullYear()+1].map(y => (
+            : reportAdYears(settings.fiscalYears, now.getFullYear()).map(y => (
                 <option key={y} value={y}>{y}</option>
               ))
           }

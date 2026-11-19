@@ -414,3 +414,29 @@ export function makeDateFormatter(settings) {
     nepaliDigits: settings.nepaliDigits,
   });
 }
+
+/* ── Year dropdown options for the Attendance reports ─────────────────────
+   Every report used to hard-code [current-1, current, current+1], so Settings → Fiscal Year
+   (e.g. FY 2076…FY 2083) was never reflected and older years could not be selected.
+   Now: every year covered by a configured fiscal year (its name, and the BS/AD years its
+   start/end dates fall in) + the current year ±1, ascending, de-duplicated. */
+export const reportBsYears = (fiscalYears, todayBS) => {
+  const ys = new Set();
+  const cur = todayBS?.year;
+  if (cur) [cur - 1, cur, cur + 1].forEach(y => ys.add(y));
+  (Array.isArray(fiscalYears) ? fiscalYears : []).forEach(fy => {
+    const n = parseInt(String(fy?.name || '').match(/\d{4}/)?.[0], 10);
+    if (n >= 1900 && n <= 2300) ys.add(n);
+    for (const d of [fy?.startDate, fy?.endDate]) {
+      try { const b = d ? adToBS(String(d).slice(0, 10)) : null; if (b?.year) ys.add(b.year); } catch { /* ignore bad date */ }
+    }
+  });
+  return [...ys].sort((a, b) => a - b);
+};
+export const reportAdYears = (fiscalYears, nowYear = new Date().getFullYear()) => {
+  const ys = new Set([nowYear - 1, nowYear, nowYear + 1]);
+  (Array.isArray(fiscalYears) ? fiscalYears : []).forEach(fy => {
+    for (const d of [fy?.startDate, fy?.endDate]) { const y = parseInt(String(d || '').slice(0, 4), 10); if (y) ys.add(y); }
+  });
+  return [...ys].sort((a, b) => a - b);
+};

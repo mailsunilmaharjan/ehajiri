@@ -13,6 +13,7 @@ import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -37,6 +38,8 @@ const STATUS_BASE = {
   OV : { color:'#2563eb', main:'OV',  sup:null,  title:'Office Visit'              },
   PH : { color:'#d97706', main:'H',   sup:null,  title:'Public Holiday'            },
   PLH: { color:'#059669', main:'P-L', sup:'½',   title:'Present + Half-day Leave'  },
+  PL : { color:'#059669', main:'P.L',  sup:null, title:'Present + Leave'           },
+  POV: { color:'#059669', main:'P.OV', sup:null, title:'Present + Office Visit'    },
   // Before the staff's Attendance Date — not counted as Present or Absent.
   NA : { color:'#d1d5db', main:'',    sup:null,  title:''                          },
 };
@@ -56,7 +59,7 @@ const STATUS_TITLE_NP = {
   P: 'उपस्थित', P1: 'उपस्थित – एकल पन्च', PP: 'सार्वजनिक बिदामा उपस्थित', PP1: 'सार्वजनिक बिदामा उपस्थित – एकल पन्च',
   WP: 'सप्ताहन्तमा उपस्थित', WP1: 'सप्ताहन्तमा उपस्थित – एकल पन्च', AB: 'अनुपस्थित',
   H: 'सप्ताहन्त', DO: 'डे अफ', NO: 'नाइट अफ', L: 'बिदा', LH: 'आधा दिन बिदा',
-  OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा', PLH: 'उपस्थित + आधा दिन बिदा',
+  OV: 'कार्यालय भ्रमण', PH: 'सार्वजनिक बिदा', PLH: 'उपस्थित + आधा दिन बिदा', PL: 'उपस्थित + बिदा', POV: 'उपस्थित + कार्यालय भ्रमण',
 };
 const STATUS_NP = {
   P:  { main:'उ',    sup:null },
@@ -74,6 +77,8 @@ const STATUS_NP = {
   OV: { main:'भ्रमण', sup:null },
   PH: { main:'साबि', sup:null },
   PLH:{ main:'उ-बि', sup:'½'  },
+  PL: { main:'उ.बि', sup:null },
+  POV:{ main:'उ.भ्रमण', sup:null },
 };
 const statusTitle = (st, language) => {
   const s = STATUS[st] || STATUS.AB;
@@ -90,6 +95,7 @@ const withLeaveCode = (disp, st, code) => {
   if (!code) return disp;
   if (st === 'L' || st === 'LH') return { ...disp, main: code };
   if (st === 'PLH') return { ...disp, main: `P-${code}` };
+  if (st === 'PL')  return { ...disp, main: `P.${code}` };
   return disp;
 };
 
@@ -99,7 +105,7 @@ const statusTip = (st, language, holidayName, leaveName) => {
   const base = statusTitle(st, language);
   if (st === 'PH') return holidayName || base;
   if (st === 'PP' || st === 'PP1') return holidayName ? `${base} (${holidayName})` : base;
-  if ((st === 'L' || st === 'LH' || st === 'PLH') && leaveName) return st === 'L' ? leaveName : `${base} (${leaveName})`;
+  if ((st === 'L' || st === 'LH' || st === 'PLH' || st === 'PL') && leaveName) return st === 'L' ? leaveName : `${base} (${leaveName})`;
   return base;
 };
 
@@ -485,7 +491,7 @@ const PresentAbsentReport = () => {
     let p=0, ab=0, l=0, ov=0;
     employees.forEach(e => {
       const st = e.days[date];
-      if      (st==='P'||st==='PP'||st==='PP1'||st==='WP'||st==='WP1'||st==='P1') p++;
+      if      (st==='P'||st==='PP'||st==='PP1'||st==='WP'||st==='WP1'||st==='P1'||st==='PL'||st==='POV') p++;
       else if (st==='AB')                       ab++;
       else if (st==='L'||st==='LH')             l++;
       else if (st==='OV')                        ov++;
@@ -791,10 +797,10 @@ const PresentAbsentReport = () => {
         <select className="form-control" style={{ width:useNP?115:85,height:36,fontSize:13 }}
           value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
-            ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(y=>(
+            ? reportBsYears(settings.fiscalYears, todayBS).filter(Boolean).map(y=>(
                 <option key={y} value={y}>{settings.nepaliDigits?toNepaliDigits(y):y} BS</option>
               ))
-            : [now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
+            : reportAdYears(settings.fiscalYears, now.getFullYear()).map(y=>(
                 <option key={y} value={y}>{y}</option>
               ))
           }
@@ -1033,6 +1039,8 @@ const PresentAbsentReport = () => {
             {[
               { st:'P',  desc:L('उपस्थित','Present')                   },
               { st:'P1', desc:L('एकल पन्च','Single Punch')              },
+              { st:'PL', desc:L('उपस्थित + बिदा (बिदा कोड)','Present + Leave (leave short name, e.g. P.SL)') },
+              { st:'POV',desc:L('उपस्थित + कार्यालय भ्रमण','Present + Office Visit') },
               { st:'AB', desc:L('अनुपस्थित','Absent')                  },
               { st:'H',  desc:L('सप्ताहन्त (स)','Weekend (W)')   },
               { st:'DO', desc:L('डे अफ','Day Off')                     },

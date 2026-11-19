@@ -10,6 +10,7 @@ import { adToBS, bsToAD, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
 import ReportIcon from './ReportIcon.jsx';
+import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
@@ -285,10 +286,10 @@ const MonthlyReport = () => {
         <select className="form-control" style={{ width:useNP?115:85,height:34,fontSize:13 }}
           disabled={dr.locked} value={year} onChange={e=>setYear(+e.target.value)}>
           {useNP
-            ? [todayBS?.year-1,todayBS?.year,todayBS?.year+1].filter(Boolean).map(bsY=>(
+            ? reportBsYears(settings.fiscalYears, todayBS).filter(Boolean).map(bsY=>(
                 <option key={bsY} value={bsY}>{settings.nepaliDigits?toNepaliDigits(bsY):bsY} BS</option>
               ))
-            : [now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1].map(y=>(
+            : reportAdYears(settings.fiscalYears, now.getFullYear()).map(y=>(
                 <option key={y} value={y}>{y}</option>
               ))
           }

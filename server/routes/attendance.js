@@ -3295,6 +3295,11 @@ router.get('/present-absent', async (req, res) => {
         // reasoning as computeDailyAttendance/staff-ledger above.
         else if (log?.hasIn && isHoliday){ st = punches === 1 ? 'PP1' : 'PP'; totalP++; }  // Present on Public Holiday
         else if (log?.hasIn && halfLeave){ st='PLH'; totalL+=0.5; totalP+=0.5; }  // Present + half-day leave
+        // Punch on a day that also has a full-day leave / approved office visit: show BOTH
+        // (PL = Present + Leave, POV = Present + Office Visit). Counted as Present only,
+        // exactly as before — display change, totals unchanged.
+        else if (log?.hasIn && leave)    { st='PL';  totalP++; }
+        else if (log?.hasIn && visit)    { st='POV'; totalP++; }
         else if (log?.hasIn && punches===1){ st='P1'; totalP++; }  // Single punch
         else if (log?.hasIn)             { st='P';  totalP++;  }
         else if (isHoliday)              { st='PH'; totalPH++; }

@@ -7,6 +7,7 @@ import useDateFormat   from '../../hooks/useDateFormat.js';
 import ViewYearlyBtn   from './ViewYearlyBtn.jsx';
 import { adToBS, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const BS_MONTHS  = ['Bai','Jes','Asa','Shr','Bha','Ash','Kar','Man','Pou','Mag','Fal','Cha'];
 const AD_MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -176,9 +177,9 @@ const YearlyReport = () => {
         <select className="form-control" style={{ width: useNP?115:85, height:36, fontSize:13 }}
           value={year} onChange={e => setYear(+e.target.value)}>
           {useNP
-            ? [todayBS?.year-2, todayBS?.year-1, todayBS?.year, todayBS?.year+1].filter(Boolean).map(y => (
+            ? reportBsYears(settings.fiscalYears, todayBS).filter(Boolean).map(y => (
                 <option key={y} value={y}>{settings.nepaliDigits ? toNepaliDigits(y) : y} BS</option>))
-            : [now.getFullYear()-2, now.getFullYear()-1, now.getFullYear(), now.getFullYear()+1].map(y => (
+            : reportAdYears(settings.fiscalYears, now.getFullYear()).map(y => (
                 <option key={y} value={y}>{y}</option>))
           }
         </select>
