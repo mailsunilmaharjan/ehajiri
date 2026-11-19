@@ -664,6 +664,10 @@ const LeavePanel = () => {
     if (filterStatus.length > 0 && !filterStatus.includes(l.status)) return false;
     if (filterTypes.length > 0 && !filterTypes.includes(l.leaveTypeCode)) return false;
     if (effFYs.length > 0) {
+    } else if (!isAdmin && String(l.employeeId) !== String(currentUser.id)
+      && !isRecommenderForLeave(l.employeeId, l) && !isApproverForLeave(l.employeeId, l)
+      && String(l.recommendedBy) !== String(currentUser.id) && String(l.approvedBy) !== String(currentUser.id)) {
+      return false;   // someone else's application (any status) I am not the recommender/approver of — not listed
       // A leave belongs to the fiscal year its From Date falls in.
       const d = String(l.fromDate || '').slice(0, 10);
       const inFY = effFYs.some(id => {
@@ -701,7 +705,10 @@ const LeavePanel = () => {
         && (isRecommenderForLeave(l.employeeId) || isApproverForLeave(l.employeeId))
         && (s === 'all' || l.status === s);
     }
-    return (!isManager ? String(l.employeeId) === String(currentUser.id) : true) && (s === 'all' || l.status === s);
+    const own = String(l.employeeId) === String(currentUser.id);
+    const hiddenPending = !isAdmin && !own && !isRecommenderForLeave(l.employeeId, l) && !isApproverForLeave(l.employeeId, l)
+      && String(l.recommendedBy) !== String(currentUser.id) && String(l.approvedBy) !== String(currentUser.id);
+    return (!isManager ? own : true) && !hiddenPending && (s === 'all' || l.status === s);
   }).length;
 
   /* language-aware leave type name lookup */
@@ -2617,6 +2624,10 @@ const VisitPanel = () => {
       if (!ovEffFYs.some(id => {
         const fy = ovFyList.find(f => String(f.id) === String(id));
         return fy && d >= String(fy.startDate).slice(0, 10) && d <= String(fy.endDate).slice(0, 10);
+    } else if (!isAdmin && String(v.employeeId) !== String(currentUser.id)
+      && !isRecommenderForVisit(v.employeeId, v) && !isApproverForVisit(v.employeeId, v)
+      && String(v.recommendedBy) !== String(currentUser.id) && String(v.approvedBy) !== String(currentUser.id)) {
+      return false;   // someone else's application (any status) I am not the recommender/approver of — not listed
       }) && !(ovFYs === null && inNoFY(d, ovFyList))) return false;
     }
     if (ovTypes.length > 0 && !ovTypes.includes(v.visitType || 'National')) return false;
@@ -2643,7 +2654,10 @@ const VisitPanel = () => {
         && (isRecommenderForVisit(v.employeeId) || isApproverForVisit(v.employeeId))
         && (s === 'all' || v.status === s);
     }
-    return (!isManager ? String(v.employeeId) === String(currentUser.id) : true) && (s === 'all' || v.status === s);
+    const own = String(v.employeeId) === String(currentUser.id);
+    const hiddenPending = !isAdmin && !own && !isRecommenderForVisit(v.employeeId, v) && !isApproverForVisit(v.employeeId, v)
+      && String(v.recommendedBy) !== String(currentUser.id) && String(v.approvedBy) !== String(currentUser.id);
+    return (!isManager ? own : true) && !hiddenPending && (s === 'all' || v.status === s);
   }).length;
 
   /* ── Bulk actions (checkbox toolbar, near Search) — see LeavePanel's
