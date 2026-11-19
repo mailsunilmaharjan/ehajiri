@@ -321,7 +321,9 @@ export default function Dashboard() {
   const yPct     = Math.round((yPresent / yTotal) * 100);
   const pctChange = (t, y) => (y === 0 ? (t === 0 ? 0 : 100) : Math.round(((t - y) / y) * 100));
 
-  const pendingMissingTotal = missingRequests.filter(r => r.status === 'pending').length;
+  // Only requests assigned to me (recommender/approver), not every pending one.
+  const pendingMissingTotal = missingRequests.filter(r => r.status === 'pending' && String(r.employeeId) !== String(currentUser?.id)
+    && (String(r.recommendedBy) === String(currentUser?.id) || String(r.approvedBy) === String(currentUser?.id))).length;
 
   // On Leave / On Office Visit today — todayAttn already carries these as
   // per-employee flags (joined server-side against leaves/office_visits for
@@ -478,16 +480,29 @@ export default function Dashboard() {
     .sort((a, b) => new Date(b.timeIn) - new Date(a.timeIn))
     .slice(0, 6);
 
-  // Pending Approvals — company-wide pending leave + office visit + late-in/early-out + OT requests.
+  // Only the concerned recommender/approver sees a pending request (admin
+  // included) — same rule as the notification bell. If the applicant picked a
+  // specific recommender/approver (rec.recoId/approvalId), only that person
+  // matches. Never your own application.
+  const isMine = (empId, rec) => {
+    const me = String(currentUser?.id);
+    if (String(empId) === me) return false;
+    const cfg = recoAssignments[String(empId)] || {};
+    const toIds = (v) => (Array.isArray(v) ? v : v != null && v !== '' ? [v] : []).map(String);
+    const asReco = toIds(cfg.reco).includes(me) && (!rec?.recoId || String(rec.recoId) === me);
+    const asAppr = toIds(cfg.approval).includes(me) && (!rec?.approvalId || String(rec.approvalId) === me);
+    return asReco || asAppr;
+  };
+  // Pending Approvals — pending leave + office visit + late-in/early-out + OT requests.
   const pendingApprovals = useMemo(() => {
     const days = (v) => Math.max(1, Math.round((new Date(v.toDate) - new Date(v.fromDate)) / 86400000) + 1);
-    const l = leaves.filter(x => x.status === 'pending')
+    const l = leaves.filter(x => x.status === 'pending' && isMine(x.employeeId, x))
       .map(x => ({ kind: 'leave', id: x.id, employeeId: x.employeeId, fromDate: x.fromDate, toDate: x.toDate,
         days: x.days, reason: x.reason, appliedDate: x.appliedDate, recommendedBy: x.recommendedBy }));
-    const v = officeVisits.filter(x => x.status === 'pending')
+    const v = officeVisits.filter(x => x.status === 'pending' && isMine(x.employeeId, x))
       .map(x => ({ kind: 'visit', id: x.id, employeeId: x.employeeId, fromDate: x.fromDate, toDate: x.toDate,
         days: days(x), reason: x.purpose, appliedDate: x.appliedDate, recommendedBy: x.recommendedBy }));
-    const m = manualPostings.filter(x => x.status === 'pending')
+    const m = manualPostings.filter(x => x.status === 'pending' && (isMine(x.employeeId) || (String(x.recommendedById) === String(currentUser?.id) && String(x.employeeId) !== String(currentUser?.id))))
       .map(x => ({ kind: 'lateEarly', id: x.id, employeeId: x.employeeId, fromDate: x.date, toDate: x.date, days: 1,
         reason: [x.check_in && `In: ${x.check_in.slice(0,5)}`, x.check_out && `Out: ${x.check_out.slice(0,5)}`, x.remark]
           .filter(Boolean).join(' | '),
@@ -495,12 +510,12 @@ export default function Dashboard() {
     // OT records are calculated on the fly and only get a DB id (approvalId)
     // once someone acts on them — id falls back to the empId-date key so a
     // never-touched record still has something unique to key/act on.
-    const o = otPending.map(x => ({ kind: 'ot', id: x.approvalId || `${x.employeeId}-${x.date}`,
+    const o = otPending.filter(x => isMine(x.employeeId)).map(x => ({ kind: 'ot', id: x.approvalId || `${x.employeeId}-${x.date}`,
       employeeId: x.employeeId, fromDate: x.date, toDate: x.date, days: 1,
       reason: `Overtime ${x.otFormatted}`, appliedDate: x.date, recommendedBy: x.recommendedBy,
       approvalId: x.approvalId, otDate: x.date, otMinutes: x.approvedOTMins }));
     return [...l, ...v, ...m, ...o].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));
-  }, [leaves, officeVisits, manualPostings, otPending]);
+  }, [leaves, officeVisits, manualPostings, otPending, isAdmin, currentUser, recoAssignments]);
 
   const refreshManualPostings = () =>
     api.get('/attendance/manual-postings').then(rows => setManualPostings(Array.isArray(rows) ? rows : [])).catch(() => {});
