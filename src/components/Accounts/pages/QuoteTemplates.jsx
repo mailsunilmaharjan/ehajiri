@@ -165,6 +165,7 @@ function TemplateForm({ value, onClose, onSaved, busy, setBusy }) {
         </div>
 
         <div className="doc-form pf-top">
+          <div className="acc-step"><i>1</i>Template details</div>
           <label className="pf-wide">Template Name *<input autoFocus value={f.name} onChange={set('name')} placeholder="e.g. Attendance & Access Control" required /></label>
           <label>Paper Size
             <select value={f.paper || 'A4'} onChange={set('paper')}>
@@ -177,14 +178,14 @@ function TemplateForm({ value, onClose, onSaved, busy, setBusy }) {
           <label className="check"><input type="checkbox" checked={f.is_default} onChange={set('is_default')} /> Default for new quotations</label>
         </div>
 
-        <div className="section-label">🏢 CONTACT LINES ON THE QUOTATION</div>
+        <div className="acc-step acc-step-out"><i>2</i>Contact lines on the quotation</div>
         <div className="doc-form pf-trans">
           <label>Website<input data-nocap value={f.website || ''} onChange={set('website')} placeholder="www.yourcompany.com.np" /></label>
           <label>Phone Numbers<input value={f.phones || ''} onChange={set('phones')} placeholder={company.phone || '01-5xxxxxx | 98xxxxxxxx'} /></label>
           <label>Address<input value={f.address || ''} onChange={set('address')} placeholder={company.address || 'Office address'} /></label>
         </div>
 
-        <div className="section-label">✍️ PREPARED BY (thank-you page)</div>
+        <div className="acc-step acc-step-out"><i>3</i>Prepared by (thank-you page)</div>
         <div className="doc-form pf-top">
           <label>Name<input value={f.prepared_name || ''} onChange={set('prepared_name')} placeholder="e.g. Sales Manager's name" /></label>
           <label>Post / Designation<input value={f.prepared_post || ''} onChange={set('prepared_post')} placeholder={`e.g. CEO, ${company.name}`} /></label>
@@ -194,7 +195,7 @@ function TemplateForm({ value, onClose, onSaved, busy, setBusy }) {
         <p className="muted small qt-help">Used only when the quotation's creator has no details of their own. Set each person's name, phone and signature below.</p>
         <StaffSigners inForm />
 
-        <div className="section-label">🖼 PICTURES</div>
+        <div className="acc-step acc-step-out"><i>4</i>Pictures</div>
         {!f.id ? <p className="muted">Save the template first, then upload the logo, cover photo, signature and stamp.</p> : (
           <div className="qt-pics">
             {PICS.map(([slot, col, label, hint]) => (
@@ -214,7 +215,7 @@ function TemplateForm({ value, onClose, onSaved, busy, setBusy }) {
         )}
 
         <div className="pf-contacts-head">
-          <span className="section-label">📑 COMPANY PROFILE PAGES — TEMPLATE UPLOAD <span className="tag">{f.profile_list.length}</span></span>
+          <span className="acc-step"><i>5</i>Company profile pages — template upload <span className="tag">{f.profile_list.length}</span></span>
           <span className="spacer" />
           {f.id && <button type="button" className="ghost add-line" tabIndex={-1} disabled={!!busy} onClick={() => pageRef.current?.click()}>
             {busy === 'profile' ? 'Uploading…' : '＋ Upload PDF / Image'}</button>}
@@ -249,7 +250,7 @@ function TemplateForm({ value, onClose, onSaved, busy, setBusy }) {
           </table>
         )}
 
-        <div className="section-label">📋 DEFAULTS FOR NEW QUOTATIONS</div>
+        <div className="acc-step acc-step-out"><i>6</i>Defaults for new quotations</div>
         <div className="doc-form pf-trans">
           <label className="pf-wide">Validity<input value={f.validity || ''} onChange={set('validity')} placeholder="15 days from date of issue" /></label>
         </div>
