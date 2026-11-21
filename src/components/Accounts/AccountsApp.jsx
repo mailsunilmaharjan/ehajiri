@@ -14,6 +14,9 @@ import Parties from './pages/Parties';
 import Products from './pages/Products';
 import DocList from './pages/DocList';
 import DocEntry from './pages/DocEntry';
+import ProfitLoss from './pages/ProfitLoss';
+import BillProfit from './pages/BillProfit';
+import MonthlyProfit from './pages/MonthlyProfit';
 import StockSummary from './pages/StockSummary';
 import StockLedger from './pages/StockLedger';
 import Alerts from './pages/Alerts';
@@ -58,6 +61,9 @@ function Shell() {
           <Route path="/day-book" element={<DayBook />} />
           <Route path="/ledger" element={<Ledger />} />
           <Route path="/trial-balance" element={<TrialBalance />} />
+          <Route path="/profit-loss" element={<ProfitLoss />} />
+          <Route path="/bill-profit" element={<BillProfit />} />
+          <Route path="/monthly-profit" element={<MonthlyProfit />} />
           <Route path="/audit" element={<AuditLog />} />
           <Route path="/customers" element={<Parties type="customer" />} />
           <Route path="/suppliers" element={<Parties type="supplier" />} />

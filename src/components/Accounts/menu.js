@@ -19,6 +19,8 @@ export const ACCOUNTS_MENU = [
   { title: 'Reports', icon: 'barChart', items: [
     ['/alerts', 'Alerts (due & expiry)', 'bell'], ['/stock-summary', 'Stock Summary', 'barChart'], ['/stock-ledger', 'Stock Ledger', 'list', 'Ctrl+K'],
     ['/serials', 'Serial No. Search', 'key'], ['/day-book', 'Day Book', 'calendar'], ['/ledger', 'Ledger', 'fileText', 'Ctrl+L'],
-    ['/trial-balance', 'Trial Balance', 'calculator'], ['/audit', 'Audit Trail', 'shield'],
+    ['/trial-balance', 'Trial Balance', 'calculator'], ['/profit-loss', 'Profit & Loss Account', 'trendingUp'],
+    ['/bill-profit', 'Bill-wise Profit & Loss', 'fileText'], ['/monthly-profit', 'Monthly Expenses & Profit', 'barChart'],
+    ['/audit', 'Audit Trail', 'shield'],
   ] },
 ];
