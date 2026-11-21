@@ -14,7 +14,7 @@
  *   • Bill-wise cost = each sale's own stock movement at its weighted-average rate.
  */
 import { Router } from 'express';
-import { q } from '../../services/accounts/accDb.js';
+import { q, one } from '../../services/accounts/accDb.js';
 import { ah, bad, money } from '../../services/accounts/common.js';
 import { valuate } from '../../services/accounts/stock.js';
 import { adToBs, bsToAd, addDays, isIsoDate, BS_MONTHS } from '../../services/accounts/nepaliDate.js';
@@ -182,6 +182,106 @@ router.get('/reports/monthly-profit', ah(async (req, res) => {
     other_income: sumK('other_income'), expenses: sumK('expenses'), damage: sumK('damage'), net_profit: sumK('net_profit'), expense_by_group: {} };
   for (const code of expenseGroups.keys()) totals.expense_by_group[code] = money(out.reduce((a, r) => a + (r.expense_by_group[code] || 0), 0));
   res.json({ months: out, totals, expense_groups: [...expenseGroups.entries()].sort().map(([code, name]) => ({ code, name })) });
+}));
+
+// ── Balance Sheet (Statement of Financial Position, NFRS / Companies Act format) ──────────────────
+// GET /reports/balance-sheet?date_from=<FY start>&date_to=<as at>
+// Two columns: as at date_to, and as at the day before date_from (previous year-end) when that year exists.
+// Lines are the chart's ledger groups, rolled up to the group directly under each section
+// (Non-Current Assets, Current Assets, Equity, Non-Current Liabilities, Current Liabilities).
+// • Inventories = closing stock at weighted-average cost (same figure as the P&L), not the Stock-in-Hand ledger.
+// • Income/expense ledgers are not closed into a ledger, so profit is worked out here and shown under Equity:
+//     profit to date  = −(income + expense balances) + closing stock − Stock-in-Hand ledger   (keeps the sheet balanced)
+//     profit for year = the P&L net profit from the year's start; previous years = the rest.
+async function fyStartFor(date) {
+  const r = await one('SELECT start_date FROM acc_fiscal_years WHERE start_date <= %s AND end_date >= %s ORDER BY start_date DESC LIMIT 1', [date, date]);
+  return r ? String(r.start_date).slice(0, 10) : null;
+}
+
+async function bsColumn(date, fyStart, ledgers) {
+  const bal = new Map((await q(
+    'SELECT a.id, a.opening_balance + COALESCE(SUM(CASE WHEN v.status = \'posted\' AND v.vdate <= %s THEN l.dr - l.cr END), 0) AS bal'
+    + ' FROM acc_ledgers a LEFT JOIN acc_voucher_lines l ON l.account_id = a.id LEFT JOIN acc_vouchers v ON v.id = l.voucher_id'
+    + ' GROUP BY a.id', [date])).rows.map((r) => [r.id, money(r.bal)]));
+  const moves = await valuate(null, date);
+  const closingStock = stockValueAt(moves, date);
+  let ix = 0, stockLedger = 0;
+  for (const l of ledgers) {
+    const b = bal.get(l.id) || 0;
+    if (l.nature === 'I' || l.nature === 'X') ix += b;
+    if (l.system_key === 'stock') stockLedger += b;
+  }
+  const profitToDate = money(-ix + closingStock - stockLedger);
+  let profitYear = 0;
+  if (fyStart) {
+    const fig = plFigures(await plLedgers(fyStart, date), stockValueAt(moves, addDays(fyStart, -1)), closingStock);
+    profitYear = fig.net_profit;
+  }
+  // amount per ledger, shown the natural way round: assets as debit balance, equity/liabilities as credit balance
+  const amt = new Map();
+  for (const l of ledgers) {
+    if (l.nature === 'I' || l.nature === 'X') continue;
+    const b = l.system_key === 'stock' ? closingStock : (bal.get(l.id) || 0);
+    amt.set(l.id, money(l.nature === 'A' ? b : -b));
+  }
+  return { amt, profitYear, profitPrev: money(profitToDate - profitYear) };
+}
+
+router.get('/reports/balance-sheet', ah(async (req, res) => {
+  const [from, to] = range(req);
+  const groups = (await q('SELECT id, code, name, nature, parent_id, sort FROM acc_groups ORDER BY sort, code')).rows;
+  const ledgers = (await q(
+    'SELECT a.id, a.code, a.name, a.system_key, a.group_id, g.nature FROM acc_ledgers a JOIN acc_groups g ON g.id = a.group_id ORDER BY a.code')).rows;
+
+  const prevAsAt = addDays(from, -1);
+  const prevFyStart = await fyStartFor(prevAsAt);
+  const cols = { cur: await bsColumn(to, from, ledgers) };
+  if (prevFyStart) cols.prev = await bsColumn(prevAsAt, prevFyStart, ledgers);
+  const keys = Object.keys(cols);
+  const zero = () => Object.fromEntries(keys.map((k) => [k, 0]));
+  const add = (t, a) => { for (const k of keys) t[k] = money(t[k] + (a[k] || 0)); };
+  const nonZero = (a) => keys.some((k) => a[k]);
+
+  // group tree: section = child of a root (A/L) or the root itself (E); line = child of the section
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const chain = (g) => { const c = []; for (let x = g; x; x = x.parent_id ? byId.get(x.parent_id) : null) c.unshift(x); return c; };
+  const sections = new Map();   // section group id -> { name, nature, lines: Map(line id -> line) }
+  for (const l of ledgers) {
+    if (l.nature === 'I' || l.nature === 'X') continue;
+    const c = chain(byId.get(l.group_id));
+    const sec = l.nature === 'E' ? c[0] : (c[1] || c[0]);
+    const line = l.nature === 'E' ? (c[1] || c[0]) : (c[2] || c[1] || c[0]);
+    if (!sections.has(sec.id)) sections.set(sec.id, { code: sec.code, name: sec.name, nature: l.nature, sort: sec.sort, lines: new Map() });
+    const s = sections.get(sec.id);
+    if (!s.lines.has(line.id)) s.lines.set(line.id, { code: line.code, name: line.name, sort: line.sort, amt: zero(), ledgers: [] });
+    const ln = s.lines.get(line.id);
+    const a = Object.fromEntries(keys.map((k) => [k, cols[k].amt.get(l.id) || 0]));
+    if (!nonZero(a)) continue;
+    ln.ledgers.push({ id: l.id, name: l.system_key === 'stock' ? `${l.name} (closing stock)` : l.name, amt: a });
+    add(ln.amt, a);
+  }
+  const bySort = (x, y) => (x.sort - y.sort) || String(x.code).localeCompare(String(y.code));
+  const out = (nature) => [...sections.values()].filter((s) => s.nature === nature).sort(bySort).map((s) => {
+    const lines = [...s.lines.values()].sort(bySort).filter((ln) => nonZero(ln.amt));
+    if (nature === 'E') {
+      const prev = Object.fromEntries(keys.map((k) => [k, cols[k].profitPrev]));
+      const year = Object.fromEntries(keys.map((k) => [k, cols[k].profitYear]));
+      if (nonZero(prev)) lines.push({ code: 'pp', name: 'Accumulated profit / (loss) of previous years', amt: prev, ledgers: [] });
+      lines.push({ code: 'py', name: 'Profit / (loss) for the year', amt: year, ledgers: [], profit: true });
+    }
+    const total = zero();
+    for (const ln of lines) add(total, ln.amt);
+    return { code: s.code, name: s.name, lines, total };
+  });
+  const sideTotal = (secs) => { const t = zero(); for (const s of secs) add(t, s.total); return t; };
+  const assets = out('A');
+  const equity = out('E');
+  const liabilities = out('L');
+  const totalAssets = sideTotal(assets);
+  const totalEL = sideTotal([...equity, ...liabilities]);
+  const difference = Object.fromEntries(keys.map((k) => [k, money(totalAssets[k] - totalEL[k])]));
+  res.json({ as_at: to, prev_as_at: prevFyStart ? prevAsAt : null, columns: keys,
+    assets, equity, liabilities, total_assets: totalAssets, total_equity_liabilities: totalEL, difference });
 }));
 
 export default router;

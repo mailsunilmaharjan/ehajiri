@@ -27,6 +27,7 @@ import SimpleVoucher from './pages/SimpleVoucher';
 import JournalHub from './pages/JournalHub';
 import QuoteTemplates from './pages/QuoteTemplates';
 import MenuHub from './pages/MenuHub';
+import BalanceSheet from './pages/BalanceSheet';
 import '../DataGrid/DataGrid.css';   // the grid look (variables + Accounts grid rules) lives in ONE place
 import './accounts.css';
 import './accounts.embed.css';
@@ -65,6 +66,7 @@ function Shell() {
           <Route path="/ledger" element={<Ledger />} />
           <Route path="/trial-balance" element={<TrialBalance />} />
           <Route path="/profit-loss" element={<ProfitLoss />} />
+          <Route path="/balance-sheet" element={<BalanceSheet />} />
           <Route path="/bill-profit" element={<BillProfit />} />
           <Route path="/monthly-profit" element={<MonthlyProfit />} />
           <Route path="/vat-sales" element={<VatSales />} />

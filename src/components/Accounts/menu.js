@@ -19,7 +19,7 @@ export const ACCOUNTS_MENU = [
   { title: 'Reports', icon: 'barChart', items: [
     ['/alerts', 'Alerts (due & expiry)', 'bell'], ['/stock-summary', 'Stock Summary', 'barChart'], ['/stock-ledger', 'Stock Ledger', 'list', 'Ctrl+K'],
     ['/serials', 'Serial No. Search', 'key'], ['/day-book', 'Day Book', 'calendar'], ['/ledger', 'Ledger', 'fileText', 'Ctrl+L'],
-    ['/trial-balance', 'Trial Balance', 'calculator'], ['/profit-loss', 'Profit & Loss Account', 'trendingUp'],
+    ['/trial-balance', 'Trial Balance', 'calculator'], ['/profit-loss', 'Profit & Loss Account', 'trendingUp'], ['/balance-sheet', 'Balance Sheet', 'briefcase'],
     ['/bill-profit', 'Bill-wise Profit & Loss', 'fileText'], ['/monthly-profit', 'Monthly Expenses & Profit', 'barChart'],
     ['/vat-purchase', 'VAT Purchase Book', 'truck'], ['/vat-sales', 'VAT Sales Book', 'fileText'], ['/vat-return', 'VAT Return (IRD)', 'calculator'],
     ['/audit', 'Audit Trail', 'shield'],
@@ -45,9 +45,13 @@ export const ACCOUNTS_HUBS = {
       ['/entry/staff_advance', 'Staff Advance / Loan', 'users'], ['/entry/asset_purchase', 'Asset Purchase', 'fileText'], ['/entry/asset_sale', 'Asset Sale', 'fileText'],
     ] },
   ] },
-  reports: { title: 'Reports', icon: 'barChart', actions: [['/ledger', 'Ledger'], ['/trial-balance', 'Trial Balance'], ['/profit-loss', 'Profit & Loss']], groups: [
-    { title: 'Books & Ledgers', icon: 'fileText', cards: [['/day-book', 'Day Book', 'calendar'], ['/ledger', 'Ledger', 'fileText', 'Ctrl+L'], ['/trial-balance', 'Trial Balance', 'calculator']] },
-    { title: 'Profit & Loss', icon: 'trendingUp', cards: [['/profit-loss', 'Profit & Loss Account', 'trendingUp'], ['/bill-profit', 'Bill-wise Profit & Loss', 'fileText'], ['/monthly-profit', 'Monthly Expenses & Profit', 'barChart']] },
+  reports: { title: 'Reports', icon: 'barChart', groups: [
+    { title: 'Main Audit Reports', icon: 'shield', cards: [
+      ['/ledger', 'Ledger', 'fileText', 'Ctrl+L'], ['/profit-loss', 'Profit & Loss Account', 'trendingUp'],
+      ['/trial-balance', 'Trial Balance', 'calculator'], ['/balance-sheet', 'Balance Sheet', 'briefcase'],
+    ] },
+    { title: 'Books', icon: 'fileText', cards: [['/day-book', 'Day Book', 'calendar']] },
+    { title: 'Profit Analysis', icon: 'trendingUp', cards: [['/bill-profit', 'Bill-wise Profit & Loss', 'fileText'], ['/monthly-profit', 'Monthly Expenses & Profit', 'barChart']] },
     { title: 'Inventory Reports', icon: 'grid', cards: [['/stock-summary', 'Stock Summary', 'barChart'], ['/stock-ledger', 'Stock Ledger', 'list', 'Ctrl+K'], ['/serials', 'Serial No. Search', 'key']] },
     { title: 'VAT Reports (IRD)', icon: 'calculator', cards: [['/vat-purchase', 'VAT Purchase Book', 'truck'], ['/vat-sales', 'VAT Sales Book', 'fileText'], ['/vat-return', 'VAT Return (IRD)', 'calculator']] },
     { title: 'Alerts & Audit', icon: 'bell', cards: [['/alerts', 'Alerts (due & expiry)', 'bell'], ['/audit', 'Audit Trail', 'shield']] },

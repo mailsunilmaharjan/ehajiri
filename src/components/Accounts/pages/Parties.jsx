@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGrid } from '../components/DataGrid';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useSearchParams } from '../lib/router';
 import { useApp } from '../context';
 import { api, fmtBal, fmtMoney, waLink } from '../lib/api';
 import { useShortcuts } from '../lib/keys';
@@ -26,7 +26,10 @@ export default function Parties({ type }) {
   const [picked, setPicked] = useState(new Set());
 
   const load = () => api.get('/parties', { type, include_inactive: true }).then(setRows);
+  const [sp, setSp] = useSearchParams();
   useEffect(() => { load(); setEdit(null); setCur(null); }, [type]);
+  // ?new=1 (from Chart of Accounts → Parties) opens a blank customer / supplier form straight away
+  useEffect(() => { if (sp.get('new') && canEdit) { open(null); setSp({}, { replace: true }); } }, [sp, type]);
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();

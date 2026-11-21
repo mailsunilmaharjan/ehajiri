@@ -43,11 +43,11 @@
 .acc-app .hub-actions .hub-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #0f7b5f; color: #fff; border-radius: 6px; font-size: 14px; font-weight: 600; text-decoration: none; }
 .acc-app .hub-actions .hub-btn:hover { background: #0b624c; }
 .acc-app .hub-cols { column-width: 300px; column-gap: 16px; }
-.acc-app .hub-col { break-inside: avoid; background: #f0f5f6; border: 1px solid #dfe7ea; border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
-.acc-app .hub-col > h2 { display: flex; align-items: center; gap: 10px; margin: 0; padding: 16px 20px; font-size: 17px; font-weight: 600; color: #1f2937; border-bottom: 1px solid #dfe7ea; }
+.acc-app .hub-col { break-inside: avoid; background: #e8eef7; border: 1px solid #cbd7e8; border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+.acc-app .hub-col > h2 { display: flex; align-items: center; gap: 10px; margin: 0; padding: 16px 20px; font-size: 17px; font-weight: 600; color: #0f2a3d; background: #dbe5f3; border-bottom: 1px solid #cbd7e8; }
 .acc-app .hub-list { padding: 8px 0 12px; }
 .acc-app .hub-item { display: flex; align-items: center; gap: 12px; padding: 9px 20px; color: #1f2937; font-size: 15px; text-decoration: none; }
-.acc-app .hub-item:hover { background: #e3edf0; color: #1a56db; }
+.acc-app .hub-item:hover { background: #d3e0f2; color: #1a56db; }
 .acc-app .hub-item kbd { margin-left: auto; font-size: 10px; color: #9ca3af; }
 
 /* Default (solid) buttons in Accounts: blue with white text, like the Staff list "Working" toggle (sizes: ui-kit.css, body .acc-app).
@@ -56,3 +56,48 @@
 .acc-app button:hover:not(:disabled), .acc-app a.btn:hover { background: var(--acc-btn-bg-hover, #1245b0); border-color: var(--acc-btn-bg-hover, #1245b0); color: #fff; }
 .acc-app .hub-actions .hub-btn { height: 30px; padding: 0 11px; font-size: 12px; font-weight: 600; border-radius: 6px; background: var(--acc-btn-bg, #1a56db); }
 .acc-app .hub-actions .hub-btn:hover { background: var(--acc-btn-bg-hover, #1245b0); }
+
+/* Balance Sheet */
+.acc-app .bs-table td.indent3 { padding-left: 58px; font-size: 12.5px; }
+.acc-app .bs-table tr.bs-profit td { font-style: italic; }
+.acc-app .bs-table tr.bs-diff td { color: #b91c1c; font-weight: 600; }
+.acc-app .bs-table th small { font-weight: 400; color: #64748b; }
+
+/* Chart of Accounts — statement view (pages/CoaStatement.jsx) */
+.acc-app .coa-viewtg { display: inline-flex; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; }
+.acc-app .coa-viewtg button { border: 0 !important; border-radius: 0 !important; }
+.acc-app .coa-viewtg button.ghost { background: #fff; color: #374151; }
+.acc-app .coa-st-quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.acc-app .coa-st-card { display: flex; flex-direction: column; gap: 8px; background: #e8eef7; border: 1px solid #cbd7e8; border-radius: 12px; padding: 12px 14px; }
+.acc-app .coa-st-card h3 { margin: 0; font-size: 15px; font-weight: 600; color: #0f2a3d; display: flex; gap: 8px; align-items: center; }
+.acc-app .coa-st-card h3 b { margin-left: auto; font-size: 12px; background: #fff; border: 1px solid #cbd7e8; border-radius: 10px; padding: 0 8px; color: #475569; }
+.acc-app .coa-st-card > button { align-self: flex-start; }
+.acc-app .coa-st-list { background: #fff; border: 1px solid #dbe3ef; border-radius: 8px; max-height: 190px; overflow: auto; padding: 4px 0; flex: 1; }
+.acc-app .coa-st-list p { margin: 8px 12px; }
+.acc-app .coa-st-party { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #eef2f7; }
+.acc-app .coa-st-party:last-child { border-bottom: 0; }
+.acc-app .coa-st-party > span { flex: 1; display: flex; flex-direction: column; }
+.acc-app .coa-st-party small { color: #64748b; font-size: 12px; }
+.acc-app .coa-st-diff { margin: 0; font-size: 12px; font-weight: 600; }
+.acc-app .coa-st-diff.ok { color: #047857; }
+.acc-app .coa-st-diff.bad { color: #b91c1c; }
+.acc-app .coa-st-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .acc-app .coa-st-cols { grid-template-columns: 1fr; } }
+.acc-app .coa-st-side { background: #fff; border: 1px solid #cbd7e8; border-radius: 12px; overflow: hidden; align-self: start; }
+.acc-app .coa-st-side > h2 { margin: 0; padding: 10px 14px; font-size: 14px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: #0f2a3d; background: #dbe5f3; border-bottom: 1px solid #cbd7e8; }
+.acc-app .coa-st-grp { padding-left: 14px; }
+.acc-app .coa-st-grp.d0 { padding-left: 0; }
+.acc-app .coa-st-gh { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 0; border-bottom: 1px solid #eef2f7; }
+.acc-app .coa-st-grp.d0 > .coa-st-gh { padding-left: 14px; background: #f1f5f9; font-weight: 700; color: #1e3a8a; }
+.acc-app .coa-st-grp.d1 > .coa-st-gh { font-weight: 700; color: #0f2a3d; }
+.acc-app .coa-st-grp.d2 > .coa-st-gh, .acc-app .coa-st-grp.d3 > .coa-st-gh { font-weight: 600; color: #334155; }
+.acc-app .coa-st-gh .nm { flex: 1; font-size: 13px; }
+.acc-app button.coa-st-add { font-size: 12px !important; padding: 0 6px !important; height: auto !important; min-height: 0 !important; background: none !important; border: 0 !important; color: #1a56db !important; font-weight: 600; }
+.acc-app button.coa-st-add:hover { text-decoration: underline; }
+.acc-app .coa-st-led { display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 16px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #f4f6fa; }
+.acc-app .coa-st-led:hover { background: #eef4fd; }
+.acc-app .coa-st-led .nm { flex: 1; }
+.acc-app .coa-st-led .nm small { color: #64748b; }
+.acc-app .coa-st-led .amt { font-variant-numeric: tabular-nums; color: #334155; min-width: 110px; text-align: right; }
+.acc-app .coa-st-led.off { opacity: .55; }
+.acc-app .coa-st-led.party .nm { color: #1a56db; font-weight: 600; }

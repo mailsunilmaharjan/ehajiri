@@ -7,6 +7,7 @@ import { DeleteDialog } from '../components/Guards';
 import { api, fmtBal } from '../lib/api';
 import { useShortcuts } from '../lib/keys';
 import { Amount, Kbd, LastSaved } from '../components/inputs';
+import CoaStatement from './CoaStatement';
 
 const NATURE = { A: 'Dr', X: 'Dr', L: 'Cr', E: 'Cr', I: 'Cr' };
 const NATURES = [['A', 'Assets'], ['L', 'Liabilities'], ['E', 'Equity'], ['I', 'Income'], ['X', 'Expenses']];
@@ -33,6 +34,9 @@ export default function ChartOfAccounts() {
   const [edit, setEdit] = useState(null);              // ledger form
   const [newGroup, setNewGroup] = useState(null);
   const [delLedger, setDelLedger] = useState(null);    // system ledger waiting for admin password
+  // 'statement' = Balance-Sheet style blocks (default); 'tree' = the classic grid with the sub-group tools
+  const [view, setView] = useState(() => { try { return localStorage.getItem('acc.coa.view') || 'statement'; } catch { return 'statement'; } });
+  const pickView = (v) => { setView(v); try { localStorage.setItem('acc.coa.view', v); } catch { /* private mode */ } };
 
   const firstLoad = useRef(true);
   const load = async () => {
@@ -69,7 +73,8 @@ export default function ChartOfAccounts() {
     e?.preventDefault();
     if (!edit) return;
     const amt = Number(edit.amount || 0);
-    const body = { ...edit, opening_balance: edit.side === 'Cr' ? -amt : amt, group_id: Number(edit.group_id) };
+    const { lock: _lock, ...rest } = edit;
+    const body = { ...rest, opening_balance: edit.side === 'Cr' ? -amt : amt, group_id: Number(edit.group_id) };
     try {
       const row = edit.id ? await api.put(`/accounts/${edit.id}`, body) : await api.post('/accounts', body);
       await load(); await reload();
@@ -187,14 +192,15 @@ export default function ChartOfAccounts() {
     catch (err) { notify(err.message, 'err'); }
   };
 
-  const openLedger = (a, groupId, kind = 'general') => {
+  /** lock = 'bank' | 'cash': a New Bank / Cash Account form — group fixed to Cash and Cash Equivalents, type fixed. */
+  const openLedger = (a, groupId, kind = 'general', lock = null) => {
     setQrBroken(false);
     if (a) {
       const ob = Number(a.opening_balance);
       setEdit({ ...a, amount: Math.abs(ob) || '', side: ob < 0 ? 'Cr' : ob > 0 ? 'Dr' : NATURE[a.nature], active: !!a.active });
     } else {
       const g = groups.find((x) => x.id === groupId) || groups.find((x) => x.parent_id);
-      setEdit({ name: '', name_np: '', group_id: g?.id, kind, amount: '', side: NATURE[g?.nature] || 'Dr', active: true });
+      setEdit({ name: '', name_np: '', group_id: g?.id, kind, amount: '', side: NATURE[g?.nature] || 'Dr', active: true, lock });
     }
   };
 
@@ -252,11 +258,20 @@ export default function ChartOfAccounts() {
         <span className="muted">NFRS for SMEs · {accounts.length} ledgers</span>
         <span className="spacer" />
         <input className="coa2-search" data-find title="Ctrl+F" placeholder="🔍 Search ledger, code, A/c no…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="ghost" onClick={collapseAll}>{allCollapsed ? 'Expand all' : 'Collapse all'}</button>
+        <span className="view-toggle coa-viewtg">
+          <button type="button" className={view === 'statement' ? 'on' : 'ghost'} onClick={() => pickView('statement')}>Statement view</button>
+          <button type="button" className={view === 'tree' ? 'on' : 'ghost'} onClick={() => pickView('tree')}>Tree view</button>
+        </span>
+        {view === 'tree' && <button className="ghost" onClick={collapseAll}>{allCollapsed ? 'Expand all' : 'Collapse all'}</button>}
         {canEdit && <button data-new title="Alt+N" onClick={() => openLedger(null, null)}>＋ New Ledger</button>}
       </header>
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
 
+      {view === 'statement' && (
+        <CoaStatement groups={groups} accounts={accounts} q={q} canEdit={canEdit} openingDiff={openingDiff}
+          openLedger={openLedger} nav={nav} onMenu={(e, a) => canEdit && ledgerMenu(e, a)} />
+      )}
+      {view === 'tree' && <>
       <div className="coa2-summary">
         <button className={`coa2-pill ${!nature ? 'on' : ''}`} onClick={() => setNature('')}>All <b>{accounts.length}</b></button>
         {NATURES.map(([k, l]) => (
@@ -347,14 +362,18 @@ export default function ChartOfAccounts() {
           </table>
         </div>
       </section>
+      </>}
       {edit && (
         <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setEdit(null)}>
           <form className="card form acc-cardform" onSubmit={saveLedger}>
-            <h2 className="acc-head"><span className="acc-head-ic">{edit.id ? '✏️' : '＋'}</span><span className="acc-head-txt">{edit.id ? 'Edit Ledger' : 'New Ledger'}{edit.system_key && <span className="tag"> system</span>}<small>{edit.id ? 'Update this ledger account' : 'Create a ledger account in the chart of accounts'}</small></span></h2>
+            <h2 className="acc-head"><span className="acc-head-ic">{edit.id ? '✏️' : '＋'}</span><span className="acc-head-txt">{edit.id ? 'Edit Ledger' : edit.lock === 'bank' ? 'New Bank Account' : edit.lock === 'cash' ? 'New Cash Account' : 'New Ledger'}{edit.system_key && <span className="tag"> system</span>}<small>{edit.id ? 'Update this ledger account' : 'Create a ledger account in the chart of accounts'}</small></span></h2>
             <div className="acc-card">
             <div className="acc-step"><i>1</i>Ledger details</div>
             <label>Name<input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} required /></label>
             <label>Name in Nepali<input value={edit.name_np || ''} onChange={(e) => setEdit({ ...edit, name_np: e.target.value })} /></label>
+            {edit.lock ? (
+              <label>Under<input readOnly tabIndex={-1} value={`${groups.find((g) => g.id === Number(edit.group_id))?.name || ''} · ${edit.lock === 'bank' ? 'Bank' : 'Cash'} ledger`} /></label>
+            ) : <>
             <label>Group
               <select value={edit.group_id || ''} onChange={(e) => setEdit({ ...edit, group_id: e.target.value })}>
                 {groups.filter((g) => g.parent_id).map((g) => <option key={g.id} value={g.id}>{g.code} — {g.name}</option>)}
@@ -365,6 +384,7 @@ export default function ChartOfAccounts() {
                 {KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </label>
+            </>}
             <label>Opening balance
               <span className="inline">
                 <Amount type="number" step="0.01" min="0" value={edit.amount} onChange={(e) => setEdit({ ...edit, amount: e.target.value })} />
