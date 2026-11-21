@@ -249,12 +249,14 @@ export default function Products() {
         <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setEdit(null)}>
           <form className="card party-full prod-full" onSubmit={(e) => { e.preventDefault(); save(); }} autoComplete="off">
             <div className="pf-title">
-              <h2>{edit.id ? '✏️ Edit Product' : '➕ New Product'}</h2>
+              <span className="acc-head-ic">{edit.id ? '✏️' : '＋'}</span>
+              <span className="acc-head-txt"><h2>{edit.id ? 'Edit Product' : 'New Product'}</h2><small>{edit.id ? 'Update product details, rates and stock' : 'Add a product with rates, warranty and specifications'}</small></span>
               {edit.id && <span className="dt-no">{edit.code}</span>}
               {edit.id && !edit.active && <span className="tag">inactive</span>}
             </div>
 
             <div className="doc-form pf-top">
+              <div className="acc-step"><i>1</i>Product details</div>
               <label className="pc4">Product Name *<input autoFocus name="name" autoComplete="nope" value={edit.name} onChange={set('name')} required placeholder="e.g. ZKTeco K40 Pro Attendance Device" /></label>
               <label className="pc2">Type
                 <select value={edit.item_type} onChange={set('item_type')}>
@@ -299,7 +301,7 @@ export default function Products() {
               {edit.id && <label className="check"><input type="checkbox" checked={edit.active} onChange={set('active')} /> Active</label>}
             </div>
 
-            <div className="section-label">💰 RATES</div>
+            <div className="acc-step acc-step-out"><i>2</i>Rates</div>
             <div className="doc-form pay-row pf-rates">
               <label>MRP (Rs)<Amount type="number" step="0.01" min="0" autoComplete="nope" value={edit.mrp} onChange={set('mrp')} placeholder="0.00" /></label>
               <label>VAT Type
@@ -332,7 +334,7 @@ export default function Products() {
               <label>Purchase Cost (excl. VAT)<Amount type="number" step="0.01" min="0" autoComplete="nope" value={edit.purchase_price} onChange={set('purchase_price')} placeholder="0.00" /></label>
             </div>
 
-            <div className="section-label">{isService ? '🛠️ SERVICE' : '📦 WARRANTY, SERIAL NUMBERS & STOCK'}</div>
+            <div className="acc-step acc-step-out"><i>3</i>{isService ? 'Service' : 'Warranty, serial numbers & stock'}</div>
             {isService ? (
               <div className="doc-form pf-top">
                 <label>Service Period (months)
@@ -357,13 +359,13 @@ export default function Products() {
               </div>
             )}
 
-            <div className="section-label">📝 FEATURES / DETAILS</div>
+            <div className="acc-step acc-step-out"><i>4</i>Features / details</div>
             <label className="pf-features">
               <textarea rows={3} value={edit.features} onChange={set('features')}
                 placeholder={'First line is shown in bold, e.g.\nBiometric Finger + RFID Card + PIN\nBattery Backup inbuilt 4 hours'} />
             </label>
 
-            <div className="section-label">📋 SPECIFICATIONS</div>
+            <div className="acc-step acc-step-out"><i>5</i>Specifications</div>
             <table className="spec-grid">
               <thead><tr><th>Attribute</th><th>Value</th><th /></tr></thead>
               <tbody>{edit.specs.map(([k, v], i) => (
