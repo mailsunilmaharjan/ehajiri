@@ -4030,9 +4030,11 @@ const Settings = () => {
                 {activeSetup === 'post' && (
                   <SetupSection
                     title={L('पद','Post')}
+                    formCols={2}
+                    formStep={L('पद विवरण','Post details')}
                     data={[...(settings.posts || [])].sort((a,b)=>(a.rankingOrder??9999)-(b.rankingOrder??9999))}
                     fields={[
-                      { key:'name',         header:L('पदको नाम','Post Name'), required:true },
+                      { key:'name',         header:L('पदको नाम','Post Name'), required:true, full:true },
                       { key:'shortName',    header:L('संक्षिप्त नाम','Short Name') },
                       { key:'rankingOrder', header:L('क्रम','Ranking Order'), type:'number', placeholder:'1' },
                       { key:'isDefault',    header:L('डिफल्ट','Default'), type:'boolean' },
