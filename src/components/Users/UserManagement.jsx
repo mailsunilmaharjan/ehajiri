@@ -92,20 +92,20 @@ const DateInput = forwardRef(({ value, onChange, error }, ref) => {
 
 /* ── Row colors — very subtle tints per row index ── */
 const ROW_BG = [
-  '#ffffff',  // white
-  '#f7faff',  // barely blue
-  '#f7fef9',  // barely green
-  '#fffefc',  // barely amber
-  '#fdf9ff',  // barely purple
-  '#fff8f9',  // barely rose
+  '#ffffff',  // white (card style — same on every row)
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
+  '#ffffff',
   '#f7fdfc',  // barely teal
   '#fafaff',  // barely indigo
 ];
 
 /* ── Panel card ── */
 const Panel = ({ title, children }) => (
-  <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius-md)', overflow:'hidden' }}>
-    <div style={{ padding:'8px 14px', borderBottom:'1px solid var(--border)', background:'#f0f5fb', fontSize:11, fontWeight:700, color:'#4b6a8a', letterSpacing:'.6px', textTransform:'uppercase' }}>
+  <div style={{ border:'1px solid #e8edf5', borderRadius:12, overflow:'hidden', background:'#fff', boxShadow:'0 1px 2px rgba(15,23,42,.04)' }}>
+    <div style={{ padding:'10px 14px', borderBottom:'1px solid #eef2f7', background:'#fff', fontSize:12.5, fontWeight:700, color:'#0f172a' }}>
       {title}
     </div>
     <div>{children}</div>
@@ -2423,137 +2423,7 @@ const UserManagement = () => {
       {/* ── Advanced Search Modal Popup ── */}
       {showAdvSearch && (() => {
         /* ── Multi-checkbox select dropdown ── */
-        const MCS = ({ label, value, onChange, options }) => {
-          const [open, setOpen] = React.useState(false);
-          const [srch, setSrch] = React.useState('');
-          const [activeIndex, setActiveIndex] = React.useState(-1);
-          const ref  = React.useRef(null);
-          const itemRefs = React.useRef([]);
-          React.useEffect(() => {
-            const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-            document.addEventListener('mousedown', h);
-            return () => document.removeEventListener('mousedown', h);
-          }, []);
-          const filtered = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
-          // "All" is always row 0 in the navigable list, followed by the filtered options
-          const navItems = [null, ...filtered];
-          itemRefs.current = [];
-          const toggle   = v  => onChange(value.includes(v) ? value.filter(x=>x!==v) : [...value, v]);
-          const selectNav = v => v === null ? onChange([]) : toggle(v);
-          const selLabel = value.length === 0 ? 'All'
-            : value.length === 1 ? value[0]
-            : `${value.length} selected`;
-          const openWithHighlight = () => {
-            const idx = value.length === 1 ? navItems.findIndex(v => v === value[0]) : 0;
-            setActiveIndex(idx >= 0 ? idx : 0);
-            setOpen(true);
-          };
-          const handleTriggerKeyDown = e => {
-            if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-              e.preventDefault();
-              open ? setOpen(false) : openWithHighlight();
-            } else if (e.key === 'Escape') {
-              setOpen(false);
-            }
-          };
-          const handleSearchKeyDown = e => {
-            if (e.key === 'ArrowDown') {
-              e.preventDefault();
-              setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
-            } else if (e.key === 'ArrowUp') {
-              e.preventDefault();
-              setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
-            } else if (e.key === 'Enter') {
-              e.preventDefault();
-              if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
-            } else if (e.key === 'Escape') {
-              e.preventDefault();
-              setOpen(false);
-            }
-          };
-          React.useEffect(() => {
-            if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
-          }, [activeIndex, open]);
-          React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
-
-          return (
-            <div ref={ref} style={{ position:'relative' }}>
-              <div style={{ fontSize:12, fontWeight:700, color:'#1f2937', marginBottom:5 }}>{label}</div>
-              <div
-                tabIndex={0}
-                onKeyDown={handleTriggerKeyDown}
-                onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
-                style={{
-                  display:'flex', alignItems:'center', justifyContent:'space-between',
-                  padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
-                  borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
-                  color: value.length>0 ? '#1e40af' : '#9ca3af',
-                  minHeight:42, fontWeight: value.length>0 ? 600 : 400,
-                  boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none',
-                  outline:'none', userSelect:'none',
-                }}>
-                <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
-                <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
-                  {value.length > 0 && (
-                    <span style={{ background:'#1a56db', color:'white', borderRadius:10,
-                      fontSize:10, fontWeight:700, padding:'1px 6px', minWidth:18, textAlign:'center' }}>
-                      {value.length}
-                    </span>
-                  )}
-                  {value.length > 0 && (
-                    <span onMouseDown={e=>{ e.preventDefault(); e.stopPropagation(); onChange([]); }}
-                      style={{ color:'#9ca3af', fontSize:16, lineHeight:1, cursor:'pointer' }}
-                      onMouseEnter={e=>e.currentTarget.style.color='#ef4444'}
-                      onMouseLeave={e=>e.currentTarget.style.color='#9ca3af'}>×</span>
-                  )}
-                  <span style={{ fontSize:9, color:'#9ca3af' }}>{open?'▲':'▼'}</span>
-                </div>
-              </div>
-              {open && (
-                <div style={{
-                  position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
-                  background:'white', border:'1.5px solid #1a56db', borderRadius:8,
-                  boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220,
-                  display:'flex', flexDirection:'column',
-                }}>
-                  {/* always show search box */}
-                  <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
-                    <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
-                      placeholder="Search..."
-                      onClick={e=>e.stopPropagation()}
-                      onKeyDown={handleSearchKeyDown}
-                      style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px',
-                        fontSize:12, outline:'none', boxSizing:'border-box' }} />
-                  </div>
-                  <div style={{ overflowY:'auto', flex:1 }}>
-                    {navItems.map((v, i) => {
-                      const isAll = v === null;
-                      const sel   = isAll ? value.length === 0 : value.includes(v);
-                      const highlighted = i === activeIndex;
-                      return (
-                        <div key={v ?? '__all'} ref={el => itemRefs.current[i] = el}
-                          onMouseDown={e=>{e.preventDefault(); selectNav(v);}}
-                          onMouseEnter={() => setActiveIndex(i)}
-                          style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
-                            background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
-                            borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
-                          <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`,
-                            background: sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                            {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
-                          </span>
-                          <span style={{ fontSize:13, color: sel?'#1e40af':'#374151', fontWeight: sel?600:400 }}>{isAll ? 'All' : v}</span>
-                        </div>
-                      );
-                    })}
-                    {filtered.length === 0 && (
-                      <div style={{ padding:'10px 11px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
+        /* MCS lives at module level (bottom of file): defined inside this render it was a new component type every render, so the dropdown remounted and closed after each tick. */
 
         /* Enter key → Tab in modal */
         const handleEnterTab = (e) => {
@@ -2713,6 +2583,10 @@ const UserManagement = () => {
         showFilterButton={false}
         searchPlaceholder={t('Search')+'...'}
         compact={true}
+        fillToBottom
+        remarks={(row) => (
+          <div><b>Remarks — {row.fullName}{row.employeeId ? ` (${row.employeeId})` : ''}:</b> {row.remarks ? row.remarks : <span className="dg-muted">no remarks for this staff member</span>}</div>
+        )}
         onRowDoubleClick={canManageStaff ? (row) => openEdit(row, false) : undefined}
         onDeleteKey={canManageStaff ? (row) => setDeleteConfirm(row.id) : null}
         contextMenu={canManageStaff ? [
@@ -2760,7 +2634,7 @@ const UserManagement = () => {
           drawer instead of the centered popup used for Add/Edit Staff. */}
       {modal && (
         <div className={`modal-overlay ${quickDeviceView ? 'modal-drawer-overlay' : ''}`}>
-          <div className={`modal ${quickDeviceView ? 'modal-drawer' : ''}`} ref={modalBodyRef}
+          <div className={`modal ${quickDeviceView ? 'modal-drawer' : 'glm-form'}`} ref={modalBodyRef}
             style={{
               maxWidth: quickDeviceView ? 480 : 1100,
               maxHeight: quickDeviceView ? undefined : '95vh',
@@ -2869,7 +2743,7 @@ const UserManagement = () => {
                       <input type="email" className={`form-control ${errors.email?'error':''}`} style={{ fontSize:13 }}
                         ref={el => (staffFieldRefs.current.email = el)}
                         placeholder="name@company.com" value={form.email}
-                        onChange={e => handleChange('email', e.target.value)} />
+                        onChange={e => handleChange('email', e.target.value.toLowerCase())} />
                       {errors.email && <div className="form-error">{errors.email}</div>}
                     </Fg>
                     <Fg idx={0}>
@@ -3450,3 +3324,136 @@ const UserManagement = () => {
 };
 
 export default UserManagement;
+
+/* Multi-checkbox select dropdown — stays open while ticking several options */
+const MCS = ({ label, value, onChange, options }) => {
+  const [open, setOpen] = React.useState(false);
+  const [srch, setSrch] = React.useState('');
+  const [activeIndex, setActiveIndex] = React.useState(-1);
+  const ref  = React.useRef(null);
+  const itemRefs = React.useRef([]);
+  React.useEffect(() => {
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const filtered = srch ? options.filter(o => o.toLowerCase().includes(srch.toLowerCase())) : options;
+  // "All" is always row 0 in the navigable list, followed by the filtered options
+  const navItems = [null, ...filtered];
+  itemRefs.current = [];
+  const toggle   = v  => onChange(value.includes(v) ? value.filter(x=>x!==v) : [...value, v]);
+  const selectNav = v => v === null ? onChange([]) : toggle(v);
+  const selLabel = value.length === 0 ? 'All'
+    : value.length === 1 ? value[0]
+    : `${value.length} selected`;
+  const openWithHighlight = () => {
+    const idx = value.length === 1 ? navItems.findIndex(v => v === value[0]) : 0;
+    setActiveIndex(idx >= 0 ? idx : 0);
+    setOpen(true);
+  };
+  const handleTriggerKeyDown = e => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      open ? setOpen(false) : openWithHighlight();
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+  const handleSearchKeyDown = e => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (navItems.length ? (i + 1) % navItems.length : -1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (navItems.length ? (i - 1 + navItems.length) % navItems.length : -1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && activeIndex < navItems.length) selectNav(navItems[activeIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+  React.useEffect(() => {
+    if (open && activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+  React.useEffect(() => { if (open) setActiveIndex(navItems.length ? 0 : -1); }, [srch]);
+
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      <div style={{ fontSize:12, fontWeight:700, color:'#1f2937', marginBottom:5 }}>{label}</div>
+      <div
+        tabIndex={0}
+        onKeyDown={handleTriggerKeyDown}
+        onClick={() => { open ? setOpen(false) : openWithHighlight(); }}
+        style={{
+          display:'flex', alignItems:'center', justifyContent:'space-between',
+          padding:'8px 10px', border:`1.5px solid ${open?'#1a56db':'#d1d5db'}`,
+          borderRadius:7, background:'white', cursor:'pointer', fontSize:13,
+          color: value.length>0 ? '#1e40af' : '#9ca3af',
+          minHeight:42, fontWeight: value.length>0 ? 600 : 400,
+          boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none',
+          outline:'none', userSelect:'none',
+        }}>
+        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>{selLabel}</span>
+        <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0, marginLeft:6 }}>
+          {value.length > 0 && (
+            <span style={{ background:'#1a56db', color:'white', borderRadius:10,
+              fontSize:10, fontWeight:700, padding:'1px 6px', minWidth:18, textAlign:'center' }}>
+              {value.length}
+            </span>
+          )}
+          {value.length > 0 && (
+            <span onMouseDown={e=>{ e.preventDefault(); e.stopPropagation(); onChange([]); }}
+              style={{ color:'#9ca3af', fontSize:16, lineHeight:1, cursor:'pointer' }}
+              onMouseEnter={e=>e.currentTarget.style.color='#ef4444'}
+              onMouseLeave={e=>e.currentTarget.style.color='#9ca3af'}>×</span>
+          )}
+          <span style={{ fontSize:9, color:'#9ca3af' }}>{open?'▲':'▼'}</span>
+        </div>
+      </div>
+      {open && (
+        <div style={{
+          position:'absolute', top:'calc(100% + 3px)', left:0, right:0, zIndex:9999,
+          background:'white', border:'1.5px solid #1a56db', borderRadius:8,
+          boxShadow:'0 8px 24px rgba(0,0,0,.18)', maxHeight:220,
+          display:'flex', flexDirection:'column',
+        }}>
+          {/* always show search box */}
+          <div style={{ padding:'6px 8px', borderBottom:'1px solid #e5e7eb', flexShrink:0 }}>
+            <input autoFocus type="text" value={srch} onChange={e=>setSrch(e.target.value)}
+              placeholder="Search..."
+              onClick={e=>e.stopPropagation()}
+              onKeyDown={handleSearchKeyDown}
+              style={{ width:'100%', border:'1px solid #d1d5db', borderRadius:5, padding:'5px 8px',
+                fontSize:12, outline:'none', boxSizing:'border-box' }} />
+          </div>
+          <div style={{ overflowY:'auto', flex:1 }}>
+            {navItems.map((v, i) => {
+              const isAll = v === null;
+              const sel   = isAll ? value.length === 0 : value.includes(v);
+              const highlighted = i === activeIndex;
+              return (
+                <div key={v ?? '__all'} ref={el => itemRefs.current[i] = el}
+                  onMouseDown={e=>{e.preventDefault(); selectNav(v);}}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  style={{ padding:'8px 11px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                    background: sel ? '#eff6ff' : (highlighted ? '#f8fafc' : 'white'),
+                    borderBottom: isAll ? '1px solid #f1f5f9' : '1px solid #f9fafb' }}>
+                  <span style={{ width:14, height:14, borderRadius:3, flexShrink:0, border:`2px solid ${sel?'#1a56db':'#d1d5db'}`,
+                    background: sel?'#1a56db':'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    {sel && <svg viewBox="0 0 12 12" fill="none" width="9" height="9"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>}
+                  </span>
+                  <span style={{ fontSize:13, color: sel?'#1e40af':'#374151', fontWeight: sel?600:400 }}>{isAll ? 'All' : v}</span>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div style={{ padding:'10px 11px', fontSize:12, color:'#9ca3af', textAlign:'center' }}>No results</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

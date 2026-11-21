@@ -1319,7 +1319,7 @@ const LeavePanel = () => {
 
         return (
           <div className="modal-overlay">
-            <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'90vh', overflowY:'auto' }}
+            <div className="modal modal-lg glm-form glm-plain" style={{ maxWidth:680, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
               <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>✏️ Edit Leave Application #{editLeave.id}</h2>
@@ -1811,7 +1811,7 @@ const LeavePanel = () => {
 
         return (
           <div className="modal-overlay">
-            <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'92vh', overflowY:'auto' }}
+            <div className="modal modal-lg glm-form glm-plain" style={{ maxWidth:680, maxHeight:'92vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
 
               {/* Header */}
@@ -3360,7 +3360,7 @@ const VisitPanel = () => {
 
         return (
           <div className="modal-overlay">
-            <div className="modal modal-lg" style={{ maxWidth:680, maxHeight:'90vh', overflowY:'auto' }}
+            <div className="modal modal-lg glm-form glm-plain" style={{ maxWidth:680, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
               <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
                 <h2>✏️ Edit Office Visit Application #{editVisit.id}</h2>
