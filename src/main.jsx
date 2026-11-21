@@ -7,9 +7,11 @@ import { LanguageProvider } from './context/LanguageContext.jsx'
 import { DataProvider }     from './context/DataContext.jsx'
 import { SettingsProvider } from './context/SettingsContext.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
+import SelectEnhancer from './components/Common/SelectEnhancer.jsx'
 import { installGlobalErrorReporting } from './utils/bugReporter.js'
 import { getTenantPrefix } from './utils/tenantPath.js'
 import { installUploadGuard } from './utils/uploadGuard.js'
+import { installButtonTags } from './utils/buttonTags.js'
 import { reloadOnceForChunkError } from './utils/chunkReload.js'
 import './index.css'
 import './ui-kit.css'
@@ -27,6 +29,9 @@ window.addEventListener('vite:preloadError', (e) => {
 
 // Blocks programs / scripts / disguised files the moment they are picked in any file input (server re-checks every upload).
 installUploadGuard()
+
+// Print buttons blue, Export buttons green — the same on every page (see utils/buttonTags.js + ui-kit.css).
+installButtonTags()
 
 // Registers the (deliberately no-op / non-caching) service worker so the
 // browser recognizes the app as installable — see public/service-worker.js
@@ -49,6 +54,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <SettingsProvider>
               <DataProvider>
                 <App />
+                <SelectEnhancer />
               </DataProvider>
             </SettingsProvider>
           </AuthProvider>

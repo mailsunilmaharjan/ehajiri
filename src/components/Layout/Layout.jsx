@@ -49,6 +49,9 @@ const Layout = ({ children }) => {
   /* ── 1. ESC + Enter-as-Tab ── */
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // a drop-down list (SearchableSelect / the global select list) already handled this key —
+      // e.g. Esc closes just the open list, Enter picks the highlighted option
+      if (e.defaultPrevented || document.querySelector('[data-dd-open]')) return;
       // Find the topmost open modal overlay
       const overlays = document.querySelectorAll('.modal-overlay');
       if (!overlays.length) return;

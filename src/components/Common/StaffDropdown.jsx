@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Avatar from './Avatar.jsx';
+import { SEARCH_ICON } from './FloatingPanel.icons.jsx';
 
 /* ── Searchable Staff Dropdown ───────────────────────────────── */
 const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
@@ -112,15 +113,17 @@ const StaffDropdown = ({ employees, value, onChange, autoOpen = false }) => {
         </svg>
       </div>
       {open && rect && createPortal(
-        <div ref={dropRef} style={{ position: 'fixed', top: rect.top, left: rect.left, width: rect.width, zIndex: 999999,
-          background: 'white', border: '1px solid #e5e7eb', borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,.12)', overflow: 'hidden' }}>
-          <div style={{ padding: '8px' }}>
-            <input ref={inpRef} value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by name, department, attendance ID…"
-              onKeyDown={handleSearchKeyDown}
-              style={{ width: '100%', height: 32, border: '1px solid #d1d5db', borderRadius: 6,
-                padding: '0 10px', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
+        <div ref={dropRef} data-dd-open="" style={{ position: 'fixed', top: rect.top, left: rect.left, width: rect.width, zIndex: 999999,
+          background: 'white', border: '1.5px solid var(--ui-dd-border, #1a56db)', borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,.18)', overflow: 'hidden' }}>
+          <div style={{ padding: 6, borderBottom: '1px solid #eef2f7' }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: '#fff' }}>
+              {SEARCH_ICON}
+              <input ref={inpRef} value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search by name, department, attendance ID…"
+                onKeyDown={handleSearchKeyDown}
+                style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, flex: 1, minWidth: 0, fontFamily: 'inherit' }} />
+            </div>
           </div>
           <div style={{ maxHeight: 200, overflowY: 'auto' }}>
             {filtered.length === 0

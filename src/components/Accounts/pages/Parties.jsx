@@ -113,7 +113,7 @@ export default function Parties({ type }) {
       </header>
       <div className="pdc-bar">
         <span className="tb-search"><input data-find title="Ctrl+F" value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="🔍 Search name, PAN, phone, address, contact…" />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
+          placeholder="Search name, PAN, phone, address, contact…" />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
         <label className="check small"><input type="checkbox" checked={onlyDue} onChange={(e) => setOnlyDue(e.target.checked)} /> Only with balance</label>
         <span className="spacer" />
         <span className="muted small">{shown.length} of {rows.length}</span>

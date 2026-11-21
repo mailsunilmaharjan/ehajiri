@@ -17,6 +17,8 @@
  */
 import React, { useState, useRef, useEffect } from 'react';
 import Avatar from './Avatar.jsx';
+import FloatingPanel from './FloatingPanel.jsx';
+import { SEARCH_ICON } from './FloatingPanel.icons.jsx';
 
 /* ── Checkbox row item ─────────────────────────────────────── */
 const OptionRow = ({ label, sub, photo, showAvatar, checked, highlighted, stripeBg, onClick, onMouseEnter, itemRef }) => {
@@ -86,7 +88,8 @@ const SearchableCheckSelect = ({
   // Close on outside click
   useEffect(() => {
     const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) {
+      // a click inside the open list (drawn on top of the page) is not "outside"
+      if (ref.current && !ref.current.contains(e.target) && !e.target.closest?.('[data-dd-open]')) {
         setOpen(false);
         setSearch('');
       }
@@ -169,7 +172,7 @@ const SearchableCheckSelect = ({
           display:'flex', alignItems:'center', justifyContent:'space-between',
           padding:'8px 12px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
           borderRadius:8, background:'white', cursor:'pointer', fontSize:13,
-          color: value ? '#1e40af' : '#374151', height:40, userSelect:'none',
+          color: value ? '#1e40af' : '#374151', height:38, boxSizing:'border-box', userSelect:'none',
           boxShadow: open ? '0 0 0 2px rgba(26,86,219,.1)' : 'none',
           transition:'border-color .12s, box-shadow .12s',
           fontWeight: value ? 600 : 400, outline:'none',
@@ -189,33 +192,25 @@ const SearchableCheckSelect = ({
         </svg>
       </div>
 
-      {/* ── Dropdown panel ── */}
-      {open && (
-        <div style={{
-          position:'absolute', top:'calc(100% + 4px)', left:0, right:0, zIndex:600,
-          background:'white', border:'1px solid #d1d5db', borderRadius:8,
-          boxShadow:'0 8px 24px rgba(0,0,0,.12)', overflow:'hidden', minWidth:160,
-        }}>
+      {/* ── Dropdown panel (drawn on top of the page, so a pop-up form never cuts it off) ── */}
+      <FloatingPanel anchorRef={trigRef} open={open} maxHeight={300}>
           {/* Search field */}
-          <div style={{ padding:'8px 10px', background:'#f9fafb', borderBottom:'1px solid #f3f4f6' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:6, background:'white',
-              border:'1px solid #e5e7eb', borderRadius:6, padding:'5px 9px' }}>
-              <svg viewBox="0 0 20 20" fill="#9ca3af" width="13" height="13">
-                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
-              </svg>
+          <div style={{ padding:6, borderBottom:'1px solid #eef2f7', flexShrink:0 }}>
+            <div style={{ display:'flex', alignItems:'center', background:'white' }}>
+              {SEARCH_ICON}
               <input
-                ref={inpRef}
+                ref={inpRef} autoFocus
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 onClick={e => e.stopPropagation()}
                 onKeyDown={handleSearchKeyDown}
                 placeholder="Search..."
-                style={{ border:'none', outline:'none', fontSize:13, flex:1,
-                  background:'transparent', color:'#1f2937' }}
+                style={{ border:'none', outline:'none', fontSize:13, flex:1, minWidth:0,
+                  background:'transparent', color:'#1f2937', fontFamily:'inherit' }}
               />
               {search && (
                 <button onClick={e=>{e.stopPropagation();setSearch('');}}
-                  style={{ background:'none',border:'none',cursor:'pointer',color:'#9ca3af',fontSize:12,padding:0,lineHeight:1 }}>
+                  style={{ background:'none',border:'none',cursor:'pointer',color:'#9ca3af',fontSize:12,padding:'0 10px',lineHeight:1 }}>
                   ✕
                 </button>
               )}
@@ -223,7 +218,7 @@ const SearchableCheckSelect = ({
           </div>
 
           {/* Options list */}
-          <div style={{ maxHeight:200, overflowY:'auto' }}>
+          <div style={{ overflowY:'auto', flex:1 }}>
             <OptionRow
               itemRef={el => itemRefs.current[0] = el}
               label={allLabel}
@@ -253,8 +248,7 @@ const SearchableCheckSelect = ({
               />
             ))}
           </div>
-        </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 };

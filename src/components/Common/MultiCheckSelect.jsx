@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import FloatingPanel from './FloatingPanel.jsx';
+import { SEARCH_ICON } from './FloatingPanel.icons.jsx';
 
 /* ── Multi-Checkbox Select — value is a string[]; empty = "All".
    Pass `single` to cap it at one pick (checking a new option replaces the
@@ -8,9 +10,11 @@ const MultiCheckSelect = ({ label, value, onChange, options, displayFn, placehol
   const [srch, setSrch] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
   const ref = useRef(null);
+  const boxRef = useRef(null);
   const itemRefs = useRef([]);
   useEffect(() => {
-    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    // a click inside the open list (drawn on top of the page) is not "outside"
+    const h = e => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest?.('[data-dd-open]')) setOpen(false); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
@@ -68,13 +72,13 @@ const MultiCheckSelect = ({ label, value, onChange, options, displayFn, placehol
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      {label && <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', marginBottom: 4 }}>{label}</div>}
-      <div onClick={() => { open ? setOpen(false) : openWithHighlight(); }} tabIndex={0}
+      {label && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ui-label-color, #000)', marginBottom: 5 }}>{label}</div>}
+      <div ref={boxRef} onClick={() => { open ? setOpen(false) : openWithHighlight(); }} tabIndex={0}
         onKeyDown={handleTriggerKeyDown}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '0 10px', border: `1.5px solid ${open ? '#1a56db' : '#d1d5db'}`, borderRadius: 7,
           background: 'white', cursor: 'pointer', fontSize: 13, color: value.length > 0 ? '#1e40af' : '#9ca3af',
-          fontWeight: value.length > 0 ? 600 : 400, height: 36, outline: 'none', userSelect: 'none',
+          fontWeight: value.length > 0 ? 600 : 400, height: 38, boxSizing: 'border-box', outline: 'none', userSelect: 'none',
           boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none' }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{selLabel}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: 4 }}>
@@ -89,15 +93,14 @@ const MultiCheckSelect = ({ label, value, onChange, options, displayFn, placehol
           </svg>
         </div>
       </div>
-      {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 9999,
-          background: 'white', border: '1.5px solid #1a56db', borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,.18)', maxHeight: 260, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '6px 8px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
-            <input autoFocus type="text" value={srch} onChange={e => setSrch(e.target.value)}
-              placeholder="Search..." onClick={e => e.stopPropagation()} onKeyDown={handleSearchKeyDown}
-              style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 5, padding: '5px 8px',
-                fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
+      <FloatingPanel anchorRef={boxRef} open={open} maxHeight={300}>
+          <div style={{ padding: 6, borderBottom: '1px solid #eef2f7', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: '#fff' }}>
+              {SEARCH_ICON}
+              <input autoFocus type="text" value={srch} onChange={e => setSrch(e.target.value)}
+                placeholder="Search..." onClick={e => e.stopPropagation()} onKeyDown={handleSearchKeyDown}
+                style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, flex: 1, minWidth: 0, fontFamily: 'inherit' }} />
+            </div>
           </div>
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {navItems.map((v, i) => {
@@ -120,8 +123,7 @@ const MultiCheckSelect = ({ label, value, onChange, options, displayFn, placehol
               );
             })}
           </div>
-        </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 };

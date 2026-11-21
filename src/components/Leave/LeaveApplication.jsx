@@ -8,6 +8,7 @@ import NepaliDatePicker from '../Common/NepaliDatePicker.jsx';
 import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import { getNepalTodayISO, makeDateFormatter } from '../../utils/dateUtils.js';
 import AlertPopup, { alertFromSaveError } from '../Common/AlertPopup.jsx';
+import SearchableSelect from '../Common/SearchableSelect.jsx';
 
 /* ── Date input that respects calendar setting — mirrors LeaveApplyModal.jsx ── */
 const LeaveDateInput = ({ value, onChange, error, settings, minDate }) => {
@@ -113,28 +114,14 @@ const LeaveApplication = () => {
             )}
 
             <form onSubmit={handleSubmit} className="glm-card">
-              {/* Employee info */}
-              <div style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 14, marginBottom: 20 }}>
-                <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>{t('Staff Information')}</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                  {[[t('Name'), currentUser.fullName], [t('Staff ID'), currentUser.employeeId], [t('Department'), currentUser.department]].map(([l, v], i) => (
-                    <div key={i}><div style={{ fontSize: 11, color: '#9ca3af' }}>{l}</div><div style={{ fontSize: 13, fontWeight: 600 }}>{v}</div></div>
-                  ))}
-                </div>
-              </div>
-
               {/* Leave Type */}
               <div className="form-group">
                 <label className="form-label required">{t('Type')}</label>
-                <select className={`form-control ${errors.leaveTypeCode ? 'error' : ''}`}
-                  value={form.leaveTypeCode} onChange={e => handleChange('leaveTypeCode', e.target.value)}>
-                  <option value="">{t('Select Leave Type')}</option>
-                  {leaveTypes.map(lt => (
-                    <option key={lt.code} value={lt.code}>
-                      {lt.name} ({t('Available')}: {balance[lt.code] || 0} {t('Days')})
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect className={`form-control ${errors.leaveTypeCode ? 'error' : ''}`}
+                  value={form.leaveTypeCode} onChange={v => handleChange('leaveTypeCode', v)}
+                  placeholder={t('Select Leave Type')}
+                  options={leaveTypes.map(lt => ({ value: lt.code, label: lt.name,
+                    sub: `${t('Available')}: ${balance[lt.code] || 0} ${t('Days')}` }))} />
                 {errors.leaveTypeCode && <div className="form-error">{errors.leaveTypeCode}</div>}
               </div>
 

@@ -631,3 +631,105 @@ body .acc-app .vat-form { margin-top: 16px; background: #fff; border: 1px solid 
 body .acc-app .vat-form-head { font-size: 14px; font-weight: 700; color: #0f2a3d; margin-bottom: 10px; }
 body .acc-app .vat-form-table tfoot tr.pl-loss th { background: #fee2e2 !important; color: #7f1d1d; }
 body .acc-app .vat-form-table tfoot tr.pl-profit th { background: #dcfce7 !important; color: #14532d; }
+
+/* ── Search boxes: the magnifier on the left is a solid blue square with a white icon, so the box is easy to spot.
+   Applies to every "icon + Search… input" box in the app (they are inline-styled per page, so this targets the
+   shape: a box whose direct child input is a Search box, and the svg icon in front of it). */
+:is(div, label):has(> svg:first-child):has(> input[placeholder^="Search" i], > input[placeholder^="खोज"]) > svg:first-child {
+  /* a blue section flush with the left edge, full height of the box (left corners rounded by the box itself) */
+  box-sizing: border-box; width: 36px !important; height: auto !important; min-height: 28px; align-self: stretch; padding: 0 10px;
+  margin: 0 4px 0 0; background: #1a56db; fill: #fff !important; color: #fff; border-radius: 0; flex-shrink: 0;
+}
+:is(div, label):has(> svg:first-child):has(> input[placeholder^="Search" i], > input[placeholder^="खोज"]) > svg:first-child path { fill: #fff !important; }
+/* the box itself: blue border + soft blue glow all the time (not only while typing), a little stronger when focused */
+:is(div, label):has(> svg:first-child):has(> input[placeholder^="Search" i], > input[placeholder^="खोज"]) { border: 1.5px solid #1a56db !important; border-radius: 8px !important; box-shadow: 0 0 0 2px rgba(26,86,219,.10); background: #fff;
+  padding-left: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; min-height: 32px; box-sizing: border-box;
+  overflow: hidden; align-items: stretch !important; }
+:is(div, label):has(> svg:first-child):has(> input[placeholder^="Search" i], > input[placeholder^="खोज"]) > input { align-self: stretch; padding-top: 6px; padding-bottom: 6px; padding-left: 6px; min-width: 0; }
+:is(div, label):has(> svg:first-child):has(> input[placeholder^="Search" i], > input[placeholder^="खोज"]):focus-within { border-color: #1245b0 !important; box-shadow: 0 0 0 3px rgba(26,86,219,.22); }
+
+/* ── A separate titled section inside a form (e.g. "📎 Document / Attachment" on the Leave / Office Visit apply forms) ── */
+.form-section { margin: 6px 0 14px; padding: 12px 14px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.form-section-title { font-size: 12px; font-weight: 700; color: #0f2a3d; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 10px; }
+.form-section label { background-color: #fff; }
+
+/* Search inputs that have no icon element of their own (plain "Search …" inputs, grid search boxes): same look —
+   blue left section with a white magnifier, blue border, soft glow. Inputs that sit next to an <svg> icon are
+   handled by the rule above instead. */
+:is(div, label, span, th, td, header, section, form, li):not(:has(> svg:first-child)) > input[placeholder*="search" i]:not([type=checkbox]):not([type=radio]),
+:is(div, label, span, th, td, header, section, form, li):not(:has(> svg:first-child)) > input[placeholder^="खोज"],
+input.dg-search {
+  padding-left: 44px !important; border: 1.5px solid #1a56db !important; border-radius: 8px !important; min-height: 32px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23fff'%3E%3Cpath fill-rule='evenodd' d='M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z' clip-rule='evenodd'/%3E%3C/svg%3E") no-repeat 9px center / 16px 16px,
+    linear-gradient(#1a56db, #1a56db) no-repeat left top / 34px 100%,
+    #fff !important;
+  box-shadow: 0 0 0 2px rgba(26,86,219,.10);
+}
+:is(div, label, span, th, td, header, section, form, li):not(:has(> svg:first-child)) > input[placeholder*="search" i]:focus,
+input.dg-search:focus { border-color: #1245b0 !important; box-shadow: 0 0 0 3px rgba(26,86,219,.22) !important; outline: none; }
+
+/* Leave Calculation → Leave Reports filter bar: labels on one line, every control the same 34px height */
+.lc-rptbar { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.lc-rptbar .lc-field { display: flex; flex-direction: column; }
+.lc-rptbar .lc-lbl { display: block; height: 16px; line-height: 16px; margin: 0 0 5px; font-size: 12px; font-weight: 700; color: var(--ui-label-color, #000); white-space: nowrap; }
+.lc-rptbar .lc-field select.form-control,
+.lc-rptbar .lc-field > div > div[tabindex],
+.lc-rptbar .lc-static {
+  height: 34px !important; min-height: 34px !important; box-sizing: border-box !important; width: 100% !important;
+  padding-top: 0 !important; padding-bottom: 0 !important; font-size: 13px !important; border-radius: 7px !important;
+}
+.lc-rptbar .lc-static { display: flex; align-items: center; padding: 0 12px; background: #f3f4f6; border: 1px solid #d1d5db; font-weight: 600; color: #374151; }
+.lc-rptbar .btn { height: 34px !important; }
+
+/* ── Print / Export buttons: one look on every page (buttons are tagged by utils/buttonTags.js) ── */
+button.btn-print {
+  background: #eff6ff !important; border: 1px solid #93c5fd !important; color: #1d4ed8 !important;
+}
+button.btn-print:hover:not(:disabled) { background: #dbeafe !important; border-color: #60a5fa !important; }
+button.btn-export {
+  background: #f0fdf4 !important; border: 1px solid #86efac !important; color: #15803d !important;
+}
+button.btn-export:hover:not(:disabled) { background: #dcfce7 !important; border-color: #4ade80 !important; }
+button.btn-print svg, button.btn-export svg { color: inherit; }
+button.btn-print:disabled, button.btn-export:disabled { opacity: .55; }
+
+/* ═══ Field focus / hover — blue border everywhere (all forms, pop-ups and Accounts) ═══
+   Some form rules (e.g. ".modal … .form-control { border-color }") are more specific than ".form-control:focus" and
+   were hiding the focus colour, so a focused box stayed grey. This wins in every case:
+     hover → light-blue border,   focus / typing → blue border + soft blue glow.
+   Skipped: check boxes / radios / file pickers, disabled & read-only boxes, inputs drawn without their own border
+   (search boxes, date-picker segments, inline cells) — they'd only get a stray glow. */
+:is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color]):not([type=button]):not([type=submit]):not([type=hidden]),
+    select, textarea, button.form-control):not(:disabled):not([readonly]):not([style*="border: none"]):not([style*="border: 0"]):not(:is(div, label):has(> svg:first-child) > *):hover {
+  border-color: #60a5fa !important;
+}
+:is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color]):not([type=button]):not([type=submit]):not([type=hidden]),
+    select, textarea, button.form-control):not(:disabled):not([readonly]):not([style*="border: none"]):not([style*="border: 0"]):not(:is(div, label):has(> svg:first-child) > *):focus {
+  border-color: #1a56db !important; box-shadow: 0 0 0 3px rgba(26, 86, 219, .15) !important; outline: none !important;
+}
+
+/* ═══ "Advanced Search" pop-ups — same look as the Staff Detail form (tagged .adv-search-modal by utils/buttonTags.js) ═══
+   grey header bar · the filter fields in one white rounded card on a grey form · grey footer · white rounded ✕ */
+.modal-overlay > .adv-search-modal {
+  background: var(--ui-modal-body-bg, #f8fafc) !important; border-radius: var(--ui-modal-radius, 16px) !important;
+  box-shadow: 0 30px 80px rgba(15,23,42,.35) !important;
+}
+.adv-search-modal > :first-child {
+  background: var(--ui-modal-head-bg, #f8fafc) !important; border-bottom: 1px solid var(--ui-modal-line, #e2e8f0) !important;
+  padding: 14px 20px !important; min-height: 64px; box-sizing: border-box;
+  border-radius: var(--ui-modal-radius, 16px) var(--ui-modal-radius, 16px) 0 0;
+}
+.adv-search-modal > :first-child > button:last-child {
+  width: 32px !important; height: 32px !important; border-radius: 10px !important; background: #fff !important;
+  box-shadow: 0 1px 3px rgba(15,23,42,.12) !important; color: var(--ui-modal-title-color, #0f2a3d) !important; font-size: 15px !important;
+}
+.adv-search-modal > :first-child > button:last-child:hover { background: #e2e8f0 !important; }
+.adv-search-modal > :not(:first-child):not(:last-child) {
+  background: #fff !important; margin: 14px 18px !important; border: 1px solid var(--ui-card-border, #e8edf5) !important;
+  border-radius: var(--ui-card-radius, 14px) !important; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+.adv-search-modal > :last-child {
+  background: var(--ui-modal-foot-bg, #f8fafc) !important; border-top: 1px solid var(--ui-modal-line, #e2e8f0) !important;
+  padding: 12px 20px !important; border-radius: 0 0 var(--ui-modal-radius, 16px) var(--ui-modal-radius, 16px);
+}

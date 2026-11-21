@@ -4,22 +4,18 @@ import { useSettings } from '../../context/SettingsContext.jsx';
 import useSaveShortcut from '../../hooks/useSaveShortcut.js';
 import api from '../../api/client.js';
 import EmpMultiSelect from '../Common/EmpMultiSelect.jsx';
+import SearchableSelect from '../Common/SearchableSelect.jsx';
+import '../DataGrid/DataGrid.css';   // the staff grid uses the standard DataGrid look (.dg-th / .dg-td)
 import { hqBranchName, isHQBranch } from '../../utils/branchUtils.js';
 
-/* ── table helpers ── */
-const TH = ({ children, wide }) => (
-  <th style={{
-    padding:'6px 10px', background:'#efefef', color:'#374151', fontSize:14, fontWeight:700,
-    borderBottom:'2px solid #dedede', borderRight:'1px solid #dedede', textAlign:'left',
-    whiteSpace:'nowrap', minWidth: wide ? 230 : undefined,
-    position:'sticky', top:0, zIndex:2,
-  }}>
+/* ── table helpers — same grid look and row height as the Staff Detail DataGrid (DataGrid.css: .dg-th / .dg-td) ── */
+const TH = ({ children, wide, className = '', style: s }) => (
+  <th className={`dg-th ${className}`} style={{ textAlign:'left', color:'#000', minWidth: wide ? 230 : undefined, position:'sticky', top:0, zIndex:2, ...s }}>
     {children}
   </th>
 );
-const TD = ({ children, style: s }) => (
-  <td style={{ padding:'6px 10px', fontSize:13, color:'#111827', borderBottom:'1px solid #eef0f4',
-    borderRight:'1px solid #e5e7eb', verticalAlign:'middle', ...s }}>
+const TD = ({ children, style: s, className = '' }) => (
+  <td className={`dg-td ${className}`} style={{ color:'#000', ...s }}>
     {children}
   </td>
 );
@@ -36,61 +32,35 @@ const staffSubLabel = (e, postMap) => {
 };
 
 /* ── department group ── */
-const DeptGroup = ({ deptName, branchName, members, assignments, onChange, employees, postMap, showBranch }) => {
-  const getNames = (ids) => {
-    if (!ids || ids.length === 0) return null;
-    return employees.filter(e => (ids).includes(String(e.id))).map(e => e.fullName).join(', ');
-  };
-
-  return (
-    <>
-      {/* staff rows */}
-      {members.map((emp, mi) => {
-        const asgn      = assignments[emp.id] || {};
-        const recoIds   = Array.isArray(asgn.reco)     ? asgn.reco     : (asgn.reco     ? [asgn.reco]     : []);
-        const apprIds   = Array.isArray(asgn.approval) ? asgn.approval : (asgn.approval ? [asgn.approval] : []);
-        const recoNames = getNames(recoIds);
-        const apprNames = getNames(apprIds);
-        return (
-          <tr key={emp.id} style={{ background: mi % 2 === 0 ? '#fff' : '#fafafa' }}>
-            {showBranch && (
-              <TD style={{ background:'transparent', color:'#6b7280', fontSize:12 }}>
-                {mi === 0 ? (branchName || '—') : ''}
-              </TD>
-            )}
-            <TD style={{ background:'transparent', color:'#6b7280', fontSize:12 }}>
-              {mi === 0 ? (deptName || '—') : ''}
-            </TD>
-            <TD>
-              <div style={{ fontWeight:600, color:'#111827', fontSize:13 }}>
-                {emp.fullName}
-                {emp.position && (
-                  <span style={{ fontWeight:400, color:'#374151', fontSize:12 }}>
-                    {` — ${emp.position}`}
-                  </span>
-                )}
-              </div>
-            </TD>
-            <TD style={{ minWidth:210 }}>
-              <EmpMultiSelect value={recoIds} employees={employees} postMap={postMap} showAvatars
-                formatLabel={staffLabel}
-                subLabel={e => staffSubLabel(e, postMap)}
-                onChange={v => onChange({ [emp.id]: { ...asgn, reco: v } })} />
-              {recoNames && <div style={{ fontSize:10, color:'#059669', marginTop:2 }}>✓ {recoNames}</div>}
-            </TD>
-            <TD style={{ minWidth:210 }}>
-              <EmpMultiSelect value={apprIds} employees={employees} postMap={postMap} showAvatars
-                formatLabel={staffLabel}
-                subLabel={e => staffSubLabel(e, postMap)}
-                onChange={v => onChange({ [emp.id]: { ...asgn, approval: v } })} />
-              {apprNames && <div style={{ fontSize:10, color:'#1a56db', marginTop:2 }}>✓ {apprNames}</div>}
-            </TD>
-          </tr>
-        );
-      })}
-    </>
-  );
-};
+const DeptGroup = ({ deptName, branchName, members, assignments, onChange, employees, postMap, showBranch, startSn = 1, shortOf = (_, n) => n }) => (
+  <>
+    {members.map((emp, mi) => {
+      const asgn    = assignments[emp.id] || {};
+      const recoIds = Array.isArray(asgn.reco)     ? asgn.reco     : (asgn.reco     ? [asgn.reco]     : []);
+      const apprIds = Array.isArray(asgn.approval) ? asgn.approval : (asgn.approval ? [asgn.approval] : []);
+      return (
+        <tr key={emp.id} className="dg-row">
+          <TD className="dg-sn-col">{startSn + mi}</TD>
+          {showBranch && <TD title={branchName || ''}>{mi === 0 ? (shortOf('branches', branchName) || '—') : ''}</TD>}
+          <TD title={deptName || ''}>{mi === 0 ? (shortOf('departments', deptName) || '—') : ''}</TD>
+          <TD>{emp.fullName}{emp.position && <span style={{ color:'#6b7280' }}>{` — ${emp.position}`}</span>}</TD>
+          <TD style={{ minWidth:210, whiteSpace:'normal' }}>
+            <EmpMultiSelect compact value={recoIds} employees={employees} postMap={postMap} showAvatars
+              formatLabel={staffLabel}
+              subLabel={e => staffSubLabel(e, postMap)}
+              onChange={v => onChange({ [emp.id]: { ...asgn, reco: v } })} />
+          </TD>
+          <TD style={{ minWidth:210, whiteSpace:'normal' }}>
+            <EmpMultiSelect compact value={apprIds} employees={employees} postMap={postMap} showAvatars
+              formatLabel={staffLabel}
+              subLabel={e => staffSubLabel(e, postMap)}
+              onChange={v => onChange({ [emp.id]: { ...asgn, approval: v } })} />
+          </TD>
+        </tr>
+      );
+    })}
+  </>
+);
 
 /* ═══════════════════════════════════════════════════
    MAIN MODAL
@@ -115,15 +85,17 @@ const RecoApprovalModal = ({ employees, onClose }) => {
 
   const [searchOpen,   setSearchOpen]   = useState(false);
   const [filterName,   setFilterName]   = useState('');
-  const [filterBranch, setFilterBranch] = useState('');
-  const [filterDept,   setFilterDept]   = useState('');
-  const [draftFilter,  setDraftFilter]  = useState({ name:'', branch:'', dept:'' });
-  const filtersActive = !!(filterName || filterBranch || filterDept);
+  const [filterBranch, setFilterBranch] = useState([]);   // multi-select (check boxes)
+  const [filterDept,   setFilterDept]   = useState([]);
+  const [draftFilter,  setDraftFilter]  = useState({ branch:[], dept:[] });
+  const filtersActive = !!(filterName || filterBranch.length || filterDept.length);
+  const popupFilterCount = (filterBranch.length ? 1 : 0) + (filterDept.length ? 1 : 0);
   const searchBoxRef = useRef(null);
 
   useEffect(() => {
     if (!searchOpen) return;
-    const close = (e) => { if (!searchBoxRef.current?.contains(e.target)) setSearchOpen(false); };
+    // clicks inside an open drop-down list (portaled to <body>) don't count as "outside"
+    const close = (e) => { if (!searchBoxRef.current?.contains(e.target) && !e.target.closest?.('[data-dd-open]')) setSearchOpen(false); };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [searchOpen]);
@@ -159,6 +131,13 @@ const RecoApprovalModal = ({ employees, onClose }) => {
   const activeEmps = employees.filter(e => e.active !== false);
   const companyHQ  = hqBranchName(settings);
 
+  // Branch / Department short names (Settings → shortName), full name kept as the cell tooltip
+  const shortOf = useCallback((list, name) => {
+    if (!name) return name;
+    const rec = (settings[list] || []).find(x => x.name === name);
+    return rec?.shortName || rec?.short_name || name;
+  }, [settings.branches, settings.departments]);
+
   const postMap = useMemo(() => {
     const m = {};
     (settings.posts || []).forEach(p => { if (p.name && p.shortName) m[p.name] = p.shortName; });
@@ -182,8 +161,8 @@ const RecoApprovalModal = ({ employees, onClose }) => {
     [...new Set(activeEmps.map(e => e.department).filter(Boolean))].sort(), [activeEmps]);
 
   const matchesFilter = useCallback((e) => {
-    if (filterBranch && e.branch !== filterBranch) return false;
-    if (filterDept && e.department !== filterDept) return false;
+    if (filterBranch.length && !filterBranch.includes(e.branch)) return false;
+    if (filterDept.length && !filterDept.includes(e.department)) return false;
     if (filterName && !e.fullName?.toLowerCase().includes(filterName.toLowerCase())) return false;
     return true;
   }, [filterName, filterBranch, filterDept]);
@@ -207,14 +186,14 @@ const RecoApprovalModal = ({ employees, onClose }) => {
     return Object.values(map).sort((a,b) => a.branch.localeCompare(b.branch) || a.dept.localeCompare(b.dept));
   }, [activeEmps, settings, matchesFilter]);
 
-  const openSearch = () => { setDraftFilter({ name:filterName, branch:filterBranch, dept:filterDept }); setSearchOpen(true); };
+  const openSearch = () => { setDraftFilter({ branch:filterBranch, dept:filterDept }); setSearchOpen(true); };
   const applySearch = () => {
-    setFilterName(draftFilter.name); setFilterBranch(draftFilter.branch); setFilterDept(draftFilter.dept);
+    setFilterBranch(draftFilter.branch); setFilterDept(draftFilter.dept);
     setSearchOpen(false);
   };
   const resetSearch = () => {
-    setDraftFilter({ name:'', branch:'', dept:'' });
-    setFilterName(''); setFilterBranch(''); setFilterDept('');
+    setDraftFilter({ branch:[], dept:[] });
+    setFilterBranch([]); setFilterDept([]);
     setSearchOpen(false);
   };
 
@@ -279,55 +258,48 @@ const RecoApprovalModal = ({ employees, onClose }) => {
 
   return (
     <div className="modal-overlay" style={{ zIndex:1100 }}>
+      {/* Same look as the global form style (ui-kit.css "GLOBAL FORM LOOK"): grey header bar, content in one
+          white rounded card on a grey form, grey footer with compact buttons. */}
       <div onClick={e => e.stopPropagation()} style={{
-        background:'#fff', borderRadius:14,
-        width:'96vw', maxWidth:1350, height:'90vh',
+        background:'var(--ui-modal-body-bg, #f8fafc)', borderRadius:'var(--ui-modal-radius, 16px)',
+        width:'calc(100vw - 32px)', maxWidth:'none', height:'calc(100vh - 32px)',   // fills the screen at any resolution
         display:'flex', flexDirection:'column',
-        boxShadow:'0 25px 60px rgba(0,0,0,.3)',
+        boxShadow:'0 30px 80px rgba(15,23,42,.35)',
         animation:'slideUp .25s ease', zIndex:1101, position:'relative',
       }}>
 
-        {/* Header */}
-        <div style={{ padding:'14px 24px', borderBottom:'2px solid #e5e7eb',
-          background:'#ffffff',
-          borderRadius:'14px 14px 0 0', flexShrink:0 }}>
-          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
-            <div>
-              <div style={{ fontSize:16, fontWeight:800, color:'#111827' }}>
-                👥 Set Recommendator &amp; Approval
-              </div>
-              <div style={{ fontSize:13, color:'#374151', marginTop:2 }}>
-                Configure who recommends and approves leave &amp; office visits — select multiple people per staff member
-                {configured > 0 && <span style={{ marginLeft:8, background:'#dbeafe', color:'#1e40af',
-                  borderRadius:10, padding:'1px 8px', fontWeight:700, fontSize:11 }}>{configured} configured</span>}
-              </div>
-            </div>
-            <button onClick={onClose} style={{ background:'#f3f4f6', border:'none', borderRadius:'50%',
-              width:34, height:34, fontSize:18, cursor:'pointer', color:'#6b7280',
-              display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>×</button>
+        {/* Header — title, then "Is Recommendation Compulsory" (left, amber box), ✕ on the right */}
+        <div style={{ padding:'14px 20px', minHeight:64, boxSizing:'border-box', borderBottom:'1px solid var(--ui-modal-line, #e2e8f0)',
+          background:'var(--ui-modal-head-bg, #f8fafc)', borderRadius:'var(--ui-modal-radius, 16px) var(--ui-modal-radius, 16px) 0 0', flexShrink:0,
+          display:'flex', alignItems:'center', gap:12 }}>
+          <div style={{ fontSize:'var(--ui-modal-title-font, 17px)', fontWeight:'var(--ui-modal-title-weight, 700)', color:'var(--ui-modal-title-color, #0f2a3d)' }}>
+            👥 Set Recommendator &amp; Approval
+            {configured > 0 && <span style={{ marginLeft:8, background:'#dbeafe', color:'#1e40af', verticalAlign:'middle',
+              borderRadius:10, padding:'1px 8px', fontWeight:700, fontSize:11 }}>{configured} configured</span>}
           </div>
-
-          {/* ── Is Recommendation Compulsory ── */}
-          <div style={{ marginTop:12, padding:'10px 14px', background:'white', borderRadius:8,
-            border:`1.5px solid ${isRecoCompulsory ? '#f59e0b' : '#e2e8f0'}`,
-            boxShadow: isRecoCompulsory ? '0 0 0 2px #fef3c7' : 'none',
-            transition:'border .2s', display:'flex', alignItems:'flex-start', gap:10 }}>
+          <label htmlFor="recoCompulsory" title="When ticked, the approval button stays disabled until the assigned recommendator has recommended the leave / office visit."
+            style={{ marginLeft:12, display:'inline-flex', alignItems:'center', gap:8, cursor:'pointer', whiteSpace:'nowrap',
+              padding:'4px 10px', borderRadius:8, background: isRecoCompulsory ? '#fde68a' : '#fef3c7',
+              border:`1.5px solid ${isRecoCompulsory ? '#d97706' : '#fcd34d'}`,
+              boxShadow: isRecoCompulsory ? '0 0 0 2px #fef3c7' : '0 1px 2px rgba(15,23,42,.05)',
+              fontSize:12, fontWeight:700, color:'#111827', transition:'border .2s' }}>
             <input type="checkbox" id="recoCompulsory" checked={isRecoCompulsory}
               onChange={e => setIsRecoCompulsory(e.target.checked)}
-              style={{ accentColor:'#f59e0b', width:16, height:16, marginTop:2, cursor:'pointer', flexShrink:0 }} />
-            <div>
-              <label htmlFor="recoCompulsory" style={{ fontSize:13, fontWeight:700, color:'#111827', cursor:'pointer', display:'block' }}>
-                Is Recommendation Compulsory
-                {isRecoCompulsory && <span style={{ marginLeft:8, background:'#fef3c7', color:'#92400e',
-                  borderRadius:8, padding:'1px 8px', fontSize:11, fontWeight:700 }}>Enabled</span>}
-              </label>
-              <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>
-                When enabled: leave &amp; office visit applications must be recommended first before the approval button becomes active.
-                The approval button stays disabled until the assigned recommendator has approved.
-              </div>
-            </div>
-          </div>
+              style={{ accentColor:'#f59e0b', width:13, height:13, margin:0, padding:0, flexShrink:0, alignSelf:'center', display:'block', cursor:'pointer' }} />
+            Is Recommendation Compulsory
+            {isRecoCompulsory && <span style={{ background:'#fff', color:'#92400e',
+              borderRadius:8, padding:'1px 8px', fontSize:11, fontWeight:700 }}>Enabled</span>}
+          </label>
+          <button onClick={onClose} title="Close (Esc)" style={{ marginLeft:'auto', background:'#fff', border:'none', borderRadius:10,
+            width:32, height:32, fontSize:14, cursor:'pointer', color:'var(--ui-modal-title-color, #0f2a3d)',
+            boxShadow:'0 1px 3px rgba(15,23,42,.12)',
+            display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>✕</button>
         </div>
+
+        {/* Content card: tabs + table */}
+        <div style={{ flex:1, minHeight:0, display:'flex', flexDirection:'column', margin:'14px 18px', background:'#fff',
+          border:'1px solid var(--ui-card-border, #e8edf5)', borderRadius:'var(--ui-card-radius, 14px)', overflow:'hidden',
+          boxShadow:'0 1px 2px rgba(15,23,42,.04)' }}>
 
         {/* Tabs */}
         <div style={{ padding:'0 24px', borderBottom:'1px solid #e5e7eb', background:'#f8fafc', flexShrink:0,
@@ -348,17 +320,25 @@ const RecoApprovalModal = ({ employees, onClose }) => {
             ))}
           </div>
 
-          <div ref={searchBoxRef} style={{ position:'relative' }}>
+          <div ref={searchBoxRef} style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
+            {/* live staff-name search (filters the grid as you type) */}
+            <div style={{ display:'flex', alignItems:'center', width:240, height:32, background:'#fff', border:'1px solid #d1d5db', borderRadius:7 }}>
+              <svg viewBox="0 0 20 20" width="14" height="14"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/></svg>
+              <input type="text" value={filterName} onChange={e => setFilterName(e.target.value)} placeholder="Search staff name…"
+                style={{ border:'none', outline:'none', background:'transparent', fontSize:13, flex:1, minWidth:0, fontFamily:'inherit' }} />
+              {filterName && <button type="button" onClick={() => setFilterName('')} title="Clear"
+                style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:15, padding:'0 8px' }}>×</button>}
+            </div>
             <button onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())} style={{
               display:'inline-flex', alignItems:'center', gap:6, padding:'6px 14px',
-              border:`1.5px solid ${filtersActive ? '#1a56db' : '#d1d5db'}`, borderRadius:7,
-              background: filtersActive ? '#eff6ff' : '#fff', color: filtersActive ? '#1e40af' : '#374151',
+              border:`1.5px solid ${popupFilterCount ? '#1e40af' : '#1a56db'}`, borderRadius:7,
+              background: popupFilterCount ? '#1e40af' : '#1a56db', color:'#fff',
               fontSize:12.5, fontWeight:600, cursor:'pointer' }}>
               🔍 Search
-              {filtersActive && (
-                <span style={{ background:'#1a56db', color:'#fff', borderRadius:10, fontSize:10, fontWeight:700,
+              {popupFilterCount > 0 && (
+                <span style={{ background:'#fff', color:'#1e40af', borderRadius:10, fontSize:10, fontWeight:700,
                   padding:'1px 6px', minWidth:16, textAlign:'center' }}>
-                  {[filterName, filterBranch, filterDept].filter(Boolean).length}
+                  {popupFilterCount}
                 </span>
               )}
             </button>
@@ -369,36 +349,18 @@ const RecoApprovalModal = ({ employees, onClose }) => {
                 style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:50, width:300,
                   background:'#fff', border:'1px solid #d1d5db', borderRadius:10,
                   boxShadow:'0 10px 28px rgba(0,0,0,.16)', padding:16 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:'#111827', marginBottom:12 }}>Search Staff</div>
+                <div style={{ fontSize:13, fontWeight:700, color:'#111827', marginBottom:12 }}>Filter Staff</div>
 
                 <div style={{ marginBottom:10 }}>
-                  <label style={{ fontSize:11.5, fontWeight:600, color:'#6b7280', display:'block', marginBottom:4 }}>Staff Name</label>
-                  <input type="text" value={draftFilter.name} autoFocus
-                    onChange={e => setDraftFilter(f => ({ ...f, name:e.target.value }))}
-                    onKeyDown={e => { if (e.key === 'Enter') applySearch(); }}
-                    placeholder="Search by name…"
-                    style={{ width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1px solid #d1d5db',
-                      borderRadius:6, fontSize:13, outline:'none' }} />
-                </div>
-
-                <div style={{ marginBottom:10 }}>
-                  <label style={{ fontSize:11.5, fontWeight:600, color:'#6b7280', display:'block', marginBottom:4 }}>Branch</label>
-                  <select value={draftFilter.branch} onChange={e => setDraftFilter(f => ({ ...f, branch:e.target.value }))}
-                    style={{ width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1px solid #d1d5db',
-                      borderRadius:6, fontSize:13, outline:'none', background:'#fff' }}>
-                    <option value="">All Branches</option>
-                    {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
+                  <label style={{ fontSize:11.5, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>Branch</label>
+                  <SearchableSelect multiple value={draftFilter.branch} onChange={v => setDraftFilter(f => ({ ...f, branch:v }))}
+                    placeholder="All Branches" options={branchOptions.map(b => ({ value:b, label:b }))} />
                 </div>
 
                 <div style={{ marginBottom:14 }}>
-                  <label style={{ fontSize:11.5, fontWeight:600, color:'#6b7280', display:'block', marginBottom:4 }}>Department</label>
-                  <select value={draftFilter.dept} onChange={e => setDraftFilter(f => ({ ...f, dept:e.target.value }))}
-                    style={{ width:'100%', boxSizing:'border-box', padding:'7px 10px', border:'1px solid #d1d5db',
-                      borderRadius:6, fontSize:13, outline:'none', background:'#fff' }}>
-                    <option value="">All Depts</option>
-                    {deptOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
+                  <label style={{ fontSize:11.5, fontWeight:600, color:'#374151', display:'block', marginBottom:4 }}>Department</label>
+                  <SearchableSelect multiple value={draftFilter.dept} onChange={v => setDraftFilter(f => ({ ...f, dept:v }))}
+                    placeholder="All Departments" options={deptOptions.map(d => ({ value:d, label:d }))} />
                 </div>
 
                 <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
@@ -417,7 +379,7 @@ const RecoApprovalModal = ({ employees, onClose }) => {
         </div>
 
         {/* Table — single overflow:auto container fixes nested-scroll issue */}
-        <div style={{ flex:1, minHeight:0, overflow:'auto', padding:'0 24px 14px' }}>
+        <div style={{ flex:1, minHeight:0, overflow:'auto', padding:'0 14px 12px' }}>
           {loading ? (
             <div style={{ textAlign:'center', padding:40, color:'#9ca3af', fontSize:13 }}>
               Loading saved configuration…
@@ -431,9 +393,10 @@ const RecoApprovalModal = ({ employees, onClose }) => {
               {filtersActive ? 'No staff match your search.' : 'No staff found for this section.'}
             </div>
           ) : (
-            <table style={{ width:'100%', minWidth:620, borderCollapse:'collapse', border:'1px solid #dedede' }}>
+            <table className="dg-table striped" style={{ width:'100%', minWidth:620, borderCollapse:'collapse', border:'1px solid #dedede' }}>
               <thead>
                 <tr>
+                  <TH className="dg-sn-col" style={{ textAlign:'center' }}>SN</TH>
                   {activeSection==='branch' && <TH>Branch</TH>}
                   <TH>Department</TH>
                   <TH>Staff Name</TH>
@@ -484,41 +447,45 @@ const RecoApprovalModal = ({ employees, onClose }) => {
                 </tr>
               </thead>
               <tbody>
-                {activeSection==='company'
-                  ? companyGroups.map(g => (
-                      <DeptGroup key={g.dept} deptName={g.dept} branchName={null}
+                {(() => {
+                  // running SN across the department groups, like the Staff Detail grid
+                  let sn = 1;
+                  const groups = activeSection === 'company' ? companyGroups : branchGroups;
+                  return groups.map(g => {
+                    const start = sn; sn += g.members.length;
+                    return (
+                      <DeptGroup key={activeSection === 'company' ? g.dept : `${g.branch}||${g.dept}`}
+                        deptName={g.dept} branchName={activeSection === 'company' ? null : g.branch}
                         members={g.members} assignments={assignments} onChange={handleChange}
-                        employees={activeEmps} postMap={postMap} showBranch={false} />
-                    ))
-                  : branchGroups.map(g => (
-                      <DeptGroup key={`${g.branch}||${g.dept}`} deptName={g.dept} branchName={g.branch}
-                        members={g.members} assignments={assignments} onChange={handleChange}
-                        employees={activeEmps} postMap={postMap} showBranch={true} />
-                    ))
-                }
+                        employees={activeEmps} postMap={postMap} showBranch={activeSection !== 'company'} startSn={start} shortOf={shortOf} />
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           )}
         </div>
 
+        </div>{/* /content card */}
+
         {/* Footer */}
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-          padding:'11px 24px', borderTop:'1px solid #e5e7eb', background:'#f9fafb',
-          borderRadius:'0 0 14px 14px', flexShrink:0 }}>
+          padding:'12px 20px', borderTop:'1px solid var(--ui-modal-line, #e2e8f0)', background:'var(--ui-modal-foot-bg, #f8fafc)',
+          borderRadius:'0 0 var(--ui-modal-radius, 16px) var(--ui-modal-radius, 16px)', flexShrink:0 }}>
           <div style={{ fontSize:12, color: saveError ? '#dc2626' : '#6b7280' }}>
             {saveError ? `⚠ ${saveError}`
               : !canSave ? `👁 View only · ${activeEmps.length} total staff · ${configured} configured`
               : `${activeEmps.length} total staff · ${configured} configured`}
           </div>
           <div style={{ display:'flex', gap:10 }}>
-            <button onClick={onClose} style={{ padding:'8px 20px', border:'1.5px solid #d1d5db',
-              borderRadius:8, background:'#fff', fontSize:13, fontWeight:600, color:'#374151', cursor:'pointer' }}>
+            <button onClick={onClose} style={{ minHeight:32, padding:'6px 14px', border:'1px solid #dbe3ee',
+              borderRadius:8, background:'#fff', fontSize:12.5, fontWeight:600, color:'#334155', cursor:'pointer' }}>
               Cancel
             </button>
             {canSave && (
-              <button onClick={handleSave} disabled={saving || loading} title="Ctrl+S" style={{ padding:'8px 24px', border:'none', borderRadius:8,
-                background: saved ? '#059669' : '#1a56db', color:'#fff', opacity: (saving || loading) ? 0.7 : 1,
-                fontSize:13, fontWeight:700, cursor: (saving || loading) ? 'default' : 'pointer', boxShadow:'0 2px 8px rgba(26,86,219,.3)' }}>
+              <button onClick={handleSave} disabled={saving || loading} title="Ctrl+S" style={{ minHeight:32, padding:'6px 16px', border:'none', borderRadius:8,
+                background: saved ? '#059669' : 'var(--ui-btn-primary-bg, #1a56db)', color:'#fff', opacity: (saving || loading) ? 0.7 : 1,
+                fontSize:12.5, fontWeight:600, cursor: (saving || loading) ? 'default' : 'pointer', boxShadow:'0 4px 12px rgba(37,99,235,.3)' }}>
                 {saved ? '✅ Saved!' : saving ? 'Saving…' : <>💾 <u>S</u>ave Configuration</>}
               </button>
             )}

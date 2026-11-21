@@ -412,44 +412,18 @@ const LeaveApplyModal = () => {
           )}
 
           {/* Form — hidden after successful submission */}
-          {!success && <><div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 10,
-            padding: '12px 16px', marginBottom: 18 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase',
-              letterSpacing: '.5px', marginBottom: 10 }}>
-              👤 Staff Information
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-              {[
-                ['Name',       activeUser.fullName],
-                ['Staff ID',   activeUser.employeeId],
-                ['Post',       activeUser.position   || '—'],
-                ['Department', activeUser.department || '—'],
-                ['Branch',     activeUser.branch     || '—'],
-              ].map(([l, v]) => (
-                <div key={l}>
-                  <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 2 }}>{l}</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2937' }}>{v}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
+          {!success && <>
           <form onSubmit={handleSubmit}>
 
             {/* Leave type */}
             <div className="form-group">
               <Lbl required>Leave</Lbl>
-              <select className={`form-control ${errors.leaveTypeCode ? 'error' : ''}`}
+              <SearchableSelect className={`form-control ${errors.leaveTypeCode ? 'error' : ''}`}
                 value={form.leaveTypeCode}
-                onChange={e => handleChange('leaveTypeCode', e.target.value)}
-                style={{ fontSize: 13 }}>
-                <option value="">— Select Leave Type —</option>
-                {ltConfigs.map(lt => (
-                  <option key={lt.shortName} value={lt.shortName}>
-                    {lt.name} — {balance[lt.shortName] || 0} days remaining
-                  </option>
-                ))}
-              </select>
+                onChange={v => handleChange('leaveTypeCode', v)}
+                placeholder="— Select Leave Type —"
+                options={ltConfigs.map(lt => ({ value: lt.shortName, label: lt.name,
+                  sub: `${balance[lt.shortName] || 0} days remaining` }))} />
               <Err msg={errors.leaveTypeCode} />
               {ltc && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
@@ -472,41 +446,33 @@ const LeaveApplyModal = () => {
               )}
             </div>
 
-            {/* Half Day */}
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
-                <input type="checkbox" checked={form.halfDay}
-                  onChange={e => handleChange('halfDay', e.target.checked)}
-                  style={{ width: 15, height: 15, accentColor: '#1a56db' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Half Day</span>
-                {form.halfDay && <span style={{ fontSize: 11, color: '#6b7280' }}>(0.5 days will be deducted)</span>}
-              </label>
-            </div>
-
-            {/* Dates */}
-            {form.halfDay ? (
+            {/* From Date | To Date | Half Day (0.5) — one row, same as Manual Leave Posting */}
+            <div style={{ display:'grid', gridTemplateColumns: form.halfDay ? 'minmax(0,1fr) auto' : 'minmax(0,1fr) minmax(0,1fr) auto', gap:12, alignItems:'start' }}>
               <div className="form-group">
-                <Lbl required>Date</Lbl>
+                <Lbl required>{form.halfDay ? 'Date' : 'From Date'}</Lbl>
                 <LeaveDateInput value={form.fromDate} error={!!errors.fromDate}
                   settings={settings} onChange={v => handleChange('fromDate', v)} />
                 <Err msg={errors.fromDate} />
               </div>
-            ) : (
-              <div className="form-row">
-                <div className="form-group">
-                  <Lbl required>From Date</Lbl>
-                  <LeaveDateInput value={form.fromDate} error={!!errors.fromDate}
-                    settings={settings} onChange={v => handleChange('fromDate', v)} />
-                  <Err msg={errors.fromDate} />
-                </div>
+              {!form.halfDay && (
                 <div className="form-group">
                   <Lbl required>To Date</Lbl>
                   <LeaveDateInput value={form.toDate} error={!!errors.toDate}
                     minDate={form.fromDate} settings={settings} onChange={v => handleChange('toDate', v)} />
                   <Err msg={errors.toDate} />
                 </div>
+              )}
+              <div className="form-group">
+                <Lbl>Half Day</Lbl>
+                <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none', minHeight:42, boxSizing:'border-box',
+                  padding:'0 14px', border:'1px solid #dbe3ee', borderRadius:8, whiteSpace:'nowrap',
+                  background: form.halfDay ? '#f5f3ff' : '#fff' }}>
+                  <input type="checkbox" checked={form.halfDay} onChange={e => handleChange('halfDay', e.target.checked)}
+                    style={{ width:15, height:15, accentColor:'#7c3aed' }} />
+                  <span style={{ fontSize:13, color:'#374151' }}>Half Day (0.5)</span>
+                </label>
               </div>
-            )}
+            </div>
 
             {/* Days + Balance summary */}
             {(form.halfDay || (form.fromDate && form.toDate)) && (
@@ -609,8 +575,8 @@ const LeaveApplyModal = () => {
             </div>
 
             {/* Document */}
-            <div className="form-group">
-              <Lbl>Document / Attachment</Lbl>
+            <div className="form-section">
+              <div className="form-section-title">📎 Document / Attachment</div>
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
                 border: '1.5px dashed #d1d5db', borderRadius: 8, cursor: 'pointer',
                 background: form.document ? '#f0fdf4' : '#fafafa', transition: 'border .15s' }}

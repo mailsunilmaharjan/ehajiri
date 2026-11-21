@@ -241,8 +241,8 @@ const YearlyInOutReport = () => {
     // code, e.g. SL/CL) like the Monthly/Half IN & OUT reports do. Public
     // Holiday still wins over a same-day leave (same precedence as there).
     if (d.leave && !d.timeIn && !d.isHoliday) {
-      if (rowKey==='in') return { text:leaveShort(d.leave), color:'#5b21b6', bg:'#ede9fe', mono:false, isLeave:true, title:d.leave.name };
-      return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'white', mono:false };
+      if (rowKey==='in') return { text:leaveShort(d.leave), color:'#5b21b6', bg:'#ede9fe', mono:false, isLeave:true, leave:true, title:d.leave.name };
+      return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#f0f9ff':rowKey==='ot'?'#faf5ff':'white', mono:false };
     }
     if (d.isWeekend && !d.timeIn) {
       if (rowKey==='ot') return { text:'—', color:'#e5e7eb', bg:'#faf5ff', mono:false };
@@ -250,16 +250,16 @@ const YearlyInOutReport = () => {
     }
     if (d.isHoliday && !d.timeIn) {
       if (rowKey==='in') return { text:(d.holidayName||'PH').slice(0,8), color:'#92400e', bg:'#fef3c7', mono:false, small:true, title:d.holidayName||L('सार्वजनिक बिदा','Public Holiday') };
-      return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#fafafa':rowKey==='ot'?'#faf5ff':'#fef9e7', mono:false };
+      return { text:'—', color:'#e5e7eb', bg:rowKey==='wh'?'#f0f9ff':rowKey==='ot'?'#faf5ff':'#fef9e7', mono:false };
     }
     // No punch at all on a past working day (server-computed `absent`).
     if (d.absent && rowKey==='in') return { text:L('अनु','AB'), color:'#991b1b', bg:'#fee2e2', mono:false, isLeave:true, title:L('अनुपस्थित','Absent') };
     // Half-day leave still has a real punch — show the time with "SL 1/2" under it.
     const sym = rowKey==='in' ? presentSymbol(d, d.isWeekend, d.isHoliday, L) : null;
-    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:'#1a56db',bg:'white',   mono:true, top:sym?.text, topColor:sym?.color, topTitle:sym?.title, sub: d.leave?.halfDay ? `${leaveShort(d.leave)} 1/2` : null} :{text:'—',color:'#e5e7eb',bg:'white',   mono:false};
-    if (rowKey==='out') return d.timeOut   ? {text:d.timeOut,   color:'#059669',bg:'white',   mono:true} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
-    if (rowKey==='wh')  return d.workedHrs ? {text:d.workedHrs, color:'#374151',bg:'#fafafa', mono:true} : {text:'—',color:'#e5e7eb',bg:'#fafafa', mono:false};
-    if (rowKey==='ot')  return d.otHrs     ? {text:d.otHrs,     color:'#7c3aed',bg:'#faf5ff', mono:true} : {text:'—',color:'#e5e7eb',bg:'#faf5ff', mono:false};
+    if (rowKey==='in')  return d.timeIn    ? {text:d.timeIn,    color:d.punches===1?'#f59e0b':'#3b82f6',bg:'white',   mono:false, top:sym?.text, topColor:sym?.color, topTitle:sym?.title, sub: d.leave?.halfDay ? `${leaveShort(d.leave)} 1/2` : null} :{text:'—',color:'#e5e7eb',bg:'white',   mono:false};
+    if (rowKey==='out') return d.timeOut   ? {text:d.timeOut,   color:'#6b7280',bg:'white',   mono:false} : {text:'—',color:'#e5e7eb',bg:'white',   mono:false};
+    if (rowKey==='wh')  return d.workedHrs ? {text:d.workedHrs, color:'#0369a1',bg:'#f0f9ff', mono:false} : {text:'—',color:'#e5e7eb',bg:'#f0f9ff', mono:false};
+    if (rowKey==='ot')  return d.otHrs     ? {text:d.otHrs,     color:'#059669',bg:'#faf5ff', mono:false} : {text:'—',color:'#e5e7eb',bg:'#faf5ff', mono:false};
     return {text:'—',color:'#e5e7eb',bg:'white',mono:false};
   };
 
@@ -303,11 +303,11 @@ const YearlyInOutReport = () => {
                 const empty = Array.from({length:maxD-m.days.length},()=>`<td style="border:1px solid #ebebeb"></td>`);
                 const wdCells = m.days.map(d => {
                   const wd = d.dateStr ? WEEKDAYS_SHORT[new Date(d.dateStr).getDay()] : '';
-                  return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:8px;font-weight:700;background:#f8fafc;color:${d.isWeekend?'#dc2626':'#6b7280'}">${wd}</td>`;
+                  return `<td style="padding:2px 2px;border:1px solid #ebebeb;text-align:center;font-size:8px;font-weight:700;background:#efefef;color:${d.isWeekend?'#dc2626':'#6b7280'}">${wd}</td>`;
                 });
                 const wdRow = `<tr>
                   <td rowspan="5" style="padding:3px 5px;border:1px solid #dedede;font-weight:700;vertical-align:middle">${m.label}</td>
-                  <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:8px;font-weight:700;color:#9ca3af;background:#f8fafc">${L('दिन','Day')}</td>
+                  <td style="padding:2px 5px;border:1px solid #dedede;text-align:center;font-size:8px;font-weight:700;color:#9ca3af;background:#efefef">${L('दिन','Day')}</td>
                   ${wdCells.join('')}${empty.join('')}
                 </tr>`;
                 const rows = rowKeys.map(rk => {
@@ -421,7 +421,7 @@ const YearlyInOutReport = () => {
               <thead style={{ position:'sticky',top:0,zIndex:5 }}>
                 <tr>
                   <th style={{ ...TH,minWidth:78,textAlign:'left',left:0,zIndex:4 }}>Month</th>
-                  <th style={{ ...TH,minWidth:82,left:78,zIndex:4,background:'#f5f5f5',textAlign:'left',paddingLeft:8 }}></th>
+                  <th style={{ ...TH,minWidth:82,left:78,zIndex:4,textAlign:'left',paddingLeft:8 }}></th>
                   {Array.from({length:maxDays},(_,i)=>(
                     <th key={i+1} style={{ ...TH,minWidth:52,width:52 }}>{i+1}</th>
                   ))}
@@ -431,7 +431,7 @@ const YearlyInOutReport = () => {
                 {matrix.map((month, mi) => (
                   <React.Fragment key={mi}>
                     {/* Weekday row — Sun/Mon/Tue under each date, per calendar */}
-                    <tr style={{ background:'#f8fafc' }}>
+                    <tr style={{ background:'#efefef' }}>
                       {/* Month name — rowspan 5 (weekday + 4 data rows) */}
                       <td rowSpan={5} style={{ ...TD,fontWeight:700,color:'#374151',textAlign:'left',
                         padding:'0 10px',verticalAlign:'middle',
@@ -441,7 +441,7 @@ const YearlyInOutReport = () => {
                         {month.label}
                       </td>
                       <td style={{ ...TD,fontSize:10,color:'#9ca3af',fontWeight:600,
-                        textAlign:'left',paddingLeft:8,background:'#f8fafc',
+                        textAlign:'left',paddingLeft:8,background:'#efefef',
                         position:'sticky',left:78,zIndex:1,
                         borderLeft:'3px solid #e5e7eb',
                         borderBottom:'1px solid #e5e7eb',minWidth:82 }}>
@@ -453,7 +453,7 @@ const YearlyInOutReport = () => {
                         return (
                           <td key={di} style={{ ...TD,fontSize:10,fontWeight:700,
                             color:dayData?.isWeekend?'#dc2626':'#6b7280',
-                            background:'#f8fafc',borderBottom:'1px solid #e5e7eb',
+                            background:'#efefef',borderBottom:'1px solid #e5e7eb',
                             width:52,minWidth:52 }}
                             title={dayData?.dateStr?fd(dayData.dateStr):''}>
                             {wd}
@@ -464,15 +464,15 @@ const YearlyInOutReport = () => {
                   {ROWS.map((row, ri) => {
                     const isLastRow = ri===ROWS.length-1;
                     const rowBorder = isLastRow ? '2px solid #d1d5db'
-                                    : (row.key==='wh' || row.key==='out') ? '2px solid #b8c0cc'
+                                    : (row.key==='wh' || row.key==='out') ? '1px solid #cbd5e1'
                                     : '1px solid #f3f4f6';
                     return (
                       <tr key={`${mi}-${ri}`}
-                        style={{ background:row.key==='wh'?'#fafafa':row.key==='ot'?'#faf5ff':'white' }}>
+                        style={{ background:row.key==='wh'?'#f0f9ff':row.key==='ot'?'#faf5ff':'white' }}>
 
                         {/* Row label */}
                         <td style={{ ...TD,fontSize:11,color:row.color,fontWeight:600,
-                          textAlign:'left',paddingLeft:8,background:'#fafafa',
+                          textAlign:'left',paddingLeft:8,background:row.key==='wh'?'#f0f9ff':'#fafafa',
                           position:'sticky',left:78,zIndex:1,
                           borderLeft:`3px solid ${row.color}33`,
                           borderBottom:rowBorder,
@@ -484,7 +484,7 @@ const YearlyInOutReport = () => {
                         {Array.from({length:maxDays},(_,di)=>{
                           const dayData = month.days[di];
                           const cell = dayData ? getCellValue(dayData, row.key) : null;
-                          const bg = row.key==='wh'?'#fafafa':row.key==='ot'?'#faf5ff':'white';
+                          const bg = row.key==='wh'?'#f0f9ff':row.key==='ot'?'#faf5ff':'white';
                           return (
                             <td key={di} style={{ ...TD,
                               background:cell?.bg||bg,
@@ -497,7 +497,7 @@ const YearlyInOutReport = () => {
                                   : <div style={{ display:'flex',flexDirection:'column',alignItems:'center',lineHeight:1.15 }}>
                                       {cell.top && <span title={cell.topTitle||''} style={{ fontSize:9,fontWeight:800,color:cell.topColor,marginBottom:1,cursor:'help' }}>{cell.top}</span>}
                                       <span title={cell.title||''} style={{ fontFamily:cell.mono?'monospace':'inherit',
-                                        fontSize:cell.small?9:12,fontWeight:cell.isLeave?800:700,color:cell.color,
+                                        fontSize:cell.small?9:cell.leave?10:13,lineHeight:cell.leave?1.1:undefined,fontWeight:cell.isLeave?800:700,color:cell.color,
                                         cursor:cell.title?'help':undefined }}>
                                         {cell.text}
                                       </span>
@@ -516,17 +516,6 @@ const YearlyInOutReport = () => {
             </table>
           </FitScroll>
 
-          {/* Legend */}
-          <div style={{ marginTop:10,display:'flex',gap:14,flexWrap:'wrap',fontSize:11,
-            color:'#6b7280',padding:'8px 12px',background:'#f9fafb',
-            borderRadius:8,border:'1px solid #e5e7eb',alignItems:'center' }}>
-            <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
-            {ROWS.map(r=><span key={r.key}><strong style={{ color:r.color,fontFamily:'monospace' }}>HH:MM</strong> = {rowLabel(r.key, language, r.label)}</span>)}
-            <span style={{ background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:4,padding:'1px 7px',color:'#9ca3af',fontWeight:700 }}>{L('स','W')}</span>= {L('सप्ताहन्त','Weekend')}
-            <span style={{ background:'#fef3c7',border:'1px solid #fde68a',borderRadius:4,padding:'1px 7px',color:'#92400e',fontWeight:700 }}>PH</span>= {L('सार्वजनिक बिदा','Public Holiday')}
-            <span style={{ background:'#fee2e2',border:'1px solid #fecaca',borderRadius:4,padding:'1px 7px',color:'#991b1b',fontWeight:700 }}>{L('अनु','AB')}</span>= {L('अनुपस्थित','Absent')}
-            <span style={{ background:'#ede9fe',border:'1px solid #ddd6fe',borderRadius:4,padding:'1px 7px',color:'#5b21b6',fontWeight:700 }}>SL</span>= {L('बिदा (बिदा प्रकारको कोड)','Leave (leave type code)')}
-          </div>
         </>
       )}
     </div>

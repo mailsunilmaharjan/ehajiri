@@ -24,7 +24,7 @@ const ContactsPopup = ({ onClose, employees, onlineIds, onPick }) => {
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 15 }}>✕</button>
       </div>
       <div style={{ padding: 8, borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search staff…"
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search staff…"
           style={{ width: '100%', height: 30, border: '1px solid #dedede', borderRadius: 7, padding: '0 9px',
             fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
       </div>

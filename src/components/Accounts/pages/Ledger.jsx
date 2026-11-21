@@ -189,7 +189,7 @@ export default function Ledger() {
       </header>
       <PeriodBar from={from} to={to} fy={fy} onChange={(f, t) => { setFrom(f); setTo(t); }}>
         <div className="ledger-search" data-find title="Ctrl+F">
-          <AccountSelect autoFocus accounts={accounts} value={accountId} onChange={(id) => setSp({ account: id })} placeholder="🔍 Search / choose a ledger…"
+          <AccountSelect autoFocus accounts={accounts} value={accountId} onChange={(id) => setSp({ account: id })} placeholder="Search / choose a ledger…"
             filter={(a) => !(combined && a.linked_party_id && a.party_type === 'supplier')} />
         </div>
         <span className="spacer" />

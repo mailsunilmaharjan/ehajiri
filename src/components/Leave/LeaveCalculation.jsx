@@ -191,7 +191,7 @@ const MultiSelectDropdown = ({ options, value, onChange, placeholder = 'All', ma
           <div style={{ padding:'6px 8px', borderBottom:'2px solid #e5e7eb', flexShrink:0 }}>
             <input
               type="text" autoFocus
-              placeholder="🔍 Search..."
+              placeholder="Search..."
               value={localSearch}
               onChange={e => setLocalSearch(e.target.value)}
               onClick={e => e.stopPropagation()}
@@ -785,7 +785,7 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
 
         {/* Scrollable table */}
         <div className="dg-scroll-wrapper">
-          <table className="dg-table compact">
+          <table className="dg-table striped compact">
             <thead>
               {/* Label row — plain single-line headers, exactly like the Staff Detail
                   grid (DataGrid's own dg-header-row/dg-th). The bulk-fill inputs live
@@ -795,11 +795,11 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
                   the fill input look like it was bleeding into row 1 underneath it. */}
               <tr className="dg-header-row">
                 <th className="dg-th dg-sn-col" style={{ width:42 }}>SN</th>
-                <th className="dg-th" style={{ width:80 }}>{L('स्टाफ आईडी','Staff ID')}</th>
-                <th className="dg-th" style={{ minWidth:160 }}>{L('कर्मचारी नाम','Staff Name')}</th>
-                <th className="dg-th" style={{ width:80 }}>{L('पद','Post')}</th>
-                <th className="dg-th" style={{ width:80 }}>{L('विभाग','Dept')}</th>
-                <th className="dg-th" style={{ width:80 }}>{L('शाखा','Branch')}</th>
+                <th className="dg-th" style={{ width:90, textAlign:'left' }}>{L('स्टाफ आईडी','Staff ID')}</th>
+                <th className="dg-th" style={{ minWidth:160, textAlign:'left' }}>{L('कर्मचारी नाम','Staff Name')}</th>
+                <th className="dg-th" style={{ width:80, textAlign:'left' }}>{L('पद','Post')}</th>
+                <th className="dg-th" style={{ width:80, textAlign:'left' }}>{L('विभाग','Dept')}</th>
+                <th className="dg-th" style={{ width:80, textAlign:'left' }}>{L('शाखा','Branch')}</th>
                 {filteredLtConfigs.map(lt => {
                   const active = focusedCol === lt.shortName;
                   return (
@@ -856,10 +856,10 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
                   <tr key={row.id} className="dg-row">
                     <td className="dg-sn-col">{(page - 1) * pageSize + ri + 1}</td>
                     <td className="dg-td" style={{ padding:'3px 8px' }}>
-                      <span style={{ color:'#1f2937' }}>{row.employeeId || '—'}</span>
+                      <span style={{ fontFamily:'monospace', background:'#f3f4f6', padding:'2px 6px', borderRadius:4 }}>{row.employeeId || '—'}</span>
                     </td>
-                    <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>
-                      <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                    <td className="dg-td dg-first-col">
+                      <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
                         <Avatar photo={row.profilePhoto} name={row.fullName} size={22} />
                         {row.fullName}
                       </span>
@@ -1245,12 +1245,12 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
       render: v => <span style={{ fontFamily:'monospace', background:'#f3f4f6', padding:'2px 6px', borderRadius:4 }}>{v || '—'}</span> },
     { field:'fullName', header:L('कर्मचारी','Staff'), width:200,
       render: (v, row) => (
-        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937', fontWeight:600 }}>
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
           <Avatar photo={row.profilePhoto} name={v} size={22} />{v}
         </span>) },
-    { field:'postShort',   header:L('पद','Post'),     width:90,  align:'center' },
-    { field:'deptShort',   header:L('विभाग','Dept'),   width:100, align:'center' },
-    { field:'branchShort', header:L('शाखा','Branch'),  width:90,  align:'center' },
+    { field:'postShort',   header:L('पद','Post'),     width:90 },
+    { field:'deptShort',   header:L('विभाग','Dept'),   width:100 },
+    { field:'branchShort', header:L('शाखा','Branch'),  width:90 },
     ...visibleLtConfigs.map(lt => ({
       field: `${lt.shortName}_prev`,
       header: <span>{lt.name} <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>({lt.shortName})</span></span>,
@@ -1650,12 +1650,12 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
       render: v => <span style={{ fontFamily:'monospace', background:'#f3f4f6', padding:'2px 6px', borderRadius:4 }}>{v || '—'}</span> },
     { field:'fullName', header:L('कर्मचारी','Staff'), width:220,
       render: (v, row) => (
-        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937', fontWeight:600 }}>
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
           <Avatar photo={row.profilePhoto} name={v} size={22} />{v}
         </span>) },
-    { field:'postShort',   header:L('पद','Post'),    width:90,  align:'center' },
-    { field:'deptShort',   header:L('विभाग','Dept'),  width:100, align:'center' },
-    { field:'branchShort', header:L('शाखा','Branch'), width:90,  align:'center' },
+    { field:'postShort',   header:L('पद','Post'),    width:90 },
+    { field:'deptShort',   header:L('विभाग','Dept'),  width:100 },
+    { field:'branchShort', header:L('शाखा','Branch'), width:90 },
     { field:'ltType', header:L('बिदा प्रकार','Leave Type'), width:130, align:'center',
       render: (v, row) => <span style={{ fontWeight:700, color: row.isAcc ? '#047857' : '#c2410c' }}>{v}</span> },
     { field:'ltName', header:L('बिदा','Leave'), width:150,
@@ -2160,51 +2160,39 @@ export const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, l
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {/* Filter toolbar */}
-      <div className="lc-toolbar" style={{ display:'flex', alignItems:'flex-end', gap:14, flexWrap:'wrap' }}>
-        <div>
-          <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
-            {L('आर्थिक वर्ष','Fiscal Year')}
-          </label>
+      {/* Filter toolbar — every field: same label line, same 34px control height (.lc-rptbar in ui-kit.css) */}
+      <div className="lc-toolbar lc-rptbar">
+        <div className="lc-field" style={{ width:150 }}>
+          <label className="lc-lbl">{L('आर्थिक वर्ष','Fiscal Year')}</label>
           <select className="form-control lc-fy" value={fyId} onChange={e => setFyId(e.target.value)}>
             {(settings.fiscalYears||[]).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
           </select>
         </div>
 
         {hideStaffPicker ? null : canChangeStaff ? (
-          <div style={{ minWidth:280 }}>
-            <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
-              {L('कर्मचारी','Staff')}
-            </label>
+          <div className="lc-field" style={{ width:300 }}>
+            <label className="lc-lbl">{L('कर्मचारी','Staff')}</label>
             <StaffDropdown employees={activeEmployees} value={selectedEmpId} onChange={setSelectedEmpId} />
           </div>
         ) : selectedEmp ? (
-          <div>
-            <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
-              {L('कर्मचारी','Staff')}
-            </label>
-            <div style={{ height:36, display:'flex', alignItems:'center', padding:'0 12px', background:'#f3f4f6',
-              border:'1px solid #d1d5db', borderRadius:7, fontSize:13, fontWeight:600, color:'#374151' }}>
-              {selectedEmp.fullName}
-            </div>
+          <div className="lc-field">
+            <label className="lc-lbl">{L('कर्मचारी','Staff')}</label>
+            <div className="lc-static">{selectedEmp.fullName}</div>
           </div>
         ) : null}
 
-        <div>
-          <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
-            {L('संचित / गैर-संचित','Leave Accumulate')}
-          </label>
-          <select className="form-control" style={{ width:170 }}
-            value={leaveAccum} onChange={e => setLeaveAccum(e.target.value)}>
+        <div className="lc-field" style={{ width:170 }}>
+          <label className="lc-lbl">{L('संचित / गैर-संचित','Leave Accumulate')}</label>
+          <select className="form-control" value={leaveAccum} onChange={e => setLeaveAccum(e.target.value)}>
             <option value="all">{L('सबै','All')}</option>
             <option value="accumulate">{L('संचित','Accumulate')}</option>
             <option value="nonAccumulate">{L('गैर-संचित','Non Accumulate')}</option>
           </select>
         </div>
 
-        <div style={{ minWidth:220 }}>
+        <div className="lc-field" style={{ width:220 }}>
+          <label className="lc-lbl">{L('बिदाको प्रकार','Leave Type')}</label>
           <MultiCheckSelect
-            label={L('बिदाको प्रकार','Leave Type')}
             value={leaveTypeFilter}
             onChange={setLeaveTypeFilter}
             options={visibleLTConfigs.map(c => c.shortName)}

@@ -36,7 +36,7 @@ export default function StockLedger() {
     <>
       <header className="page-head"><h1>Stock Ledger</h1></header>
       <PeriodBar from={from} to={to} fy={fy} onChange={(f, t) => { setFrom(f); setTo(t); }}>
-        <div className="ledger-search" data-find title="Ctrl+F"><AccountSelect autoFocus accounts={opts} value={itemId} onChange={(id) => setSp({ item: id })} placeholder="🔍 Search / choose a product…" /></div>
+        <div className="ledger-search" data-find title="Ctrl+F"><AccountSelect autoFocus accounts={opts} value={itemId} onChange={(id) => setSp({ item: id })} placeholder="Search / choose a product…" /></div>
         <span className="spacer" />
         {data && <ReportButtons areaRef={area} title="Stock Ledger" subtitle={data.item.name} from={from} to={to} />}
       </PeriodBar>

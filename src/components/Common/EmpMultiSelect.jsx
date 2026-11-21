@@ -19,7 +19,8 @@ import Avatar from './Avatar.jsx';
      THIS picker's own selection) — a caller passes this when the picker
      also drives some broader bulk action that should be resettable too.
 ───────────────────────────────────────────────────────── */
-const EmpMultiSelect = ({ value = [], onChange, employees, postMap = {}, formatLabel, subLabel, placeholder = '— Select —', showNamesWhenMultiple = false, showAvatars = false, onClearAll }) => {
+const EmpMultiSelect = ({ value = [], onChange, employees, postMap = {}, formatLabel, subLabel, placeholder = '— Select —', showNamesWhenMultiple = false, showAvatars = false, onClearAll, compact = false }) => {
+  // compact: a 26px-high trigger for use inside grid rows (same height as a DataGrid row)
   const [open,   setOpen]   = useState(false);
   const [search, setSearch] = useState('');
   const [rect,   setRect]   = useState(null);
@@ -98,18 +99,18 @@ const EmpMultiSelect = ({ value = [], onChange, employees, postMap = {}, formatL
     <div style={{ position:'relative' }}>
       <button ref={trigRef} type="button" onClick={openDrop} style={{
         width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
-        padding:'6px 10px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
+        padding: compact ? '1px 8px' : '6px 10px', border:`1.5px solid ${open ? '#1a56db' : '#d1d5db'}`,
         borderRadius:6, background: selected.length > 0 ? '#f0f9ff' : '#fff',
         cursor:'pointer', fontSize:12, color: selected.length > 0 ? '#1f2937' : '#9ca3af',
         fontFamily:'inherit', boxShadow: open ? '0 0 0 2px rgba(26,86,219,.1)' : 'none',
-        minHeight:32, transition:'border-color .12s, box-shadow .12s',
+        minHeight: compact ? 26 : 32, transition:'border-color .12s, box-shadow .12s',
       }}>
         {showAvatars && selOptions.length > 0 ? (
           <div style={{ display:'flex', alignItems:'center', flex:1, overflow:'hidden' }}>
             {selOptions.slice(0, AVATAR_STACK_MAX).map((o, i) => (
               <span key={o.id} style={{ display:'flex', alignItems:'center', flexShrink:0,
                 marginRight: i < Math.min(selOptions.length, AVATAR_STACK_MAX) - 1 ? 10 : 0 }}>
-                <Avatar photo={o.photo} name={o.name} size={20} style={{ marginRight:5 }} />
+                <Avatar photo={o.photo} name={o.name} size={compact ? 18 : 20} style={{ marginRight:5 }} />
                 <span style={{ whiteSpace:'nowrap' }}>
                   {showNamesWhenMultiple && selOptions.length > 1 ? o.name.split(' ')[0] : o.name}
                   {i < Math.min(selOptions.length, AVATAR_STACK_MAX) - 1 ? ',' : ''}

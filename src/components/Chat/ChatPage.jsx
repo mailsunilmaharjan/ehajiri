@@ -170,7 +170,7 @@ const ChatPage = () => {
           <div style={{ padding: '2px 14px 6px', flexShrink: 0 }}>
             <input
               type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="🔍 Search chats…"
+              placeholder="Search chats…"
               style={{ width: '100%', height: 32, border: '1px solid #dedede', borderRadius: 7,
                 padding: '0 10px', fontSize: 12.5, boxSizing: 'border-box', outline: 'none', background: '#fff' }}
             />

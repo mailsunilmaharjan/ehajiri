@@ -16,6 +16,7 @@ import Avatar from '../Common/Avatar.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
 import FitScroll from '../Common/FitScroll.jsx';
+import { InOutHead, InOutBlock, ioPrintTable, ioExcelTable } from './InOutGrid.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 // BS day-of-month for an AD ISO date: headers must show the real BS day, not a 1..N counter (a custom range may start mid-month)
 const bsDay = (iso) => adToBS(iso)?.day ?? 0;
@@ -481,64 +482,20 @@ const MonthlyInOutReport = () => {
 
   const rptTitle = 'Monthly IN & OUT Report';
   const rptSub = () => periodLabel();
+  const dayLabelOf = (d) => (useNP ? (settings.nepaliDigits ? toNepaliDigits(bsDay(d.date)) : bsDay(d.date)) : d.dayNum);
+  const postOf = (e) => (settings.posts||[]).find(p=>p.name===e.position)?.shortName || e.postShort || e.position || '—';
+  const deptOf = (e) => (settings.departments||[]).find(d=>d.name===e.department)?.shortName || e.deptShort || e.department || '—';
 
   // Mirrors the on-screen 4-stacked-row-per-employee matrix exactly (one
   // column per day, SN/Staff merged vertically across IN/OUT/WH/OT rows,
   // Total WH/OT only populated on their own row) — same structure as
   // exportExcel below, just as an HTML table. WH values are bold throughout
   // (day cells and the Total WH column), matching the on-screen weight.
+  // Same block layout and colours as the screen (Day / IN / OUT / WorkedHour / OT per staff).
   const handlePrint = () => {
     if (!employees.length) return;
-    const dayHeaders = dates.map((d, idx) => {
-      const n = useNP ? bsDay(d.date) : d.dayNum;
-      return `<th style="padding:2px 3px;border:1px solid #dedede;background:#efefef;font-size:8px">${n}<br/>${d.dayKey.slice(0,3)}</th>`;
-    }).join('');
-    const rowColors = { in:'#1a56db', out:'#059669', wh:'#374151', ot:'#7c3aed' };
-    const dataRows = employees.map((e,i) => {
-      const post = (settings.posts||[]).find(p=>p.name===e.position)?.shortName || e.postShort || e.position || '—';
-      const dept = (settings.departments||[]).find(d=>d.name===e.department)?.shortName || e.deptShort || e.department || '—';
-      const staffCellHtml = `
-        <div style="font-weight:700">${e.fullName}</div>
-        <div style="font-size:7px;color:#6b7280">${post} | ${dept}</div>
-        <div style="font-size:7px;color:#6b7280">Branch : ${resolveShort(e)}</div>`;
-      return ROWS.map((rowDef, rIdx) => {
-        const isFirst = rIdx === 0;
-        const isLast  = rIdx === ROWS.length - 1;
-        const bdBottom = isLast ? '2px solid #c5cdd8' : '1px solid #ebebeb';
-        const dayCells = dates.map(d => {
-          const day = e.days[d.date];
-          let value = '';
-          // IN row carries the same status short names as the screen
-          // (leave code, PH, OV, DO/NO, W) when there's no punch.
-          if (rowDef.key === 'in')  value = inRowPrintHtml((day?.duties ? day.duties.map(d => d.timeIn ? fmtTime(d.timeIn) : '—').join('<br>') : fmtTime(day?.timeIn)), day,
-            day?.isWeekend ?? d.isWeekend, day?.isHoliday ?? d.isHoliday, L);
-          if (rowDef.key === 'out') value = (day?.duties ? day.duties.map(d => d.timeOut ? fmtTime(d.timeOut) : '—').join('<br>') : fmtTime(day?.timeOut)) || '';
-          if (rowDef.key === 'wh')  value = day?.workedHrs || '';
-          if (rowDef.key === 'ot')  value = day?.otHrs || '';
-          const bold = rowDef.key === 'wh' ? 'font-weight:700;' : '';
-          return `<td style="padding:1px 2px;border-right:1px solid #ebebeb;border-bottom:${bdBottom};text-align:center;font-size:8px;${bold}">${value}</td>`;
-        }).join('');
-        return `<tr>
-          ${isFirst ? `<td rowspan="4" style="padding:2px 4px;border:1px solid #dedede;border-bottom:2px solid #c5cdd8;text-align:center;vertical-align:middle">${i+1}</td>
-          <td rowspan="4" style="padding:2px 5px;border:1px solid #dedede;border-bottom:2px solid #c5cdd8;vertical-align:middle">${staffCellHtml}</td>` : ''}
-          <td style="padding:1px 5px;border:1px solid #dedede;border-bottom:${bdBottom};text-align:center;color:${rowColors[rowDef.key]};font-weight:700;font-size:8px">${rowLabel(rowDef.key, language, rowDef.label)}</td>
-          ${dayCells}
-          <td style="padding:1px 4px;border:1px solid #dedede;border-bottom:${bdBottom};text-align:center;color:#065f46;font-weight:700;font-size:8px">${rowDef.key==='wh' ? (e.totalWorkedHrs||'') : ''}</td>
-          <td style="padding:1px 4px;border:1px solid #dedede;border-bottom:${bdBottom};text-align:center;color:#059669;font-weight:700;font-size:8px">${rowDef.key==='ot' ? (e.eligibleForOt ? (e.totalApprovedOTFormatted||'—') : '') : ''}</td>
-        </tr>`;
-      }).join('');
-    }).join('');
-    const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:9px">
-      <thead><tr>
-        <th style="padding:3px 4px;border:1px solid #dedede;background:#efefef">SN</th>
-        <th style="padding:3px 4px;border:1px solid #dedede;background:#efefef;text-align:left">Staff</th>
-        <th style="padding:3px 4px;border:1px solid #dedede;background:#efefef"></th>
-        ${dayHeaders}
-        <th style="padding:3px 4px;border:1px solid #dedede;background:#f0fdf4;color:#065f46">Total WH</th>
-        <th style="padding:3px 4px;border:1px solid #dedede;background:#f0fdf4;color:#059669">Total OT</th>
-      </tr></thead>
-      <tbody>${dataRows}</tbody>
-    </table>`;
+    const contentHtml = ioPrintTable({ employees, dates, dayLabel: dayLabelOf, totals: ['wh','ot'], language,
+      staffHtml: (e) => `<div style="font-size:7px;color:#6b7280">${postOf(e)} | ${deptOf(e)}</div><div style="font-size:7px;color:#6b7280">Branch : ${resolveShort(e)}</div>` });
     openPrintWindow(buildPrintDoc({ settings, language, reportTitle: rptTitle, reportSub: rptSub(), contentHtml, isLandscape: true, branch: printBranch }), true);
   };
 
@@ -589,80 +546,9 @@ const MonthlyInOutReport = () => {
     // grows a logo the same way that one did.
     const headerOffset = ws.rowCount;
 
-    // ── Table header (2 rows, matching the on-screen rowSpan={2} layout) ──
-    const hdr1 = ws.addRow([...FIXED_COLS, ...dayCols, 'Total WH', 'Total OT']);
-    const hdr2 = ws.addRow([...FIXED_COLS.map(() => ''), ...dayDows, '', '']);
-    // Merge BEFORE styling — ExcelJS resets a merged range's non-master
-    // cells when mergeCells() runs, which would silently drop any border/
-    // fill applied beforehand.
-    [1, 2, 3, lastCol - 1, lastCol].forEach(c => {
-      ws.mergeCells(headerOffset + 1, c, headerOffset + 2, c);
-    });
-    [hdr1, hdr2].forEach((row, rowIdx) => {
-      row.eachCell({ includeEmpty: true }, cell => {
-        cell.font = { bold: true, size: 10.5, color: { argb: 'FF374151' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = { right: thin, bottom: rowIdx === 1 ? heavy : thin };
-      });
-    });
-    ws.getRow(headerOffset + 1).getCell(2).alignment = { horizontal: 'left', vertical: 'middle' };
-
-    // ── Data rows ──
-    employees.forEach((e, i) => {
-      const post   = (settings.posts||[]).find(p=>p.name===e.position)?.shortName || e.postShort || e.position || '—';
-      const dept   = (settings.departments||[]).find(d=>d.name===e.department)?.shortName || e.deptShort || e.department || '—';
-      const branch = resolveShort(e);
-      const staffCell = `${e.fullName}\n${post} | ${dept}\nBranch : ${branch}`;
-      const blockStartRow = ws.rowCount + 1;
-      const addedRows = [];
-
-      ROWS.forEach((rowDef, rIdx) => {
-        const cells = [
-          rIdx === 0 ? i + 1 : '', rIdx === 0 ? staffCell : '', rowDef.label,
-          ...dates.map(d => {
-            const day = e.days[d.date];
-            if (rowDef.key === 'in')  return inRowExcelText((day?.duties ? day.duties.map(d => d.timeIn ? fmtTime(d.timeIn) : '—').join(' / ') : fmtTime(day?.timeIn)), day,
-              day?.isWeekend ?? d.isWeekend, day?.isHoliday ?? d.isHoliday, L);
-            if (rowDef.key === 'out') return (day?.duties ? day.duties.map(d => d.timeOut ? fmtTime(d.timeOut) : '—').join(' / ') : fmtTime(day?.timeOut)) || '';
-            if (rowDef.key === 'wh')  return day?.workedHrs || '';
-            if (rowDef.key === 'ot')  return day?.otHrs || '';
-            return '';
-          }),
-          rowDef.key === 'wh' ? (e.totalWorkedHrs || '') : '',
-          rowDef.key === 'ot' ? (e.eligibleForOt ? (e.totalApprovedOTFormatted || '') : '') : '',
-        ];
-        addedRows.push(ws.addRow(cells));
-      });
-
-      // Merge BEFORE styling, same reason as the table header above.
-      [1, 2].forEach(c => ws.mergeCells(blockStartRow, c, blockStartRow + ROWS.length - 1, c));
-      ws.getCell(blockStartRow, 2).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-
-      addedRows.forEach((row, rIdx) => {
-        const isLast = rIdx === ROWS.length - 1;
-        const isWH   = ROWS[rIdx].key === 'wh';
-        row.eachCell({ includeEmpty: true }, (cell, colNum) => {
-          if (colNum === 2) return; // Staff cell alignment set once above — don't overwrite its wrapText
-          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-          cell.border = { right: colNum <= 3 ? thin : { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            bottom: isLast ? heavy : light };
-          // Worked Hours row — day values and the Total WH cell all bold,
-          // matching the on-screen matrix's own bold WH weight.
-          if (isWH && colNum > 3) cell.font = { bold: true, size: 9 };
-        });
-        row.getCell(2).border = { right: thin, bottom: isLast ? heavy : light };
-        row.getCell(3).font = { bold: true, size: 9.5,
-          color: { in: 'FF1A56DB', out: 'FF059669', wh: 'FF374151', ot: 'FF7C3AED' }[ROWS[rIdx].key] };
-      });
-    });
-
-    ws.columns = [
-      { width: 5 }, { width: 28 }, { width: 6 },
-      ...dayCols.map(() => ({ width: 7 })),
-      { width: 9 }, { width: 9 },
-    ];
-    ws.views = [{ state: 'frozen', ySplit: headerOffset + 2 }];
+    // Table: same block layout and colours as the screen
+    ioExcelTable(ws, { employees, dates, dayLabel: dayLabelOf, totals: ['wh','ot'], language,
+      staffText: (e) => `${e.fullName}\n${postOf(e)} | ${deptOf(e)}\nBranch : ${resolveShort(e)}` });
 
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -793,42 +679,8 @@ const MonthlyInOutReport = () => {
         <FitScroll style={{ borderRadius:8,
           border:'1px solid #dedede', boxShadow:'0 1px 3px rgba(0,0,0,.07)' }}>
           <table style={{ borderCollapse:'collapse', width:'100%' }}>
-            <thead style={{ position:'sticky', top:0, zIndex:5 }}>
-              <tr>
-                <th rowSpan={2} style={{ ...TH, minWidth:34, position:'sticky', left:0, zIndex:4 }}>SN</th>
-                <th rowSpan={2} style={{ ...TH, textAlign:'left', minWidth:170, position:'sticky', left:34, zIndex:4 }}>
-                  {L('कर्मचारी','Staff')}
-                </th>
-                <th rowSpan={2} style={{ ...TH, minWidth:58 }}></th>
-
-                {dates.map(({ date, dayNum, dayKey, isWeekend, isHoliday }, dateIdx) => {
-                  // BS mode: sequential 1…N; AD mode: actual AD day number
-                  const dispNum = useNP
-                    ? (settings.nepaliDigits ? toNepaliDigits(bsDay(date)) : bsDay(date))
-                    : dayNum;
-                  return (
-                    <th key={date} style={thDay(isWeekend, isHoliday)}>{dispNum}</th>
-                  );
-                })}
-
-                {/* Total WH header */}
-                <th rowSpan={2} style={{ ...TH, background:'#f0fdf4', color:'#065f46',
-                  borderLeft:'2px solid #c9d1db', minWidth:64 }}>
-                  {useNP ? 'कुल WH' : 'Total WH'}
-                </th>
-                {/* Total OT header */}
-                <th rowSpan={2} style={{ ...TH, background:'#f0fdf4', color:'#059669', minWidth:64 }}>
-                  {useNP ? 'कुल OT' : 'Total OT'}
-                </th>
-              </tr>
-              <tr>
-                {dates.map(({ date, dayKey, isWeekend, isHoliday }) => (
-                  <th key={date} style={thDow(isWeekend, isHoliday)}>
-                    {dayKey.slice(0,3)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+            <InOutHead dates={dates} totals={['wh','ot']} L={L}
+              dayLabel={(d) => (useNP ? (settings.nepaliDigits ? toNepaliDigits(bsDay(d.date)) : bsDay(d.date)) : d.dayNum)} />
 
             <tbody>
               {employees.length === 0 && (
@@ -841,94 +693,21 @@ const MonthlyInOutReport = () => {
               )}
 
               {employees.map((emp, idx) => (
-                <React.Fragment key={emp.id}>
-                  {ROWS.map((row, rIdx) => {
-                    const isLast = rIdx === ROWS.length - 1;
-                    return (
-                      <tr key={row.key}
-                        style={{ background: rIdx===2 ? '#fafafa' : rIdx===3 ? '#fdfcff' : 'white' }}>
-
-                        {rIdx === 0 && (
-                          <>
-                            <td rowSpan={4} style={{ ...TD_FIX, background:'#efefef', color:'#6b7280',
-                              textAlign:'center', position:'sticky', left:0, zIndex:1,
-                              borderBottom:'2px solid #c5cdd8' }}>
-                              {idx+1}
-                            </td>
-                            <td rowSpan={4} style={{ ...TD_FIX, background:'white', color:'#1f2937',
-                              position:'sticky', left:34, zIndex:1, borderBottom:'2px solid #c5cdd8',
-                              whiteSpace:'normal', padding:'6px 8px' }}>
-                              <span style={{ display:'flex', alignItems:'flex-start', gap:6 }}>
-                                <Avatar photo={emp.profilePhoto} name={emp.fullName} size={20} />
-                                <span>
-                                  <div style={{ fontWeight:600 }}>{emp.fullName}</div>
-                                  <div style={{ fontSize:11, color:'#6b7280' }}>
-                                    {(settings.posts||[]).find(p=>p.name===emp.position)?.shortName || emp.postShort || emp.position || '—'}
-                                    {' | '}
-                                    {(settings.departments||[]).find(d=>d.name===emp.department)?.shortName || emp.deptShort || emp.department || '—'}
-                                  </div>
-                                  <div style={{ fontSize:11, color:'#6b7280' }}>{L('शाखा','Branch')} : {resolveShort(emp)}</div>
-                                </span>
-                              </span>
-                            </td>
-                          </>
-                        )}
-
-                        <LabelCell label={rowLabel(row.key, language, row.label)} color={row.color} isLast={isLast} />
-
-                        {/* isWeekend prefers this employee's own roster-aware
-                            flag (set once a roster entry covers the date);
-                            dates[].isWeekend is just the flat company-wide
-                            pattern shared by everyone, used only as a
-                            fallback for a day with no per-employee data. */}
-                        {dates.map(({ date, isWeekend, isHoliday, holidayName }) => (
-                          <DayCell
-                            key={date}
-                            rowKey={row.key}
-                            day={emp.days[date]}
-                            isWeekend={emp.days?.[date]?.isWeekend ?? isWeekend}
-                            isHoliday={emp.days?.[date]?.isHoliday ?? isHoliday}
-                            holidayName={emp.days?.[date]?.holidayName ?? holidayName}
-                            isLast={isLast}
-                            language={language}
-                          />
-                        ))}
-
-                        <TotalCell emp={emp} rowKey={row.key} isLast={isLast} which="wh" />
-                        <TotalCell emp={emp} rowKey={row.key} isLast={isLast} which="ot" />
-                      </tr>
-                    );
-                  })}
-                </React.Fragment>
+                <InOutBlock key={emp.id} emp={emp} idx={idx} dates={dates} totals={['wh','ot']} language={language} fd={fd}
+                  staffInfo={<>
+                    <div style={{ fontSize:11, color:'#6b7280' }}>
+                      {(settings.posts||[]).find(p=>p.name===emp.position)?.shortName || emp.postShort || emp.position || '—'}
+                      {' | '}
+                      {(settings.departments||[]).find(d=>d.name===emp.department)?.shortName || emp.deptShort || emp.department || '—'}
+                    </div>
+                    <div style={{ fontSize:11, color:'#6b7280' }}>{L('शाखा','Branch')} : {resolveShort(emp)}</div>
+                  </>} />
               ))}
             </tbody>
           </table>
         </FitScroll>
       )}
 
-      {/* Legend */}
-      {!loading && employees.length > 0 && (
-        <div style={{ marginTop:10,display:'flex',gap:12,flexWrap:'wrap',fontSize:11,
-          color:'#6b7280',padding:'8px 14px',background:'#f9fafb',
-          borderRadius:8,border:'1px solid #e5e7eb',alignItems:'center' }}>
-          <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
-          {ROWS.map(r=>(
-            <span key={r.key} style={{ display:'inline-flex',alignItems:'center',gap:4 }}>
-              <span style={{ background:r.color,color:'white',borderRadius:4,
-                padding:'1px 7px',fontSize:11,fontWeight:800 }}>{rowLabel(r.key, language, r.label)}</span>
-              <span>= {r.key==='in'?L('आएको समय','Time In'):r.key==='out'?L('गएको समय','Time Out'):r.key==='wh'?L('काम भएको घण्टा','Worked Hours'):L('ओभरटाइम','Over Time')}</span>
-            </span>
-          ))}
-          <span><span style={{ background:'#e5e7eb',color:'#6b7280',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('स','W')}</span> = {L('सप्ताहन्त','Weekend')}</span>
-          <span><span style={{ background:'#fee2e2',color:'#991b1b',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('अनु','AB')}</span> = {L('अनुपस्थित','Absent')}</span>
-          <span><span style={{ background:'#fef3c7',color:'#92400e',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('साबि','PH')}</span> = {L('सार्वजनिक बिदा','Public Holiday')}</span>
-          <span><span style={{ background:'#fde68a',color:'#78350f',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('हा-साबि','P-PH')}</span> = {L('सार्वजनिक बिदामा हाजिर','Present on Public Holiday')}</span>
-          <span><span style={{ background:'#ede9fe',color:'#5b21b6',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>SL</span> = {L('बिदा','Leave')}</span>
-          <span><span style={{ background:'#dbeafe',color:'#1e40af',borderRadius:4,padding:'1px 6px',fontSize:11,fontWeight:800 }}>{L('भ्रमण','OV')}</span> = {L('कार्यालय भ्रमण','Office Visit')}</span>
-          <span><strong style={{ color:'#d97706' }}>⚠</strong> = {L('एकल पन्च','Single punch')}</span>
-          <span style={{ marginLeft:'auto' }}>{employees.length} {L('कर्मचारी','staff')}</span>
-        </div>
-      )}
       {/* ── Advance Search Modal ── */}
       {showSearch && (
         <AdvanceSearchModal

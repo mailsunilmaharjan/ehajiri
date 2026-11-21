@@ -134,7 +134,7 @@ export default function DocList() {
           <option value="cancelled">Cancelled</option>
         </select>
         <span className="tb-search"><input data-find title="Ctrl+F" value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder={`🔍 Search by ${meta.side === 'sales' ? 'Customer' : 'Supplier'}, PAN or bill no…`} />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
+          placeholder={`Search by ${meta.side === 'sales' ? 'Customer' : 'Supplier'}, PAN or bill no…`} />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
       </PeriodBar>
       <section className="card">
         <table ref={gridRef} className="grid doc-list dg-soft" onContextMenu={(e) => rowMenu(e, null)}>

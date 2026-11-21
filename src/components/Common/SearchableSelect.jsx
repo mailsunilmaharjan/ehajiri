@@ -187,7 +187,7 @@ const SearchableSelect = forwardRef(({
      typed inside the portaled search input (React bubbles synthetic events
      along the component tree, not the DOM tree, so this still works) */
   const handleKeyDown = (e) => {
-    if (e.key === 'Escape') { if (open) closeDrop(); return; }
+    if (e.key === 'Escape') { if (open) { e.preventDefault(); e.stopPropagation(); closeDrop(); } return; }   // only the list closes, not the form
 
     if (!open) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
@@ -283,7 +283,7 @@ const SearchableSelect = forwardRef(({
 
       {/* Portal dropdown */}
       {open && rect && createPortal(
-        <div ref={dropRef} style={{
+        <div ref={dropRef} data-dd-open="" style={{
           position: 'fixed', zIndex: 99999,
           top: rect.top, left: rect.left, width: rect.width,
           background: '#fff', border: '1.5px solid var(--ui-dd-border, #1a56db)', borderRadius: 'var(--ui-dd-radius, 8px)',
@@ -291,7 +291,7 @@ const SearchableSelect = forwardRef(({
           maxHeight: 280, display: 'flex', flexDirection: 'column',
         }}>
           {/* search */}
-          <div style={{ padding:'7px 7px 5px', borderBottom:'1px solid #f1f5f9', flexShrink:0 }}>
+          <div style={{ padding:6, borderBottom:'1px solid #eef2f7', flexShrink:0, background:'#fff', borderRadius:'var(--ui-dd-radius, 8px) var(--ui-dd-radius, 8px) 0 0' }}>
             <div style={{ display:'flex', alignItems:'center', gap:5, background:'#f8fafc',
               border:'1px solid #e2e8f0', borderRadius:5, padding:'4px 7px' }}>
               <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12" style={{ color:'#9ca3af', flexShrink:0 }}>
@@ -299,9 +299,9 @@ const SearchableSelect = forwardRef(({
               </svg>
               <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search..." style={{ border:'none', outline:'none', background:'transparent',
-                  fontSize:12, color:'#374151', width:'100%', fontFamily:'inherit' }} />
+                  fontSize:13, color:'#1f2937', flex:1, width:'auto', minWidth:0, fontFamily:'inherit' }} />
               {search && <button type="button" onMouseDown={e => { e.preventDefault(); setSearch(''); }}
-                style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:14, padding:0 }}>×</button>}
+                style={{ background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:15, padding:'0 10px', alignSelf:'center' }}>×</button>}
             </div>
           </div>
 

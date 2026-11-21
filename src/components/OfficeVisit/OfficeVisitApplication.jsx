@@ -290,29 +290,6 @@ const OfficeVisitApplication = () => {
               </div>
             )}
 
-            {/* ── Staff Information ── */}
-            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 10,
-              padding: '12px 16px', marginBottom: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase',
-                letterSpacing: '.5px', marginBottom: 10 }}>
-                👤 Staff Information
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-                {[
-                  ['Name',       currentUser.fullName],
-                  ['Staff ID',   currentUser.employeeId],
-                  ['Post',       currentUser.position   || '—'],
-                  ['Department', currentUser.department || '—'],
-                  ['Branch',     currentUser.branch     || '—'],
-                ].map(([l, v]) => (
-                  <div key={l}>
-                    <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 2 }}>{l}</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2937' }}>{v}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
             <form onSubmit={handleSubmit} className="glm-card">
 
               {/* ── Official Visit — searchable dropdown from settings ── */}
@@ -496,8 +473,8 @@ const OfficeVisitApplication = () => {
               )}
 
               {/* ── Document Upload ── */}
-              <div className="form-group">
-                <Lbl>Document / Attachment</Lbl>
+              <div className="form-section">
+                <div className="form-section-title">📎 Document / Attachment</div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
                   border: '1.5px dashed #d1d5db', borderRadius: 8, cursor: 'pointer',
                   background: form.document ? '#f0fdf4' : '#fafafa', transition: 'border .15s' }}

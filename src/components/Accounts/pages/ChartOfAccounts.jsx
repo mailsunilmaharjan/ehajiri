@@ -270,7 +270,7 @@ export default function ChartOfAccounts() {
         <h1>Chart of Accounts</h1>
         <span className="muted">NFRS for SMEs · {accounts.length} ledgers</span>
         <span className="spacer" />
-        <input className="coa2-search" data-find title="Ctrl+F" placeholder="🔍 Search ledger, code, A/c no…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="coa2-search" data-find title="Ctrl+F" placeholder="Search ledger, code, A/c no…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="view-toggle coa-viewtg">
           <button type="button" className={view === 'statement' ? 'on' : 'ghost'} onClick={() => pickView('statement')}>Statement view</button>
           <button type="button" className={view === 'tree' ? 'on' : 'ghost'} onClick={() => pickView('tree')}>Tree view</button>

@@ -756,7 +756,7 @@ const LeavePanel = () => {
         <span style={{ color:'#6b7280' }}>{getEmployeeById(row.employeeId)?.employeeId || '—'}</span>
       ) },
     { field: 'employeeId',    header: t('Name'),         width: 160, render: v => (
-        <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight:600, color:'#111827' }}>
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
           <Avatar photo={getEmployeeById(v)?.profilePhoto} name={getEmployeeName(v)} size={22} />
           {getEmployeeName(v)}
         </span>
@@ -1826,46 +1826,17 @@ const LeavePanel = () => {
                   </div>
                 )}
 
-                {/* ── Staff Information ── */}
-                <div style={{ background:'#ffffff', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 16px', marginBottom:18 }}>
-                  <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:10 }}>
-                    👤 Staff Information
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
-                    {[
-                      ['Name',       currentUser.fullName],
-                      ['Staff ID',   currentUser.employeeId],
-                      ['Post',       currentUser.position || '—'],
-                      ['Department', currentUser.department || '—'],
-                      ['Branch',     currentUser.branch || '—'],
-                    ].map(([l,v]) => (
-                      <div key={l}>
-                        <div style={{ fontSize:10, color:'#9ca3af', marginBottom:2 }}>{l}</div>
-                        <div style={{ fontSize:13, fontWeight:600, color:'#1f2937' }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
                 <form onSubmit={handleApplySubmit}>
 
                   {/* ── Leave ── */}
                   <div className="form-group">
                     <Lbl required>Leave</Lbl>
-                    <select className={`form-control ${applyErrors.leaveTypeCode ? 'error' : ''}`}
+                    <SearchableSelect className={`form-control ${applyErrors.leaveTypeCode ? 'error' : ''}`}
                       value={applyForm.leaveTypeCode}
-                      onChange={e => handleApplyChange('leaveTypeCode', e.target.value)}
-                      style={{ fontSize:13 }}>
-                      <option value="">— Select Leave Type —</option>
-                      {ltConfigs.map(lt => {
-                        const avl = balance[lt.shortName] || 0;
-                        return (
-                          <option key={lt.shortName} value={lt.shortName}>
-                            {lt.name}  —  {avl} days remaining
-                          </option>
-                        );
-                      })}
-                    </select>
+                      onChange={v => handleApplyChange('leaveTypeCode', v)}
+                      placeholder="— Select Leave Type —"
+                      options={ltConfigs.map(lt => ({ value: lt.shortName, label: lt.name,
+                        sub: `${balance[lt.shortName] || 0} days remaining` }))} />
                     <Err msg={applyErrors.leaveTypeCode} />
 
                     {/* Leave type detail chips */}
@@ -1890,44 +1861,33 @@ const LeavePanel = () => {
                     )}
                   </div>
 
-                  {/* ── Half Day toggle ── */}
-                  <div style={{ marginBottom:14 }}>
-                    <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none' }}>
-                      <input type="checkbox" checked={applyForm.halfDay}
-                        onChange={e => handleApplyChange('halfDay', e.target.checked)}
-                        style={{ width:15, height:15, accentColor:'#1a56db' }} />
-                      <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>Half Day</span>
-                      {applyForm.halfDay && <span style={{ fontSize:11, color:'#6b7280' }}>(0.5 days will be deducted)</span>}
-                    </label>
-                  </div>
-
-                  {/* ── Dates ── */}
-                  {applyForm.halfDay ? (
+                  {/* From Date | To Date | Half Day (0.5) — one row, same as Manual Leave Posting */}
+                  <div style={{ display:'grid', gridTemplateColumns: applyForm.halfDay ? 'minmax(0,1fr) auto' : 'minmax(0,1fr) minmax(0,1fr) auto', gap:12, alignItems:'start' }}>
                     <div className="form-group">
-                      <Lbl required>Date</Lbl>
+                      <Lbl required>{applyForm.halfDay ? 'Date' : 'From Date'}</Lbl>
                       <LeaveDateInput value={applyForm.fromDate} error={!!applyErrors.fromDate}
-                        settings={settings}
-                        onChange={v => handleApplyChange('fromDate', v)} />
+                        settings={settings} onChange={v => handleApplyChange('fromDate', v)} />
                       <Err msg={applyErrors.fromDate} />
                     </div>
-                  ) : (
-                    <div className="form-row">
-                      <div className="form-group">
-                        <Lbl required>From Date</Lbl>
-                        <LeaveDateInput value={applyForm.fromDate} error={!!applyErrors.fromDate}
-                          settings={settings}
-                          onChange={v => handleApplyChange('fromDate', v)} />
-                        <Err msg={applyErrors.fromDate} />
-                      </div>
+                    {!applyForm.halfDay && (
                       <div className="form-group">
                         <Lbl required>To Date</Lbl>
                         <LeaveDateInput value={applyForm.toDate} error={!!applyErrors.toDate}
-                          minDate={applyForm.fromDate} settings={settings}
-                          onChange={v => handleApplyChange('toDate', v)} />
+                          minDate={applyForm.fromDate} settings={settings} onChange={v => handleApplyChange('toDate', v)} />
                         <Err msg={applyErrors.toDate} />
                       </div>
+                    )}
+                    <div className="form-group">
+                      <Lbl>Half Day</Lbl>
+                      <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none', minHeight:42, boxSizing:'border-box',
+                        padding:'0 14px', border:'1px solid #dbe3ee', borderRadius:8, whiteSpace:'nowrap',
+                        background: applyForm.halfDay ? '#f5f3ff' : '#fff' }}>
+                        <input type="checkbox" checked={applyForm.halfDay} onChange={e => handleApplyChange('halfDay', e.target.checked)}
+                          style={{ width:15, height:15, accentColor:'#7c3aed' }} />
+                        <span style={{ fontSize:13, color:'#374151' }}>Half Day (0.5)</span>
+                      </label>
                     </div>
-                  )}
+                  </div>
 
                   {/* ── No. of Days (auto, disabled) ── */}
                   {(applyForm.halfDay || (applyForm.fromDate && applyForm.toDate)) && (
@@ -2030,8 +1990,8 @@ const LeavePanel = () => {
                   </div>
 
                   {/* ── Document Upload ── */}
-                  <div className="form-group">
-                    <Lbl>Document / Attachment</Lbl>
+                  <div className="form-section">
+                    <div className="form-section-title">📎 Document / Attachment</div>
                     <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
                       border:'1.5px dashed #d1d5db', borderRadius:8, cursor:'pointer',
                       background: applyForm.document ? '#f0fdf4' : '#fafafa',
@@ -2693,7 +2653,7 @@ const VisitPanel = () => {
         <span style={{ color:'#6b7280' }}>{getEmployeeById(row.employeeId)?.employeeId || '—'}</span>
       ) },
     { field: 'employeeId',  header: t('Name'),          width: 150, render: v => (
-        <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight:600 }}>
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937' }}>
           <Avatar photo={getEmployeeById(v)?.profilePhoto} name={getEmployeeName(v)} size={22} />
           {getEmployeeName(v)}
         </span>

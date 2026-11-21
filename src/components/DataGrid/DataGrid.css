@@ -206,6 +206,9 @@
 
 /* â”€â”€ SN column â€” compact width (force even in auto-layout tables) â”€â”€ */
 .dg-sn-col { text-align: center; width: 32px !important; min-width: 28px !important; max-width: 36px !important; padding: 4px 2px !important; }
+/* SN never takes a share of spare width: in a grid with only a few columns the browser spreads the extra width over
+   every column (SN became ~80px). A 1% width keeps it at its content width (min 28px) in every grid. */
+.dg-table:not(.auto-width) .dg-sn-col { width: 1% !important; white-space: nowrap; }
 
 /* SN and checkbox cells in body rows â€” light #efefef background */
 td.dg-checkbox-col,
@@ -261,7 +264,7 @@ th.dg-sn-col {
 /* Row states */
 .dg-row { transition: background .1s; }
 .dg-table.striped .dg-row:nth-child(even) .dg-td { background: var(--dg-stripe); }
-.dg-row:hover .dg-td { background: var(--dg-hover) !important; }
+.dg-row:hover .dg-td { background: var(--dg-hover) !important; font-weight: 700; }   /* hovered row: highlighted + bold, like the selected row */
 .dg-row.selected .dg-td { background: var(--dg-selected) !important; font-weight: 700; }
 .dg-row.selected td.dg-checkbox-col,
 .dg-row.selected td.dg-sn-col { background: var(--dg-selected) !important; }
