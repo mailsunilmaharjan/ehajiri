@@ -1500,10 +1500,12 @@ const LeaveTypeSection = () => {
         <div className="modal-overlay">
           <div className="modal glm-form glm-plain" style={{ maxWidth:680, width:'95%' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ बिदा प्रकार','New Leave Type')}`}</h2>
+              <div className="glm-head-ic">{editId ? '✏️' : '＋'}</div>
+              <div className="glm-head-txt"><h2>{editId ? L('बिदा प्रकार सम्पादन','Edit Leave Type') : L('नयाँ बिदा प्रकार','New Leave Type')}</h2><p>{L('बिदाको नियम र दिन सेट गर्नुहोस्','Set the leave rules and yearly days')}</p></div>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ maxHeight:'70vh', overflowY:'auto' }}>
+              <div className="glm-step"><i>1</i>{L('बिदा प्रकार विवरण','Leave type details')}</div>
 
               {/* Row 1 */}
               <div className="form-row-3" style={{ marginBottom:14 }}>
@@ -1722,10 +1724,12 @@ const OfficeVisitTypeSection = () => {
         <div className="modal-overlay">
           <div className="modal modal-sm glm-form glm-plain" style={{ maxWidth:520 }} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ भ्रमण प्रकार','New Office Visit Type')}`}</h2>
+              <div className="glm-head-ic">{editId ? '✏️' : '＋'}</div>
+              <div className="glm-head-txt"><h2>{editId ? L('भ्रमण प्रकार सम्पादन','Edit Office Visit Type') : L('नयाँ भ्रमण प्रकार','New Office Visit Type')}</h2><p>{L('कार्यालय भ्रमणको प्रकार तोक्नुहोस्','Define a type of office visit')}</p></div>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
+              <div className="glm-step"><i>1</i>{L('भ्रमण प्रकार विवरण','Visit type details')}</div>
               <div className="form-group">
                 <label className="form-label">{L('भ्रमणको नाम','Office Visit Name')} <span style={{ color:'#ef4444' }}>*</span></label>
                 <input type="text" className={`form-control${errors.name?' error':''}`} placeholder={L('फिल्ड भिजिट','Field Visit')} value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} />
@@ -2033,10 +2037,12 @@ const PublicHolidaySection = () => {
         <div className="modal-overlay">
           <div className="modal glm-form glm-plain" style={{ maxWidth:700, width:'95%' }} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ सार्वजनिक छुट्टी','New Public Holiday')}`}</h2>
+              <div className="glm-head-ic">{editId ? '✏️' : '＋'}</div>
+              <div className="glm-head-txt"><h2>{editId ? L('सार्वजनिक छुट्टी सम्पादन','Edit Public Holiday') : L('नयाँ सार्वजनिक छुट्टी','New Public Holiday')}</h2><p>{L('मिति र नियमसहित छुट्टी थप्नुहोस्','Add a holiday with its date and rules')}</p></div>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ maxHeight:'70vh', overflowY:'auto' }}>
+              <div className="glm-step"><i>1</i>{L('छुट्टी विवरण','Holiday details')}</div>
 
               {/* Holiday Name */}
               <div className="form-group" style={{ marginBottom:14 }}>
@@ -4370,7 +4376,7 @@ const Settings = () => {
                 {/* ── Assign Staff Modal ── */}
                 {assignModal && (
                   <div className="modal-overlay">
-                    <div className="modal modal-md" onClick={e => e.stopPropagation()}>
+                    <div className="modal modal-md glm-form glm-plain" onClick={e => e.stopPropagation()}>
                       <div className="modal-header">
                         <h2>{assignModal.icon} {L('कर्मचारी थप्नुस','Assign Staff')} — {assignModal.name}</h2>
                         <button className="modal-close" onClick={() => setAssignModal(null)}>✕</button>
@@ -4430,7 +4436,7 @@ const Settings = () => {
                 {/* ── Change Role Modal ── */}
                 {changeModal && (
                   <div className="modal-overlay">
-                    <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+                    <div className="modal modal-sm glm-form glm-plain" onClick={e => e.stopPropagation()}>
                       <div className="modal-header">
                         <h2>✏️ {L('भूमिका परिवर्तन','Change Role')}</h2>
                         <button className="modal-close" onClick={() => setChangeModal(null)}>✕</button>
@@ -4791,7 +4797,7 @@ const Settings = () => {
       {/* ── Backup location modal ── */}
       {backupPathModal && (
         <div className="modal-overlay">
-          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+          <div className="modal modal-sm glm-form glm-plain" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>📁 {L('ब्याकअप स्थान','Backup Location')}</h2>
               <button className="modal-close" onClick={() => setBackupPathModal(null)}>✕</button>
@@ -4830,7 +4836,7 @@ const Settings = () => {
       {/* ── Weekend change modal ── */}
       {weekendModal && (
         <div className="modal-overlay">
-          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+          <div className="modal modal-sm glm-form glm-plain" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>📅 {weekendEditId
                 ? L('साप्ताहिक बिदा अद्यावधिक','Update Weekend')
@@ -4897,7 +4903,7 @@ const Settings = () => {
       {/* ── Company Edit Modal ── */}
       {companyModal && (
         <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth:620, width:'95%' }} onClick={e => e.stopPropagation()}>
+          <div className="modal glm-form glm-plain" style={{ maxWidth:620, width:'95%' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>🏢 {L('कम्पनी जानकारी सम्पादन','Edit Company Information')}</h2>
               <button className="modal-close" onClick={() => setCompanyModal(false)}>✕</button>
