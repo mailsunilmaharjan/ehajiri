@@ -9,7 +9,24 @@ import { pushLater } from './pushService.js';
  * Shared by POST /api/messages and any server-triggered notification (e.g. missing
  * attendance requests) that needs to reach a specific recommender/approver.
  */
-export async function notifyUsers({ senderId, recipientIds, subject, body, path }) {
+/** Bucket a system notification for the bell (leave / office_visit / overtime / task / field_visit / accounts / quotation …).
+ *  Callers may pass `category` explicitly; otherwise it is inferred from the subject and target path. */
+export function inferCategory(subject = '', path = '') {
+  const t = String(subject);
+  if (/office visit/i.test(t))            return 'office_visit';
+  if (/field visit/i.test(t))             return 'field_visit';
+  if (/quotation/i.test(t))               return 'quotation';
+  if (/overtime/i.test(t))                return 'overtime';
+  if (/duty/i.test(t))                    return 'duty';
+  if (/late in|early out|missing attendance|online attendance|attendance/i.test(t)) return 'attendance';
+  if (/leave/i.test(t))                   return 'leave';
+  if (/task/i.test(t))                    return 'task';
+  if (/invoice|bill|payment|account|stock/i.test(t)) return 'accounts';
+  if (String(path).includes('/m/roster')) return 'duty';
+  return 'general';
+}
+
+export async function notifyUsers({ senderId, recipientIds, subject, body, path, category }) {
   const targetIds = [...new Set((recipientIds || []).map(Number))]
     .filter(n => Number.isFinite(n) && n !== senderId);
   if (!targetIds.length) return { recipientCount: 0 };
@@ -19,9 +36,9 @@ export async function notifyUsers({ senderId, recipientIds, subject, body, path 
     await client.query('BEGIN');
 
     const { rows: [msg] } = await client.query(`
-      INSERT INTO internal_messages (sender_id, subject, body, recipient_type)
-      VALUES ($1, $2, $3, 'individual') RETURNING id
-    `, [senderId, subject, body]);
+      INSERT INTO internal_messages (sender_id, subject, body, recipient_type, category)
+      VALUES ($1, $2, $3, 'individual', $4) RETURNING id
+    `, [senderId, subject, body, category || inferCategory(subject, path)]);
 
     const placeholders = targetIds.map((_, i) => `($1, $${i + 2})`).join(', ');
     await client.query(
@@ -35,6 +52,7 @@ export async function notifyUsers({ senderId, recipientIds, subject, body, path 
     broadcastNotification({
       type        : 'new_message',
       messageId   : msg.id,
+      category    : category || inferCategory(subject, path),
       subject,
       senderName  : sender?.full_name || '',
       preview     : body.substring(0, 120),

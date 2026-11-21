@@ -3,7 +3,7 @@ import pool from '../db.js';
 import { logAudit } from '../services/auditLog.js';
 import { startStandaloneBridge, stopStandaloneBridge } from '../services/standaloneBridgeLauncher.js';
 import { startStandaloneScheduler, stopStandaloneScheduler } from '../services/standaloneScheduler.js';
-import { invalidateModuleFlagsCache, FLAG_KEYS } from '../utils/moduleFlags.js';
+import { invalidateModuleFlagsCache, FLAG_KEYS, getModuleFlags } from '../utils/moduleFlags.js';
 import { invalidateAppSettingsCache } from '../utils/appSettings.js';
 import { requireRole } from '../middleware/roleGuard.js';
 
@@ -99,7 +99,9 @@ const SUPER_ADMIN_ONLY_FLAGS = [
   FLAG_KEYS.guestRegistration,
   FLAG_KEYS.standaloneDevice,
   FLAG_KEYS.smsGateway,
+  FLAG_KEYS.accounting,
   FLAG_KEYS.supportHelp,
+  FLAG_KEYS.fieldVisitTracking,
 ];
 
 router.put('/', canManageSettings, async (req, res) => {
@@ -108,6 +110,14 @@ router.put('/', canManageSettings, async (req, res) => {
   for (const flagKey of SUPER_ADMIN_ONLY_FLAGS) {
     if (flagKey in settings && req.user.role !== 'superAdmin') {
       return res.status(403).json({ error: 'Only a Super Admin can change this module.' });
+    }
+  }
+
+  // Accounts is a licensed module: it can only be switched ON when the company's license includes "Accounting".
+  if (settings[FLAG_KEYS.accounting] === true) {
+    const f = await getModuleFlags();
+    if (!f.accountingLicensed) {
+      return res.status(403).json({ error: 'Accounts is not included in your company license. Ask your dealer to add "Accounting" to the license in LicenseAdmin and activate the updated key on this company (Settings → License), then enable the module.' });
     }
   }
 
@@ -180,7 +190,8 @@ router.put('/', canManageSettings, async (req, res) => {
     } else if (
       FLAG_KEYS.onlineAttendance in settings || FLAG_KEYS.dutyRoster in settings ||
       FLAG_KEYS.chat in settings || FLAG_KEYS.task in settings || FLAG_KEYS.guestRegistration in settings ||
-      FLAG_KEYS.supportHelp in settings
+      FLAG_KEYS.supportHelp in settings || FLAG_KEYS.accounting in settings || FLAG_KEYS.fieldVisitTracking in settings ||
+      FLAG_KEYS.smsGateway in settings
     ) {
       invalidateModuleFlagsCache();
     }
@@ -194,7 +205,7 @@ router.put('/', canManageSettings, async (req, res) => {
 
 /* ─── Setup lists (fiscal years, departments, etc.) ─── */
 const SETUP_TABLES = {
-  fiscalYears      : { table: 'fiscal_years',      cols: ['name','start_date','end_date','is_default','is_system'] },
+  fiscalYears      : { table: 'fiscal_years',      cols: ['name','start_date','end_date','is_default','is_system','ranking_order'] },
   branches         : { table: 'branches',           cols: ['name','short_name','address','phone','ranking_order'] },
   departments      : { table: 'departments',        cols: ['name','short_name','ranking_order','is_default','is_system'] },
   posts            : { table: 'posts',              cols: ['name','short_name','ranking_order','is_default','is_system'] },

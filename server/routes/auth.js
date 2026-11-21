@@ -252,7 +252,7 @@ router.post('/login', validateBody({ username: { required: true, max: 200 }, pas
     // UI but historically only checked against the email column.
     const { rows } = await pool.query(
       `SELECT * FROM users
-       WHERE (email = $1 OR username = $1) AND active = TRUE`,
+       WHERE (LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)) AND active = TRUE`,
       [username]
     );
     const row = rows[0];

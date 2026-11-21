@@ -2,6 +2,7 @@
 import crypto from 'crypto';
 import { PAYROLL_SCHEMA_SQL, PAYROLL_SCALE_SQL, seedFy2083Slabs } from './payrollSchema.js';
 import { PUSH_SCHEMA_SQL } from './pushSchema.js';
+import { ACCOUNTS_SCHEMA_SQL } from './accountsSchema.js';
 import pool from '../db.js';
 import { DB_VERSION } from '../version.js';
 
@@ -3431,6 +3432,210 @@ const MIGRATIONS = [
           position INTEGER NOT NULL,
           PRIMARY KEY (user_id, task_id)
         )`);
+    },
+  },
+  {
+    version    : 166,
+    description: 'duty_exchange_requests — a staff member asks to swap one day of duty with a colleague; Department Head recommends, Admin approves, then the day is swapped. Additive.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS duty_exchange_requests (
+          id                SERIAL PRIMARY KEY,
+          requester_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          partner_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          duty_date         DATE    NOT NULL,
+          requester_duty    VARCHAR(200),
+          partner_duty      VARCHAR(200),
+          reason            TEXT,
+          status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+          recommended_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          recommended_at    TIMESTAMPTZ,
+          recommend_comment TEXT,
+          approved_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          approved_at       TIMESTAMPTZ,
+          approve_comment   TEXT,
+          rejected_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          reject_comment    TEXT,
+          created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_dex_status ON duty_exchange_requests(status);
+        CREATE INDEX IF NOT EXISTS idx_dex_people ON duty_exchange_requests(requester_id, partner_id);`);
+    },
+  },
+  {
+    version    : 167,
+    description: 'Nepal Accounts module (accounting + inventory): acc_* tables, all empty until a tenant enables the module. Additive, IF NOT EXISTS.',
+    up: async (client) => {
+      await client.query(ACCOUNTS_SCHEMA_SQL);
+    },
+  },
+  {
+    version    : 168,
+    description: 'Accounts: a party that is BOTH customer and supplier = two linked ledgers (receivable under 1202 + payable under 2201). Adds acc_ledgers.linked_party_id (nullable, self-reference). Additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_ledgers ADD COLUMN IF NOT EXISTS linked_party_id INTEGER REFERENCES acc_ledgers(id) ON DELETE SET NULL`);
+      await client.query(`CREATE INDEX IF NOT EXISTS ix_acc_ledgers_linked ON acc_ledgers(linked_party_id)`);
+    },
+  },
+  {
+    version    : 169,
+    description: 'fiscal_years — add ranking_order so Fiscal Year dropdowns/filters can follow an admin-set order. Nullable (unranked years keep their stored order). Additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE fiscal_years ADD COLUMN IF NOT EXISTS ranking_order INTEGER`);
+    },
+  },
+  {
+    version    : 170,
+    description: 'Accounts: Ranking Order for products — acc_item_categories.rank (main category order) and acc_items.rank (product order within its category), shown as "category.product" e.g. 1.2. Nullable, additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_item_categories ADD COLUMN IF NOT EXISTS rank INTEGER`);
+      await client.query(`ALTER TABLE acc_items ADD COLUMN IF NOT EXISTS rank INTEGER`);
+    },
+  },
+  {
+    version    : 171,
+    description: 'Accounts: main product categories get HS Code, Effective Date (YYYY-MM-DD text) and Remarks. Nullable, additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_item_categories ADD COLUMN IF NOT EXISTS hs_code TEXT`);
+      await client.query(`ALTER TABLE acc_item_categories ADD COLUMN IF NOT EXISTS effective_date TEXT`);
+      await client.query(`ALTER TABLE acc_item_categories ADD COLUMN IF NOT EXISTS remarks TEXT`);
+    },
+  },
+  {
+    version    : 172,
+    description: 'Accounts becomes a licensed module: tenants that already have it switched on are grandfathered (module_accounting_license_override=true) so licensing it does not switch their Accounts off. Additive.',
+    up: async (client) => {
+      await client.query(`
+        INSERT INTO app_settings (key, value)
+        SELECT 'module_accounting_license_override', 'true'::jsonb
+        WHERE EXISTS (SELECT 1 FROM app_settings WHERE key='module_accounting_enabled' AND value = 'true'::jsonb)
+        ON CONFLICT (key) DO NOTHING
+      `);
+    },
+  },
+  {
+    version    : 173,
+    description: 'Accounts follow-up reminders get task_id — each follow-up assigned on a quotation / bill is mirrored as a real task in the Task module (bell + phone notifications, Task list). Nullable, additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_reminders ADD COLUMN IF NOT EXISTS task_id INTEGER`);
+    },
+  },
+  {
+    version    : 174,
+    description: 'tasks — link to the Accounts document a task came from (doc_id / doc_no / doc_type) plus the party name, person and phone, so the Task list shows a short title "Subject — QT/…" (doc no. opens the bill) with Customer / Person / Mobile filled. Existing document tasks are renamed. Nullable, additive.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS doc_id INTEGER;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS doc_no TEXT;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS doc_type TEXT;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS party_name TEXT;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS party_person TEXT;
+        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS party_phone TEXT;
+      `);
+      // tasks already created from documents (v173): shorten the title and fill the party columns
+      await client.query(`
+        UPDATE tasks t SET
+          doc_id = d.id, doc_no = d.doc_no, doc_type = d.doc_type, party_name = d.party_name,
+          party_person = NULLIF(COALESCE(NULLIF(d.qt_attn, ''), a.contact_person), ''),
+          party_phone = NULLIF(concat_ws(' | ', NULLIF(a.contact_mobile, ''), NULLIF(COALESCE(NULLIF(a.phone, ''), a.office_phone), '')), ''),
+          title = LEFT(CASE WHEN d.doc_type = 'QT' THEN COALESCE(NULLIF(d.qt_subject, ''), 'Quotation')
+                            WHEN d.doc_type IN ('SI','SO','SR') THEN 'Collect payment'
+                            WHEN d.doc_type IN ('PB','PO','PR') THEN 'Pay supplier' ELSE 'Follow up' END || ' — ' || d.doc_no, 250)
+        FROM acc_reminders r
+        JOIN acc_docs d ON d.id = r.doc_id
+        LEFT JOIN acc_ledgers a ON a.id = d.party_id
+        WHERE r.task_id = t.id AND t.doc_id IS NULL
+      `);
+    },
+  },
+  {
+    version    : 175,
+    description: 'task_followups — plain-text clean-up of follow-ups that were saved wrapped in <p>…</p> / <br> by the short-lived Accounts task pop-up (Task module follow-ups are plain text, so the tags showed literally). Only rows that are a single <p>…</p> block are touched.',
+    up: async (client) => {
+      await client.query(`
+        UPDATE task_followups SET description =
+          replace(replace(replace(replace(regexp_replace(regexp_replace(description, '<br\\s*/?>', E'\\n', 'g'), '^<p>|</p>$', '', 'g'),
+                  '&lt;', '<'), '&gt;', '>'), '&quot;', '"'), '&amp;', '&')
+        WHERE description ~ '^<p>.*</p>$' AND description !~ '<p>.*<p>'
+      `);
+    },
+  },
+  {
+    version    : 176,
+    description: 'Quotation templates: ZKTeco / YOI brand logo uploads (cover page + footer of pages 2+). Additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_quote_templates ADD COLUMN IF NOT EXISTS brand_zk_file TEXT`);
+      await client.query(`ALTER TABLE acc_quote_templates ADD COLUMN IF NOT EXISTS brand_yoi_file TEXT`);
+    },
+  },
+  {
+    version    : 177,
+    description: 'Quotations: staff-wise signatories (name / post / phone / e-mail / signature per user) used as "Prepared by". Additive.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS acc_quote_signers (
+          username   TEXT PRIMARY KEY,
+          name       TEXT,
+          post       TEXT,
+          phone      TEXT,
+          email      TEXT,
+          sign_file  TEXT,
+          updated_by TEXT,
+          updated_at TIMESTAMPTZ
+        )`);
+    },
+  },
+  {
+    version    : 178,
+    description: 'Quotations pick their customer from the Contact list: acc_docs.contact_id (quotation made for a contact) and acc_ledgers.contact_id (Accounts customer created from that contact when the quotation is converted). Nullable, additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_docs ADD COLUMN IF NOT EXISTS contact_id INTEGER`);
+      await client.query(`ALTER TABLE acc_ledgers ADD COLUMN IF NOT EXISTS contact_id INTEGER`);
+    },
+  },
+  {
+    version    : 179,
+    description: 'internal_messages.category — groups system notifications (leave, office visit, overtime, task, field visit, accounts, quotation…) so the bell can show them by category. Nullable, additive; old rows are back-filled from their subject.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE internal_messages ADD COLUMN IF NOT EXISTS category VARCHAR(30)`);
+      await client.query(`
+        UPDATE internal_messages SET category = CASE
+          WHEN subject ILIKE '%office visit%'                              THEN 'office_visit'
+          WHEN subject ILIKE '%field visit%'                               THEN 'field_visit'
+          WHEN subject ILIKE '%leave%' AND subject NOT ILIKE '%late in%'   THEN 'leave'
+          WHEN subject ILIKE '%overtime%'                                  THEN 'overtime'
+          WHEN subject ILIKE '%quotation%'                                 THEN 'quotation'
+          WHEN subject ILIKE '%task%'                                      THEN 'task'
+          WHEN subject ILIKE '%duty%'                                      THEN 'duty'
+          WHEN subject ILIKE '%attendance%' OR subject ILIKE '%late in%'   THEN 'attendance'
+          ELSE category END
+        WHERE category IS NULL AND recipient_type = 'individual' AND (
+          subject ILIKE '%recommended%' OR subject ILIKE '%approved%' OR subject ILIKE '%rejected%' OR subject ILIKE '% request%')`);
+    },
+  },
+  {
+    version    : 180,
+    description: 'Late In / Early Out application: late_in/late_by + early_out/early_by (HH:MM the staff informs they will be late / leave early) and recommended_date. Additive; existing rows untouched.',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE attendance_manual_postings
+          ADD COLUMN IF NOT EXISTS late_in          BOOLEAN    NOT NULL DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS late_by          VARCHAR(5),
+          ADD COLUMN IF NOT EXISTS early_out        BOOLEAN    NOT NULL DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS early_by         VARCHAR(5),
+          ADD COLUMN IF NOT EXISTS recommended_date DATE
+      `);
+    },
+  },
+  {
+    version    : 181,
+    description: 'online_attendance: reco_id + approval_id (the recommender/approver the staff member picked at check-out); overtime_approvals: approval_id (the approver the recommender sends the OT to). Only the picked person is notified and may act. Existing rows stay NULL (no pick = any configured person, as before).',
+    up: async (client) => {
+      await client.query(`
+        ALTER TABLE online_attendance  ADD COLUMN IF NOT EXISTS reco_id     INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        ALTER TABLE online_attendance  ADD COLUMN IF NOT EXISTS approval_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        ALTER TABLE overtime_approvals ADD COLUMN IF NOT EXISTS approval_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      `);
     },
   },
 ];

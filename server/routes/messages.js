@@ -9,7 +9,7 @@ const router = Router();
 router.get('/', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT m.id, m.subject, m.body, m.recipient_type, m.department, m.created_at,
+      SELECT m.id, m.subject, m.body, m.recipient_type, m.department, m.created_at, m.category,
              s.full_name AS sender_name, s.employee_id AS sender_emp_id, s.id AS sender_id,
              s.profile_photo AS sender_photo,
              mr.is_read, mr.read_at, mr.folder_id
@@ -37,6 +37,21 @@ router.get('/sent', async (req, res) => {
       WHERE  m.sender_id = $1
       GROUP  BY m.id
       ORDER  BY m.created_at DESC
+    `, [req.user.id]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* GET /api/messages/unread-summary — unread notifications grouped by category (for the bell).
+   Person-to-person messages (no category) count under 'message'. */
+router.get('/unread-summary', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT COALESCE(m.category, 'message') AS category, COUNT(*)::int AS count
+      FROM   message_recipients mr
+      JOIN   internal_messages m ON m.id = mr.message_id
+      WHERE  mr.recipient_id = $1 AND mr.is_read = FALSE
+      GROUP  BY 1
     `, [req.user.id]);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }

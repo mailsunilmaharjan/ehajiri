@@ -9,12 +9,14 @@ import { api, fmtMoney } from '../lib/api';
 export default function MonthlyProfit() {
   const { fy, today } = useApp();
   const [from, setFrom] = useState(fy.start_date);
-  const [to, setTo] = useState(today);
+  // current fiscal year selected by default (full year, so the Fiscal Year drop-down shows it)
+  const [to, setTo] = useState(fy.end_date || today);
   const [split, setSplit] = useState(true);
   const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
   const area = useRef(null);
 
-  useEffect(() => { setData(null); api.get('/reports/monthly-profit', { date_from: from, date_to: to }).then(setData); }, [from, to]);
+  useEffect(() => { setData(null); setErr(''); api.get('/reports/monthly-profit', { date_from: from, date_to: to }).then(setData).catch((e) => setErr(e?.message || 'Could not load the report.')); }, [from, to]);
 
   const groups = split ? (data?.expense_groups || []) : [];
   const m = (v) => (v ? fmtMoney(v) : '—');
@@ -28,6 +30,8 @@ export default function MonthlyProfit() {
         <span className="spacer" />
         <ReportButtons areaRef={area} title="Monthly Expenses & Profit" from={from} to={to} />
       </PeriodBar>
+      {err && <div className="notice">⚠ {err}</div>}
+      {!data && !err && <div className="muted" style={{ padding: 12 }}>Loading…</div>}
       {data && (
         <section className="card print-area" ref={area}>
           <ReportHeader title="Monthly Expenses & Profit" from={from} to={to} />

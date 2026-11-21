@@ -20,6 +20,17 @@ export async function getRecoApprovalIds(employeeId) {
   };
 }
 
+/** Validates a recommender/approver id the client says was picked for employeeId.
+ *  Returns null when nothing was picked, the numeric id when it is one of the employee's configured
+ *  people for `role` ('recommend' | 'approve'), or false when it is not (reject the request). */
+export async function validPickedPerson(employeeId, pickedId, role) {
+  if (pickedId == null || pickedId === '') return null;
+  const { recommenderIds, approverIds } = await getRecoApprovalIds(employeeId);
+  const list = role === 'recommend' ? recommenderIds : approverIds;
+  return list.includes(String(pickedId)) ? Number(pickedId) : false;
+}
+export const validPickedApprover = (employeeId, pickedId) => validPickedPerson(employeeId, pickedId, 'approve');
+
 /**
  * Authorizes a recommend/approve/reject action on employeeId's application.
  * Returns null if authorized, or { status, error } to send back otherwise.
@@ -81,6 +92,11 @@ export async function authorizeRecoAction(req, employeeId, action, opts = {}) {
   const allowed = action === 'recommend' ? recommenderIds : approverIds;
   if (!allowed.includes(userId)) {
     return { status: 403, error: 'You are not the configured recommender/approver for this employee.' };
+  }
+  // The applicant picked one specific recommender/approver on the application:
+  // only that person may act (others configured for the employee may not).
+  if (opts.pickedId != null && String(opts.pickedId) !== '' && String(opts.pickedId) !== userId) {
+    return { status: 403, error: `This application was sent to a different ${action === 'recommend' ? 'recommender' : 'approver'}.` };
   }
   if (action === 'approve' && !opts.alreadyRecommended && hasRecommenderConfigured && await isRecoApprovalCompulsory()) {
     return { status: 400, error: 'This application must be recommended before it can be approved.' };

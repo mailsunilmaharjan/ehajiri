@@ -5,6 +5,8 @@
  * POST /api/license/deactivate — remove license
  */
 import express   from 'express';
+import jwt       from 'jsonwebtoken';
+import { JWT_SECRET } from '../utils/secrets.js';
 import crypto    from 'crypto';
 import bcrypt    from 'bcryptjs';
 import pool      from '../db.js';
@@ -136,7 +138,7 @@ function computeExpiry(payload, activatedAt) {
 }
 
 // ── GET /status ───────────────────────────────────────────────────────────────
-router.get('/status', async (_req, res) => {
+router.get('/status', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT * FROM license WHERE is_active = TRUE ORDER BY activated_at DESC LIMIT 1`
@@ -148,6 +150,19 @@ router.get('/status', async (_req, res) => {
     const expires = payload.expires || computeExpiry(payload, row.activated_at);
     const expired = expires ? new Date(expires) < new Date() : false;
 
+    // SECURITY: this endpoint is reachable before login (the app checks it on load). Anonymous callers get only
+    // what the login / "subscription expired" screens need; license id, client e-mail, limits etc. need a valid token.
+    let authed = false;
+    try { const t = String(req.headers.authorization || '').replace(/^Bearer\s+/i, ''); if (t) { jwt.verify(t, JWT_SECRET, { algorithms: ['HS256'] }); authed = true; } } catch { /* anonymous */ }
+    if (!authed) {
+      return res.json({
+        licensed: !expired, expired, expires,
+        distributorName       : row.distributor_name         || payload.distributorName || '',
+        distributorContactName: row.distributor_contact_name || '',
+        distributorPhone      : row.distributor_phone        || '',
+        distributorEmail      : row.distributor_email        || '',
+      });
+    }
     res.json({
       licensed    : !expired,
       expired,

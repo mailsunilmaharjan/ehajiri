@@ -76,6 +76,7 @@ router.get('/', async (req, res) => {
         dr.employee_id          AS "employeeDbId",
         dr.shift_id             AS "shiftId",
         dr.shift_ids            AS "shiftIds",
+        dr.double_duty          AS "doubleDuty",
         s.name                  AS "shiftName",
         s.start_time::text      AS "startTime",
         s.end_time::text        AS "endTime",
@@ -96,27 +97,50 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* Single-day shift overrides (plain shift rows, not day-off rows) sitting inside a date
+   range. They are narrower than the range, so they win over it — a double-duty range
+   saved over them would otherwise be silently ignored on those days. */
+const OVERRIDE_WHERE = `employee_id = $1 AND date_from = date_to AND date_from BETWEEN $2 AND $3
+                        AND id <> $4 AND COALESCE(off_days, '[]'::jsonb) = '[]'::jsonb`;
+
+router.get('/overrides-count', async (req, res) => {
+  const { employeeId, dateFrom, dateTo, excludeId } = req.query;
+  if (!employeeId || !dateFrom || !dateTo) return res.json({ count: 0 });
+  try {
+    const scope = resolveOrgScope(req);
+    if (scope.level === 'self' || !(await isEmployeeInScope(scope, Number(employeeId)))) return res.json({ count: 0 });
+    const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM duty_roster WHERE ${OVERRIDE_WHERE}`,
+      [employeeId, dateFrom, dateTo, Number(excludeId) || 0]);
+    res.json({ count: rows[0].n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ── POST /api/duty-roster  — create a roster entry (target employee must be in-scope) ──
    Accepts either the new shiftIds (array, order = rotation order across the date
    range) or the legacy single shiftId — shift_id is always kept as shiftIds[0] so
    any older code path still reading the single column keeps working. */
 router.post('/', async (req, res) => {
-  const { employeeId, shiftId, shiftIds, dateFrom, dateTo, offDays, dayOffDays, nightOffDays, createdBy } = req.body;
+  const { employeeId, shiftId, shiftIds, dateFrom, dateTo, offDays, dayOffDays, nightOffDays, createdBy, doubleDuty, replaceOverrides } = req.body;
   const ids = Array.isArray(shiftIds) && shiftIds.length ? shiftIds : (shiftId ? [shiftId] : []);
   try {
     const scope = resolveOrgScope(req);
     if (scope.level === 'self' || !(await isEmployeeInScope(scope, employeeId))) {
       return res.status(403).json({ error: 'Not authorized to create a roster entry for this employee' });
     }
+    if (replaceOverrides) {
+      const del = await pool.query(`DELETE FROM duty_roster WHERE ${OVERRIDE_WHERE} RETURNING *`, [employeeId, dateFrom, dateTo, 0]);
+      if (del.rowCount) logAudit({ actor: req.user, action: 'replace-overrides', entity: 'duty-roster', entityId: `${employeeId}:${dateFrom}..${dateTo}`, before: del.rows, after: { doubleDuty: !!doubleDuty } });
+    }
     const { rows } = await pool.query(`
-      INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, day_off_days, night_off_days, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, employee_id AS "employeeId", shift_id AS "shiftId", shift_ids AS "shiftIds",
+      INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, day_off_days, night_off_days, created_by, double_duty)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id, employee_id AS "employeeId", shift_id AS "shiftId", shift_ids AS "shiftIds", double_duty AS "doubleDuty",
                 date_from AS "dateFrom", date_to AS "dateTo",
                 off_days AS "offDays", day_off_days AS "dayOffDays", night_off_days AS "nightOffDays",
                 created_by AS "createdBy", created_at AS "createdAt"
     `, [employeeId, ids[0] || null, JSON.stringify(ids), dateFrom, dateTo,
-        JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), createdBy]);
+        JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), createdBy,
+        !!doubleDuty && ids.length > 1]);
     notifyRosterChange(req, employeeId, 'Duty roster assigned', `A new duty roster was assigned to you: ${String(dateFrom).slice(0, 10)} to ${String(dateTo).slice(0, 10)}.`);
     res.status(201).json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -124,7 +148,7 @@ router.post('/', async (req, res) => {
 
 /* ── PUT /api/duty-roster/:id  — update a roster entry (must be in-scope) ── */
 router.put('/:id', async (req, res) => {
-  const { shiftId, shiftIds, dateFrom, dateTo, offDays, dayOffDays, nightOffDays } = req.body;
+  const { shiftId, shiftIds, dateFrom, dateTo, offDays, dayOffDays, nightOffDays, doubleDuty, replaceOverrides } = req.body;
   const ids = Array.isArray(shiftIds) && shiftIds.length ? shiftIds : (shiftId ? [shiftId] : []);
   try {
     const scope = resolveOrgScope(req);
@@ -133,13 +157,18 @@ router.put('/:id', async (req, res) => {
     if (scope.level === 'self' || !(await isEmployeeInScope(scope, existing[0].employee_id))) {
       return res.status(403).json({ error: 'Not authorized to edit this roster entry' });
     }
+    if (replaceOverrides) {
+      const del = await pool.query(`DELETE FROM duty_roster WHERE ${OVERRIDE_WHERE} RETURNING *`, [existing[0].employee_id, dateFrom, dateTo, Number(req.params.id)]);
+      if (del.rowCount) logAudit({ actor: req.user, action: 'replace-overrides', entity: 'duty-roster', entityId: `${existing[0].employee_id}:${dateFrom}..${dateTo}`, before: del.rows, after: { doubleDuty: !!doubleDuty } });
+    }
     const { rows } = await pool.query(`
       UPDATE duty_roster
-      SET shift_id = $1, shift_ids = $2, date_from = $3, date_to = $4, off_days = $5, day_off_days = $6, night_off_days = $7
+      SET shift_id = $1, shift_ids = $2, date_from = $3, date_to = $4, off_days = $5, day_off_days = $6, night_off_days = $7, double_duty = $9
       WHERE id = $8
       RETURNING id
     `, [ids[0] || null, JSON.stringify(ids), dateFrom, dateTo,
-        JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), req.params.id]);
+        JSON.stringify(offDays || []), JSON.stringify(dayOffDays || []), JSON.stringify(nightOffDays || []), req.params.id,
+        !!doubleDuty && ids.length > 1]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     notifyRosterChange(req, existing[0].employee_id, 'Duty roster updated', `Your duty roster was updated: ${String(dateFrom).slice(0, 10)} to ${String(dateTo).slice(0, 10)}.`);
     res.json({ success: true });
@@ -302,7 +331,7 @@ router.delete('/clear', async (req, res) => {
       await client.query('BEGIN');
       ({ rows: affected } = await client.query(
         `SELECT dr.id, dr.employee_id, dr.shift_id, dr.shift_ids, dr.date_from::text AS date_from, dr.date_to::text AS date_to,
-                dr.off_days, dr.day_off_days, dr.night_off_days, dr.created_by
+                dr.off_days, dr.day_off_days, dr.night_off_days, dr.created_by, dr.double_duty
          FROM duty_roster dr, users u WHERE ${conds.join(' AND ')} FOR UPDATE OF dr`,
         params
       ));
@@ -330,10 +359,10 @@ router.delete('/clear', async (req, res) => {
           await client.query(`UPDATE duty_roster SET date_to=$2 WHERE id=$1`, [r.id, left[1]]);
           if (okRight) {
             await client.query(
-              `INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, day_off_days, night_off_days, created_by)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+              `INSERT INTO duty_roster (employee_id, shift_id, shift_ids, date_from, date_to, off_days, day_off_days, night_off_days, created_by, double_duty)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
               [r.employee_id, rightIds[0] ?? r.shift_id, r.shift_ids == null ? null : JSON.stringify(rightIds), right[0], right[1],
-               JSON.stringify(r.off_days ?? []), JSON.stringify(r.day_off_days ?? []), JSON.stringify(r.night_off_days ?? []), r.created_by]
+               JSON.stringify(r.off_days ?? []), JSON.stringify(r.day_off_days ?? []), JSON.stringify(r.night_off_days ?? []), r.created_by, !!r.double_duty]
             );
           }
         } else {

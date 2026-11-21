@@ -61,3 +61,61 @@ export async function buildPunchNotification(employeeId, checkTime) {
     return null;
   }
 }
+
+/* ── Phone push for the live attendance popup ─────────────────────────────────────────────────
+   The website popup (Settings → Live Attendance Notifications) only reaches pages that are open.
+   When that setting is ON for the company, also send a push so it arrives with the app closed:
+     · the staff member gets a confirmation for their first punch of the day;
+     · admins and the staff member's branch manager / department head (and area managers / incharges
+       covering them) get one when the arrival is LATE — the same people who see the popup.
+   Only the first punch of the shift-day, so double presses and out-punches never spam anyone.
+   A user can mute these in the app (push_devices.punch_alerts). Best effort: never throws. */
+import { pushLater } from './pushService.js';
+
+export async function pushPunchAlert(n, checkTime) {
+  try {
+    if (!n || !n.employeeId) return;
+    // A device that was offline uploads its backlog in bulk — only a punch from the last 30 minutes is an alert.
+    const ageMs = Date.now() - new Date(checkTime).getTime();
+    if (!Number.isFinite(ageMs) || ageMs > 30 * 60000 || ageMs < -5 * 60000) return;
+    const { rows: [st] } = await pool.query(`SELECT value FROM app_settings WHERE key='main'`);
+    const v = st?.value && typeof st.value === 'string' ? JSON.parse(st.value) : st?.value;
+    if (v?.liveAttendanceNotifications !== true) return;
+
+    const { rows: [c] } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM zkteco_attendance_logs WHERE employee_id=$1 AND check_time::date = ($2::timestamptz)::date`,
+      [n.employeeId, checkTime]);
+    if (c.n > 1) return;                                       // not the first punch of the day
+
+    const { rows: [emp] } = await pool.query(`SELECT branch, department FROM users WHERE id=$1`, [n.employeeId]);
+    const data = { path: '/m/home', type: 'punch' };
+    const note = n.remarks ? ` — ${n.remarks}` : '';
+    pushLater([n.employeeId], { title: 'Attendance recorded', body: `In at ${n.timeIn}${note}`, data }, { topic: 'punch' });
+
+    if (String(n.remarks || '').startsWith('Late')) {
+      const { rows } = await pool.query(`
+        SELECT id FROM users u
+        WHERE u.active = TRUE AND u.id <> $1 AND (
+          u.role IN ('admin','superAdmin')
+          OR (u.role = 'branchManager' AND TRIM(COALESCE(u.branch,'')) <> '' AND LOWER(TRIM(u.branch)) = LOWER(TRIM($2)))
+          OR (u.role = 'departmentHead' AND LOWER(TRIM(u.department)) = LOWER(TRIM($3))
+              AND (TRIM(COALESCE(u.branch,'')) = '' OR LOWER(TRIM(u.branch)) = LOWER(TRIM($2))))
+          OR (u.role = 'branchAreaManager' AND u.id IN (
+                SELECT mbc.user_id FROM manager_branch_coverage mbc JOIN branches b ON b.id = mbc.branch_id
+                WHERE LOWER(TRIM(b.name)) = LOWER(TRIM($2))))
+          OR (u.role = 'departmentIncharge' AND u.id IN (
+                SELECT mdc.user_id FROM manager_department_coverage mdc
+                JOIN departments d ON d.id = mdc.department_id LEFT JOIN branches b ON b.id = mdc.branch_id
+                WHERE LOWER(TRIM(d.name)) = LOWER(TRIM($3))
+                  AND (mdc.branch_id IS NULL OR LOWER(TRIM(b.name)) = LOWER(TRIM($2)))))
+        )`, [n.employeeId, emp?.branch || '', emp?.department || '']);
+      if (rows.length) {
+        pushLater(rows.map(r => r.id), {
+          title: 'Late arrival',
+          body: `${n.staffName}${n.postShort ? ' (' + n.postShort + ')' : ''} — ${n.remarks}, in at ${n.timeIn}`,
+          data,
+        }, { topic: 'punch' });
+      }
+    }
+  } catch (e) { logError('[pushPunchAlert]', e); }
+}

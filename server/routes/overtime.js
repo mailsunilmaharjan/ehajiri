@@ -27,7 +27,7 @@ import pool       from '../db.js';
 import { logError } from '../utils/logError.js';
 import { resolveOrgScope, resolveOrgEmployeeIds, canManagerManualPost } from './orgScope.js';
 import { loadRosterMap, getEffectiveRoster, isRosterWeekend, bucketPunchesByShiftDay, resolveWinterShift } from './attendance.js';
-import { authorizeRecoAction } from '../services/recoApprovalGuard.js';
+import { authorizeRecoAction, validPickedApprover } from '../services/recoApprovalGuard.js';
 
 const router  = Router();
 const PRIVILEGED_ROLES = ['admin', 'superAdmin'];
@@ -363,6 +363,7 @@ router.get('/', async (req, res) => {
         recommendedBy    : appr?.recommended_by      || null,
         recommendedByName: appr?.recommended_by_name || null,
         recommendedDate  : toDateS(appr?.recommended_date),
+        pickedApproverId : appr?.approval_id || null,   // approver the recommender sent this OT to (null = any configured approver)
         comment        : appr?.comment || '',
         // "Provide Next Day Leave" conversion (set only via /approve-leave)
         leaveTypeCode  : appr?.leave_type_code || null,
@@ -448,13 +449,15 @@ router.patch('/:id/recommend', async (req, res) => {
     if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
     const authError = await authorizeOtAction(req, existingRows[0].employee_id, 'recommend');
     if (authError) return res.status(authError.status).json({ error: authError.error });
+    const pickedApprover = await validPickedApprover(existingRows[0].employee_id, req.body?.approvalId);
+    if (pickedApprover === false) return res.status(400).json({ error: 'The chosen approver is not configured for this employee.' });
 
     const { rows } = await pool.query(
-      `UPDATE overtime_approvals SET recommended_by=$1, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($3,''), comment) WHERE id=$2 RETURNING *`,
-      [req.user.id, req.params.id, String(req.body?.comment || '').slice(0, 500)]
+      `UPDATE overtime_approvals SET recommended_by=$1, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($3,''), comment), approval_id=COALESCE($4, approval_id) WHERE id=$2 RETURNING *`,
+      [req.user.id, req.params.id, String(req.body?.comment || '').slice(0, 500), pickedApprover]
     );
     if (!rows[0]) return res.status(404).json({ error: 'OT record not found' });
-    notifyApproversNext(existingRows[0].employee_id, req.user.id, { subject: 'Overtime recommended — needs approval', body: `An overtime record for ${String(rows[0].date).slice(0, 10)} was recommended and is waiting for your approval.`, path: '/m/approvals' });
+    notifyApproversNext(existingRows[0].employee_id, req.user.id, { subject: 'Overtime recommended — needs approval', body: `An overtime record for ${String(rows[0].date).slice(0, 10)} was recommended and is waiting for your approval.`, path: '/m/approvals', pickedApproverId: rows[0].approval_id });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -470,15 +473,18 @@ router.post('/recommend-inline', async (req, res) => {
   try {
     const authError = await authorizeOtAction(req, employeeId, 'recommend');
     if (authError) return res.status(authError.status).json({ error: authError.error });
+    const pickedApprover = await validPickedApprover(employeeId, req.body?.approvalId);
+    if (pickedApprover === false) return res.status(400).json({ error: 'The chosen approver is not configured for this employee.' });
 
     const { rows } = await pool.query(`
-      INSERT INTO overtime_approvals (employee_id, date, ot_minutes, status, recommended_by, recommended_date, comment)
-      VALUES ($1, $2, $3, 'pending', $4, CURRENT_DATE, $5)
+      INSERT INTO overtime_approvals (employee_id, date, ot_minutes, status, recommended_by, recommended_date, comment, approval_id)
+      VALUES ($1, $2, $3, 'pending', $4, CURRENT_DATE, $5, $6)
       ON CONFLICT (employee_id, date) DO UPDATE
-        SET recommended_by=$4, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($5,''), overtime_approvals.comment)
+        SET recommended_by=$4, recommended_date=CURRENT_DATE, comment=COALESCE(NULLIF($5,''), overtime_approvals.comment),
+            approval_id=COALESCE($6, overtime_approvals.approval_id)
       RETURNING *
-    `, [employeeId, date, otMinutes || 0, req.user.id, String(comment || '').slice(0, 500)]);
-    notifyApproversNext(employeeId, req.user.id, { subject: 'Overtime recommended — needs approval', body: `An overtime record for ${String(date).slice(0, 10)} was recommended and is waiting for your approval.`, path: '/m/approvals' });
+    `, [employeeId, date, otMinutes || 0, req.user.id, String(comment || '').slice(0, 500), pickedApprover]);
+    notifyApproversNext(employeeId, req.user.id, { subject: 'Overtime recommended — needs approval', body: `An overtime record for ${String(date).slice(0, 10)} was recommended and is waiting for your approval.`, path: '/m/approvals', pickedApproverId: rows[0].approval_id });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -488,11 +494,11 @@ router.patch('/:id/approve', async (req, res) => {
   const { comment, approvedOTMins } = req.body;
   try {
     const { rows: existingRows } = await pool.query(
-      'SELECT employee_id, recommended_by FROM overtime_approvals WHERE id=$1', [req.params.id]
+      'SELECT employee_id, recommended_by, approval_id FROM overtime_approvals WHERE id=$1', [req.params.id]
     );
     if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
     const authError = await authorizeOtAction(req, existingRows[0].employee_id, 'approve',
-      { alreadyRecommended: !!existingRows[0].recommended_by });
+      { alreadyRecommended: !!existingRows[0].recommended_by, pickedId: existingRows[0].approval_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(`
@@ -512,10 +518,10 @@ router.patch('/:id/approve', async (req, res) => {
 router.patch('/:id/reject', async (req, res) => {
   const { comment } = req.body;
   const { rows: existingRows } = await pool.query(
-    'SELECT employee_id FROM overtime_approvals WHERE id=$1', [req.params.id]
+    'SELECT employee_id, approval_id FROM overtime_approvals WHERE id=$1', [req.params.id]
   );
   if (!existingRows[0]) return res.status(404).json({ error: 'OT record not found' });
-  const authError = await authorizeOtAction(req, existingRows[0].employee_id, 'reject');
+  const authError = await authorizeOtAction(req, existingRows[0].employee_id, 'reject', { pickedId: existingRows[0].approval_id });
   if (authError) return res.status(authError.status).json({ error: authError.error });
 
   const client = await pool.connect();
@@ -551,10 +557,10 @@ router.post('/approve-inline', async (req, res) => {
   const status = action === 'approve' ? 'approved' : 'rejected';
   try {
     const { rows: existingRows } = await pool.query(
-      'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
+      'SELECT recommended_by, approval_id FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
     );
     const authError = await authorizeOtAction(req, employeeId, action,
-      { alreadyRecommended: !!existingRows[0]?.recommended_by });
+      { alreadyRecommended: !!existingRows[0]?.recommended_by, pickedId: existingRows[0]?.approval_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(`
@@ -593,10 +599,10 @@ router.post('/approve-leave', async (req, res) => {
   const isPrivileged = PRIVILEGED_ROLES.includes(req.user.role);
   if (!isPrivileged) {
     const { rows: existingApprRows } = await pool.query(
-      'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
+      'SELECT recommended_by, approval_id FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [employeeId, date]
     );
     const authError = await authorizeOtAction(req, employeeId, 'approve',
-      { alreadyRecommended: !!existingApprRows[0]?.recommended_by });
+      { alreadyRecommended: !!existingApprRows[0]?.recommended_by, pickedId: existingApprRows[0]?.approval_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
   }
   // Only a privileged user may record someone ELSE as the approver (proxy
@@ -682,10 +688,10 @@ router.post('/bulk-approve', async (req, res) => {
     for (const r of records) {
       if (!isPrivileged) {
         const { rows: existingRows } = await pool.query(
-          'SELECT recommended_by FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [r.employeeId, r.date]
+          'SELECT recommended_by, approval_id FROM overtime_approvals WHERE employee_id=$1 AND date=$2', [r.employeeId, r.date]
         );
         const authError = await authorizeOtAction(req, r.employeeId, action,
-          { alreadyRecommended: !!existingRows[0]?.recommended_by });
+          { alreadyRecommended: !!existingRows[0]?.recommended_by, pickedId: existingRows[0]?.approval_id });
         if (authError) { skipped++; continue; }
       }
       await pool.query(`
@@ -708,9 +714,9 @@ router.delete('/:id', async (req, res) => {
   // Resetting an OT decision (and reversing its leave-in-lieu credit) used to
   // have no authorization at all — any logged-in user could reset anyone's OT
   // approval by id. Same rule as rejecting it.
-  const { rows: ex } = await pool.query('SELECT employee_id FROM overtime_approvals WHERE id=$1', [req.params.id]);
+  const { rows: ex } = await pool.query('SELECT employee_id, approval_id FROM overtime_approvals WHERE id=$1', [req.params.id]);
   if (!ex[0]) return res.status(404).json({ error: 'OT record not found' });
-  const authError = await authorizeOtAction(req, ex[0].employee_id, 'reject');
+  const authError = await authorizeOtAction(req, ex[0].employee_id, 'reject', { pickedId: ex[0].approval_id });
   if (authError) return res.status(authError.status).json({ error: authError.error });
 
   const client = await pool.connect();

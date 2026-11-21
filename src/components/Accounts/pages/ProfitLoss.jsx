@@ -9,12 +9,14 @@ import { api, fmtMoney } from '../lib/api';
 export default function ProfitLoss() {
   const { fy, today } = useApp();
   const [from, setFrom] = useState(fy.start_date);
-  const [to, setTo] = useState(today);
+  // current fiscal year selected by default (full year, so the Fiscal Year drop-down shows it)
+  const [to, setTo] = useState(fy.end_date || today);
   const [detail, setDetail] = useState(true);
   const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
   const area = useRef(null);
 
-  useEffect(() => { setData(null); api.get('/reports/profit-loss', { date_from: from, date_to: to }).then(setData); }, [from, to]);
+  useEffect(() => { setData(null); setErr(''); api.get('/reports/profit-loss', { date_from: from, date_to: to }).then(setData).catch((e) => setErr(e?.message || 'Could not load the report.')); }, [from, to]);
 
   const link = (id) => `/ledger?account=${id}&from=${from}&to=${to}`;
   const Groups = ({ groups }) => groups.map((g) => [
@@ -36,6 +38,8 @@ export default function ProfitLoss() {
         <span className="spacer" />
         <ReportButtons areaRef={area} title="Profit & Loss Account" from={from} to={to} />
       </PeriodBar>
+      {err && <div className="notice">⚠ {err}</div>}
+      {!data && !err && <div className="muted" style={{ padding: 12 }}>Loading…</div>}
       {data && (
         <section className="card print-area pl-report" ref={area}>
           <ReportHeader title="Profit & Loss Account" from={from} to={to} />

@@ -10,13 +10,15 @@ import { fmtDate } from '../lib/dates';
 export default function BillProfit() {
   const { fy, today } = useApp();
   const [from, setFrom] = useState(fy.start_date);
-  const [to, setTo] = useState(today);
+  // current fiscal year selected by default (full year, so the Fiscal Year drop-down shows it)
+  const [to, setTo] = useState(fy.end_date || today);
   const [show, setShow] = useState('all');        // all | profit | loss
   const [search, setSearch] = useState('');
   const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
   const area = useRef(null);
 
-  useEffect(() => { setData(null); api.get('/reports/bill-profit', { date_from: from, date_to: to }).then(setData); }, [from, to]);
+  useEffect(() => { setData(null); setErr(''); api.get('/reports/bill-profit', { date_from: from, date_to: to }).then(setData).catch((e) => setErr(e?.message || 'Could not load the report.')); }, [from, to]);
 
   const rows = useMemo(() => {
     const s = search.trim().toLowerCase();
@@ -44,6 +46,8 @@ export default function BillProfit() {
         <span className="spacer" />
         <ReportButtons areaRef={area} title="Bill-wise Profit & Loss" from={from} to={to} />
       </PeriodBar>
+      {err && <div className="notice">⚠ {err}</div>}
+      {!data && !err && <div className="muted" style={{ padding: 12 }}>Loading…</div>}
       {data && (
         <section className="card print-area" ref={area}>
           <ReportHeader title="Bill-wise Profit & Loss" from={from} to={to} />

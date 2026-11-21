@@ -241,7 +241,7 @@ export function parseAttlog(body) {
 }
 
 import { broadcastNotification }   from './liveNotifications.js';
-import { buildPunchNotification }  from './punchNotification.js';
+import { buildPunchNotification, pushPunchAlert }  from './punchNotification.js';
 
 // ── Access-window check ──────────────────────────────────────────────────
 // Shared by PostVerifyData (real-time door-relay allow/deny, in routes/zkteco.js)
@@ -383,7 +383,7 @@ export async function saveAttlogs(deviceSn, records) {
           await consumeValidityUse(employeeId);
           // Fire-and-forget: broadcast live notification
           buildPunchNotification(employeeId, r.checkTime)
-            .then(n => { if (n) broadcastNotification(n); })
+            .then(n => { if (n) { broadcastNotification(n); pushPunchAlert(n, r.checkTime); } })
             .catch(() => {});
         }
       }

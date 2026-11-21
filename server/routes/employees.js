@@ -66,6 +66,14 @@ function getLocalIp() {
 }
 
 const router = Router();
+
+// Email addresses are always stored in small letters (Name@Company.com -> name@company.com), whichever way the staff
+// record is saved: single add / edit here, or a bulk import row below.
+const lowerEmail = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v);
+router.use((req, _res, next) => {
+  if ((req.method === 'POST' || req.method === 'PUT') && req.body && typeof req.body === 'object' && !Array.isArray(req.body) && typeof req.body.email === 'string') req.body.email = lowerEmail(req.body.email);
+  next();
+});
 const canManageStaffStrict = requireRole('admin', 'branchManager', 'superAdmin');
 
 const ADMIN_ROLES = ['admin', 'superAdmin'];
@@ -339,7 +347,9 @@ router.get('/', async (req, res) => {
     // Free-text HR remarks are only for staff-management/manager roles.
     const MANAGER_VIEW = ['admin', 'superAdmin', 'branchManager', 'branchAreaManager', 'departmentHead', 'departmentIncharge'];
     if (!MANAGER_VIEW.includes(req.user?.role)) {
-      for (const r of rows) if (Number(r.id) !== Number(req.user?.id)) r.remarks = null;
+      // SECURITY: ordinary staff get a directory view of colleagues — no religion, disability flag, HR remarks or audit fields (DOB stays: Dashboard birthdays).
+      const PRIVATE = ['remarks', 'religion', 'handicapped', 'updatedBy', 'updatedDevice'];
+      for (const r of rows) if (Number(r.id) !== Number(req.user?.id)) for (const k of PRIVATE) if (k in r) r[k] = null;
     }
     res.json(rows);
   }
@@ -700,6 +710,22 @@ router.post('/import', canManageStaffStrict, async (req, res) => {
       candidates.push(forcedBranch ? { ...emp, branch: forcedBranch } : emp);
     }
 
+    // Status column: match (case-insensitively) against Settings → Status so a
+    // typo can't create staff with a status the app doesn't know. Blank = Active.
+    const { rows: stRows } = await pool.query('SELECT name, status_type FROM employee_statuses');
+    const statusByKey = new Map(stRows.map(s => [String(s.name).trim().toLowerCase(), s]));
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const raw = String(candidates[i].status ?? '').trim();
+      if (!raw) { candidates[i] = { ...candidates[i], status: 'Active' }; continue; }
+      const hit = statusByKey.get(raw.toLowerCase());
+      if (!hit && raw.toLowerCase() !== 'active') {
+        errors.push({ employeeId: candidates[i].employeeId, error: `Unknown Status "${raw}" (see Settings → Status)` });
+        candidates.splice(i, 1);
+        continue;
+      }
+      candidates[i] = { ...candidates[i], status: hit ? hit.name : 'Active', _notWorking: hit ? hit.status_type === 'Not Working' : false };
+    }
+
     const existingIds = new Set();
     if (candidates.length) {
       const { rows } = await pool.query(
@@ -720,9 +746,10 @@ router.post('/import', canManageStaffStrict, async (req, res) => {
     try {
       for (const emp of candidates) {
         const {
-          employeeId, fullName, email, phone, department, position, branch,
+          employeeId, fullName, phone, department, position, branch,
           role, gender, joinDate, mode, deviceId, grade, dob, status, eligibleForOt, remarks,
         } = emp;
+        const email = lowerEmail(emp.email);
         const idStr = String(employeeId);
         if (existingIds.has(idStr)) { skipped.push(idStr); continue; }
 
@@ -746,6 +773,9 @@ router.post('/import', canManageStaffStrict, async (req, res) => {
             otVal === 'yes' || otVal === 'true' || otVal === '1',
             false, // onlineAttendanceEnabled — not part of the Excel import template, always starts off
           ]);
+          // A Not Working status (Resigned, Terminated…) means inactive — same
+          // rule the Officially Changes sweep applies.
+          if (emp._notWorking) await client.query('UPDATE users SET active=false WHERE employee_id=$1 AND is_system IS NOT TRUE', [idStr]);
           created.push(idStr);
           existingIds.add(idStr); // guards against duplicate rows within the same file
           if (email) syncEmailDirectory({ action: 'upsert', newEmail: email });

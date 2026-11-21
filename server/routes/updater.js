@@ -161,6 +161,12 @@ router.post('/apply', async (req, res) => {
   }
   const { downloadUrl, checksum, version } = req.body;
   if (!downloadUrl || !version) return res.status(400).json({ error: 'Missing downloadUrl or version' });
+  // SECURITY: only download from the configured update server, over HTTPS, with a mandatory SHA-256.
+  try {
+    const u = new URL(downloadUrl);
+    if (u.protocol !== 'https:' || u.origin !== new URL(UPDATE_BASE).origin) throw new Error('bad origin');
+  } catch { return res.status(400).json({ error: 'Update URL not allowed' }); }
+  if (!checksum || !/^[a-f0-9]{64}$/i.test(String(checksum))) return res.status(400).json({ error: 'A valid SHA-256 checksum is required' });
 
   // Respond immediately so the frontend gets the 200 before server restarts
   res.json({ success: true, message: 'Update started — poll /api/update/status' });

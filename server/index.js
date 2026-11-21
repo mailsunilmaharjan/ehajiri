@@ -39,6 +39,7 @@ import licenseRouter    from './routes/license.js';
 import updaterRouter    from './routes/updater.js';
 import overtimeRouter   from './routes/overtime.js';
 import dutyRosterRouter from './routes/dutyRoster.js';
+import dutyExchangeRouter from './routes/dutyExchange.js';
 import auditLogRouter   from './routes/auditLog.js';
 import staffNotesRouter  from './routes/staffNotes.js';
 import contactsRouter    from './routes/contacts.js';
@@ -55,6 +56,8 @@ import smsConfigRouter   from './routes/smsConfig.js';
 import smsRouter         from './routes/sms.js';
 import aiAnalysisRouter  from './routes/aiAnalysis.js';
 import supportLiveRouter from './routes/supportLive.js';
+import accountsRouter from './routes/accounts/index.js';
+import { accountsGuard } from './services/accounts/authz.js';
 import payrollRouter from './routes/payroll.js';
 import payrollRunsRouter from './routes/payrollRuns.js';
 import payrollScalesRouter from './routes/payrollScales.js';
@@ -67,11 +70,13 @@ import broadcastRouter   from './routes/broadcast.js';
 import { logBugReport }  from './services/bugReportService.js';
 import { licenseGuard } from './middleware/licenseGuard.js';
 import { authGuard }    from './middleware/authGuard.js';
-import { securityHeaders, corsOptions, pickJsonLimit, rateLimit } from './middleware/security.js';
+import { securityHeaders, corsOptions, pickJsonLimit, rateLimit, cspReportHandler } from './middleware/security.js';
 import { bodySanity } from './middleware/validate.js';
+import { uploadGuard } from './middleware/uploadGuard.js';
 import { requireRole }  from './middleware/roleGuard.js';
 import { standaloneSyncTokenGuard } from './middleware/standaloneSyncTokenGuard.js';
 import { mountTenantPathProxy } from './middleware/tenantPathProxy.js';
+import { extraDistDirs } from './utils/tenantDist.js';
 import * as routingCache from './services/routingCache.js';
 
 const app  = express();
@@ -106,7 +111,11 @@ const jsonSmall = express.json({ limit: '1mb' });
 const jsonLarge = express.json({ limit: '50mb' });
 app.use((req, res, next) => (pickJsonLimit(req) === '50mb' ? jsonLarge : jsonSmall)(req, res, next));
 
+// CSP violation reports (Content-Security-Policy-Report-Only) — logged, never stored.
+app.post('/api/csp-report', rateLimit({ windowMs: 60_000, max: 60 }), express.json({ type: () => true, limit: '10kb' }), cspReportHandler);
 app.use('/api', bodySanity);
+// Malware / hacking-tool / disguised-file scan of every image & document uploaded inside a JSON body.
+app.use('/api', uploadGuard);
 
 /* ── Bug Finder — auto-capture every 5xx response, regardless of which route
    produced it. Every route handler in this codebase catches its own errors
@@ -124,6 +133,14 @@ app.use((req, res, next) => {
         message   : body?.error || body?.message || 'Unknown server error',
         userId    : req.user?.id || null,
       }).catch(() => {});
+      // SECURITY: never show internal error text (SQL, paths, stack) to the client on a 5xx — it was logged above.
+      // 503 is left alone: it carries deliberate user-facing messages (module disabled, SMS/AI not configured).
+      if (res.statusCode !== 503 && body && typeof body === 'object' && !Array.isArray(body)) {
+        body = { ...body };
+        if ('error' in body) body.error = 'Internal server error';
+        if ('message' in body) body.message = 'Internal server error';
+        delete body.stack; delete body.detail;
+      }
     }
     return originalJson(body);
   };
@@ -166,6 +183,7 @@ app.use('/api/standalone-sync', licenseGuard, rateLimit({ windowMs: 60_000, max:
 app.use('/api/attendance',licenseGuard, authGuard, attendanceRouter);
 app.use('/api/overtime',    licenseGuard, authGuard, overtimeRouter);
 app.use('/api/duty-roster', licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.dutyRoster, 'Duty Roster'), dutyRosterRouter);
+app.use('/api/duty-exchange', licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.dutyRoster, 'Duty Roster'), dutyExchangeRouter);
 app.use('/api/audit-log',   licenseGuard, authGuard, requireRole('superAdmin'), auditLogRouter);
 app.use('/api/staff-notes',  licenseGuard, authGuard, staffNotesRouter);
 app.use('/api/contacts',     licenseGuard, authGuard, contactsRouter);
@@ -186,6 +204,8 @@ app.use('/api/sms-config',  licenseGuard, authGuard, requireRole('admin', 'super
 app.use('/api/sms',         licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.smsGateway, 'SMS Gateway'), smsRouter);
 app.use('/api/ai',          licenseGuard, authGuard, aiAnalysisRouter);
 app.use('/api/support-live', licenseGuard, authGuard, supportLiveRouter);
+// Nepal Accounts: Super-Admin flag (default OFF per tenant) + the user's `accounts` page permission.
+app.use('/api/accounts', licenseGuard, authGuard, requireModuleEnabled(FLAG_KEYS.accounting, 'Accounting'), accountsGuard, accountsRouter);
 app.use('/api/payroll', licenseGuard, authGuard, payrollRouter);
 app.use('/api/payroll', licenseGuard, authGuard, payrollRunsRouter);
 app.use('/api/payroll', licenseGuard, authGuard, payrollScalesRouter);
@@ -239,12 +259,19 @@ app.get('/api/downloads/android-apk', (_req, res) => {
 });
 
 /* ── Auto-updater (admin only — no licenseGuard so it works during update) ── */
-app.use('/api/update', updaterRouter);
+// SECURITY: the self-updater is a desktop (Electron) feature. On hosted/tenant servers it is disabled outright,
+// and even on desktop it needs a logged-in super admin (it used to be completely unauthenticated).
+app.use('/api/update', (req, res, next) => (process.env.ELECTRON === 'true' ? next() : res.status(404).json({ error: 'Not found' })),
+  authGuard, requireRole('superAdmin'), updaterRouter);
 
 /* ── Serve Vite production build (production mode only) ── */
-const DIST = join(dirname(fileURLToPath(import.meta.url)), '../dist');
+// DIST_DIR (folder name next to server/, e.g. "dist-planet") lets ONE tenant's service serve a different
+// frontend build than everyone else — used to roll a new module out to a single tenant first. Unset = ../dist.
+const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', /^[\w.-]+$/.test(process.env.DIST_DIR || '') ? process.env.DIST_DIR : 'dist');
 if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
   app.use(express.static(DIST));
+  // builds served to specific tenants only (TENANT_DIST_OVERRIDES) — their hashed assets, never their index.html at /
+  for (const d of extraDistDirs()) app.use(express.static(d, { index: false }));
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/iclock')) {
       return res.sendFile(join(DIST, 'index.html'));

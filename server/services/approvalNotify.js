@@ -38,10 +38,11 @@ export async function notifyPeople(employeeId, ids, { subject, body, path }) {
 }
 
 /** After a recommendation: the configured approvers (or admins when none are set) are next in line. */
-export async function notifyApproversNext(employeeId, actorId, { subject, body, path }) {
+export async function notifyApproversNext(employeeId, actorId, { subject, body, path, pickedApproverId }) {
   try {
     const { approverIds } = await getRecoApprovalIds(employeeId);
-    let ids = approverIds.map(Number);
+    // If the applicant picked a specific approver, only that person is next in line.
+    let ids = pickedApproverId ? [Number(pickedApproverId)] : approverIds.map(Number);
     if (!ids.length) {
       const { rows } = await pool.query(`SELECT id FROM users WHERE role IN ('admin','superAdmin') AND active = TRUE`);
       ids = rows.map(r => r.id);
@@ -50,4 +51,24 @@ export async function notifyApproversNext(employeeId, actorId, { subject, body, 
     if (!ids.length) return;
     await notifyUsers({ senderId: Number(employeeId), recipientIds: ids, subject, body, path });
   } catch (e) { console.error('[approvalNotify next]', e.message); }
+}
+
+/** Everyone who must be told about a NEW application by employeeId: the recommender/approver the
+ *  applicant picked in the form (all entries), PLUS every recommender/approver configured for them in
+ *  Set Recommendator & Approval; admins when nobody is configured. The applicant is never included. */
+export async function resolveApplicationRecipients(employeeId, picked = []) {
+  const flat = (picked || []).flat().filter(Boolean).map(Number);
+  let ids = [...flat];
+  try {
+    // Only the people the applicant picked are told; configured ones are the fallback when nothing was picked.
+    if (!ids.length) {
+      const { recommenderIds, approverIds } = await getRecoApprovalIds(employeeId);
+      ids.push(...recommenderIds.map(Number), ...approverIds.map(Number));
+    }
+    if (!ids.length) {
+      const { rows } = await pool.query(`SELECT id FROM users WHERE role IN ('admin','superAdmin') AND active = TRUE`);
+      ids = rows.map(r => r.id);
+    }
+  } catch (e) { console.error('[approvalNotify recipients]', e.message); }
+  return [...new Set(ids)].filter(i => Number.isFinite(i) && i !== Number(employeeId));
 }

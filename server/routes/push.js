@@ -29,6 +29,22 @@ router.post('/unregister', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* Mute / unmute the attendance (punch) alerts for every device of the signed-in user. */
+router.get('/prefs', async (req, res) => {
+  try {
+    const { rows: [r] } = await pool.query(
+      'SELECT COUNT(*)::int AS n, COUNT(*) FILTER (WHERE punch_alerts)::int AS on_n FROM push_devices WHERE user_id=$1 AND active', [req.user.id]);
+    res.json({ punchAlerts: r.n === 0 ? true : r.on_n > 0, devices: r.n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/prefs', async (req, res) => {
+  try {
+    await pool.query('UPDATE push_devices SET punch_alerts=$2 WHERE user_id=$1', [req.user.id, req.body?.punchAlerts !== false]);
+    res.json({ ok: true, punchAlerts: req.body?.punchAlerts !== false });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/status', async (req, res) => {
   try {
     const { rows: [r] } = await pool.query('SELECT COUNT(*)::int AS n FROM push_devices WHERE user_id=$1 AND active', [req.user.id]);

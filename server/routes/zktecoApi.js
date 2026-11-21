@@ -1240,7 +1240,7 @@ router.post('/devices/:id/delete-fp-slot', async (req, res) => {
 //   user.dat    : PIN\tName\tPri\tPasswd\tCard\tGrp\tTZs\tVerify\n  (user records)
 //   oplog.dat   : operation logs (fingerprint enrollments etc.)
 // Frontend reads file content and sends as { fileName, content } JSON.
-router.post('/devices/:id/usb-upload', async (req, res) => {
+const usbUploadHandler = async (req, res) => {
   const { fileName = '', content = '' } = req.body;
   if (!content) return res.status(400).json({ error:'No file content provided' });
 
@@ -1252,7 +1252,9 @@ router.post('/devices/:id/usb-upload', async (req, res) => {
     let attInserted = 0, usersUpserted = 0, skipped = 0;
 
     // ── Detect and parse file type ──────────────────────────────────────
-    if (fileType.includes('attlog') || lines[0]?.split('\t').length >= 4 && !lines[0]?.startsWith('USER') && !lines[0]?.startsWith('FP')) {
+    const isUserFile = fileType.includes('user') || lines[0]?.startsWith('USER\t');
+    const isAttFile  = !isUserFile && (fileType.includes('attlog') || lines[0]?.split('\t').length >= 4 && !lines[0]?.startsWith('FP'));
+    if (isAttFile) {
       // Attendance log format: PIN\tDateTime\tVerify\tInOut[\tWorkCode]
       const records = parseAttlog(lines.join('\n'));
       attInserted   = await saveAttlogs(sn, records);
@@ -1261,7 +1263,7 @@ router.post('/devices/:id/usb-upload', async (req, res) => {
       console.log(`[ZK USB] attlog ${sn}: ${records.length} parsed, ${attInserted} new`);
     }
 
-    if (fileType.includes('user') || lines[0]?.startsWith('USER\t') || lines[0]?.split('\t').length >= 3) {
+    if (!isAttFile && (isUserFile || lines[0]?.split('\t').length >= 3)) {
       // User data format — try both USER\t... prefix and raw tab format
       for (const line of lines) {
         const trimmed = line.trim();
@@ -1298,6 +1300,12 @@ router.post('/devices/:id/usb-upload', async (req, res) => {
     logError('[ZK USB] upload error:', err);
     res.status(500).json({ error: err.message });
   }
+};
+router.post('/devices/:id/usb-upload', usbUploadHandler);
+// Excel → attendance logs (client converts the sheet to attlog lines). Super Admin only.
+router.post('/devices/:id/excel-upload', requireRole('superAdmin'), (req, res) => {
+  req.body = { fileName: 'attlog_excel.dat', content: req.body?.content || '' };
+  return usbUploadHandler(req, res);
 });
 
 // ── Unlock door (guide §12) ───────────────────────────────────────────────

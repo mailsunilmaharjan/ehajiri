@@ -1,5 +1,31 @@
 import crypto from 'crypto';
 
+export const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self' https: wss:",
+  "frame-src 'self' https:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+  'report-uri /api/csp-report',
+].join('; ');
+
+/** POST /api/csp-report handler body: log one short line per violation (no storage). */
+export function cspReportHandler(req, res) {
+  try {
+    const r = (req.body && (req.body['csp-report'] || req.body)) || {};
+    console.warn('[csp-report]', String(r['violated-directive'] || r.effectiveDirective || '').slice(0, 60),
+      '| blocked:', String(r['blocked-uri'] || r.blockedURL || '').slice(0, 120),
+      '| page:', String(r['document-uri'] || r.documentURL || '').slice(0, 120));
+  } catch { /* ignore */ }
+  res.status(204).end();
+}
+
 /* ── Security headers (dependency-free subset of what helmet sets) ── */
 export function securityHeaders(req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -7,9 +33,10 @@ export function securityHeaders(req, res, next) {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-DNS-Prefetch-Control', 'off');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Content-Security-Policy-Report-Only', CSP_REPORT_ONLY);
   res.removeHeader('X-Powered-By');
   if (req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') {
-    res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
   next();
 }
@@ -38,8 +65,15 @@ export function corsOptions() {
 
 /* ── In-memory rate limiter (one process per tenant → no shared store needed) ── */
 export function clientIp(req) {
-  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return xff || req.socket?.remoteAddress || 'unknown';
+  // Only trust X-Forwarded-For when the TCP peer is the local reverse proxy (IIS/ARR on this box),
+  // and then take the LAST hop (the one the proxy appended) — the first value is client-controlled.
+  const peer = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  const viaLocalProxy = peer === '127.0.0.1' || peer === '::1';
+  if (viaLocalProxy) {
+    const parts = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return peer || 'unknown';
 }
 
 export function rateLimit({ windowMs, max, message = 'Too many requests — please try again later', key = clientIp }) {
@@ -64,7 +98,7 @@ export function rateLimit({ windowMs, max, message = 'Too many requests — plea
    Failures = any 401 response from the wrapped handler. Tracked per
    (ip, username) and, with a higher cap, per username alone so rotating
    source IPs does not bypass it. Success clears the counters. */
-export function loginThrottle({ perPair = 8, perUser = 30, windowMs = 15 * 60_000, lockMs = 15 * 60_000 } = {}) {
+export function loginThrottle({ perPair = 6, perUser = 12, windowMs = 15 * 60_000, lockMs = 15 * 60_000 } = {}) {
   const fails = new Map(); // key -> { n, first, lockedUntil }
   setInterval(() => {
     const now = Date.now();

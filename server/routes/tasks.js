@@ -66,10 +66,11 @@ const SEL = (userId) => `
   t.created_at  AS "createdAt",
   t.updated_at  AS "updatedAt",
   t.completed_at AS "completedAt",
-  COALESCE(c.company_name, c.person_name) AS "customerName",
-  COALESCE(cp.name, c.person_name) AS "personName",
+  t.doc_id AS "docId", t.doc_no AS "docNo", t.doc_type AS "docType",
+  COALESCE(c.company_name, c.person_name, t.party_name) AS "customerName",
+  COALESCE(cp.name, c.person_name, t.party_person) AS "personName",
   c.address AS "customerAddress",
-  COALESCE(cp.mobile1, c.mobile1) AS "customerMobile",
+  COALESCE(cp.mobile1, c.mobile1, t.party_phone) AS "customerMobile",
   COALESCE(cp.mobile2, NULL) AS "customerMobile2",
   COALESCE(c.company_phone, c.office_phone) AS "customerPhone",
   COALESCE(cp.email, c.email, c.company_email) AS "customerEmail",
@@ -222,7 +223,7 @@ async function broadcastTaskEvent(taskId, title, event, creatorId, assigneeIds, 
 // task's full current assignee list, used only to size the popup audience
 // (so Department Head/Admin/every other current assignee sees it too, not
 // just whoever's new).
-async function notifyAssignees(taskId, title, newAssigneeIds, creatorId, allAssigneeIds, actorId, isFieldVisit = false) {
+export async function notifyAssignees(taskId, title, newAssigneeIds, creatorId, allAssigneeIds, actorId, isFieldVisit = false) {
   if (!newAssigneeIds.length) return;
   await broadcastTaskEvent(taskId, title, 'assigned', creatorId, allAssigneeIds, actorId, { isFieldVisit });
   try {
@@ -296,7 +297,12 @@ async function notifyDescriptionChanged(taskId, title, creatorId, assigneeIds, a
 // for). Called after the followup insert commits, so a "Hand Over" followup's
 // newly-added assignee (already in task_assignees by then) is included in the
 // audience the same way any other current assignee is.
-async function notifyFollowupAdded(taskId, title, creatorId, assigneeIds, actorId, isFieldVisit = false) {
+// A follow-up logged on a Pending task moves it to In Progress ("Processing") automatically.
+export async function markTaskProcessing(queryable, taskId) {
+  await queryable.query("UPDATE tasks SET status = 'in_progress', updated_at = NOW() WHERE id = $1 AND status = 'pending'", [taskId]);
+}
+
+export async function notifyFollowupAdded(taskId, title, creatorId, assigneeIds, actorId, isFieldVisit = false) {
   await broadcastTaskEvent(taskId, title, 'followup_added', creatorId, assigneeIds, actorId, { isFieldVisit });
 }
 
@@ -402,6 +408,30 @@ router.get('/', async (req, res) => {
 // CURRENT is_field_visit flag: "count" is the regular Task page's badge
 // (non-Field-Visit tasks only), "fieldVisitCount" is the separate Field
 // Visit page's own badge — see the Staff dropdown's two nav items.
+/** Task ↔ Accounts: the Sales Quotations a task of category "Quotation" can be linked to (newest first; narrowed to the task's contact when given). */
+router.get('/accounts-quotations', async (req, res) => {
+  try {
+    if (!(await pool.query("SELECT to_regclass('public.acc_docs') AS t")).rows[0].t) return res.json([]);
+    const cid = parseInt(req.query.contactId) || 0;
+    const { rows } = await pool.query(
+      `SELECT d.id, d.doc_no, d.party_name, d.qt_subject AS subject, d.status, d.doc_date
+         FROM acc_docs d
+        WHERE d.doc_type = 'QT' AND d.status <> 'cancelled'
+          AND ($1 = 0 OR d.contact_id = $1 OR d.party_id IN (SELECT id FROM acc_ledgers WHERE contact_id = $1))
+        ORDER BY d.id DESC LIMIT 300`, [cid]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/** Link (or unlink) the Accounts quotation a task belongs to. doc_no comes from the database, never from the browser. */
+async function applyDocLink(client, taskId, docId) {
+  const id = parseInt(docId);
+  if (!id) { await client.query('UPDATE tasks SET doc_id = NULL, doc_no = NULL, doc_type = NULL WHERE id = $1', [taskId]); return; }
+  if (!(await client.query("SELECT to_regclass('public.acc_docs') AS t")).rows[0].t) return;
+  const d = (await client.query("SELECT id, doc_no, doc_type FROM acc_docs WHERE id = $1 AND doc_type = 'QT'", [id])).rows[0];
+  if (d) await client.query('UPDATE tasks SET doc_id = $1, doc_no = $2, doc_type = $3 WHERE id = $4', [d.id, d.doc_no, d.doc_type, taskId]);
+}
+
 router.get('/notifications/count', async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -451,6 +481,18 @@ router.post('/:id/notifications/read', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// One task with the same columns as the list (used by the Accounts "Task" pop-up on a quotation).
+router.get('/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid task id' });
+  try {
+    if (!(await userCanAccessTask(req.user, id))) return res.status(404).json({ error: 'Task not found' });
+    const { rows } = await pool.query(`SELECT ${SEL(req.user.id)} ${JOINS} WHERE t.id = $1`, [id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Task not found' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/', validateBody({ title: { max: 500 }, description: { max: 2000000 }, contactId: {"type":"scalar","max":100}, contactPersonId: {"type":"scalar","max":100}, categoryId: {"type":"scalar","max":100}, priorityId: {"type":"scalar","max":100}, dueDate: {"type":"scalar","max":40}, status: { type: 'scalar', max: 40 }, assignedTo: { type: 'array', max: 500 } }), async (req, res) => {
   const { title, description, contactId, contactPersonId, categoryId, priorityId, dueDate, assignedTo, isFieldVisit } = req.body;
   if (!title?.trim()) return res.status(400).json({ error: 'Task title is required' });
@@ -465,6 +507,7 @@ router.post('/', validateBody({ title: { max: 500 }, description: { max: 2000000
        priorityId || null, dueDate || null, req.user.id, !!isFieldVisit]
     );
     const taskId = rows[0].id;
+    if (req.body.docId) await applyDocLink(client, taskId, req.body.docId);
     for (const uid of assigneeIds) {
       await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [taskId, uid]);
     }
@@ -537,6 +580,7 @@ router.put('/:id', validateBody({ title: { max: 500 }, description: { max: 20000
     for (const uid of assigneeIds) {
       await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, uid]);
     }
+    if ('docId' in req.body) await applyDocLink(client, id, req.body.docId);
     await client.query('COMMIT');
 
     const newTitle = title.trim();
@@ -746,6 +790,7 @@ router.post('/:taskId/followups', validateBody({ mode: { type: 'scalar', max: 40
     if (handedOverId) {
       await client.query(`INSERT INTO task_assignees (task_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [taskId, handedOverId]);
     }
+    await markTaskProcessing(client, taskId);
     // "Transfer for Next Task" actually reclassifies the task, same non-destructive-side-effect pattern as Hand Over -> task_assignees.
     if (nextCategory) {
       await client.query(`UPDATE tasks SET category_id=$1, updated_at=NOW() WHERE id=$2`, [nextCategory, taskId]);

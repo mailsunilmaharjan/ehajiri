@@ -70,10 +70,22 @@ router.post('/', requireRole('admin', 'superAdmin'), async (req, res) => {
 });
 
 router.put('/:id', requireRole('admin', 'superAdmin', 'branchManager', 'branchAreaManager', 'departmentHead', 'departmentIncharge'), async (req, res) => {
-  const s = req.body;
+  const s = { ...req.body };
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    /* Day Off / Night Off (is_off=true) are system shifts: if their name/code/
+       times are edited into a working shift, every roster using them is
+       treated as "off" on ALL days (ledger shows the shift name under Status
+       and a blank Shift). Keep their identity locked; admins must create a
+       separate, normal shift for working hours. */
+    const { rows: cur } = await client.query('SELECT * FROM shifts WHERE id=$1', [req.params.id]);
+    if (cur[0]?.is_off) {
+      const o = cur[0];
+      s.name = o.name; s.nameEn = o.name_en; s.code = o.code;
+      s.startTime = o.start_time; s.endTime = o.end_time; s.workHours = o.work_hours;
+      s.makeDefault = false;
+    }
     // Enforce single default: clear all other shifts before marking this one as default
     if (s.makeDefault) {
       await client.query('UPDATE shifts SET make_default = FALSE WHERE id != $1', [req.params.id]);

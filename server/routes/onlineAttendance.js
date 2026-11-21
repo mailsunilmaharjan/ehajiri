@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import pool from '../db.js';
-import { authorizeRecoAction, authorizeOwnEditDelete } from '../services/recoApprovalGuard.js';
+import { authorizeRecoAction, authorizeOwnEditDelete, getRecoApprovalIds, validPickedPerson } from '../services/recoApprovalGuard.js';
 import { logAudit } from '../services/auditLog.js';
 import { reverseGeocode } from '../services/geocode.js';
-import { notifyApproversOf, notifyApplicantOf } from '../services/approvalNotify.js';
+import { notifyPeople, notifyApplicantOf, resolveApplicationRecipients } from '../services/approvalNotify.js';
 
 const router = Router();
 
@@ -15,6 +15,7 @@ const SEL = `
   check_out_accuracy AS "checkOutAccuracy", check_out_device AS "checkOutDevice", check_out_place AS "checkOutPlace",
   status, recommended_by AS "recommendedBy", recommended_date AS "recommendedDate",
   approved_by AS "approvedBy", approved_date AS "approvedDate", comment,
+  reco_id AS "recoId", approval_id AS "approvalId",
   created_at AS "createdAt"
 `;
 
@@ -95,6 +96,17 @@ router.post('/check-in', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/* The recommender / approver the staff member picked at check-out. A valid pick is used; with no pick, a
+   single configured person is chosen automatically; otherwise null (falls back to everyone configured). */
+async function resolvePick(employeeId, picked, role) {
+  const v = await validPickedPerson(employeeId, Array.isArray(picked) ? picked[0] : picked, role);
+  if (v === false) return false;
+  if (v != null) return v;
+  const { recommenderIds, approverIds } = await getRecoApprovalIds(employeeId);
+  const list = role === 'recommend' ? recommenderIds : approverIds;
+  return list.length === 1 ? Number(list[0]) : null;
+}
+
 router.post('/check-out', async (req, res) => {
   const { lat, lng, accuracy, deviceInfo } = req.body;
   if (lat == null || lng == null) return res.status(400).json({ error: 'Location is required to check out.' });
@@ -109,15 +121,27 @@ router.post('/check-out', async (req, res) => {
     if (!existing[0]?.check_in_at) return res.status(404).json({ error: 'Check in first before checking out.' });
     if (existing[0].check_out_at) return res.status(409).json({ error: 'You have already checked out today.' });
 
+    const recoId = await resolvePick(req.user.id, req.body.reco, 'recommend');
+    const approvalId = await resolvePick(req.user.id, req.body.approval, 'approve');
+    if (recoId === false || approvalId === false) return res.status(400).json({ error: 'The chosen recommender/approver is not configured for you.' });
+
     const { rows } = await pool.query(
       `UPDATE online_attendance
-       SET check_out_at=NOW(), check_out_lat=$1, check_out_lng=$2, check_out_accuracy=$3, check_out_device=$4, check_out_ip=$5, updated_at=NOW()
+       SET check_out_at=NOW(), check_out_lat=$1, check_out_lng=$2, check_out_accuracy=$3, check_out_device=$4, check_out_ip=$5, updated_at=NOW(),
+           reco_id=$7, approval_id=$8
        WHERE id=$6 RETURNING ${SEL}`,
-      [lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), clientIp(req), existing[0].id]
+      [lat, lng, accuracy ?? null, String(deviceInfo || '').slice(0, 500), clientIp(req), existing[0].id, recoId, approvalId]
     );
     savePlaceLater(rows[0].id, 'out', lat, lng);
+    // already approved (approved while only checked in) → the check-out must reach the reports too
+    pool.query(`SELECT * FROM online_attendance WHERE id=$1 AND status='approved'`, [rows[0].id])
+      .then(({ rows: [r] }) => r && mirrorToLogs(pool, r)).catch(() => {});
     // the day is complete: tell whoever has to approve it (inbox + website toast + phone push)
-    pool.query('SELECT full_name FROM users WHERE id=$1', [req.user.id]).then(({ rows: [u] }) => notifyApproversOf(req.user.id, {
+    // only the recommender/approver they picked (configured people / admins only when nobody was picked)
+    Promise.all([
+      pool.query('SELECT full_name FROM users WHERE id=$1', [req.user.id]),
+      resolveApplicationRecipients(req.user.id, [recoId, approvalId]),
+    ]).then(([{ rows: [u] }, ids]) => notifyPeople(req.user.id, ids, {
       subject: `Online attendance for approval: ${u?.full_name || ''}`,
       body: `${u?.full_name || 'A staff member'} checked in and out online today and is waiting for your approval.`,
       path: '/m/approvals',
@@ -129,9 +153,9 @@ router.post('/check-out', async (req, res) => {
 
 router.patch('/:id/recommend', async (req, res) => {
   try {
-    const { rows: existing } = await pool.query('SELECT employee_id FROM online_attendance WHERE id=$1', [req.params.id]);
+    const { rows: existing } = await pool.query('SELECT employee_id, reco_id FROM online_attendance WHERE id=$1', [req.params.id]);
     if (!existing[0]) return res.status(404).json({ error: 'Record not found' });
-    const authError = await authorizeRecoAction(req, existing[0].employee_id, 'recommend');
+    const authError = await authorizeRecoAction(req, existing[0].employee_id, 'recommend', { pickedId: existing[0].reco_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(
@@ -154,17 +178,43 @@ router.patch('/:id/recommend', async (req, res) => {
 // exactly like a real device punch for any report that joins on pin), else a
 // synthetic 'ONLINE<id>' pin so the insert never fails for an employee who's
 // never been assigned a physical device PIN.
+// Mirror whichever punches exist. Previously this required BOTH check-in and
+// check-out, so an approved check-in-only day (forgot to check out, or approved
+// before checking out) never reached any report → Absent (green-technology,
+// Mana, 13-Nov-2026). Idempotent (ON CONFLICT DO NOTHING), so it can be re-run
+// when the check-out arrives later; synced_to_logs flips only when complete.
+async function mirrorToLogs(client, row) {
+  if (row.synced_to_logs || !row.check_in_at) return;
+  const { rows: empRows } = await client.query('SELECT device_id FROM users WHERE id=$1', [row.employee_id]);
+  const pin = empRows[0]?.device_id || `ONLINE${row.employee_id}`;
+  await client.query(
+    `INSERT INTO zkteco_attendance_logs (device_sn, pin, check_time, employee_id, raw_line)
+     VALUES ('ONLINE', $1, $2, $3, 'ONLINE_ATTENDANCE check-in')
+     ON CONFLICT (device_sn, pin, check_time) DO NOTHING`,
+    [pin, row.check_in_at, row.employee_id]
+  );
+  if (row.check_out_at) {
+    await client.query(
+      `INSERT INTO zkteco_attendance_logs (device_sn, pin, check_time, employee_id, raw_line)
+       VALUES ('ONLINE', $1, $2, $3, 'ONLINE_ATTENDANCE check-out')
+       ON CONFLICT (device_sn, pin, check_time) DO NOTHING`,
+      [pin, row.check_out_at, row.employee_id]
+    );
+    await client.query('UPDATE online_attendance SET synced_to_logs=true WHERE id=$1', [row.id]);
+  }
+}
+
 router.patch('/:id/approve', async (req, res) => {
   const { comment } = req.body;
   const client = await pool.connect();
   try {
     const { rows: existing } = await client.query(
-      'SELECT employee_id, recommended_by, check_in_at, check_out_at, synced_to_logs FROM online_attendance WHERE id=$1',
+      'SELECT employee_id, recommended_by, check_in_at, check_out_at, synced_to_logs, approval_id FROM online_attendance WHERE id=$1',
       [req.params.id]
     );
     if (!existing[0]) { client.release(); return res.status(404).json({ error: 'Record not found' }); }
     const authError = await authorizeRecoAction(req, existing[0].employee_id, 'approve',
-      { alreadyRecommended: !!existing[0].recommended_by });
+      { alreadyRecommended: !!existing[0].recommended_by, pickedId: existing[0].approval_id });
     if (authError) { client.release(); return res.status(authError.status).json({ error: authError.error }); }
 
     await client.query('BEGIN');
@@ -175,18 +225,7 @@ router.patch('/:id/approve', async (req, res) => {
     );
     const row = rows[0];
 
-    if (!row.synced_to_logs && row.check_in_at && row.check_out_at) {
-      const { rows: empRows } = await client.query('SELECT device_id FROM users WHERE id=$1', [row.employee_id]);
-      const pin = empRows[0]?.device_id || `ONLINE${row.employee_id}`;
-      await client.query(
-        `INSERT INTO zkteco_attendance_logs (device_sn, pin, check_time, employee_id, raw_line)
-         VALUES ('ONLINE', $1, $2, $3, 'ONLINE_ATTENDANCE check-in'),
-                ('ONLINE', $1, $4, $3, 'ONLINE_ATTENDANCE check-out')
-         ON CONFLICT (device_sn, pin, check_time) DO NOTHING`,
-        [pin, row.check_in_at, row.employee_id, row.check_out_at]
-      );
-      await client.query('UPDATE online_attendance SET synced_to_logs=true WHERE id=$1', [row.id]);
-    }
+    await mirrorToLogs(client, row);
     await client.query('COMMIT');
 
     const { rows: final } = await pool.query(`SELECT ${SEL} FROM online_attendance WHERE id=$1`, [req.params.id]);
@@ -202,9 +241,9 @@ router.patch('/:id/approve', async (req, res) => {
 router.patch('/:id/reject', async (req, res) => {
   const { comment } = req.body;
   try {
-    const { rows: existing } = await pool.query('SELECT employee_id FROM online_attendance WHERE id=$1', [req.params.id]);
+    const { rows: existing } = await pool.query('SELECT employee_id, approval_id FROM online_attendance WHERE id=$1', [req.params.id]);
     if (!existing[0]) return res.status(404).json({ error: 'Record not found' });
-    const authError = await authorizeRecoAction(req, existing[0].employee_id, 'reject');
+    const authError = await authorizeRecoAction(req, existing[0].employee_id, 'reject', { pickedId: existing[0].approval_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(

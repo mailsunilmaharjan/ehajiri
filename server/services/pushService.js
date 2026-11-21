@@ -66,12 +66,13 @@ async function sendOne(sa, access, token, { title, body, data }) {
 }
 
 /** Send a notification to every registered device of the given users. Never throws. */
-export async function sendPushToUsers(userIds, { title, body, data } = {}) {
+export async function sendPushToUsers(userIds, { title, body, data } = {}, opts = {}) {
   try {
     const sa = serviceAccount();
     const ids = [...new Set((userIds || []).map(Number))].filter(n => Number.isInteger(n) && n > 0);
     if (!sa || !ids.length || !title) return { sent: 0, removed: 0 };
-    const { rows } = await pool.query('SELECT id, token FROM push_devices WHERE user_id = ANY($1) AND active', [ids]);
+    // topic 'punch': skip devices whose user muted attendance alerts in the app
+    const { rows } = await pool.query(`SELECT id, token FROM push_devices WHERE user_id = ANY($1) AND active${opts.topic === 'punch' ? ' AND punch_alerts' : ''}`, [ids]);
     if (!rows.length) return { sent: 0, removed: 0 };
     const access = await accessToken(sa);
     let sent = 0; const gone = [];
@@ -88,4 +89,4 @@ export async function sendPushToUsers(userIds, { title, body, data } = {}) {
 }
 
 /** Fire-and-forget convenience for request handlers. */
-export const pushLater = (userIds, payload) => { sendPushToUsers(userIds, payload).catch(() => {}); };
+export const pushLater = (userIds, payload, opts) => { sendPushToUsers(userIds, payload, opts).catch(() => {}); };

@@ -3,7 +3,8 @@
  * seeded OFF by migration 47) plus Email Setup (seeded OFF by migration 75),
  * Guest Registration/Online Attendance/Duty Roster/Chat/Task (all seeded OFF),
  * all stored in the generic app_settings key-value table. attendanceDevice
- * defaults ON (migration 120) — every other flag defaults OFF; a Super Admin
+ * defaults ON (migration 120) — every other flag defaults OFF, INCLUDING the Help assistant and Field Visit
+ * route tracking (both were always-on before; they are now opt-in per tenant like the rest); a Super Admin
  * must explicitly enable the rest before they become active (Super-Admin
  * only, not license-gated — see RoleManagement.jsx and settings.js's
  * SUPER_ADMIN_ONLY_FLAGS).
@@ -25,9 +26,14 @@ export const FLAG_KEYS = {
   chat:             'module_chat_enabled',
   task:             'module_task_enabled',
   smsGateway:       'module_sms_gateway_enabled',
-  // Help assistant widget. Unlike every flag above, this one defaults ON: only
-  // an explicit `false` hides it (a missing row means enabled).
+  // Nepal Accounts (accounting + inventory). Defaults OFF like every flag except attendanceDevice
+  // a Super Admin must switch it on per tenant.
+  accounting:       'module_accounting_enabled',
+  // Help assistant widget (floating Help button). Defaults OFF — a Super Admin enables it per tenant.
   supportHelp:      'module_support_help_enabled',
+  // Field Visit continuous route tracking (the "📡 Tracking field visit" chip + GPS recording while a trip is open).
+  // Defaults OFF — a Super Admin enables it per tenant.
+  fieldVisitTracking: 'module_field_visit_tracking_enabled',
 };
 
 const TTL_MS = 5000;
@@ -44,6 +50,20 @@ export async function getModuleFlags() {
   );
   const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
 
+  // Accounts is a LICENSED module: on a hosted tenant it may only run when the active license lists the
+  // "Accounting" feature (LicenseAdmin → Licenses). Tenants that already had it on when gating was introduced
+  // were grandfathered by migration 172 (module_accounting_license_override). Desktop / dev installs
+  // (no TENANT_ID) are not gated.
+  let accountingLicensed = true;
+  if (process.env.TENANT_ID) {
+    const ov = (await pool.query("SELECT value FROM app_settings WHERE key='module_accounting_license_override'")).rows[0]?.value;
+    if (!(ov === true || ov === 'true')) {
+      const lic = (await pool.query('SELECT payload FROM license WHERE is_active = TRUE ORDER BY activated_at DESC LIMIT 1')).rows[0];
+      const feats = Array.isArray(lic?.payload?.features) ? lic.payload.features : [];
+      accountingLicensed = feats.some(f => /^(accounting|accounts)$/i.test(String(f).trim()));
+    }
+  }
+
   cache = {
     attendanceDeviceEnabled:  map[FLAG_KEYS.attendanceDevice]  === true,
     standaloneDeviceEnabled:  map[FLAG_KEYS.standaloneDevice]  === true,
@@ -54,7 +74,10 @@ export async function getModuleFlags() {
     chatEnabled:              map[FLAG_KEYS.chat]              === true,
     taskEnabled:              map[FLAG_KEYS.task]              === true,
     smsGatewayEnabled:        map[FLAG_KEYS.smsGateway]        === true,
-    supportHelpEnabled:       map[FLAG_KEYS.supportHelp]       !== false,
+    accountingEnabled:        map[FLAG_KEYS.accounting]        === true && accountingLicensed,
+    accountingLicensed,
+    supportHelpEnabled:       map[FLAG_KEYS.supportHelp]       === true,
+    fieldVisitTrackingEnabled: map[FLAG_KEYS.fieldVisitTracking] === true,
   };
   cachedAt = now;
   return cache;
@@ -75,6 +98,8 @@ export async function isModuleEnabled(flagKey) {
   if (flagKey === FLAG_KEYS.chat)              return flags.chatEnabled;
   if (flagKey === FLAG_KEYS.task)              return flags.taskEnabled;
   if (flagKey === FLAG_KEYS.smsGateway)        return flags.smsGatewayEnabled;
-  if (flagKey === FLAG_KEYS.supportHelp)       return flags.supportHelpEnabled;
+  if (flagKey === FLAG_KEYS.accounting)        return flags.accountingEnabled;
+  if (flagKey === FLAG_KEYS.supportHelp)      return flags.supportHelpEnabled;
+  if (flagKey === FLAG_KEYS.fieldVisitTracking) return flags.fieldVisitTrackingEnabled;
   return false;
 }

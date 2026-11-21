@@ -449,9 +449,9 @@ router.put('/:id', validateBody({ employeeId: {"type":"scalar","max":100}, leave
 router.patch('/:id/recommend', validateBody({ comment: { max: 2000 } }), async (req, res) => {
   const { comment } = req.body;
   try {
-    const { rows: existingRows } = await pool.query('SELECT employee_id FROM leaves WHERE id=$1', [req.params.id]);
+    const { rows: existingRows } = await pool.query('SELECT employee_id, approval_id, reco_id FROM leaves WHERE id=$1', [req.params.id]);
     if (!existingRows[0]) return res.status(404).json({ error: 'Leave not found' });
-    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'recommend');
+    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'recommend', { pickedId: existingRows[0].reco_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(
@@ -459,7 +459,7 @@ router.patch('/:id/recommend', validateBody({ comment: { max: 2000 } }), async (
       [req.user.id, req.params.id, comment || null]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Leave not found' });
-    notifyApproversNext(existingRows[0].employee_id, req.user.id, { subject: 'Leave recommended — needs approval', body: `A leave request (${String(rows[0].from_date).slice(0, 10)} to ${String(rows[0].to_date).slice(0, 10)}) was recommended and is waiting for your approval.`, path: '/m/approvals' });
+    notifyApproversNext(existingRows[0].employee_id, req.user.id, { subject: 'Leave recommended — needs approval', body: `A leave request (${String(rows[0].from_date).slice(0, 10)} to ${String(rows[0].to_date).slice(0, 10)}) was recommended and is waiting for your approval.`, path: '/m/approvals', pickedApproverId: existingRows[0].approval_id });
     res.json(toLeave(rows[0]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -467,10 +467,10 @@ router.patch('/:id/recommend', validateBody({ comment: { max: 2000 } }), async (
 router.patch('/:id/approve', validateBody({ comment: { max: 2000 } }), async (req, res) => {
   const { comment } = req.body;
   try {
-    const { rows: existingRows } = await pool.query('SELECT employee_id, recommended_by FROM leaves WHERE id=$1', [req.params.id]);
+    const { rows: existingRows } = await pool.query('SELECT employee_id, recommended_by, approval_id FROM leaves WHERE id=$1', [req.params.id]);
     if (!existingRows[0]) return res.status(404).json({ error: 'Leave not found' });
     const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'approve',
-      { alreadyRecommended: !!existingRows[0].recommended_by });
+      { alreadyRecommended: !!existingRows[0].recommended_by, pickedId: existingRows[0].approval_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(
@@ -489,9 +489,9 @@ router.patch('/:id/approve', validateBody({ comment: { max: 2000 } }), async (re
 router.patch('/:id/reject', validateBody({ comment: { max: 2000 } }), async (req, res) => {
   const { comment } = req.body;
   try {
-    const { rows: existingRows } = await pool.query('SELECT employee_id FROM leaves WHERE id=$1', [req.params.id]);
+    const { rows: existingRows } = await pool.query('SELECT employee_id, approval_id FROM leaves WHERE id=$1', [req.params.id]);
     if (!existingRows[0]) return res.status(404).json({ error: 'Leave not found' });
-    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'reject');
+    const authError = await authorizeRecoAction(req, existingRows[0].employee_id, 'reject', { pickedId: existingRows[0].approval_id });
     if (authError) return res.status(authError.status).json({ error: authError.error });
 
     const { rows } = await pool.query(

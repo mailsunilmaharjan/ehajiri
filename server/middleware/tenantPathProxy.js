@@ -9,6 +9,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getPort, refreshOne } from '../services/routingCache.js';
+import { tenantDistFor } from '../utils/tenantDist.js';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '../../dist');
 
@@ -55,6 +56,6 @@ export function mountTenantPathProxy(app) {
     // client-side route, etc.) — the exact same static SPA shell every
     // tenant already serves (identical dist/ build, differing only by env
     // vars), so this is a local sendFile, never a proxy.
-    res.sendFile(join(DIST, 'index.html'));
+    res.sendFile(join(tenantDistFor(slug), 'index.html'));
   });
 }
