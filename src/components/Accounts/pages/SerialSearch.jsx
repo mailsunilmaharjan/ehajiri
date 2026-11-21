@@ -26,7 +26,7 @@ export default function SerialSearch() {
   return (
     <>
       <header className="page-head"><h1>Serial No. Search</h1><span className="muted">Warranty check · history of every serial / IMEI</span></header>
-      <div className="toolbar"><input autoFocus style={{ minWidth: 320 }} placeholder="Type or scan a serial number…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      <div className="toolbar"><span className="spacer" /><span className="tb-search"><input autoFocus data-find title="Ctrl+F" placeholder="Search or scan a serial number…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span></div>
       <section className="card">
         <table ref={g.gridRef} className="grid dg-soft">
           <thead><tr>{g.tickTh}<th className="sn">SN</th><th>Serial No.</th><th>Product</th><th>Status</th><th>Warranty till</th><th>History</th></tr></thead>

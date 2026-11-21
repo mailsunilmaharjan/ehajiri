@@ -16,6 +16,7 @@ export default function StockSummary() {
   const [cats, setCats] = useState([]);
   const [cat, setCat] = useState('');
   const [lowOnly, setLowOnly] = useState(false);
+  const [srch, setSrch] = useState('');
   const [data, setData] = useState(null);
   const area = useRef(null);
 
@@ -24,7 +25,10 @@ export default function StockSummary() {
     api.get('/reports/stock-summary', { date_from: from, date_to: to, ...(cat ? { category_id: cat } : {}) }).then(setData);
   }, [from, to, cat]);
 
-  const rows = useMemo(() => (data?.rows || []).filter((r) => !lowOnly || r.low), [data, lowOnly]);
+  const rows = useMemo(() => {
+    const s = srch.trim().toLowerCase();
+    return (data?.rows || []).filter((r) => (!lowOnly || r.low) && (!s || `${r.name} ${r.category || ''} ${r.code || ''}`.toLowerCase().includes(s)));
+  }, [data, lowOnly, srch]);
   const mains = cats.filter((c) => !c.parent_id);
   const nav = useNavigate();
   const g = useGrid({ rows, onOpen: (r) => nav(`/stock-ledger?item=${r.id}&from=${from}&to=${to}`) });
@@ -40,6 +44,7 @@ export default function StockSummary() {
         </select>
         <label className="check"><input type="checkbox" checked={lowOnly} onChange={(e) => setLowOnly(e.target.checked)} /> Re-order needed</label>
         <span className="spacer" />
+        <span className="tb-search"><input data-find title="Ctrl+F" placeholder="Search product or category…" value={srch} onChange={(e) => setSrch(e.target.value)} />{srch && <button type="button" className="link" onClick={() => setSrch('')}>✕</button>}</span>
         <ReportButtons areaRef={area} title="Stock Summary" from={from} to={to} />
       </PeriodBar>
       {data && (
