@@ -349,8 +349,10 @@ export default function ChartOfAccounts() {
       </section>
       {edit && (
         <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setEdit(null)}>
-          <form className="card form" onSubmit={saveLedger}>
-            <h2>{edit.id ? 'Edit ledger' : 'New ledger'}{edit.system_key && <span className="tag"> system</span>}</h2>
+          <form className="card form acc-cardform" onSubmit={saveLedger}>
+            <h2 className="acc-head"><span className="acc-head-ic">{edit.id ? '✏️' : '＋'}</span><span className="acc-head-txt">{edit.id ? 'Edit Ledger' : 'New Ledger'}{edit.system_key && <span className="tag"> system</span>}<small>{edit.id ? 'Update this ledger account' : 'Create a ledger account in the chart of accounts'}</small></span></h2>
+            <div className="acc-card">
+            <div className="acc-step"><i>1</i>Ledger details</div>
             <label>Name<input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} required /></label>
             <label>Name in Nepali<input value={edit.name_np || ''} onChange={(e) => setEdit({ ...edit, name_np: e.target.value })} /></label>
             <label>Group
@@ -369,9 +371,10 @@ export default function ChartOfAccounts() {
                 <select value={edit.side} onChange={(e) => setEdit({ ...edit, side: e.target.value })}><option>Dr</option><option>Cr</option></select>
               </span>
             </label>
+            </div>
             {edit.kind === 'bank' && (
-              <>
-                <h3>Bank account details</h3>
+              <div className="acc-card">
+                <div className="acc-step"><i>2</i>Bank account details</div>
                 <label>Bank Account Name<input value={edit.bank_account_name || ''} onChange={(e) => setEdit({ ...edit, bank_account_name: e.target.value })} placeholder="Name the account is held in" /></label>
                 <label>Bank Account No.<input data-nocap value={edit.bank_account_no || ''} onChange={(e) => setEdit({ ...edit, bank_account_no: e.target.value })} placeholder="e.g. 0120-1234567-001" /></label>
                 <label>Bank Branch<input value={edit.bank_branch || ''} onChange={(e) => setEdit({ ...edit, bank_branch: e.target.value })} placeholder="e.g. Lalitpur" /></label>
@@ -397,14 +400,15 @@ export default function ChartOfAccounts() {
                     <input ref={qrFile} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={uploadQr} />
                   </div>
                 </div>
-              </>
+              </div>
             )}
             {edit.kind !== 'bank' && (edit.kind === 'party' || edit.pan) && (
-              <>
+              <div className="acc-card">
+                <div className="acc-step"><i>2</i>Contact details</div>
                 <label>PAN / VAT No.<input value={edit.pan || ''} maxLength={9} onChange={(e) => setEdit({ ...edit, pan: e.target.value })} /></label>
                 <label>Phone<input value={edit.phone || ''} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} /></label>
                 <label>Address<input value={edit.address || ''} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></label>
-              </>
+              </div>
             )}
             {edit.id && !edit.system_key && (
               <label className="check"><input type="checkbox" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>
