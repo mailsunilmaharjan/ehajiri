@@ -57,13 +57,17 @@
   --ui-dd-sub-text: #9ca3af;
 
   /* dialogs / forms */
-  --ui-modal-radius: 12px;
+  --ui-modal-radius: 16px;
   --ui-modal-title-font: 17px;
-  --ui-modal-title-weight: 600;
-  --ui-modal-head-bg: #ffffff;
+  --ui-modal-title-weight: 700;
+  --ui-modal-head-bg: #f8fafc;     /* header bar: same grey as the form */
   --ui-modal-body-bg: #f8fafc;
-  --ui-modal-foot-bg: #f9fafb;
-  --ui-modal-line: #e5e7eb;
+  --ui-modal-foot-bg: #f8fafc;
+  --ui-modal-line: #e2e8f0;
+  --ui-modal-title-color: #0f2a3d;
+  --ui-card-border: #e8edf5;       /* white section cards inside a form */
+  --ui-card-radius: 14px;
+  --ui-btn-primary-bg: linear-gradient(135deg, #2563eb, #4f46e5);
 
   --ui-textarea-min-h: 64px;     /* text areas (Remarks …) — same minimum height everywhere */
   --ui-page-pad: 8px 14px 0;     /* page content padding (desktop) — small, so the data grid gets the room */
@@ -558,3 +562,46 @@ body .acc-app .acc-reportcard > .toolbar { border-radius: 14px !important; borde
 body .acc-app .acc-reportcard > .card { border-radius: 14px; border-color: #e8edf5; box-shadow: 0 1px 2px rgba(15,23,42,.04); margin-bottom: 0; }
 body .acc-app .acc-reportcard > .notice, body .acc-app .acc-reportcard > .muted { margin-bottom: 12px; }
 @media print { body .acc-app .acc-reportcard { background: none; border: none; box-shadow: none; padding: 0; } }
+
+/* ═══════════════════════ GLOBAL FORM LOOK — automatic for every dialog, existing and new ═══════════════════════
+   Any form built with the standard markup  .modal-overlay > .modal > .modal-header + .modal-body + .modal-footer
+   gets: grey header bar (17px bold title, white rounded ✕), the fields in one white rounded card on a grey form,
+   grey footer bar with compact buttons and a gradient primary button. Change the --ui-modal-* / --ui-card-* variables
+   at the top of this file to restyle every form at once. Forms with their own card layout (.glm-form) keep it.
+   (Accounts screens use their own .modal > .card markup — covered by the Accounts header / card rules above.) */
+.modal-overlay > .modal:not(.modal-drawer) {
+  border-radius: var(--ui-modal-radius); background: var(--ui-modal-body-bg);
+  box-shadow: 0 30px 80px rgba(15,23,42,.35); font-family: 'Inter','Noto Sans Devanagari','Segoe UI',system-ui,sans-serif;
+}
+.modal-overlay > .modal:not(.modal-drawer) > .modal-header {
+  background: var(--ui-modal-head-bg); border-bottom: 1px solid var(--ui-modal-line); min-height: 64px; box-sizing: border-box;
+  padding: 14px 20px; gap: 12px; border-radius: var(--ui-modal-radius) var(--ui-modal-radius) 0 0;
+}
+.modal-overlay > .modal:not(.modal-drawer) > .modal-header h2 { color: var(--ui-modal-title-color); letter-spacing: -.1px; }
+.modal-overlay > .modal:not(.modal-drawer) > .modal-header .modal-close {
+  margin-left: auto; width: 32px; height: 32px; border-radius: 10px; background: #fff; color: var(--ui-modal-title-color);
+  box-shadow: 0 1px 3px rgba(15,23,42,.12); font-size: 14px; flex-shrink: 0;
+}
+.modal-overlay > .modal:not(.modal-drawer) > .modal-header .modal-close:hover { background: #e2e8f0; }
+/* the fields sit in one white rounded card (forms with their own .glm-card sections keep their layout) */
+.modal-overlay > .modal:not(.modal-drawer):not(.glm-form) > .modal-body {
+  background: #fff; margin: 14px 18px; border: 1px solid var(--ui-card-border); border-radius: var(--ui-card-radius);
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+.modal-overlay > .modal:not(.modal-drawer) > .modal-footer {
+  background: var(--ui-modal-foot-bg); border-top: 1px solid var(--ui-modal-line); padding: 12px 20px;
+  border-radius: 0 0 var(--ui-modal-radius) var(--ui-modal-radius);
+}
+.modal-overlay > .modal:not(.modal-drawer) > .modal-footer .btn { min-height: 32px; padding: 6px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600; }
+.modal-overlay > .modal:not(.modal-drawer) > .modal-footer .btn-outline { border: 1px solid #dbe3ee; color: #334155; background: #fff; }
+.modal-overlay > .modal:not(.modal-drawer) > .modal-footer .btn-primary { background: var(--ui-btn-primary-bg); border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(37,99,235,.3); }
+.modal-overlay > .modal:not(.modal-drawer) > .modal-footer .btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
+.modal-overlay > .modal:not(.modal-drawer) .form-label { font-size: 11.5px; font-weight: 600; color: #64748b; }
+.modal-overlay > .modal:not(.modal-drawer) .form-control { border-radius: 8px; border-color: #dbe3ee; }
+
+/* Accounts: every report / list page gets the same header-card automatically (no per-page markup needed) */
+body .acc-app .page-container > .page-head:first-child {
+  background: var(--ui-modal-head-bg); border: 1px solid var(--ui-card-border); border-radius: var(--ui-card-radius);
+  padding: 12px 18px; min-height: 56px; box-sizing: border-box; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+body .acc-app .page-container > .page-head:first-child h1 { color: var(--ui-modal-title-color); font-size: 16px !important; font-weight: 700; }
