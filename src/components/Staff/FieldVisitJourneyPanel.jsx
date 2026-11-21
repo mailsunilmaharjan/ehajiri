@@ -325,9 +325,10 @@ const FieldVisitJourneyPanel = ({ task, tasks, currentUser, showToast }) => {
           Check In for the return leg) */}
       {checkpoint && (
         <div className="modal-overlay" onClick={() => !cpSaving && setCheckpoint(null)}>
-          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+          <div className="modal modal-sm glm-form glm-plain" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{cpTitle}</h2>
+              <div className="glm-head-ic">📍</div>
+              <div className="glm-head-txt"><h2>{cpTitle}</h2><p>Record this field visit checkpoint</p></div>
               <button className="modal-close" onClick={() => setCheckpoint(null)}>✕</button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

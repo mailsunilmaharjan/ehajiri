@@ -26,6 +26,7 @@ import FieldVisitTripLog from './FieldVisitTripLog.jsx';
 import CompanyTaskLedger from './CompanyTaskLedger.jsx';
 import FieldVisitJourneyPanel, { CHECKOUT_STATUS_LABEL } from './FieldVisitJourneyPanel.jsx';
 import { haversineKm } from '../../utils/geoUtils.js';
+import { getTenantPrefix } from '../../utils/tenantPath.js';
 // Temporarily disabled — the Leaflet import chain breaks the production
 // bundle app-wide (see StaffTrackFlowModal.jsx's top for details). Re-enable
 // once that's fixed with a lazy-loaded/code-split import instead.
@@ -46,7 +47,7 @@ const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const emptyTask = { title: '', description: '', contactId: '', contactPersonId: '', categoryId: '', priorityId: '', dueDate: todayISO(), assignedTo: [], status: 'pending', isFieldVisit: false };
+const emptyTask = { title: '', description: '', docId: '', docNo: '', contactId: '', contactPersonId: '', categoryId: '', priorityId: '', dueDate: todayISO(), assignedTo: [], status: 'pending', isFieldVisit: false };
 
 // Task grid date-bucket sections ("Today", "Tomorrow", ...). addDaysISO now
 // lives in dateUtils.js (imported above) since TaskDashboard.jsx needs the
@@ -82,6 +83,22 @@ const taskDateBucket = (row) => {
 // native `title` tooltip renders in tiny OS chrome, not big enough to read
 // comfortably, hence the shared HoverCard used for both this and Seen By.
 const MAX_ASSIGNEE_AVATARS = 4;
+// Official WhatsApp glyph (green) for menu items / buttons.
+const WhatsAppIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0, verticalAlign: 'middle' }}>
+    <path fill="#25D366" d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2z"/>
+    <path fill="#fff" d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.64.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.88 1.22 3.08.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2.01-1.41.25-.69.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35z"/>
+  </svg>
+);
+
+// Coloured envelope (Gmail red) for the Email follow-up button.
+const EmailIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0, verticalAlign: 'middle' }}>
+    <rect x="2" y="4" width="20" height="16" rx="2.5" fill="#fff" stroke="#EA4335" strokeWidth="1.6" />
+    <path d="M3 6.5l9 6.5 9-6.5" fill="none" stroke="#EA4335" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const AssigneeCell = ({ assignees }) => {
   if (!Array.isArray(assignees) || !assignees.length) return <span style={{ color: '#d1d5db' }}>—</span>;
   const shown = assignees.slice(0, MAX_ASSIGNEE_AVATARS);
@@ -298,8 +315,8 @@ const STATUS_OPTIONS = [
 
 const FOLLOWUP_MODES = [
   { value: 'phone',    label: 'Phone',    icon: '📞' },
-  { value: 'email',    label: 'Email',    icon: '✉️' },
-  { value: 'whatsapp', label: 'WhatsApp', icon: '💬' },
+  { value: 'email',    label: 'Email',    icon: <EmailIcon size={20} /> },
+  { value: 'whatsapp', label: 'WhatsApp', icon: <WhatsAppIcon size={20} /> },
   { value: 'sms',      label: 'SMS',      icon: '📱' },
 ];
 
@@ -449,6 +466,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // to or have seen yet), so this only ever gets populated in openEdit.
   const [taskModalMeta, setTaskModalMeta] = useState({ reactions: [], seenBy: [] });
   const [trackFlowOpen, setTrackFlowOpen] = useState(false);
+  const [tripLogOpen, setTripLogOpen] = useState(false);   // Field Visit page: Trip Log report popup
   const [saving,  setSaving]  = useState(false);
 
   // The Staff/Task nav badge (and this grid's own per-row blink, see the
@@ -457,7 +475,6 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // (see openEdit/saveFollowup below) — NOT cleared in bulk just from opening
   // this list page. (Previously this cleared every unread notification the
   // instant the page mounted, so the blink never had a chance to mean
-  const [tripLogOpen, setTripLogOpen] = useState(false);   // Field Visit page: Trip Log report popup
   // anything.) The local setTasks update here is what stops THIS row's own
   // blink immediately, without waiting on a full reload — refreshTaskCounts
   // only re-syncs the aggregate nav badge, not each row's own flag.
@@ -491,6 +508,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   const [yesterdayOnly, setYesterdayOnly] = useState(false);
   const [tomorrowOnly,  setTomorrowOnly]  = useState(false);
   const [quickPriorityId, setQuickPriorityId] = useState('');
+  // Filter Task Status — multi-select, defaults to Pending + In Progress.
+  // Picked statuses show every task in them, however old. Clearing it (the
+  // dropdown's "All") shows open tasks plus anything completed/cancelled
+  // within the last day.
+  const [statusFilter, setStatusFilter] = useState(['pending', 'in_progress']);
+  // Company Task Ledger popup — opened by clicking the company name in the side panel.
+  const [ledgerCompany, setLedgerCompany] = useState(null);
   // Header-level Task Category quick filter (pill row) — separate from
   // Advance Search's own categoryId field, same relationship quickPriorityId
   // already has to advSearch.priorityId.
@@ -499,13 +523,6 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // Advance Search — a fuller filter form (branch/department/post/assignee/
   // category/title/priority/customer/date range), applied on top of
   // whatever Filter by Staff + quick filters already narrowed down.
-  // Filter Task Status — multi-select, defaults to Pending + In Progress.
-  // Picked statuses show every task in them, however old. Clearing it (the
-  // dropdown's "All") shows open tasks plus anything completed/cancelled
-  // within the last day.
-  const [statusFilter, setStatusFilter] = useState(['pending', 'in_progress']);
-  // Company Task Ledger popup — opened by clicking the company name in the side panel.
-  const [ledgerCompany, setLedgerCompany] = useState(null);
   const emptyAdvSearch = { branch: '', department: '', post: '', staffId: '', categoryId: '', title: '', priorityId: '', customerName: '', dateFrom: '', dateTo: '' };
   const [advSearchOpen, setAdvSearchOpen] = useState(false);
   const [advSearchDraft, setAdvSearchDraft] = useState(emptyAdvSearch);
@@ -765,6 +782,15 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       .catch(e => { if (seq === loadTasksSeqRef.current) showToast(e.message || 'Failed to load tasks', 'error'); })
       .finally(() => { if (seq === loadTasksSeqRef.current) setLoading(false); });
   };
+  // a task changed elsewhere (e.g. closed because a newer follow-up was assigned from a Sales Quotation): reload the grid
+  const loadTasksRef = useRef(loadTasks);
+  loadTasksRef.current = loadTasks;
+  useEffect(() => {
+    let timer = null;
+    const onEvt = () => { clearTimeout(timer); timer = setTimeout(() => loadTasksRef.current(), 400); };
+    window.addEventListener('ehajiri:task-event', onEvt);
+    return () => { window.removeEventListener('ehajiri:task-event', onEvt); clearTimeout(timer); };
+  }, []);
   const loadCategories = () => api.get('/settings/taskCategories').then(rows => setCategories(Array.isArray(rows) ? rows : [])).catch(() => setCategories([]));
   const loadPriorities = () => api.get('/settings/taskPriorities').then(rows => setPriorities(Array.isArray(rows) ? rows : [])).catch(() => setPriorities([]));
   const loadContacts   = () => api.get('/contacts').then(rows => setContacts(Array.isArray(rows) ? rows : [])).catch(() => setContacts([]));
@@ -888,6 +914,38 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     window.open(`https://wa.me/${target}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
   };
 
+  // Right-click → "Notify Customer via WhatsApp": opens the CUSTOMER's WhatsApp chat (their own mobile
+  // from the linked contact) with the task name, then logs a WhatsApp followup on the task automatically
+  // (today's date, with the date + time in the text) so the Followup History shows when it was sent.
+  const notifyCustomerWhatsApp = async (row) => {
+    const mobile = row.customerMobile || row.customerMobile2 || row.customerPhone;
+    const digits = String(mobile || '').replace(/\D/g, '');
+    if (!digits) { showToast('No mobile number on file for this task\'s customer', 'error'); return; }
+    const target = digits.length === 10 ? `977${digits}` : digits;
+    const message = `${row.customerName ? `Dear ${row.customerName},\n` : ''}Regarding: ${row.title}`;
+    window.open(`https://wa.me/${target}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
+    try {
+      const when = formatNepalDateTime(new Date().toISOString(), fd);
+      await api.post(`/tasks/${row.id}/followups`, {
+        mode: 'whatsapp',
+        description: `WhatsApp sent to customer${row.customerName ? ` (${row.customerName})` : ''} on ${mobile} — ${when}\nTask: ${row.title}`,
+      });
+      showToast('WhatsApp opened and followup logged');
+      if (followupTask?.id === row.id) loadFollowups(row.id);
+      loadTasks();
+    } catch (e) { showToast(`WhatsApp opened, but the followup could not be saved: ${e.message || 'error'}`, 'error'); }
+  };
+
+  // Task Type dropdown (replaces the row of category chips) — each option keeps the red "followups logged
+  // today" count and the 🔔 for a new unseen task that the chips used to show.
+  const categoryOptions = useMemo(() => ([
+    { value: '', label: 'All Task Types' },
+    ...categories.map(c => {
+      const s = categoryStats.get(String(c.id));
+      return { value: String(c.id), label: c.name, count: s?.followupCount || 0, unseen: !!s?.hasUnseenNew };
+    }),
+  ]), [categories, categoryStats]);
+
   const composeTaskMessage = (row) => {
     const desc = stripHtml(row.description);
     const lines = [
@@ -949,7 +1007,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // Task Date column is already showing as "Today" for that person.
   const sendTodaysTaskDigest = () => {
     if (!staffFilter || staffFilter === 'all') {
-      showToast('Select one specific staff member in "Filter by Staff" first', 'error');
+      showToast('Select one specific staff member in "Staff" first', 'error');
       return;
     }
     const emp = employeeById.get(String(staffFilter));
@@ -976,6 +1034,31 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // with their own phone numbers — fetched fresh whenever the selected
   // contact changes, so the task can point at exactly one of them.
   const [contactPersons, setContactPersons] = useState([]);
+  // Category "Quotation": the Accounts Sales Quotations this task can be linked to
+  const [qtList, setQtList] = useState([]);
+  const isQuotationCat = /quotation/i.test(categories.find(c => String(c.id) === String(form.categoryId))?.name || '');
+  useEffect(() => {
+    if (!modal || !isQuotationCat) { setQtList([]); return; }
+    api.get(`/tasks/accounts-quotations?contactId=${form.contactId || 0}`).then(rows => setQtList(Array.isArray(rows) ? rows : [])).catch(() => setQtList([]));
+  }, [modal, isQuotationCat, form.contactId]);
+  // a quotation saved in the other tab (＋ New Quotation): refresh the list and select the new one
+  useEffect(() => {
+    if (!modal || typeof BroadcastChannel === 'undefined') return undefined;
+    const ch = new BroadcastChannel('ehajiri-quotation');
+    ch.onmessage = (ev) => {
+      const m = ev.data;
+      if (m?.type !== 'saved' || m.prefix !== getTenantPrefix()) return;
+      api.get(`/tasks/accounts-quotations?contactId=${form.contactId || 0}`).then(rows => setQtList(Array.isArray(rows) ? rows : [])).catch(() => {});
+      setForm(p => ({ ...p, docId: String(m.docId), docNo: m.docNo, title: !p.title.trim() ? `Quotation — ${m.docNo}` : p.title }));
+      showToast(`${m.docNo} linked to this task`, 'success');
+    };
+    return () => ch.close();
+  }, [modal, form.contactId]);
+  const qtOptions = useMemo(() => {
+    const o = qtList.map(q => ({ value: String(q.id), label: `${q.doc_no} — ${q.party_name}${q.subject ? ' — ' + q.subject : ''}` }));
+    if (form.docId && !o.some(x => x.value === String(form.docId))) o.unshift({ value: String(form.docId), label: form.docNo || `Quotation #${form.docId}` });
+    return o;
+  }, [qtList, form.docId, form.docNo]);
   useEffect(() => {
     if (!form.contactId || selectedContact?.contactInfo !== 'company') { setContactPersons([]); return; }
     api.get(`/contacts/${form.contactId}/persons`).then(rows => setContactPersons(Array.isArray(rows) ? rows : [])).catch(() => setContactPersons([]));
@@ -986,6 +1069,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
     setEditId(row.id);
     setForm({
       title: row.title || '', description: row.description || '',
+      docId: row.docId ? String(row.docId) : '', docNo: row.docNo || '',
       contactId: row.contactId ? String(row.contactId) : '',
       contactPersonId: row.contactPersonId ? String(row.contactPersonId) : '',
       categoryId: row.categoryId ? String(row.categoryId) : '',
@@ -1016,6 +1100,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       title: form.title.trim(),
       description: form.description || null,
       contactId: form.contactId ? Number(form.contactId) : null,
+      docId: form.docId ? Number(form.docId) : null,
       contactPersonId: form.contactPersonId ? Number(form.contactPersonId) : null,
       categoryId: form.categoryId ? Number(form.categoryId) : null,
       priorityId: form.priorityId ? Number(form.priorityId) : null,
@@ -1311,8 +1396,11 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'title', header: 'Task', minWidth: 130,
       render: (v, row) => {
         const titleSpan = (
-          <span style={{ fontSize: 12.5, color: row.status === 'completed' ? '#9ca3af' : '#1f2937',
-            textDecoration: row.status === 'completed' ? 'line-through' : 'none' }}>
+          <span style={{ fontSize: 12.5,
+            // Completed and Cancelled both get a strike-through; Cancelled keeps a muted red tone
+            // so it never reads as a finished (grey) task.
+            color: row.status === 'completed' ? '#9ca3af' : row.status === 'cancelled' ? '#c2706f' : '#1f2937',
+            textDecoration: (row.status === 'completed' || row.status === 'cancelled') ? 'line-through' : 'none' }}>
             {/* Blinks while this task has an unread notification for the
                 current user — stops the instant it's opened/double-clicked
                 or a followup is logged against it (see markTaskRead). */}
@@ -1324,7 +1412,16 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             {/* Only shown on the regular Task page — every row on the Field Visit
                 page is already a field visit, so the icon would be redundant there. */}
             {row.isFieldVisit && !fieldVisitOnly && <span title="Field Visit" style={{ marginRight: 5 }}>🚗</span>}
-            {v}
+            {/* Task made from an Accounts document: short subject, and the document number opens that bill. */}
+            {row.docId && row.docNo && String(v || '').endsWith(row.docNo) ? (
+              <>
+                {String(v).slice(0, -row.docNo.length)}
+                <a href={`${getTenantPrefix()}/accounts/docs/${row.docType}?open=${row.docId}&fromTask=1`} title="Open this bill in Accounts (new tab — the Task page stays here)"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.open(`${getTenantPrefix()}/accounts/docs/${row.docType}?open=${row.docId}&fromTask=1`, '_blank'); }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  style={{ color: '#1a56db', fontWeight: 600, textDecoration: 'underline', cursor: 'pointer' }}>{row.docNo}</a>
+              </>
+            ) : v}
           </span>
         );
         // Description moved here as a hover tooltip (its own grid column was
@@ -1418,7 +1515,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       field: 'status', header: 'Status', width: 80, align: 'center',
       render: (v) => {
         const color = v === 'completed' ? '#15803d'
-          : v === 'cancelled' ? '#6b7280'
+          : v === 'cancelled' ? '#dc2626'
           : v === 'in_progress' ? '#1d4ed8'
           : '#b45309';
         return <span style={{ fontSize: 12.5, color, textTransform: 'capitalize' }}>{v.replace('_', ' ')}</span>;
@@ -1430,19 +1527,6 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // own toolbar (left of its Search box) via DataGrid's toolbarLeft prop.
   const taskFilterToolbar = (
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter by Staff</label>
-        <div style={{ width: 190 }}>
-          <SearchableSelect
-            value={staffFilter}
-            onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
-            options={staffFilterOptions}
-            placeholder="— Select staff —"
-            showAvatar
-          />
-        </div>
-      </div>
-
       <button onClick={() => { setYesterdayOnly(p => !p); setTomorrowOnly(false); }}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
           border: `1px solid ${yesterdayOnly ? '#1a56db' : '#d1d5db'}`, borderRadius: 7, cursor: 'pointer',
@@ -1461,7 +1545,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
 
       <button onClick={sendTodaysTaskDigest}
         disabled={!staffFilter || staffFilter === 'all'}
-        title={!staffFilter || staffFilter === 'all' ? 'Select one specific staff member in Filter by Staff first' : "Send this staff member's today's tasks via WhatsApp"}
+        title={!staffFilter || staffFilter === 'all' ? 'Select one specific staff member in Staff first' : "Send this staff member's today's tasks via WhatsApp"}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px',
           border: '1px solid #bbf7d0', borderRadius: 7,
           cursor: (!staffFilter || staffFilter === 'all') ? 'not-allowed' : 'pointer',
@@ -1477,6 +1561,16 @@ const TaskList = ({ fieldVisitOnly = false }) => {
           <option value="">All</option>
           {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter Task Status</label>
+        <div style={{ minWidth: 150 }}>
+          <MultiCheckSelect value={statusFilter} onChange={setStatusFilter}
+            options={STATUS_OPTIONS.map(o => o.value)}
+            displayFn={v => STATUS_OPTIONS.find(o => o.value === v)?.label || v}
+            placeholder="All" />
+        </div>
       </div>
 
       <button onClick={() => { setAdvSearchDraft(advSearch); setAdvSearchOpen(true); }}
@@ -1499,33 +1593,21 @@ const TaskList = ({ fieldVisitOnly = false }) => {
   // task row is currently selected/focused (same row the Followup History
   // drawer is open for). A long description shows truncated with a hover
   // card for the full text instead of stretching the footer.
-  const taskFooterLeft = (() => {
-    const descText = stripHtml(followupTask?.description);
-    const descNode = !descText ? '—' : descText.length <= 50
+  // Remarks strip under the grid (same strip as Staff Detail): the focused task's company, title and description
+  const taskRemarks = (row) => {
+    if (!row) return null;
+    const descText = stripHtml(row.description);
+    const descNode = !descText ? <span className="dg-muted">—</span> : descText.length <= 140
       ? descText
-      : <HoverCard trigger={<span style={{ cursor: 'default', borderBottom: '1px dotted #9ca3af' }}>{descText.slice(0, 50)}…</span>} content={descText} />;
+      : <HoverCard trigger={<span style={{ cursor: 'default', borderBottom: '1px dotted #9ca3af' }}>{descText.slice(0, 140)}…</span>} content={descText} />;
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 20, fontSize: 12.5, color: '#374151', flexWrap: 'wrap' }}>
-        <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Company Name :</span> {followupTask?.customerName || '—'}</span>
-        <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Task :</span> {followupTask?.title || '—'}</span>
-        <span><span style={{ color: '#6b7280', fontWeight: 600 }}>Description :</span> {descNode}</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>Filter Task Status</label>
-        <div style={{ minWidth: 150 }}>
-          <MultiCheckSelect value={statusFilter} onChange={setStatusFilter}
-            options={STATUS_OPTIONS.map(o => o.value)}
-            displayFn={v => STATUS_OPTIONS.find(o => o.value === v)?.label || v}
-            placeholder="All" />
-        </div>
-      </div>
-
-      </div>
+      <div><b>Remarks — {row.title || '—'}:</b> {descNode}{row.customerName ? <> &nbsp;·&nbsp; <b>Company:</b> {row.customerName}</> : null}</div>
     );
-  })();
+  };
 
   return (
-    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 18, flexShrink: 0 }}>
+    <div style={{ padding: '8px 14px 0', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8, flexShrink: 0 }}>
         <h1 className="page-title" style={{ flexShrink: 0 }}>
           {fieldVisitOnly ? '🚗 Field Visit' : '✅ Task'}
         </h1>
@@ -1534,44 +1616,40 @@ const TaskList = ({ fieldVisitOnly = false }) => {
             count for that category (top-right corner) and a ringing 🔔 when
             it has a new task the viewer hasn't opened yet. Only on the
             regular Task page; Field Visit's own page stays uncluttered. */}
-        {!fieldVisitOnly && (
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden' }}>
-            <button onClick={() => setQuickCategoryId('')}
-              style={{ flexShrink: 0, height: 26, padding: '0 9px', borderRadius: 5, cursor: 'pointer', fontSize: 11.5, fontWeight: 500,
-                border: 'none', whiteSpace: 'nowrap',
-                background: !quickCategoryId ? '#dbeafe' : '#f1f5f9', color: !quickCategoryId ? '#1a56db' : '#374151' }}>
-              All
-            </button>
-            {categories.map(c => {
-              const on = quickCategoryId === String(c.id);
-              const stat = categoryStats.get(String(c.id));
-              const count = stat?.followupCount || 0;
-              const hasUnseenNew = !!stat?.hasUnseenNew;
-              return (
-                <button key={c.id} onClick={() => setQuickCategoryId(on ? '' : String(c.id))}
-                  style={{ position: 'relative', flexShrink: 0, height: 26, padding: '0 9px', borderRadius: 5, cursor: 'pointer',
-                    fontSize: 11.5, fontWeight: 500, border: 'none',
-                    background: on ? '#dbeafe' : '#f1f5f9', color: on ? '#1a56db' : '#374151', whiteSpace: 'nowrap' }}>
-                  {c.name}
-                  {(count > 0 || hasUnseenNew) && (
-                    <span style={{ position: 'absolute', top: -7, right: -5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                      {hasUnseenNew && (
-                        <span className="task-bell-ring" title="New task in this category, not seen yet" style={{ fontSize: 12 }}>🔔</span>
-                      )}
-                      {count > 0 && (
-                        <span title={`${count} followup${count === 1 ? '' : 's'} logged today in this category`}
-                          style={{ background: '#dc2626', color: '#fff', borderRadius: 8, fontSize: 9, fontWeight: 700,
-                            padding: '1px 5px', lineHeight: 1.4, minWidth: 14, textAlign: 'center' }}>
-                          {count}
-                        </span>
-                      )}
+        <div className="task-head-filters">
+          {!fieldVisitOnly && (
+            <div className="task-head-field">
+              <label>Task Type</label>
+              <div style={{ width: 'clamp(210px, 16vw, 300px)' }}>
+                <SearchableSelect
+                  value={quickCategoryId}
+                  onChange={v => setQuickCategoryId(v || '')}
+                  options={categoryOptions}
+                  placeholder="All Task Types"
+                  renderOption={o => (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
+                      {o.unseen && <span className="task-bell-ring task-cat-bell" title="New task in this type, not seen yet">🔔</span>}
+                      {o.count > 0 && <span className="task-cat-count" title={`${o.count} followup${o.count === 1 ? '' : 's'} logged today`}>{o.count}</span>}
                     </span>
                   )}
-                </button>
-              );
-            })}
+                />
+              </div>
+            </div>
+          )}
+          <div className="task-head-field">
+            <label>Staff</label>
+            <div style={{ width: 'clamp(200px, 15vw, 280px)' }}>
+              <SearchableSelect
+                value={staffFilter}
+                onChange={v => setStaffFilter(v || (currentUser ? String(currentUser.id) : ''))}
+                options={staffFilterOptions}
+                placeholder="— Select staff —"
+                showAvatar
+              />
+            </div>
           </div>
-        )}
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: fieldVisitOnly ? 'auto' : 0 }}>
           {canManageSystem && (
@@ -1600,6 +1678,13 @@ const TaskList = ({ fieldVisitOnly = false }) => {
               )}
             </div>
           )}
+          {fieldVisitOnly && (
+            <button onClick={() => setTripLogOpen(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 30, background: '#fff',
+                color: '#374151', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              📋 Trip Log
+            </button>
+          )}
           {canEditTask && (
             <button onClick={openAdd}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 30, background: '#1a56db',
@@ -1626,16 +1711,10 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 compact={true}
                 ultraCompact={true}
                 className="task-list-grid"
-          {fieldVisitOnly && (
-            <button onClick={() => setTripLogOpen(true)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', height: 30, background: '#fff',
-                color: '#374151', border: '1px solid #d1d5db', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-              📋 Trip Log
-            </button>
-          )}
+                fillToBottom
                 showFilterButton={false}
                 toolbarLeft={taskFilterToolbar}
-                footerLeft={taskFooterLeft}
+                remarks={taskRemarks}
                 extraSearchFields={['customerPhone']}
                 onRowClick={openFollowupPanel}
                 onFocusChange={openFollowupPanel}
@@ -1649,7 +1728,8 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                     { label: (row) => row.isFieldVisit ? 'Remove Field Visit' : 'Mark as Field Visit', icon: '🚗', onClick: (row) => toggleFieldVisit(row) },
                     'divider',
                   ] : []),
-                  { label: 'Notify via WhatsApp', icon: '💬', onClick: (row) => handleWhatsAppClick(row) },
+                  { label: 'Notify via WhatsApp', icon: <WhatsAppIcon />, onClick: (row) => notifyCustomerWhatsApp(row) },
+                  { label: 'Notify Staff via WhatsApp', icon: <WhatsAppIcon />, onClick: (row) => handleWhatsAppClick(row) },
                   ...(moduleFlags.smsGatewayEnabled
                     ? [{ label: 'Notify via SMS', icon: '📱', onClick: (row) => handleSmsClick(row) }]
                     : []),
@@ -1755,6 +1835,7 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                             data={filteredFollowups}
                             rowKey="id"
                             className="followup-history-grid"
+                fillToBottom={false}
                             showCheckbox={false}
                             showFilterButton={false}
                             showSearch={false}
@@ -1957,6 +2038,12 @@ const TaskList = ({ fieldVisitOnly = false }) => {
         )}
       </div>
 
+      {tripLogOpen && <FieldVisitTripLog onClose={() => setTripLogOpen(false)} />}
+
+      {ledgerCompany && (
+        <CompanyTaskLedger contactId={ledgerCompany.id} name={ledgerCompany.name} onClose={() => setLedgerCompany(null)} />
+      )}
+
       {/* Description & Replies popup — opened by clicking the compact card above */}
       {descriptionModalOpen && selectedFollowup && (
         <div className="modal-overlay" onClick={() => setDescriptionModalOpen(false)}>
@@ -1984,12 +2071,6 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 8 }}>
                   Replies
-      {tripLogOpen && <FieldVisitTripLog onClose={() => setTripLogOpen(false)} />}
-
-      {ledgerCompany && (
-        <CompanyTaskLedger contactId={ledgerCompany.id} name={ledgerCompany.name} onClose={() => setLedgerCompany(null)} />
-      )}
-
                 </div>
                 <div style={{ flex: 1, minHeight: 0, maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {renderReplyBubbles()}
@@ -2083,9 +2164,10 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       {/* Add / Edit Task */}
       {modal && (
         <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: 680 }} onClick={e => e.stopPropagation()}>
+          <div className="modal glm-form glm-plain" style={{ maxWidth: 680 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{editId ? '✏️ Edit Task' : '+ Add Task'}</h2>
+              <div className="glm-head-ic">{editId ? '✏️' : '＋'}</div>
+              <div className="glm-head-txt"><h2>{editId ? (fieldVisitOnly ? 'Edit Field Visit' : 'Edit Task') : (fieldVisitOnly ? 'Add Field Visit' : 'Add Task')}</h2><p>{fieldVisitOnly ? (editId ? 'Update the field visit details' : 'Plan and assign a new field visit') : (editId ? 'Update the task details' : 'Create and assign a new task')}</p></div>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -2201,6 +2283,27 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 )}
               </div>
 
+              {isQuotationCat && field('Sales Quotation (Accounts)', false, null,
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <SearchableSelect
+                      value={form.docId}
+                      onChange={v => {
+                        const q = qtList.find(x => String(x.id) === String(v));
+                        setForm(p => ({ ...p, docId: v || '', docNo: q?.doc_no || '',
+                          title: !p.title.trim() && q ? `Quotation — ${q.doc_no}` : p.title }));
+                      }}
+                      options={qtOptions}
+                      placeholder={form.contactId ? '— Select this customer\'s quotation —' : '— Select Sales Quotation —'}
+                    />
+                  </div>
+                  <button type="button" onClick={() => window.open(`${getTenantPrefix()}/accounts/docs/QT/new?fromTask=1&contact=${form.contactId || ''}&person=${form.contactPersonId || ''}&subject=${encodeURIComponent(form.title || '')}`, '_blank')}
+                    style={{ border: '1px solid #d1d5db', borderRadius: 7, padding: '0 12px', background: '#fff', fontSize: 12.5, fontWeight: 700, color: '#1a56db', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    + New Quotation
+                  </button>
+                </div>
+              )}
+
               {field('Assign Task', false, null,
                 <EmpMultiSelect
                   value={form.assignedTo}
@@ -2249,9 +2352,10 @@ const TaskList = ({ fieldVisitOnly = false }) => {
       {/* + New Followup */}
       {followupModal && followupTask && (
         <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+          <div className="modal glm-form glm-plain" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{editingFollowupId ? '✏️ Edit Followup' : '+ New Followup'}</h2>
+              <div className="glm-head-ic">{editingFollowupId ? '✏️' : '＋'}</div>
+              <div className="glm-head-txt"><h2>{editingFollowupId ? 'Edit Followup' : 'New Followup'}</h2><p>{editingFollowupId ? 'Update this followup entry' : 'Record a followup for this task'}</p></div>
               <button className="modal-close" onClick={() => setFollowupModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

@@ -247,7 +247,7 @@ const PersonsGrid = ({ persons, onAdd, onEdit, onDelete }) => {
             <tbody>
               {persons.map((p, idx) => {
                 const isSelected = sel.has(p.id);
-                const rowBg = isSelected ? '#eff6ff' : idx%2===0 ? '#fff' : '#f3f4f6';
+                const rowBg = isSelected ? '#eff6ff' : idx%2===0 ? '#fff' : '#f7f8fa';
                 return (
                   <tr key={p.id}
                     style={{ background:rowBg, cursor:'pointer', userSelect:'none' }}
@@ -334,9 +334,10 @@ const PersonModal = ({ initial, onClose, onSaved }) => {
 
   return (
     <div className="modal-overlay" style={{ zIndex:1100 }} {...overlayProps}>
-      <div className="modal" style={{ maxWidth:720, width:'95vw' }} {...modalProps}>
+      <div className="modal glm-form glm-plain" style={{ maxWidth:720, width:'95vw' }} {...modalProps}>
         <div className="modal-header">
-          <h2>{isEdit ? '✏️ Edit Person' : '👤 Add Contact Person'}</h2>
+          <div className="glm-head-ic">{isEdit ? '✏️' : '👤'}</div>
+          <div className="glm-head-txt"><h2>{isEdit ? 'Edit Person' : 'Add Contact Person'}</h2><p>{isEdit ? 'Update the contact person details' : 'Add a person for this contact'}</p></div>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
@@ -489,11 +490,12 @@ const ContactFormModal = ({ initial, onClose, onSaved }) => {
   return (
     <>
       <div className="modal-overlay" {...overlayProps}>
-        <div className="modal" style={{ maxWidth:920, width:'96vw' }} {...modalProps}>
+        <div className="modal glm-form glm-plain" style={{ maxWidth:920, width:'96vw' }} {...modalProps}>
 
-          {/* Animated header */}
+          {/* Header */}
           <div className="modal-header">
-            <h2>{isEdit ? '✏️ Edit Contact' : '📞 New Contact'}</h2>
+            <div className="glm-head-ic">{isEdit ? '✏️' : '📞'}</div>
+            <div className="glm-head-txt"><h2>{isEdit ? 'Edit Contact' : 'New Contact'}</h2><p>{isEdit ? 'Update the contact details' : 'Add a new contact with its details'}</p></div>
             <button className="modal-close" onClick={onClose}>✕</button>
           </div>
 

@@ -101,7 +101,7 @@ const LeaveApplication = () => {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20 }}>
+      <div className="glm-page" style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20 }}>
         {/* Form */}
         <div className="card">
           <div className="card-header"><h3>{t('Leave Application')}</h3></div>
@@ -112,7 +112,7 @@ const LeaveApplication = () => {
               </div>
             )}
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} className="glm-card">
               {/* Employee info */}
               <div style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 14, marginBottom: 20 }}>
                 <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>{t('Staff Information')}</div>
