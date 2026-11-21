@@ -13,6 +13,8 @@ import Avatar           from '../Common/Avatar.jsx';
 import ExchangeDutyModal from './ExchangeDutyModal.jsx';
 import { downloadCSV, getExcelHeaderRows } from '../../utils/printHelper.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import FitScroll from '../Common/FitScroll.jsx';
+import RosterPasteImportModal from './RosterPasteImportModal.jsx';
 
 const DAY_KEYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const DAY_KEYS_FULL = { Sun:'Sunday', Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday', Thu:'Thursday', Fri:'Friday', Sat:'Saturday' };
@@ -630,6 +632,7 @@ const DutyRosterDeptWise = () => {
   const [error,      setError]      = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  const [showPasteImport, setShowPasteImport] = useState(false);
   const [showConfig,      setShowConfig]      = useState(false);
   const [gridVisible,     setGridVisible]     = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false); // entire create workflow as modal
@@ -880,7 +883,15 @@ const DutyRosterDeptWise = () => {
     const isOff = Array.isArray(offDays) && offDays.includes(dayKey);
     const rawIds = entry.shiftIds || entry.shift_ids;
     const shiftId = entry.shiftId ?? entry.shift_id;
-    const ids = Array.isArray(rawIds) && rawIds.length ? rawIds : (shiftId ? [shiftId] : []);
+    let ids = Array.isArray(rawIds) && rawIds.length ? rawIds : (shiftId ? [shiftId] : []);
+    // A multi-day row with 2+ shifts that is NOT flagged double duty rotates one shift per
+    // day (same rule the reports use) — show just that day's shift. Double duty (flagged,
+    // or any single-day row) shows all of its shifts.
+    const from = rosterDateStr(entry.date_from || entry.dateFrom), to = rosterDateStr(entry.date_to || entry.dateTo);
+    if (ids.length > 1 && from !== to && !(entry.doubleDuty ?? entry.double_duty)) {
+      const idx = Math.round((Date.parse(dateStr) - Date.parse(from)) / 86400000);
+      ids = [ids[((idx % ids.length) + ids.length) % ids.length]];
+    }
     // Prefer each shift's admin-set Roster Short Name (Roster Analysis
     // Dashboard → ⚙️ → "Create Shortname for Roster") over its full
     // configured name, same as the shift picker itself — display only,
@@ -1324,6 +1335,18 @@ const DutyRosterDeptWise = () => {
 
   return (
     <div className="page-container">
+      {showPasteImport && (
+        <RosterPasteImportModal
+          employees={employees} shifts={shifts} useNP={useNP} months={MONTHS}
+          fiscalYears={settings.fiscalYears || []} defaultFyId={advSearch.fiscalYearId} defaultMonth={viewBsMonth}
+          branches={branchOpts} departments={deptOpts} currentUser={currentUser}
+          onClose={() => setShowPasteImport(false)}
+          onDone={async (msg) => {
+            const fresh = await api.get('/duty-roster');
+            setRosters(fresh || []);
+            setSuccessMsg(msg);
+          }} />
+      )}
       <style>{`
         @media print {
           @page { size: A4 landscape; margin: 6mm; }
@@ -1421,6 +1444,13 @@ const DutyRosterDeptWise = () => {
               </button>
             </>
           )}
+          {canEditRoster && (
+            <button onClick={() => setShowPasteImport(true)}
+              style={{ height:30, padding:'0 11px', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:4,
+                background:'#fefce8', border:'1px solid #fde047', color:'#854d0e', borderRadius:7, cursor:'pointer' }}>
+              📋 Bulk Import
+            </button>
+          )}
           <RosterMenuBtn active="department" onSelect={key => {
             if (key === 'dashboard')       navigate('/attendance/roster-dashboard');
             else if (key === 'staff')      navigate('/attendance/duty-roster');
@@ -1454,12 +1484,12 @@ const DutyRosterDeptWise = () => {
           <div style={{ display:'flex', flexWrap:'wrap', gap:14, alignItems:'flex-start', marginBottom:12 }}>
 
             {/* Fiscal Year */}
-            <div style={{ flex:'0 0 150px' }}>
+            <div style={{ flex:'0 0 170px' }}>
               <div style={{ fontSize:11, fontWeight:700, color:'#374151', marginBottom:4 }}>Fiscal Year</div>
               <select value={advSearch.fiscalYearId ?? ''}
                 onChange={e => setAS('fiscalYearId', e.target.value ? parseInt(e.target.value) : null)}
-                style={{ width:'100%', height:36, border:'1.5px solid #d1d5db', borderRadius:7, padding:'0 8px',
-                  fontSize:13, outline:'none', background:'white', cursor:'pointer' }}
+                style={{ width:'100%', height:28, boxSizing:'border-box', border:'1.5px solid #d1d5db', borderRadius:6, padding:'0 8px',
+                  fontSize:12, outline:'none', background:'white', cursor:'pointer' }}
                 onFocus={e => e.target.style.borderColor = '#1a56db'}
                 onBlur={e => e.target.style.borderColor = '#d1d5db'}>
                 <option value="">All Fiscal Years</option>
@@ -1693,7 +1723,7 @@ const DutyRosterDeptWise = () => {
               </span>
             </div>
           </div>
-          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+          <FitScroll style={{ border:'1px solid #e5e7eb', borderRadius:10 }}>
           <table style={{ borderCollapse:'collapse', fontSize:12.5, tableLayout:'fixed' }}>
             <colgroup>
               {STICKY_WIDTHS.map((w, i) => <col key={i} style={{ width:w, minWidth:w }} />)}
@@ -1729,9 +1759,9 @@ const DutyRosterDeptWise = () => {
                   </td>
                 </tr>
               ) : visibleViewEmployees.map((emp, idx) => (
-                <tr key={emp.id} style={{ background: idx % 2 === 0 ? 'white' : '#f3f4f6' }}
+                <tr key={emp.id} style={{ background: idx % 2 === 0 ? 'white' : '#f7f8fa' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#f5f5f5'}
-                  onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'white' : '#f3f4f6'}>
+                  onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'white' : '#f7f8fa'}>
                   <td style={{ ...tdSt(true, 0), background:'#efefef', color:'#374151', fontWeight:700, textAlign:'center' }}>{idx + 1}</td>
                   <td style={{ ...tdSt(true, 1), fontWeight:600 }}>
                     <span style={{ display:'flex', alignItems:'center', gap:6 }}>
@@ -1817,7 +1847,7 @@ const DutyRosterDeptWise = () => {
               ))}
             </tbody>
           </table>
-          </div>
+          </FitScroll>
           {viewLegendEntries.length > 0 && (
             <div style={{ marginTop:8, padding:'6px 10px', background:'#f8fafc', border:'1px solid #e5e7eb',
               borderRadius:8, fontSize:11, color:'#374151', display:'flex', flexWrap:'wrap', gap:'4px 14px' }}>
@@ -1911,7 +1941,7 @@ const DutyRosterDeptWise = () => {
       {/* Roster Grid (create mode) */}
       {loading && <LoadingIndicator />}
       {!loading && (
-        <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+        <FitScroll style={{ border:'1px solid #e5e7eb', borderRadius:10 }}>
           <table style={{ borderCollapse:'collapse', fontSize:12.5, tableLayout:'fixed' }}>
             <colgroup>
               {STICKY_WIDTHS.map((w, i) => <col key={i} style={{ width: w, minWidth: w }} />)}
@@ -1971,9 +2001,9 @@ const DutyRosterDeptWise = () => {
                   return eff.length > 0 && !eff.includes('OFF');
                 });
                 return (
-                <tr key={emp.id} style={{ background: idx % 2 === 0 ? 'white' : '#f3f4f6' }}
+                <tr key={emp.id} style={{ background: idx % 2 === 0 ? 'white' : '#f7f8fa' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#f5f5f5'}
-                  onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'white' : '#f3f4f6'}>
+                  onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 0 ? 'white' : '#f7f8fa'}>
                   <td style={{ ...tdSt(true, 0), background:'#efefef',
                     color:'#374151', fontWeight:700, textAlign:'center' }}>
                     {idx + 1}
@@ -2031,7 +2061,7 @@ const DutyRosterDeptWise = () => {
               })}
             </tbody>
           </table>
-        </div>
+        </FitScroll>
       )}
 
       {/* Saved Summary Grid */}
@@ -2044,7 +2074,7 @@ const DutyRosterDeptWise = () => {
             <span style={{ color:'#6b7280', fontSize:13, fontWeight:500 }}>{savedResults.periodLabel}</span>
             <button onClick={() => setSavedResults(null)} style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:16 }}>x</button>
           </div>
-          <div style={{ overflowX:'auto', border:'1px solid #e5e7eb', borderRadius:10 }}>
+          <FitScroll style={{ border:'1px solid #e5e7eb', borderRadius:10 }}>
             <table style={{ borderCollapse:'collapse', fontSize:12, width:'100%' }}>
               <thead>
                 <tr style={{ background:'#efefef' }}>
@@ -2067,7 +2097,7 @@ const DutyRosterDeptWise = () => {
                   return Object.values(groups).map((g, i) => {
                     const shiftNames = [...g.shiftIds].map(id => savedResults.shifts.find(s => s.id === id)?.name || id).join(', ');
                     return (
-                      <tr key={i} style={{ background: i % 2 === 0 ? 'white' : '#f3f4f6' }}>
+                      <tr key={i} style={{ background: i % 2 === 0 ? 'white' : '#f7f8fa' }}>
                         <td style={{ padding:'7px 12px', borderBottom:'1px solid #f3f4f6', borderRight:'1px solid #f3f4f6', color:'#6b7280' }}>{i + 1}</td>
                         <td style={{ padding:'7px 12px', borderBottom:'1px solid #f3f4f6', borderRight:'1px solid #f3f4f6', fontWeight:600 }}>{g.branch}</td>
                         <td style={{ padding:'7px 12px', borderBottom:'1px solid #f3f4f6', borderRight:'1px solid #f3f4f6' }}>{g.department}</td>
@@ -2087,7 +2117,7 @@ const DutyRosterDeptWise = () => {
                 })()}
               </tbody>
             </table>
-          </div>
+          </FitScroll>
         </div>
       )}
 
@@ -2099,22 +2129,22 @@ const DutyRosterDeptWise = () => {
       {/* Config Popup — appears on top of createModal overlay when showConfig is true */}
       {showConfig && (
         <div className="modal-overlay">
-          <div onClick={e => e.stopPropagation()}
-            style={{ background:'white', borderRadius:14, width:'94vw', maxWidth:820,
+          <div onClick={e => e.stopPropagation()} className="glm-form"
+            style={{ background:'#f8fafc', borderRadius:16, width:'94vw', maxWidth:820,
               maxHeight:'90vh', display:'flex', flexDirection:'column',
               boxShadow:'0 25px 60px rgba(0,0,0,.22)', overflow:'hidden' }}>
 
-            <div style={{ background:'#ffffff', borderBottom:'1px solid #e5e7eb', padding:'16px 22px',
-              display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-              <span style={{ fontWeight:800, fontSize:16, color:'#111827' }}>Create Roster — Department Wise</span>
+            <div className="modal-header" style={{ flexShrink:0 }}>
+              <div className="glm-head-ic">🗓️</div>
+              <div className="glm-head-txt"><h2>Create Roster — Department Wise</h2><p>Choose the staff and the roster period</p></div>
               <button className="modal-close" onClick={() => setShowConfig(false)}>✕</button>
             </div>
 
-            <div style={{ overflowY:'auto', flex:1, padding:'20px 24px', display:'flex', flexDirection:'column', gap:18 }}>
+            <div style={{ overflowY:'auto', flex:1, padding:'14px 18px', display:'flex', flexDirection:'column', gap:10 }}>
 
               {/* Staff Filters */}
-              <div>
-                <div style={{ fontSize:12, fontWeight:800, color:'#374151', marginBottom:10, textTransform:'uppercase', letterSpacing:.5 }}>Staff Filters</div>
+              <div className="glm-card">
+                <div className="glm-step"><i>1</i>Staff Filters</div>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12 }}>
                   <div>
                     <div style={{ fontSize:11, fontWeight:700, color:'#374151', marginBottom:4 }}>Fiscal Year</div>
@@ -2148,8 +2178,8 @@ const DutyRosterDeptWise = () => {
               <hr style={{ border:'none', borderTop:'1px solid #f3f4f6' }} />
 
               {/* Roster Period */}
-              <div>
-                <div style={{ fontSize:12, fontWeight:800, color:'#374151', marginBottom:12, textTransform:'uppercase', letterSpacing:.5 }}>Roster Period</div>
+              <div className="glm-card">
+                <div className="glm-step"><i>2</i>Roster Period</div>
 
                 {/* Weekly / Half Monthly toggle + BS Year (disabled, from FY) — same row */}
                 <div style={{ display:'flex', gap:10, marginBottom:16, alignItems:'center', flexWrap:'wrap' }}>

@@ -958,7 +958,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
     <div>
       {/* Field tab strip — underline tabs with count badges, same style as the
           Attendance Device sub-tabs (Devices / Att. Logs / Device Users / …) */}
-      <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:14, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e2e8f0', marginBottom:14, flexWrap:'wrap' }}>
         {OFFICIAL_CHANGE_FIELDS.map(f => {
           const active = fieldTab === f.key;
           const count  = rows.filter(r => r.field === f.key).length;
@@ -1017,7 +1017,7 @@ const OfficialChangesTab = ({ employeeId, current, onApplied }) => {
       {/* ── Add New / Edit popup ── */}
       {editor && (
         <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
-          <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:440 }} onClick={e => e.stopPropagation()}>
+          <div className="modal modal-sm glm-form glm-plain" style={{ zIndex:1200, maxWidth:440 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {fieldLabel} {t('Change')}</h2>
               <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
@@ -1229,7 +1229,7 @@ const StaffIdentityTab = ({ employeeId }) => {
   return (
     <div>
       {/* Section tab strip — same underline style as the Officially Changes field tabs */}
-      <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:14, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e2e8f0', marginBottom:14, flexWrap:'wrap' }}>
         {IDENTITY_SECTIONS.map(s => {
           const active = section === s.key;
           const count  = data[s.key].length;
@@ -1249,12 +1249,12 @@ const StaffIdentityTab = ({ employeeId }) => {
       </div>
 
       {/* Section content card */}
-      <div style={{ border:'1px solid #dedede', borderRadius:8, background:'white',
-        boxShadow:'0 1px 3px rgba(0,0,0,.07)', overflow:'hidden' }}>
+      <div style={{ border:'1px solid #e8edf5', borderRadius:14, background:'white',
+        boxShadow:'0 1px 2px rgba(15,23,42,.04)', overflow:'hidden' }}>
 
         {/* Toolbar — title + Add New */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-          padding:'9px 14px', background:'#f9fafb', borderBottom:'1px solid #dedede' }}>
+          padding:'10px 14px', background:'#fff', borderBottom:'1px solid #eef2f7' }}>
           <span style={{ fontSize:14, fontWeight:600, color:'#111827' }}>
             {sectionDef.icon} {t(sectionDef.label)}
           </span>
@@ -1303,7 +1303,7 @@ const StaffIdentityTab = ({ employeeId }) => {
       {/* ── Add New / Edit popup ── */}
       {editor && (
         <div className="modal-overlay" style={{ zIndex:1100 }} onClick={() => setEditor(null)}>
-          <div className="modal modal-sm" style={{ zIndex:1200, maxWidth:460 }} onClick={e => e.stopPropagation()}>
+          <div className="modal modal-sm glm-form glm-plain" style={{ zIndex:1200, maxWidth:460 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editor.row ? `✏️ ${t('Edit')}` : `+ ${t('Add New')}`} — {t(sectionDef.label)}</h2>
               <button className="modal-close" onClick={() => setEditor(null)}>✕</button>
