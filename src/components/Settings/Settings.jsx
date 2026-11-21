@@ -4054,6 +4054,7 @@ const Settings = () => {
                 {activeSetup === 'grade' && (
                   <SetupSection
                     title={L('ग्रेड','Grade')}
+                    formCols={2}
                     formStep={L('ग्रेड विवरण','Grade details')}
                     data={[...(settings.grades || [])].sort((a,b)=>(a.rankingOrder??9999)-(b.rankingOrder??9999))}
                     fields={[
