@@ -18,6 +18,7 @@ import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.j
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
+import { DutyLines, ShiftLines, dutyInLines, dutyOutLines, dutyInStatusLines, dutyOutStatusLines, dutyHtml } from './DutyStack.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 /* ── Constants ──────────────────────────────────────────────── */
@@ -51,6 +52,7 @@ const fmtTime = (iso) => {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 };
+
 
 const pad = (n) => String(n).padStart(2, '0');
 const isoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -268,16 +270,16 @@ const StaffLedger = () => {
     setEmpId(branchFilteredEmps.length ? String(branchFilteredEmps[0].id) : '');
   }, [sortedEmps.length, branchFilter]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Compute EXACT AD date range ── */
-  const getDateRange = useCallback(() => {
   /* Optional From/To range (Settings → Report Custom Date Range) — Monthly ledger only */
   const dr = useReportDateRange();
   const rangeActive = !isHalfMonthlyCtx && dr.active;
   const rangeLocked  = !isHalfMonthlyCtx && dr.locked;
 
+  /* ── Compute EXACT AD date range ── */
+  const getDateRange = useCallback(() => {
+    if (rangeActive) return { startDate: dr.from, endDate: dr.to };
     if (isHalfMonthlyCtx) {
       // Half-monthly: 1st half = 1–15, 2nd half = 16–end
-    if (rangeActive) return { startDate: dr.from, endDate: dr.to };
       if (useNP) {
         const halfStartDay = half === 1 ? 1 : 16;
         const halfEndDay   = half === 1 ? 15 : getBSDays(year, month);
@@ -320,9 +322,9 @@ const StaffLedger = () => {
 
   /* ── Period label ── */
   const periodLabel = () => {
+    if (rangeActive) return `${dr.from} → ${dr.to}`;
     let label;
     if (useNP) {
-    if (rangeActive) return `${dr.from} → ${dr.to}`;
       const bsM = BS_MONTHS_NP[month-1] || '';
       const fmt  = n => settings.nepaliDigits ? toNepaliDigits(n) : String(n);
       label = `${bsM} ${fmt(year)} BS`;
@@ -406,12 +408,13 @@ const StaffLedger = () => {
         // column right next to it.
         const isRosterOff = row.status === 'Day Off' || row.status === 'Night Off';
         const show = isRosterOff ? row.shiftName : (!row.isWeekend ? row.shiftName : null);
-        return <span style={{ fontSize:13,color:'#1f2937' }}>{show || '—'}</span>;
+        return String(show || '').includes('\n') ? <ShiftLines fontSize={13} value={show} /> : <span style={{ fontSize:13,color:'#1f2937', whiteSpace:'nowrap' }}>{show || '—'}</span>;
       },
     },
     {
       field:'timeIn', header:L('आएको','Time In'), align:'center',
       render:(v,row)=>{
+        if(row.duties && v) return <DutyLines fontSize={13} lines={dutyInLines(row.duties)} />;
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         const warn=row.punches===1;
         const onTime=row.lateFormatted==='On Time';
@@ -426,11 +429,12 @@ const StaffLedger = () => {
     {
       field:'timeOut', header:L('गएको','Time Out'), align:'center',
       render:(v,row)=>{
+        if(row.duties && row.timeIn) return <DutyLines fontSize={13} lines={dutyOutLines(row.duties)} />;
         if(!v){
           if(row.timeIn){
             return (
               <span
-                onClick={e => { e.stopPropagation(); openMissingAttendance(emp?.id, row.dateStr); }}
+                onClick={e => { e.stopPropagation(); openMissingAttendance(emp?.id, row.dateStr, row.timeIn ? fmtTime(row.timeIn) : ''); }}
                 title={L('टाइम आउट रेकर्ड भएन — अनुरोध पठाउन क्लिक गर्नुस्','Missing time out — click to request')}
                 style={{ color:'#dc2626', fontSize:13, fontWeight:700, cursor:'pointer', textDecoration:'underline', textDecorationStyle:'dotted', textUnderlineOffset:3 }}>
                 —
@@ -457,7 +461,8 @@ const StaffLedger = () => {
     },
     {
       field:'lateFormatted', header:L('IN स्थिति','IN Status'),
-      render:v=>{
+      render:(v,row)=>{
+        if(row.duties && v) return <DutyLines fontSize={13} lines={dutyInStatusLines(row.duties)} />;
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         if (v === 'On Time') return <span style={{ color:'#1f2937', fontSize:13 }}>{v}</span>;
         const isEarly = v.startsWith('Early In');
@@ -466,7 +471,8 @@ const StaffLedger = () => {
     },
     {
       field:'earlyFormatted', header:L('OUT स्थिति','OUT Status'),
-      render:v=>{
+      render:(v,row)=>{
+        if(row.duties && row.timeIn && v) return <DutyLines fontSize={13} lines={dutyOutStatusLines(row.duties)} />;
         if(!v) return <span style={{ color:'#d1d5db', fontSize:13 }}>—</span>;
         if (v === 'On Time') return <span style={{ color:'#1f2937', fontSize:13 }}>{v}</span>;
         const isLateOut = v.startsWith('Late Out');
@@ -589,8 +595,9 @@ const StaffLedger = () => {
 
               // Staff info row + summary row — placed BELOW the header black line, ABOVE the grid
               const staffInfoHtml = `
-                <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;
-                            padding:7px 0;margin-bottom:6px;border-bottom:2px solid #000;">
+                <div style="display:flex;gap:6px 18px;flex-wrap:wrap;font-size:11px;
+                            padding:6px 10px;margin-bottom:6px;background:#f8fafc;
+                            border:1px solid #dedede;border-radius:4px;">
                   <span><strong style="color:#6b7280">Staff Name:</strong>
                     <strong style="color:#1f2937;margin-left:4px">${emp.fullName||'—'}</strong></span>
                   <span><strong style="color:#6b7280">Post:</strong>
@@ -604,8 +611,8 @@ const StaffLedger = () => {
                   <span><strong style="color:#6b7280">Branch:</strong>
                     <span style="color:#7c3aed;font-weight:700;margin-left:4px">${emp.branchShort||emp.branch||'—'}</span></span>
                 </div>
-                <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;
-                            padding:4px 8px;margin-bottom:8px;
+                <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;font-size:10px;
+                            padding:5px 10px;margin-bottom:8px;
                             background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;">
                   <span>Present: <strong style="color:#065f46">${s.presentCount||0}</strong></span>
                   <span>·</span>
@@ -631,18 +638,18 @@ const StaffLedger = () => {
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;background:#efefef;color:#6b7280;font-weight:600">${i+1}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;font-weight:600">${fd(r.dateStr)||r.dateStr||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.dayFull?r.dayFull.slice(0,3):''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace;color:#1a56db;font-weight:700">${r.timeIn?fmtTime(r.timeIn):''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.timeOut?fmtTime(r.timeOut):''}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace;color:#1a56db;font-weight:700">${r.duties ? dutyHtml(dutyInLines(r.duties)) : (r.timeIn?fmtTime(r.timeIn):'')}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.duties ? dutyHtml(dutyOutLines(r.duties)) : (r.timeOut?fmtTime(r.timeOut):'')}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;color:#0369a1;font-weight:700">${r.totalFormatted||''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.lateFormatted?.startsWith('Late')?'#dc2626':'#059669'}">${r.lateFormatted||''}</td>
-                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.earlyFormatted?.startsWith('Early Out')?'#d97706':'#2563eb'}">${r.earlyFormatted||''}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.lateFormatted?.startsWith('Late')?'#dc2626':'#059669'}">${(r.duties && r.lateFormatted) ? dutyHtml(dutyInStatusLines(r.duties)) : (r.lateFormatted||'')}</td>
+                <td style="padding:4px 6px;border:1px solid #dedede;color:${r.earlyFormatted?.startsWith('Early Out')?'#d97706':'#2563eb'}">${(r.duties && r.timeIn && r.earlyFormatted) ? dutyHtml(dutyOutStatusLines(r.duties)) : (r.earlyFormatted||'')}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;color:#059669;font-weight:700">${(emp?.eligibleForOt && r.otApprovedFormatted)||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.status||''}</td>
                 <td style="padding:4px 6px;border:1px solid #dedede;font-size:9px">${r.remarks||''}</td>
               </tr>`).join('');
 
               const contentHtml = staffInfoHtml + `
-                <table style="border-collapse:collapse;width:100%;font-size:10px">
+                <table class="lg" style="border-collapse:collapse;width:100%;font-size:10px">
                   <thead><tr>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef">SN</th>
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef;text-align:left">Date</th>
@@ -1012,13 +1019,13 @@ const StaffLedger = () => {
             {
               label: 'Request for Missing Attendance',
               icon: '📩',
-              onClick: (row) => openMissingAttendance(emp.id, row.dateStr),
+              onClick: (row) => openMissingAttendance(emp.id, row.dateStr, row.timeIn ? fmtTime(row.timeIn) : ''),
             },
           ] : [
             {
               label: 'Add Manual Attendance',
               icon: '✍️',
-              onClick: (row) => navigate('/attendance/manual-postings', { state: { employeeId: emp.id, employeeName: emp.fullName, date: row.dateStr } }),
+              onClick: (row) => navigate('/attendance/manual-postings', { state: { employeeId: emp.id, employeeName: emp.fullName, date: row.dateStr, checkIn: row.timeIn ? fmtTime(row.timeIn) : '', checkOut: row.timeOut ? fmtTime(row.timeOut) : '' } }),
             },
             'divider',
             {
@@ -1034,7 +1041,7 @@ const StaffLedger = () => {
             {
               label: 'Request for Missing Attendance',
               icon: '📩',
-              onClick: (row) => openMissingAttendance(emp.id, row.dateStr),
+              onClick: (row) => openMissingAttendance(emp.id, row.dateStr, row.timeIn ? fmtTime(row.timeIn) : ''),
             },
             ...(isAdmin ? [
               'divider',

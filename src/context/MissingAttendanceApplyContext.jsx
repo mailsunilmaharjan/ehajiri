@@ -6,20 +6,23 @@ export const MissingAttendanceApplyProvider = ({ children }) => {
   const [isOpen,           setIsOpen]           = useState(false);
   const [targetEmployeeId, setTargetEmployeeId] = useState(null);
   const [targetDate,       setTargetDate]       = useState(null);
+  const [targetCheckIn,    setTargetCheckIn]    = useState(''); // existing punch-in (HH:MM) — shown locked in the form
 
-  const open  = useCallback((empId = null, date = null) => {
+  const open  = useCallback((empId = null, date = null, checkIn = '') => {
     setTargetEmployeeId(empId);
     setTargetDate(date);
+    setTargetCheckIn(checkIn || '');
     setIsOpen(true);
   }, []);
   const close = useCallback(() => {
     setTargetEmployeeId(null);
     setTargetDate(null);
+    setTargetCheckIn('');
     setIsOpen(false);
   }, []);
 
   return (
-    <MissingAttendanceApplyContext.Provider value={{ isOpen, open, close, targetEmployeeId, targetDate }}>
+    <MissingAttendanceApplyContext.Provider value={{ isOpen, open, close, targetEmployeeId, targetDate, targetCheckIn }}>
       {children}
     </MissingAttendanceApplyContext.Provider>
   );

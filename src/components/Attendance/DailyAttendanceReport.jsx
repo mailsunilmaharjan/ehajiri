@@ -18,6 +18,7 @@ import { branchAbbr } from '../../utils/branchUtils.js';
 import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import { getNepalTodayISO } from '../../utils/dateUtils.js';
 import { downloadBlob } from '../../utils/printHelper.js';
+import { DutyLines, ShiftLines, dutyInLines, dutyOutLines, dutyInStatusLines, dutyOutStatusLines, dutyHtml } from './DutyStack.jsx';
 
 /* ── constants ─────────────────────────────────────────────── */
 const DAY_EN = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -98,17 +99,10 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, allRows, e
   ];
 
   /* Shared label style matching screenshot */
-  const Lbl = ({ text }) => (
-    <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:8 }}>{text}</div>
-  );
+  // Lbl moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   /* Each field wrapper — overflow visible so dropdown isn't clipped */
-  const Field = ({ label, children }) => (
-    <div style={{ position:'relative', overflow:'visible' }}>
-      <Lbl text={label} />
-      {children}
-    </div>
-  );
+  // Field moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   return (
     <div className="modal-overlay">
@@ -416,11 +410,12 @@ const DailyAttendanceReport = () => {
     },
     {
       field:'shiftName', header:L('सिफ्ट','Shift'),
-      render: v => <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v||'—'}</span>,
+      render: v => String(v||'').includes('\n') ? <ShiftLines value={v} /> : <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v||'—'}</span>,
     },
     {
       field:'timeIn', header:L('आएको','Time In'), align:'center',
       render: (v, row) => {
+        if (row.duties && v) return <DutyLines lines={dutyInLines(row.duties)} />;
         if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         const warn = row.punchCount === 1;
         const onTime = row.lateIn === 'On Time';
@@ -435,11 +430,12 @@ const DailyAttendanceReport = () => {
     {
       field:'timeOut', header:L('गएको','Time Out'), align:'center',
       render: (v, row) => {
+        if (row.duties && row.timeIn) return <DutyLines lines={dutyOutLines(row.duties)} />;
         if (!v) {
           if (row.timeIn) {
             return (
               <span
-                onClick={e => { e.stopPropagation(); openMissingAttendance(row.id, date); }}
+                onClick={e => { e.stopPropagation(); openMissingAttendance(row.id, date, row.timeIn ? fmtTime(row.timeIn) : ''); }}
                 title={L('टाइम आउट रेकर्ड भएन — अनुरोध पठाउन क्लिक गर्नुस्','Missing time out — click to request')}
                 style={{ color:'#dc2626', fontWeight:700, cursor:'pointer', textDecoration:'underline', textDecorationStyle:'dotted', textUnderlineOffset:3 }}>
                 —
@@ -472,7 +468,8 @@ const DailyAttendanceReport = () => {
     },
     {
       field:'lateIn', header:L('IN स्थिति','IN Status'),
-      render: v => {
+      render: (v, row) => {
+        if (row.duties && v) return <DutyLines lines={dutyInStatusLines(row.duties)} />;
         if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         if (v === 'On Time') return <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v}</span>;
         const isEarly = v.startsWith('Early In');
@@ -481,7 +478,8 @@ const DailyAttendanceReport = () => {
     },
     {
       field:'earlyOut', header:L('OUT स्थिति','OUT Status'),
-      render: v => {
+      render: (v, row) => {
+        if (row.duties && v) return <DutyLines lines={dutyOutStatusLines(row.duties)} />;
         if (!v) return <span style={{ color:'#d1d5db' }}>—</span>;
         if (v === 'On Time') return <span style={{ color:'#1f2937', whiteSpace:'nowrap' }}>{v}</span>;
         const isLateOut = v.startsWith('Late Out');
@@ -606,7 +604,7 @@ const DailyAttendanceReport = () => {
               quickRows.forEach((r, i) => {
                 csvRows.push([
                   i+1, r.fullName, r.postShort||'', r.deptShort||'', r.branchShort||'',
-                  displayDate, dayLabel, r.shiftName||'',
+                  displayDate, dayLabel, (r.shiftName||'').replace(/\n/g,' + '),
                   r.timeIn  ? fmtTime(r.timeIn)  : '',
                   r.timeOut ? fmtTime(r.timeOut) : '',
                   r.totalHrs||'', (r.eligibleForOt && r.otApprovedFormatted) || '', r.lateIn||'', r.earlyOut||'',
@@ -660,13 +658,13 @@ const DailyAttendanceReport = () => {
                   ${td(r.postShort,'#0369a1',700)}
                   ${td(r.deptShort,'#059669',700)}
                   ${td(r.branchShort,'#7c3aed',700)}
-                  ${td(r.shiftName||'—','#7c3aed')}
-                  ${td(r.timeIn?fmtTime(r.timeIn):'—','#1a56db',700)}
-                  ${td(r.timeOut?fmtTime(r.timeOut):'—','#374151',700)}
+                  ${td(String(r.shiftName||'—').includes('\n') ? dutyHtml(String(r.shiftName).split('\n').map(text=>({text,color:'#7c3aed'}))) : (r.shiftName||'—'),'#7c3aed')}
+                  ${td(r.duties ? dutyHtml(dutyInLines(r.duties)) : (r.timeIn?fmtTime(r.timeIn):'—'),'#1a56db',700)}
+                  ${td(r.duties ? dutyHtml(dutyOutLines(r.duties)) : (r.timeOut?fmtTime(r.timeOut):'—'),'#374151',700)}
                   ${td(r.totalHrs||'—','#0369a1',700)}
                   ${td((r.eligibleForOt && r.otApprovedFormatted)||'—','#059669',700)}
-                  ${td(r.lateIn||'—',r.lateIn?.startsWith('Late')?'#dc2626':'#059669')}
-                  ${td(r.earlyOut||'—',r.earlyOut?.startsWith('Early Out')?'#d97706':'#2563eb')}
+                  ${r.duties && r.lateIn ? td(dutyHtml(dutyInStatusLines(r.duties))) : td(r.lateIn||'—',r.lateIn?.startsWith('Late')?'#dc2626':'#059669')}
+                  ${r.duties && r.earlyOut ? td(dutyHtml(dutyOutStatusLines(r.duties))) : td(r.earlyOut||'—',r.earlyOut?.startsWith('Early Out')?'#d97706':'#2563eb')}
                   <td style="padding:4px 5px;border:1px solid #e5e7eb;background:${bg};text-align:center;">
                     <span style="background:${sb};color:${sc};border-radius:4px;padding:1px 5px;font-size:8px;font-weight:700;">${statusLabel(r.status, language)}</span>
                   </td>
@@ -868,13 +866,13 @@ const DailyAttendanceReport = () => {
           {
             label: 'Request for Missing Attendance',
             icon: '📩',
-            onClick: (row) => openMissingAttendance(row.id, date),
+            onClick: (row) => openMissingAttendance(row.id, date, row.timeIn ? fmtTime(row.timeIn) : ''),
           },
         ] : [
           {
             label: 'Add Manual Attendance',
             icon: '✍️',
-            onClick: (row) => navigate('/attendance/manual-postings', { state: { employeeId: row.id, employeeName: row.name, date } }),
+            onClick: (row) => navigate('/attendance/manual-postings', { state: { employeeId: row.id, employeeName: row.name, date, checkIn: row.timeIn ? fmtTime(row.timeIn) : '', checkOut: row.timeOut ? fmtTime(row.timeOut) : '' } }),
           },
           'divider',
           {
@@ -890,7 +888,7 @@ const DailyAttendanceReport = () => {
           {
             label: 'Request for Missing Attendance',
             icon: '📩',
-            onClick: (row) => openMissingAttendance(row.id, date),
+            onClick: (row) => openMissingAttendance(row.id, date, row.timeIn ? fmtTime(row.timeIn) : ''),
           },
         ]}
         showCheckbox={false}
@@ -992,3 +990,14 @@ const DailyAttendanceReport = () => {
 };
 
 export default DailyAttendanceReport;
+
+const Lbl = ({ text }) => (
+  <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:8 }}>{text}</div>
+);
+
+const Field = ({ label, children }) => (
+  <div style={{ position:'relative', overflow:'visible' }}>
+    <Lbl text={label} />
+    {children}
+  </div>
+);

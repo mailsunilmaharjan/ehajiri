@@ -20,9 +20,10 @@ const DateInput = ({ value, onChange }) => {
   return <EnglishDatePicker value={value} onChange={onChange} maxToday={true} />;
 };
 
-const TimeInput = ({ value, onChange }) => (
-  <input type="time" className="form-control" value={value || ''}
-    onChange={e => onChange(e.target.value)} style={{ fontSize: 13 }} />
+const TimeInput = ({ value, onChange, disabled }) => (
+  <input type="time" className="form-control" value={value || ''} disabled={disabled}
+    title={disabled ? 'Existing punch-in time — cannot be changed' : undefined}
+    onChange={e => onChange(e.target.value)} style={{ fontSize: 13, ...(disabled ? { background:'#f3f4f6', cursor:'not-allowed' } : null) }} />
 );
 
 const Lbl = ({ children, required }) => (
@@ -36,7 +37,8 @@ const Err = ({ msg }) => msg ? <div style={{ fontSize: 11, color: '#dc2626', mar
    MissingAttendanceApplyModal — globally rendered modal
 ════════════════════════════════════════════════ */
 const MissingAttendanceApplyModal = () => {
-  const { isOpen, close, targetEmployeeId, targetDate } = useMissingAttendanceApply();
+  const { isOpen, close, targetEmployeeId, targetDate, targetCheckIn } = useMissingAttendanceApply();
+  const lockCheckIn = !!targetCheckIn;   // an existing punch-in is shown and cannot be edited
   const { currentUser } = useAuth();
   const navigate         = useNavigate();
   const { employees: allEmployees } = useData();
@@ -129,7 +131,7 @@ const MissingAttendanceApplyModal = () => {
   useEffect(() => {
     if (!isOpen) return;
     const { reco, approval } = getMyRecoApproval();
-    setForm({ date: targetDate || today, checkIn: '', checkOut: '', reason: '', reco, approval });
+    setForm({ date: targetDate || today, checkIn: targetCheckIn || '', checkOut: '', reason: '', reco, approval });
     setSelectedReco(reco.length === 1 ? String(reco[0]) : '');
     setSelectedApproval(approval.length === 1 ? String(approval[0]) : '');
     setErrors({}); setSuccess(false); setSubmitError('');
@@ -228,7 +230,7 @@ const MissingAttendanceApplyModal = () => {
             </div>
           ) : (
             <form onSubmit={handleSubmit}>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 10,
                 padding: '12px 16px', marginBottom: 18 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase',
                   letterSpacing: '.5px', marginBottom: 10 }}>
@@ -257,7 +259,7 @@ const MissingAttendanceApplyModal = () => {
               <div className="form-row">
                 <div className="form-group">
                   <Lbl>Check In</Lbl>
-                  <TimeInput value={form.checkIn} onChange={v => handleChange('checkIn', v)} />
+                  <TimeInput value={form.checkIn} disabled={lockCheckIn} onChange={v => handleChange('checkIn', v)} />
                 </div>
                 <div className="form-group">
                   <Lbl>Check Out</Lbl>

@@ -6,6 +6,7 @@ import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import Avatar          from '../Common/Avatar.jsx';
+import HoverCard       from '../Common/HoverCard.jsx';
 import NepaliDatePicker  from '../Common/NepaliDatePicker.jsx';
 import EnglishDatePicker from '../Common/EnglishDatePicker.jsx';
 import SearchableSelect  from '../Common/SearchableSelect.jsx';
@@ -57,12 +58,7 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, settings, employees, sh
   const posts       = [...new Set(activeEmps.map(e => e.position).filter(Boolean))].sort().map(p => ({ value:p, label:p }));
   const shiftOpts   = (shifts || []).map(s => ({ value:s.code, label:s.name || s.code }));
 
-  const Field = ({ label, children }) => (
-    <div style={{ position:'relative', overflow:'visible' }}>
-      <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:6 }}>{label}</div>
-      {children}
-    </div>
-  );
+  // Field moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   return (
     <div className="modal-overlay">
@@ -179,6 +175,23 @@ const ManualPostings = () => {
     return ids.length ? ids.map(id => empById[String(id)]?.fullName || `#${id}`).join(', ') : '—';
   };
 
+  // Recommendator / Approval cell: the one person who actually acted on THIS posting (photo + name); "—" until someone has.
+  const actorCell = (id, name) => {
+    if (!id && !name) return <span style={{ color: '#d1d5db' }}>—</span>;
+    const emp = empById[String(id)];
+    const full = emp?.fullName || name || (id ? `#${id}` : '—');
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151' }}>
+        <Avatar photo={emp?.profilePhoto} name={full} size={20} />
+        {full}
+      </span>
+    );
+  };
+
+  // "Posted by Application" = the staff member filed it for themselves through the app (Inform Late In / Early Out, missing-attendance request);
+  // a posting made for someone else by a user on this page is "Manual Posted by <that user>".
+  const postedByApplication = (row) => !!row.createdBy && row.createdBy === row.fullName;
+
   const [records,       setRecords]       = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [modal,         setModal]         = useState(false);
@@ -190,6 +203,8 @@ const ManualPostings = () => {
   const [toast,         setToast]         = useState(null);
   const [filters,       setFilters]       = useState({ ...EMPTY_FILTERS });
   const [showSearch,    setShowSearch]    = useState(false);
+  const [fromDate,      setFromDate]      = useState('');   // header filter: posting date range (ISO), empty = no limit
+  const [toDate,        setToDate]        = useState('');
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -225,6 +240,9 @@ const ManualPostings = () => {
         ...empty,
         employeeId : String(state.employeeId),
         date       : state.date || '',
+        // Pre-fill the punch times the staff member already has for that day
+        checkIn    : state.checkIn  || '',
+        checkOut   : state.checkOut || '',
       });
       setErrors({});
       setModal(true);
@@ -387,7 +405,21 @@ const ManualPostings = () => {
       ),
     },
     {
-      field: 'remark', header: 'Remark',
+      field: 'lateBy', header: 'Late By',
+      width: 80, align: 'center',
+      render: (v, row) => row.lateIn && v
+        ? <span style={{ color: '#b45309', fontWeight: 600 }}>{v}</span>
+        : <span style={{ color: '#d1d5db' }}>—</span>,
+    },
+    {
+      field: 'earlyBy', header: 'Early By',
+      width: 80, align: 'center',
+      render: (v, row) => row.earlyOut && v
+        ? <span style={{ color: '#b45309', fontWeight: 600 }}>{v}</span>
+        : <span style={{ color: '#d1d5db' }}>—</span>,
+    },
+    {
+      field: 'remark', header: 'Remark / Reason',
       minWidth: 160,
       render: (v) => v
         ? <span style={{ fontSize: 12, color: '#4b5563' }}>{v}</span>
@@ -411,18 +443,43 @@ const ManualPostings = () => {
     },
     {
       field: 'recommendatorNames', header: 'Recommendator',
-      width: 150, sortable: false, filterable: false,
-      render: (_, row) => <span style={{ fontSize: 12, color: '#6b7280' }}>{recoApprovalNames(row.employeeId, 'reco')}</span>,
+      width: 160, sortable: false, filterable: false,
+      render: (_, row) => actorCell(row.recommendedById, row.recommendedByName),
+    },
+    {
+      field: 'recommendedDate', header: 'Recom. Date',
+      width: 100, align: 'center',
+      render: (v) => v ? String(v).split('T')[0] : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'approvalNames', header: 'Approval',
-      width: 150, sortable: false, filterable: false,
-      render: (_, row) => <span style={{ fontSize: 12, color: '#6b7280' }}>{recoApprovalNames(row.employeeId, 'approval')}</span>,
+      width: 160, sortable: false, filterable: false,
+      render: (_, row) => actorCell(row.approvedById, row.approvedByName),
+    },
+    {
+      field: 'approvedDate', header: 'Approval Date',
+      width: 105, align: 'center',
+      render: (v) => v ? String(v).split('T')[0] : <span style={{ color: '#d1d5db' }}>—</span>,
     },
     {
       field: 'createdBy', header: 'Posted By',
-      width: 130,
-      render: (v) => <span style={{ fontSize: 12, color: '#6b7280' }}>{v || '—'}</span>,
+      width: 80, align: 'center',
+      render: (v, row) => {
+        if (!v) return <span style={{ color: '#d1d5db' }}>—</span>;
+        const poster = Object.values(empById).find(e => e.fullName === v);
+        const via = postedByApplication(row) ? 'Posted by Application' : `Manual Posted by ${v}`;
+        const on = row.created_at ? new Date(row.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+        return (
+          <HoverCard minWidth={180} fontSize={12}
+            trigger={<span style={{ display: 'inline-flex', cursor: 'default' }}><Avatar photo={poster?.profilePhoto} name={v} size={22} /></span>}
+            content={<div style={{ lineHeight: 1.6 }}>
+              <div style={{ fontWeight: 700, color: '#111827' }}>{v}</div>
+              {poster && <div style={{ color: '#6b7280' }}>{[poster.position, poster.department].filter(Boolean).join(' · ')}</div>}
+              <div style={{ color: '#374151' }}>{via}</div>
+              {on && <div style={{ color: '#6b7280' }}>On {on}</div>}
+            </div>} />
+        );
+      },
     },
     {
       field: 'created_at', header: 'Posted On',
@@ -431,43 +488,13 @@ const ManualPostings = () => {
         ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
         : '—',
     },
-    {
-      field: 'actions', header: 'Actions',
-      width: 90, align: 'center', sortable: false, filterable: false,
-      render: (_, row) => {
-        const amReco      = isRecommenderFor(row.employeeId);
-        const amApprover  = canManageSystem || isApproverFor(row.employeeId);
-        const canApprove  = canApproveRow(row);
-        const alreadyReco = !!row.recommendedById;
-        return (
-          <div className="dg-actions">
-            {row.status === 'pending' && amReco && !alreadyReco && (
-              <button className="dg-action-btn" title="Recommend" onClick={e => { e.stopPropagation(); decide(row, 'recommend'); }}>👍</button>
-            )}
-            {row.status === 'pending' && amApprover && (
-              <>
-                <button className="dg-action-btn" title={canApprove ? 'Approve' : 'Awaiting recommendation first'}
-                  disabled={!canApprove}
-                  style={{ opacity: canApprove ? 1 : 0.4, cursor: canApprove ? 'pointer' : 'not-allowed' }}
-                  onClick={e => { e.stopPropagation(); if (canApprove) decide(row, 'approve'); }}>✅</button>
-                <button className="dg-action-btn" title="Reject" onClick={e => { e.stopPropagation(); decide(row, 'reject'); }}>❌</button>
-              </>
-            )}
-            {canManageSystem && (
-              <>
-                <button className="dg-action-btn edit"   title="Edit"   onClick={e => { e.stopPropagation(); openEdit(row); }}>✏️</button>
-                <button className="dg-action-btn delete" title="Delete" onClick={e => { e.stopPropagation(); setDeleteConfirm(row.id); }}>🗑</button>
-              </>
-            )}
-          </div>
-        );
-      },
-    },
   ], [canManageSystem, empById, recoConfig, isRecoCompulsory, currentUser?.id]);
 
   /* Apply Advance Search filters to the loaded records */
   const filteredRecords = useMemo(() => records.filter(r => {
     const recDate = r.date ? String(r.date).split('T')[0] : '';
+    if (fromDate && recDate < fromDate) return false;
+    if (toDate   && recDate > toDate)   return false;
     if (filters.fiscalYear) {
       const fy = (settings.fiscalYears || []).find(f => f.name === filters.fiscalYear);
       if (fy && (recDate < fy.startDate || recDate > fy.endDate)) return false;
@@ -482,10 +509,27 @@ const ManualPostings = () => {
       if (filters.shift  && emp.shift       !== filters.shift)  return false;
     }
     return true;
-  }), [records, filters, empById, settings.fiscalYears]);
+  }), [records, filters, empById, settings.fiscalYears, fromDate, toDate]);
 
   const activeFilterCount = Object.entries(filters)
     .filter(([k, v]) => k === '_status' ? v !== 'working' : v !== '').length;
+
+  // options for the Department / Post drop-downs in the filter row (working or not, as chosen in Advance Search)
+  const filterEmps = (allEmployees || []).filter(e => (e.active !== false) === ((filters._status || 'working') === 'working'));
+  const deptOptions = [...new Set(filterEmps.map(e => e.department).filter(Boolean))].sort();
+  const postOptions = [...new Set(filterEmps.map(e => e.position).filter(Boolean))].sort();
+  const anyFilter = !!(fromDate || toDate || activeFilterCount);
+
+  // Right-click menu: Recommend / Approve / Reject for pending requests (shown only to the people allowed to act), then Edit / Delete for admins.
+  const menuItems = [
+    { label: 'Recommend', icon: '👍', visible: (r) => r.status === 'pending' && isRecommenderFor(r.employeeId) && !r.recommendedById, onClick: (r) => decide(r, 'recommend') },
+    { label: 'Approve', icon: '✅', visible: (r) => r.status === 'pending' && (canManageSystem || isApproverFor(r.employeeId)),
+      disabled: (r) => !canApproveRow(r), title: (r) => canApproveRow(r) ? '' : 'Awaiting recommendation first', onClick: (r) => decide(r, 'approve') },
+    { label: 'Reject', icon: '❌', className: 'danger', visible: (r) => r.status === 'pending' && (canManageSystem || isApproverFor(r.employeeId)), onClick: (r) => decide(r, 'reject') },
+    ...(canManageSystem ? ['divider',
+      { label: 'Edit', icon: '✏️', onClick: (r) => openEdit(r) },
+      { label: 'Delete', icon: '🗑', className: 'danger', onClick: (r) => setDeleteConfirm(r.id) }] : []),
+  ];
 
   const f = (k) => (v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -508,39 +552,40 @@ const ManualPostings = () => {
   );
 
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div className="page-container">
       {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0 }}>✍️ Manual Postings</h1>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => setShowSearch(true)}
-            style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'0 14px', height:36,
-              background:activeFilterCount>0?'#ede9fe':'#f5f3ff',
-              border:`1.5px solid ${activeFilterCount>0?'#7c3aed':'#c4b5fd'}`,
-              color:activeFilterCount>0?'#5b21b6':'#6d28d9',
-              borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
-            <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
-              <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
-            </svg>
-            Advance Search
-            {activeFilterCount>0 && <span style={{ background:'#1a56db', color:'white', borderRadius:'50%', width:18, height:18, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>{activeFilterCount}</span>}
+      <div className="page-header" style={{ marginBottom: 6 }}>
+        <h1 className="page-title">✍️ Manual Postings</h1>
+        {canManageSystem && (
+          <button className="btn btn-primary" onClick={openAdd} style={{ height: 30, padding: '0 14px', fontSize: 12 }}>
+            + Add Manual Entry
           </button>
-          {canManageSystem && (
-            <button
-              onClick={openAdd}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '8px 18px', background: '#1a56db', color: '#fff',
-                border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                cursor: 'pointer', boxShadow: '0 2px 8px rgba(26,86,219,.25)',
-              }}
-            >
-              + Add Manual Entry
-            </button>
-          )}
-        </div>
+        )}
+      </div>
+
+      {/* Filter row: posting date range, Department, Post + Advance Search */}
+      <div className="ui-compact-controls" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>From Date</span>
+        <DateInput value={fromDate} onChange={setFromDate} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>To Date</span>
+        <DateInput value={toDate} onChange={setToDate} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Department</span>
+        <select value={filters.dept} onChange={e => setFilters(p => ({ ...p, dept: e.target.value }))} style={{ width: 150 }}>
+          <option value="">All Depts</option>{deptOptions.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Post</span>
+        <select value={filters.post} onChange={e => setFilters(p => ({ ...p, post: e.target.value }))} style={{ width: 150 }}>
+          <option value="">All Posts</option>{postOptions.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <button className="btn btn-filter" onClick={() => setShowSearch(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
+            <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd"/>
+          </svg>
+          Advance Search{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+        </button>
+        {anyFilter && (
+          <button className="btn btn-outline" onClick={() => { setFromDate(''); setToDate(''); setFilters({ ...EMPTY_FILTERS }); }}>✕ Reset</button>
+        )}
       </div>
 
       {/* DataGrid */}
@@ -552,14 +597,20 @@ const ManualPostings = () => {
           data={filteredRecords}
           defaultPageSize={20}
           compact={true}
+          fillToBottom
           showFilterButton={false}
+          remarks={(row) => (
+            <>
+              <div><b>Remarks — {row.fullName}{row.staffId ? ` (${row.staffId})` : ''}:</b> {row.remark ? row.remark : <span className="dg-muted">no remarks on this posting</span>}</div>
+              <div style={{ marginTop: 2 }}>
+                <b>Posted:</b> {postedByApplication(row) ? 'Posted by Application' : `Manual Posted by ${row.createdBy || '—'}`}
+                {row.status && row.status !== 'approved' && <> &nbsp;·&nbsp; <b>Status:</b> <span style={{ textTransform: 'capitalize' }}>{row.status}</span></>}
+              </div>
+            </>
+          )}
           onRowDoubleClick={canManageSystem ? openEdit : undefined}
           onDeleteKey={canManageSystem ? (row) => setDeleteConfirm(row.id) : null}
-          contextMenu={canManageSystem ? [
-            { label: 'Edit',   icon: '✏️', onClick: (row) => openEdit(row) },
-            'divider',
-            { label: 'Delete', icon: '🗑', className: 'danger', onClick: (row) => setDeleteConfirm(row.id) },
-          ] : undefined}
+          contextMenu={menuItems.length ? menuItems : undefined}
         />
       )}
 
@@ -709,3 +760,10 @@ const ManualPostings = () => {
 };
 
 export default ManualPostings;
+
+const Field = ({ label, children }) => (
+  <div style={{ position:'relative', overflow:'visible' }}>
+    <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:6 }}>{label}</div>
+    {children}
+  </div>
+);
