@@ -292,12 +292,18 @@ export default function SimpleVoucher() {
 
   return (
     <>
-      <header className="page-head">
-        <h1>{meta.icon} {editId ? `Edit ${orig?.voucher_no || ''}` : meta.title}</h1><span className="muted">{meta.hint}</span>
-        {orig?.edit_count > 0 && <span className="tag">edited {orig.edit_count}×</span>}
-        <span className="spacer" /><span className="muted small">Enter = next · Ctrl+S = save · Esc = back</span>
-      </header>
       <section className={`card entry-card v-${kind}`}>
+        {/* form header — same as every other form: icon tile, title, subtitle */}
+        <header className="acc-formhead">
+          <span className="acc-head-ic">{editId ? '✏️' : meta.icon}</span>
+          <span className="acc-head-txt">
+            <h1>{editId ? `Edit ${meta.title} ${orig?.voucher_no || ''}` : meta.title}</h1>
+            <small>{meta.hint}</small>
+          </span>
+          {orig?.edit_count > 0 && <span className="tag">edited {orig.edit_count}×</span>}
+          <span className="spacer" />
+          <span className="muted small acc-keys">Enter = next · Ctrl+S = save · Esc = back</span>
+        </header>
         <VoucherTypePicker current={kind} disabled={!!editId}>
           <span className="vtype-date"><span className="vtype-label">Date (Miti) *</span>
             <BsDateInput value={f.vdate} onChange={(v) => setF({ ...f, vdate: v })} autoFocus={!editId} /></span>
