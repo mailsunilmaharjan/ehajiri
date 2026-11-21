@@ -37,6 +37,7 @@ export function VoucherTypePicker({ current, disabled, children }) {
   const nav = useNavigate();
   return (
     <div className="vtype-bar">
+      <span className="acc-step acc-step-inline"><i>1</i></span>
       <span className="vtype-label">Voucher Type</span>
       {disabled ? <b className="vtype-fixed">{VOUCHER_TYPES.find((t) => t.id === current)?.name}</b> : (
         <AccountSelect accounts={VOUCHER_TYPES} value={current} placeholder="Search voucher type…"
@@ -473,7 +474,7 @@ export default function SimpleVoucher() {
 
         {kind === 'journal' && (
           <>
-            <div className="section-label">ENTRIES — amount moves FROM → TO</div>
+            <div className="acc-step acc-step-out"><i>2</i>Entries — amount moves FROM → TO</div>
             <table className="grid entry">
               <thead><tr><th className="sn">SN</th><th style={{ width: '32%' }}>FROM (gives / source)</th><th style={{ width: '32%' }}>TO (receives / expense)</th>
                 <th className="num" style={{ width: 140 }}>AMOUNT Rs.</th><th>NOTE</th><th style={{ width: 30 }} /></tr></thead>
