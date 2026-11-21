@@ -3004,9 +3004,6 @@ const VisitPanel = () => {
                 <button className="modal-close" onClick={() => setShowManualV(false)}>✕</button>
               </div>
               <div className="modal-body">
-                <div style={{ background:'#fef3c7', border:'1px solid #fde68a', borderRadius:8, padding:'8px 12px', marginBottom:14, fontSize:12, color:'#92400e' }}>
-                  ⚠️ Manual posting bypasses the normal workflow. Use for correcting records or back-dated entries.
-                </div>
                 <form ref={manualVFormRef} onSubmit={handleMVSubmit}>
                   {/* Staff */}
                   <div className="form-group">
