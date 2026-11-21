@@ -1,0 +1,39 @@
+/* Embedding overrides: the demo was a full-page app (own header + page padding). Inside eHajiri the module's menu
+   lives in eHajiri's own top menu, so the screens just need normal page padding. Loaded after accounts.css. */
+.acc-app .main-layout { padding-top: 0; min-height: 0; }
+.acc-app .page-container { padding: 16px 20px 24px; }
+
+/* Look & feel of buttons, text boxes, drop-downs, labels, dialogs and form headings is NOT set here — it lives in
+   src/ui-kit.css (one set of variables; the "Accounts mapping" section there maps this module's classes onto them).
+   Only layout/typography specific to embedding is kept below. */
+.acc-app h1, .acc-app .page-head h1 { font-size: 15px !important; }
+.acc-app table th, .acc-app table td, .acc-app table.grid thead th, .acc-app table.grid tbody td { font-size: 12.5px !important; }
+.acc-app .modal h2, .acc-app .card > h2 { font-size: 17px !important; font-weight: 600 !important; }
+.acc-app .doc-form input, .acc-app .doc-form select, .acc-app .page-head select, .acc-app .toolbar > select, .acc-app .toolbar label > select { border-radius: 6px; }
+
+/* Grid look (header, SN/tick columns, stripes, hover, selected row, sizes) is defined once in
+   ../DataGrid/DataGrid.css — nothing to set here. */
+/* a card that only holds a grid: the grid runs edge to edge, like eHajiri's DataGrid container */
+.acc-app section.card:has(> table.grid.dg-soft) { padding: 0; overflow: hidden; border: 1px solid #dedede; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.acc-app section.card:has(> table.grid.dg-soft) > table.grid.dg-soft { border: none !important; width: 100%; margin: 0; }
+/* ── Filter bars: white card like the Attendance reports (not a blue panel) ── */
+.acc-app .toolbar, .acc-app .pdc-bar { background: #fff; border: 1px solid #dedede; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.acc-app .card .toolbar { border: none; border-bottom: 1px solid #dedede; box-shadow: none; border-radius: 8px 8px 0 0; }
+
+/* Compact in-row controls so every Accounts grid row is the same height as a Products / Staff Detail row
+   (Rename / Delete links and the Dealer Rate inputs used to make their rows ~4px taller). */
+.acc-app .grid.dg-soft td button.link, .acc-app .grid.dg-soft td button.btn-sm { padding: 0 6px; font-size: 12.5px; line-height: 1.5; min-height: 0; height: auto; border: 0; }
+.acc-app .grid.dg-soft td button.btn-sm { border: 1px solid transparent; padding: 1px 10px; }
+.acc-app .grid.dg-soft td input, .acc-app .grid.dg-soft td select { height: 24px; padding: 0 6px; font-size: 12.5px; box-sizing: border-box; }
+
+/* Products module (Products Detail, Product Category, Sub Category, Dealer Rate Setting): search box and filter
+   drop-downs match Staff Detail's search box (28px high, 1px #dedede, 6px radius, blue magnifier, blue focus ring). */
+.acc-app .products-page .dg-search {
+  width: 200px; min-width: 0; height: 28px; box-sizing: border-box; padding: 0 10px 0 30px; font-size: 12px;
+  border: 1px solid #dedede; border-radius: 6px; background: #fff no-repeat 9px center / 14px 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230078D4' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");
+}
+.acc-app .products-page .dg-search::placeholder { color: #9ca3af; }
+.acc-app .products-page .dg-search:focus { border-color: #1a56db; box-shadow: 0 0 0 2px rgba(26,86,219,.1); outline: none; }
+.acc-app .products-page .page-head select { height: 28px; font-size: 12px; padding: 0 6px; width: auto; min-width: 0; max-width: 170px; border: 1px solid #dedede; border-radius: 6px; }
+.acc-app .products-page .page-head button { height: 28px; font-size: 12px; padding: 0 12px; }

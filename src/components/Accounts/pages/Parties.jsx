@@ -1,0 +1,267 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useGrid } from '../components/DataGrid';
+import { useNavigate } from '../lib/router';
+import { useApp } from '../context';
+import { api, fmtBal, fmtMoney, waLink } from '../lib/api';
+import { useShortcuts } from '../lib/keys';
+import { Amount, Kbd, LastSaved } from '../components/inputs';
+import ContextMenu from '../components/ContextMenu';
+import { fmtDate } from '../lib/dates';
+
+const LEVELS = [['mrp', 'Retail (MRP)'], ['dealer', 'Dealer'], ['partner', 'Partner']];
+const blankContact = () => ({ name: '', post: '', dept: '', mobile1: '', mobile2: '', email: '', remarks: '' });
+
+/** Customers = Sundry Debtors, Suppliers = Sundry Creditors. Same grid and full-width form as the Sales Invoice screens. */
+export default function Parties({ type }) {
+  const { reload, notify, fy, today, canEdit } = useApp();
+  const nav = useNavigate();
+  const isCus = type === 'customer';
+  const word = isCus ? 'Customer' : 'Supplier';
+  const otherWord = isCus ? 'Supplier' : 'Customer';
+  const [rows, setRows] = useState([]);
+  const [q, setQ] = useState('');
+  const [onlyDue, setOnlyDue] = useState(false);
+  const [edit, setEdit] = useState(null);
+  const [menu, setMenu] = useState(null);
+  const [picked, setPicked] = useState(new Set());
+
+  const load = () => api.get('/parties', { type, include_inactive: true }).then(setRows);
+  useEffect(() => { load(); setEdit(null); setCur(null); }, [type]);
+
+  const shown = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return rows.filter((r) => (!s || `${r.name} ${r.pan || ''} ${r.phone || ''} ${r.whatsapp || ''} ${r.address || ''} ${r.main_contact || ''}`.toLowerCase().includes(s))
+      && (!onlyDue || Math.abs(r.balance) > 0.005));
+  }, [rows, q, onlyDue]);
+  const total = shown.reduce((s, r) => s + r.balance, 0);
+  const colCount = isCus ? 13 : 12;
+  // standard grid: current row, ticks, ↑ / ↓ / Enter, blank rows + details box down to the screen bottom
+  const g = useGrid({ rows: shown, onOpen: (r) => (canEdit ? open(r) : ledger(r)) });
+  const { gridRef, cur, setCur, curRow, sel, setSel, remH } = g;
+  const ledger = (r) => nav(`/ledger?account=${r.id}&from=${fy.start_date}&to=${today}`);
+
+  const open = async (r) => {
+    if (r) {
+      const full = await api.get(`/parties/${r.id}`);
+      const ob = Number(full.opening_balance);
+      setEdit({ ...full, amount: Math.abs(ob) || '', side: ob < 0 ? 'pay' : 'take', active: !!full.active, also_other_role: !!full.linked_party_id,
+        contacts: full.contacts.length ? full.contacts : [blankContact()] });
+    } else {
+      setEdit({ party_type: type, name: '', amount: '', side: isCus ? 'take' : 'pay', price_level: 'mrp', credit_limit: '', credit_days: '',
+        active: true, also_other_role: false, contacts: [blankContact()] });
+    }
+    setPicked(new Set());
+  };
+  const set = (k) => (e) => setEdit({ ...edit, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  // phone boxes take digits (and + - / space) only, so letters can't sneak in
+  const setPhone = (k) => (e) => setEdit({ ...edit, [k]: e.target.value.replace(/[^\d+\-/\s]/g, '') });
+  const badPhone = (v) => !!v && /[^\d+\-/\s]/.test(v);   // an older saved value with letters in it
+  // after a failed save, jump to the box the message is about
+  const FIELD_OF = [['WhatsApp Mobile No.', 'whatsapp'], ['Mobile No.', 'phone'], ['Office Phone', 'office_phone'], ['Transport Phone', 'transport_phone'],
+    ['Email', 'email'], ['PAN', 'pan'], ['Another', 'pan'], ['Name is required', 'name'], ['A ledger with this name', 'name'], ['The ', 'also_other_role']];
+  const focusBad = (msg) => {
+    const hit = FIELD_OF.find(([label]) => msg.startsWith(label) || msg.includes(`${label} `));
+    const el = hit && document.querySelector(`.party-full [name="${hit[1]}"]`);
+    if (el) { el.focus(); el.select?.(); el.classList.add('bad-field'); setTimeout(() => el.classList.remove('bad-field'), 4000); }
+  };
+  const setC = (i, k, v) => setEdit({ ...edit, contacts: edit.contacts.map((c, j) => (j === i ? { ...c, [k]: v } : c)) });
+
+  const remove = async (p = edit) => {
+    if (!p?.id || !confirm(`Delete "${p.name}"?\nOnly possible if there are no transactions.`)) return;
+    try { await api.del(`/parties/${p.id}`); setEdit(null); await load(); await reload(); notify('Deleted'); }
+    catch (err) { notify(err.message, 'err'); }
+  };
+  const save = async (e) => {
+    e?.preventDefault();
+    if (!edit) return;
+    const amt = Number(edit.amount || 0);
+    const body = { ...edit, party_type: type, also_other_role: !!edit.also_other_role, opening_balance: edit.side === 'pay' ? -amt : amt,
+      credit_limit: Number(edit.credit_limit || 0), credit_days: Number(edit.credit_days || 0),
+      contacts: edit.contacts.filter((c) => Object.values(c).some((v) => String(v || '').trim())) };
+    try {
+      if (edit.id) await api.put(`/parties/${edit.id}`, body); else await api.post('/parties', body);
+      setEdit(null); await load(); await reload(); notify(`${word} saved`);
+    } catch (err) { notify(err.message, 'err'); focusBad(err.message); }
+  };
+  useShortcuts({ save: () => save(), close: () => setEdit(null), del: () => remove() }, !!edit);
+
+  const rowMenu = (e, r) => {
+    e.preventDefault(); e.stopPropagation();
+    if (r) setCur(r.id);
+    setMenu({ x: e.clientX, y: e.clientY, title: r ? r.name : (isCus ? 'Customers' : 'Suppliers'), items: [
+      canEdit && { icon: '➕', label: `Add ${word.toLowerCase()}`, onClick: () => open(null) },
+      r && canEdit && { icon: '✏️', label: `Edit ${word.toLowerCase()}`, onClick: () => open(r) },
+      r && { icon: '📄', label: 'Ledger statement', onClick: () => ledger(r) },
+      r && r.linked_party_id && { icon: '🔗', label: `${otherWord} ledger (same party)`, onClick: () => nav(`/ledger?account=${r.linked_party_id}&from=${fy.start_date}&to=${today}`) },
+      r && canEdit && (isCus ? { icon: '📥', label: 'Receive payment', onClick: () => nav('/entry/receipt') } : { icon: '📤', label: 'Make payment', onClick: () => nav('/entry/supplier_payment') }),
+      r && (r.whatsapp || r.phone) && { icon: '🟢', label: 'WhatsApp', onClick: () => window.open(waLink(r.whatsapp || r.phone, `Namaste ${r.name},`), '_blank', 'noopener') },
+      r && canEdit && 'divider',
+      r && canEdit && { icon: '🗑', label: 'Delete', danger: true, onClick: () => remove(r) },
+    ] });
+  };
+
+  return (
+    <>
+      <header className="page-head">
+        <h1>{isCus ? 'Customers' : 'Suppliers'}</h1>
+        <span className="muted">{isCus ? 'Sundry Debtors' : 'Sundry Creditors'}</span>
+        <span className="spacer" />
+        <button className="edit-only" data-new title="F1 / Alt+N" onClick={() => open(null)}>＋ New {word.toLowerCase()} <kbd className="kbd">F1</kbd></button>
+      </header>
+      <div className="pdc-bar">
+        <span className="tb-search"><input data-find title="Ctrl+F" value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 Search name, PAN, phone, address, contact…" />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
+        <label className="check small"><input type="checkbox" checked={onlyDue} onChange={(e) => setOnlyDue(e.target.checked)} /> Only with balance</label>
+        <span className="spacer" />
+        <span className="muted small">{shown.length} of {rows.length}</span>
+      </div>
+      <section className="card">
+        <table ref={gridRef} className="grid dg-soft" onContextMenu={(e) => rowMenu(e, null)}>
+          <thead><tr>
+            <th className="sel"><input type="checkbox" title="Select all" checked={shown.length > 0 && shown.every((r) => sel.has(r.id))}
+              onChange={(e) => setSel(e.target.checked ? new Set(shown.map((r) => r.id)) : new Set())} /></th>
+            <th className="sn">SN</th><th>Name</th><th>PAN</th><th>Office Phone</th><th>WhatsApp</th><th>Contact Person</th><th>Address</th>
+            {isCus && <th>Type</th>}<th className="num">Credit</th><th className="nowrap">Last Txn</th><th className="num">Balance</th><th className="nowrap">Updated By</th>
+          </tr></thead>
+          <tbody>
+            {shown.length === 0 && <tr><td colSpan={colCount} className="muted">No {isCus ? 'customers' : 'suppliers'} found.{canEdit && <> Press <kbd className="kbd">F1</kbd> to add a new {word.toLowerCase()} (or right-click).</>}</td></tr>}
+            {shown.map((r, idx) => {
+              const over = isCus && r.credit_limit > 0 && r.balance > r.credit_limit;
+              return (
+                <tr key={r.id} data-id={r.id} className={`clickable ${r.active ? '' : 'inactive-row'} ${cur === r.id ? 'current' : ''} ${sel.has(r.id) ? 'selected' : ''}`}
+                  onClick={() => setCur(r.id)} onDoubleClick={() => (canEdit ? open(r) : ledger(r))} onContextMenu={(e) => rowMenu(e, r)}>
+                  <td className="sel" onDoubleClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)}
+                    onChange={() => setSel((s) => { const n = new Set(s); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} /></td>
+                  <td className="sn">{idx + 1}</td>
+                  <td className="pname">{r.name}{!r.active && <span className="tag">inactive</span>}{r.linked_party_id && <span className="tag" title={`Also a ${otherWord.toLowerCase()} — ${isCus ? 'payable' : 'receivable'} ${fmtBal(r.linked_balance)}`}>also {otherWord.toLowerCase()}</span>}</td>
+                  <td>{r.pan}</td><td className="nowrap">{r.office_phone}</td>
+                  <td className="nowrap">{(r.whatsapp || r.phone) && <a href={waLink(r.whatsapp || r.phone, `Namaste ${r.name},`)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{r.whatsapp || r.phone}</a>}</td>
+                  <td>{r.main_contact}{r.contact_count > 1 && <span className="tag">+{r.contact_count - 1}</span>}</td>
+                  <td>{r.address}</td>
+                  {isCus && <td>{LEVELS.find((l) => l[0] === r.price_level)?.[1]}</td>}
+                  <td className="num">{r.credit_days ? `${r.credit_days} d` : ''}{r.credit_limit ? ` · ${fmtMoney(r.credit_limit)}` : ''}</td>
+                  <td className="nowrap">{r.last_date ? fmtDate(r.last_date) : ''}</td>
+                  <td className={`num b ${over ? 'neg' : ''}`}>{fmtBal(r.balance)}{over && <span className="tag">over limit</span>}</td>
+                  <td className="nowrap">{r.saved_by_name || r.updated_by || r.created_by}</td>
+                </tr>
+              );
+            })}
+            {g.blankRows(colCount)}
+            <tr className="remarks-row"><td colSpan={colCount} style={{ height: remH }}>
+              {curRow ? (
+                <div className="rm-grid">
+                  <div><b>{curRow.name}</b>
+                    {curRow.address && <> · {curRow.address}</>}{curRow.pan && <> · PAN {curRow.pan}</>}</div>
+                  {curRow.transport_name && <div className="rm-pay"><b>🚚 Transport:</b> {[curRow.transport_name, curRow.transport_phone, curRow.transport_address].filter(Boolean).join(' · ')}</div>}
+                  <div className="rm-pay"><b>Contact:</b> {[curRow.phone && `Mobile ${curRow.phone}`, curRow.whatsapp && `WhatsApp ${curRow.whatsapp}`,
+                    curRow.office_phone && `Office ${curRow.office_phone}`, curRow.email, curRow.main_contact && `Person ${curRow.main_contact}`].filter(Boolean).join(' · ') || '—'}</div>
+                  <div className="rm-pay"><b>Account:</b> Balance {fmtBal(curRow.balance)}
+                    {curRow.credit_days ? ` · Credit ${curRow.credit_days} days` : ''}{curRow.credit_limit ? ` · Limit Rs.${fmtMoney(curRow.credit_limit)}` : ''}
+                    {curRow.last_date ? ` · Last transaction ${fmtDate(curRow.last_date)}` : ''}</div>
+                  {curRow.linked_party_id && <div className="rm-pay"><b>🔗 Also a {otherWord.toLowerCase()}:</b> {isCus ? 'payable' : 'receivable'} {fmtBal(curRow.linked_balance)} · Net position {fmtBal(Number(curRow.balance) + Number(curRow.linked_balance))}</div>}
+                </div>
+              ) : <span className="muted">Click a {word.toLowerCase()} to see their details.</span>}
+            </td></tr>
+          </tbody>
+          <tfoot><tr><th colSpan={isCus ? 11 : 10} className="num">Total {isCus ? 'to take' : 'to pay'} ({shown.length})</th>
+            <th className="num">{fmtBal(total)}</th><th /></tr></tfoot>
+        </table>
+      </section>
+      {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
+
+      {edit && (
+        <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setEdit(null)}>
+          <form className="card party-full" onSubmit={save} autoComplete="off">
+            <div className="pf-title">
+              <h2>{edit.id ? `✏️ Edit ${word}` : `➕ New ${word}`}</h2>
+              {edit.id && <span className="dt-no">{edit.code}</span>}
+              {edit.id && !edit.active && <span className="tag">inactive</span>}
+            </div>
+
+            <div className="doc-form pf-top">
+              <label>{word} / Company Name *<input autoFocus name="name" autoComplete="nope" value={edit.name} onChange={set('name')} required /></label>
+              <label>PAN / VAT No.<input name="pan" autoComplete="nope" value={edit.pan || ''} onChange={(e) => setEdit({ ...edit, pan: e.target.value.replace(/\D/g, '') })} maxLength={9} inputMode="numeric" placeholder="9 digits" /></label>
+              {isCus ? (
+                <label>Type (default price)
+                  <select value={edit.price_level} onChange={set('price_level')}>{LEVELS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+                </label>
+              ) : <label>Company Email<input name="email" autoComplete="nope" data-nocap value={edit.email || ''} onChange={set('email')} placeholder="info@company.com" /></label>}
+              {isCus && <label>Company Email<input name="email" autoComplete="nope" data-nocap value={edit.email || ''} onChange={set('email')} placeholder="info@company.com" /></label>}
+              <label>Office Phone<input name="office_phone" autoComplete="nope" inputMode="tel" className={badPhone(edit.office_phone) ? 'bad-field' : ''} value={edit.office_phone || ''} onChange={setPhone('office_phone')} placeholder="01-4xxxxxx" /></label>
+              <label>Mobile No.<input name="phone" autoComplete="nope" inputMode="tel" className={badPhone(edit.phone) ? 'bad-field' : ''}
+                value={edit.phone || ''} onChange={setPhone('phone')} placeholder="98XXXXXXXX" />
+                {badPhone(edit.phone) && <small className="neg">“{edit.phone}” is not a phone number — type the number or clear it.</small>}</label>
+              <label>WhatsApp Mobile No.<input name="whatsapp" autoComplete="nope" inputMode="tel" className={badPhone(edit.whatsapp) ? 'bad-field' : ''} value={edit.whatsapp || ''} onChange={setPhone('whatsapp')} placeholder="Bills & reminders go here" /></label>
+              <label className={isCus ? '' : 'pf-wide'}>Address<input name="address" autoComplete="nope" value={edit.address || ''} onChange={set('address')} placeholder="Registered address" /></label>
+            </div>
+
+            <div className="doc-form pf-both">
+              <label className="check"><input type="checkbox" name="also_other_role" checked={!!edit.also_other_role} onChange={set('also_other_role')} />
+                {' '}Also a <b>{otherWord.toLowerCase()}</b> — this business {isCus ? 'sells to us as well' : 'buys from us as well'}.
+                {' '}<span className="muted small">It gets a second ledger ({isCus ? 'payable' : 'receivable'}) with the same name, PAN and contacts; credit and balances stay separate.</span></label>
+            </div>
+
+            <div className="doc-form pay-row pf-acc">
+              <label>Opening Balance
+                <select value={edit.side} onChange={(e) => setEdit({ ...edit, side: e.target.value })}>
+                  <option value="take">Need to take payment from them (Dr)</option>
+                  <option value="pay">Need to make payment to them (Cr)</option>
+                </select>
+              </label>
+              <label>Amount (Rs) at start of books<Amount type="number" step="0.01" min="0" autoComplete="nope" value={edit.amount} onChange={set('amount')} placeholder="0.00" /></label>
+              <label>Credit Period (days)<input type="number" min="0" autoComplete="nope" value={edit.credit_days} onChange={set('credit_days')} placeholder="e.g. 30" /></label>
+              <label>Credit Limit (Rs)<Amount type="number" min="0" autoComplete="nope" value={edit.credit_limit} onChange={set('credit_limit')} placeholder="0 = no limit" /></label>
+              {edit.id && <label className="check"><input type="checkbox" checked={edit.active} onChange={set('active')} /> Active</label>}
+            </div>
+
+            <div className="section-label">🚚 RECOMMENDED TRANSPORT</div>
+            <div className="doc-form pf-trans">
+              <label>Transport Name<input name="transport_name" autoComplete="nope" value={edit.transport_name || ''} onChange={set('transport_name')} placeholder="e.g. Sajha Yatayat Cargo" /></label>
+              <label>Phone<input name="transport_phone" autoComplete="nope" inputMode="tel" value={edit.transport_phone || ''} onChange={setPhone('transport_phone')} placeholder="Transport office phone" /></label>
+              <label>Address<input name="transport_address" autoComplete="nope" value={edit.transport_address || ''} onChange={set('transport_address')} placeholder="Branch / pick-up address" /></label>
+            </div>
+
+            <div className="pf-contacts-head">
+              <span className="section-label">CONTACT PERSONS <span className="tag">{edit.contacts.filter((c) => c.name).length}</span></span>
+              <span className="spacer" />
+              {picked.size > 0 && <button type="button" className="ghost btn-sm" onClick={() => { setEdit({ ...edit, contacts: edit.contacts.filter((_, i) => !picked.has(i)) }); setPicked(new Set()); }}>Remove selected ({picked.size})</button>}
+              <button type="button" className="ghost add-line" tabIndex={-1} onClick={() => setEdit({ ...edit, contacts: [...edit.contacts, blankContact()] })}>＋ Add Contact</button>
+            </div>
+            <table className="grid entry bill-grid pf-contacts">
+              <thead><tr><th className="sn"><input type="checkbox" tabIndex={-1} checked={picked.size > 0 && picked.size === edit.contacts.length}
+                onChange={(e) => setPicked(e.target.checked ? new Set(edit.contacts.map((_, i) => i)) : new Set())} /></th>
+                <th className="sn">SN</th><th>NAME</th><th>POST</th><th>DEPT</th><th>MOBILE 1</th><th>MOBILE 2</th><th>EMAIL</th><th>REMARKS</th><th style={{ width: 30 }} /></tr></thead>
+              <tbody>{edit.contacts.map((c, i) => (
+                <tr key={i}>
+                  <td className="sn"><input type="checkbox" tabIndex={-1} checked={picked.has(i)} onChange={() => setPicked((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; })} /></td>
+                  <td className="sn">{i + 1}</td>
+                  <td><input value={c.name} placeholder="Full name" onChange={(e) => {
+                    const contacts = edit.contacts.map((x, j) => (j === i ? { ...x, name: e.target.value } : x));
+                    if (i === contacts.length - 1 && e.target.value) contacts.push(blankContact());
+                    setEdit({ ...edit, contacts });
+                  }} /></td>
+                  <td><input value={c.post || ''} onChange={(e) => setC(i, 'post', e.target.value)} /></td>
+                  <td><input value={c.dept || ''} onChange={(e) => setC(i, 'dept', e.target.value)} /></td>
+                  <td><input autoComplete="nope" inputMode="tel" value={c.mobile1 || ''} onChange={(e) => setC(i, 'mobile1', e.target.value.replace(/[^\d+\-/\s]/g, ''))} /></td>
+                  <td><input autoComplete="nope" inputMode="tel" value={c.mobile2 || ''} onChange={(e) => setC(i, 'mobile2', e.target.value.replace(/[^\d+\-/\s]/g, ''))} /></td>
+                  <td><input data-nocap autoComplete="nope" value={c.email || ''} onChange={(e) => setC(i, 'email', e.target.value)} /></td>
+                  <td><input autoComplete="nope" value={c.remarks || ''} placeholder="e.g. call after 2 pm" onChange={(e) => setC(i, 'remarks', e.target.value)} /></td>
+                  <td>{edit.contacts.length > 1 && <button type="button" className="link del-x" tabIndex={-1} onClick={() => setEdit({ ...edit, contacts: edit.contacts.filter((_, j) => j !== i) })}>✕</button>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+
+            <LastSaved row={edit} />
+            <div className="actions pf-actions">
+              {edit.id && <button type="button" className="ghost" onClick={() => { setEdit(null); ledger(edit); }}>📄 Ledger</button>}
+              {edit.id && <button type="button" className="danger edit-only" onClick={() => remove()}>Delete <kbd className="kbd">Ctrl+Del</kbd></button>}
+              <span className="spacer" />
+              <button type="button" className="ghost" onClick={() => setEdit(null)}>Cancel <Kbd>Esc</Kbd></button>
+              <button data-save>{edit.id ? 'Update' : 'Save'} {word.toLowerCase()} <Kbd>Ctrl+S</Kbd></button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
