@@ -1,3 +1,20 @@
+﻿/* â•â•â• Grid look â€” the single source of truth for every grid in eHajiri (Staff, Attendance â€¦ and Accounts) â•â•â•
+   Change a value here and all of them follow. Header, SN and tick-box columns share one colour. */
+:root {
+  --dg-head-bg: #efefef;      /* header row, and the SN + tick-box columns */
+  --dg-head-text: #374151;
+  --dg-line: #dedede;
+  --dg-stripe: #f8f8f8;       /* even-row stripe â€” neutral grey (matches the approved screenshot) */
+  --dg-hover: #e3edf9;        /* hovered row â€” a touch darker than the stripe so hover stays visible on striped rows */
+  --dg-selected: #dbeafe;     /* selected / current row (and bold text) */
+  --dg-text: #1f2937;
+  --dg-font: 12.5px;
+  --dg-pad: 3px 8px;
+  --dg-row-pad: 5px 8px;      /* one data-row height everywhere (= a Staff Detail row, about 30px); also Accounts rows and blank filler rows */
+  --dg-head-pad: 4px 8px;
+  --dg-lh: 1.5;
+}
+
 /* ===== DataGrid ===== */
 .dg-container {
   background: #fff;
@@ -61,7 +78,7 @@
 }
 .dg-search-clear:hover { color: #374151; }
 
-/* Filter button — violet so it stands apart from the other toolbar actions */
+/* Filter button â€” violet so it stands apart from the other toolbar actions */
 .dg-filter-btn {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 10px; height: 32px;
@@ -110,7 +127,7 @@
   overscroll-behavior: contain;
 }
 
-/* Opt-in fixed-height wrapper — e.g. side-by-side grids (like the dual-panel
+/* Opt-in fixed-height wrapper â€” e.g. side-by-side grids (like the dual-panel
    "Add Personnel" picker) that should stay the same height regardless of how
    many rows either side currently has. Wrap a DataGrid in
    <div className="dg-fixed-height" style={{ height }}> to use it. */
@@ -126,7 +143,7 @@
   min-width: 600px;
 }
 /* auto-width: columns shrink/grow to content. width:auto (not the base
-   rule's 100%) matters specifically for grids with few/narrow columns —
+   rule's 100%) matters specifically for grids with few/narrow columns â€”
    a width:100% table with room to spare redistributes that leftover space
    proportionally across every column regardless of their own width/
    max-width (even !important ones can't stop it), which is what puffs up
@@ -138,7 +155,7 @@
 
 /* Scoped opt-in (via the className prop) for a wide, many-column table that
    should never grow past its container, matching the per-column `width`
-   hints already on its columns — the default (neither auto-width nor this)
+   hints already on its columns â€” the default (neither auto-width nor this)
    mode leaves table-layout at the browser's own default (auto), which lets
    a table with enough unconstrained columns render WIDER than width:100%
    and overflow the page instead of respecting it, needing a horizontal
@@ -151,27 +168,27 @@
 .zk-biometric-grid .dg-td { overflow: hidden; text-overflow: ellipsis; }
 
 /* .compact used to set its own (larger) th/td/action-btn sizing here, but
-   that's now just what .dg-th/.dg-td default to app-wide — nothing left
+   that's now just what .dg-th/.dg-td default to app-wide â€” nothing left
    to override. The className stays on existing call sites harmlessly. */
 
-/* ── Ultra-compact — roughly half the row height of .compact, for dense
-   tables like command/log history where many rows need to fit at once ── */
+/* â”€â”€ Ultra-compact â€” roughly half the row height of .compact, for dense
+   tables like command/log history where many rows need to fit at once â”€â”€ */
 .dg-table.ultra-compact .dg-th { padding: 2px 8px; font-size: 12px; }
 .dg-table.ultra-compact .dg-td { padding: 1px 8px; font-size: 12px; line-height: 1.3; }
 .dg-table.ultra-compact .dg-action-btn { width: 20px; height: 18px; font-size: 11px; }
 .dg-table.ultra-compact td.dg-checkbox-col,
 .dg-table.ultra-compact td.dg-sn-col { font-size: 12px; }
 
-/* ── Header row ── */
+/* â”€â”€ Header row â”€â”€ */
 .dg-header-row { position: sticky; top: 0; z-index: 2; }
 .dg-th {
-  background: #efefef;
-  border-bottom: 2px solid #dedede;
-  border-right: 1px solid #dedede;
-  padding: 4px 8px;
-  font-size: 12.5px;
+  background: var(--dg-head-bg);
+  border-bottom: 2px solid var(--dg-line);
+  border-right: 1px solid var(--dg-line);
+  padding: var(--dg-head-pad);
+  font-size: var(--dg-font);
   font-weight: 700;
-  color: #374151;
+  color: var(--dg-head-text);
   white-space: nowrap;
   user-select: none;
   position: relative;
@@ -184,16 +201,16 @@
 .dg-sort-icon { font-size: 10px; opacity: .7; }
 .dg-sort-both { opacity: .4; }
 
-/* ── Checkbox column — narrow, lighter shade ── */
+/* â”€â”€ Checkbox column â€” narrow, lighter shade â”€â”€ */
 .dg-checkbox-col { width: 20px; min-width: 20px; max-width: 20px; text-align: center; padding: 4px 2px !important; }
 
-/* ── SN column — compact width (force even in auto-layout tables) ── */
+/* â”€â”€ SN column â€” compact width (force even in auto-layout tables) â”€â”€ */
 .dg-sn-col { text-align: center; width: 32px !important; min-width: 28px !important; max-width: 36px !important; padding: 4px 2px !important; }
 
-/* SN and checkbox cells in body rows — light #efefef background */
+/* SN and checkbox cells in body rows â€” light #efefef background */
 td.dg-checkbox-col,
 td.dg-sn-col {
-  background: #f5f6f8 !important;
+  background: var(--dg-head-bg) !important;
   border-right: 1px solid #dedede;
   color: #6b7280;
   font-size: 12.5px;
@@ -202,7 +219,7 @@ td.dg-sn-col {
 /* Header checkbox + SN cells also #efefef */
 th.dg-checkbox-col,
 th.dg-sn-col {
-  background: #efefef !important;
+  background: var(--dg-head-bg) !important;
 }
 
 .dg-checkbox { width: 14px; height: 14px; accent-color: #1a56db; cursor: pointer; }
@@ -220,7 +237,7 @@ th.dg-sn-col {
 }
 .dg-filter-input:focus { outline: none; border-color: #1a56db; }
 
-/* ── Body rows — white background, #dedede borders ── */
+/* â”€â”€ Body rows â€” white background, #dedede borders â”€â”€ */
 .dg-td {
   padding: 3px 8px;
   border-bottom: 1px solid #dedede;
@@ -243,26 +260,23 @@ th.dg-sn-col {
 
 /* Row states */
 .dg-row { transition: background .1s; }
-.dg-table.striped .dg-row:nth-child(even) .dg-td { background: #f8f9fc; }
-.dg-row:hover .dg-td { background: #eff3fa !important; }
-.dg-row.selected .dg-td { background: #dbeafe !important; }
+.dg-table.striped .dg-row:nth-child(even) .dg-td { background: var(--dg-stripe); }
+.dg-row:hover .dg-td { background: var(--dg-hover) !important; }
+.dg-row.selected .dg-td { background: var(--dg-selected) !important; font-weight: 700; }
 .dg-row.selected td.dg-checkbox-col,
-.dg-row.selected td.dg-sn-col { background: #c7d9f5 !important; }
+.dg-row.selected td.dg-sn-col { background: var(--dg-selected) !important; }
 .dg-row:hover td.dg-checkbox-col,
-.dg-row:hover td.dg-sn-col { background: #e8ecf3 !important; }
+.dg-row:hover td.dg-sn-col { background: var(--dg-head-bg) !important; }
 .dg-row.clickable { cursor: pointer; }
 .dg-row.clickable:hover .dg-first-col { color: #1a56db; }
 
-/* Keyboard-focused row (↑ ↓ navigation) — very subtle warm tint */
-.dg-row.kb-focus .dg-td { background: #fffef5 !important; outline: none; }
+/* Focused / current row (clicked, or moved to with â†‘ â†“) â€” the same blue as a selected row, in bold */
+.dg-row.kb-focus .dg-td { background: var(--dg-selected) !important; font-weight: 700; outline: none; }
 .dg-row.kb-focus td.dg-checkbox-col,
-.dg-row.kb-focus td.dg-sn-col { background: #fefdf0 !important; }
-.dg-row.kb-focus .dg-first-col { color: #b45309 !important; }
-/* left accent bar on focused row */
-.dg-row.kb-focus .dg-td:first-child { box-shadow: inset 3px 0 0 #fbbf24; }
+.dg-row.kb-focus td.dg-sn-col { background: var(--dg-selected) !important; }
 
-/* ── Grouped sections (groupBy prop) — merged full-width header bar per
-   section, same bg/border convention as a summary row elsewhere in the app ── */
+/* â”€â”€ Grouped sections (groupBy prop) â€” merged full-width header bar per
+   section, same bg/border convention as a summary row elsewhere in the app â”€â”€ */
 .dg-group-row td.dg-group-cell {
   background: transparent;
   border-top: 2px solid #e2e8f0;
@@ -293,37 +307,37 @@ th.dg-sn-col {
 .dg-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  background: #fff;
-  border-top: 1px solid #dedede;
+  justify-content: flex-end;   /* "1â€“6 / Total 6" sits on the right, next to the page navigation */
+  padding: 5px 12px;
+  background: #f6f6f6;          /* same neutral grey as the heading (#efefef), a shade lighter */
+  border-top: 1px solid #dedede; /* single line; the container supplies the outer border */
   flex-wrap: wrap;
   gap: 8px;
 }
-.dg-info { font-size: 14px; color: #6b7280; white-space: nowrap; }
-/* footerLeft opt-in layout (e.g. Task's selected-row preview strip) — Total/
+.dg-info { font-size: 12px; color: #6b7280; white-space: nowrap; }
+/* footerLeft opt-in layout (e.g. Task's selected-row preview strip) â€” Total/
    pagination info bundles together on the right instead of sitting alone
    on the left. */
 .dg-footer-left { flex: 1; min-width: 0; }
-.dg-footer-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-left: auto; }
-.dg-paging { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.dg-pagesize { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #6b7280; }
+.dg-footer-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-left: auto; }
+.dg-paging { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dg-pagesize { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #6b7280; }
 .dg-pagesize select {
-  padding: 3px 6px; border: 1px solid #dedede; border-radius: 4px;
-  font-size: 14px; background: #fff; cursor: pointer;
+  padding: 1px 4px; border: 1px solid #dedede; border-radius: 4px;
+  font-size: 12px; background: #fff; cursor: pointer;
 }
 .dg-page-btns { display: flex; align-items: center; gap: 2px; }
 .pg-btn {
-  min-width: 28px; height: 28px;
+  min-width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
   background: #fff; border: 1px solid #dedede; border-radius: 4px;
-  font-size: 14px; color: #374151; cursor: pointer;
-  transition: all .1s; padding: 0 5px;
+  font-size: 12px; color: #374151; cursor: pointer;
+  transition: all .1s; padding: 0 4px;
 }
 .pg-btn:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; }
 .pg-btn.active { background: #1a56db; border-color: #1a56db; color: #fff; font-weight: 600; }
 .pg-btn:disabled { opacity: .4; cursor: not-allowed; }
-.pg-ellipsis { color: #9ca3af; font-size: 14px; padding: 0 3px; }
+.pg-ellipsis { color: #9ca3af; font-size: 12px; padding: 0 2px; }
 
 /* Action buttons in cells */
 .dg-actions { display: flex; align-items: center; gap: 4px; }
@@ -352,16 +366,16 @@ th.dg-sn-col {
   padding: 0 3px; box-shadow: 0 0 0 1.5px #fff;
 }
 
-/* ── Right-click context menu ── */
+/* â”€â”€ Right-click context menu â”€â”€ */
 .dg-ctx-menu {
   position: fixed;
   z-index: 9999;
   background: #fff;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.08);
-  padding: 4px 0;
-  min-width: 160px;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.14), 0 2px 5px rgba(0,0,0,.08);
+  padding: 3px 0;
+  min-width: 140px;
   animation: ctxFadeIn .12s ease;
 }
 @keyframes ctxFadeIn {
@@ -371,13 +385,14 @@ th.dg-sn-col {
 .dg-ctx-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
-  padding: 8px 14px;
+  padding: 4px 11px;
   border: none;
   background: none;
   text-align: left;
-  font-size: 14px;
+  font-size: 12.5px;
+  line-height: 1.4;
   color: #374151;
   cursor: pointer;
   transition: background .1s;
@@ -385,10 +400,10 @@ th.dg-sn-col {
 .dg-ctx-item:hover { background: #f3f4f6; color: #111827; }
 .dg-ctx-item.danger { color: #dc2626; }
 .dg-ctx-item.danger:hover { background: #fef2f2; }
-.dg-ctx-icon { font-size: 14px; width: 18px; text-align: center; }
-.dg-ctx-divider { height: 1px; background: #e5e7eb; margin: 4px 0; }
+.dg-ctx-icon { font-size: 12px; width: 16px; text-align: center; }
+.dg-ctx-divider { height: 1px; background: #e5e7eb; margin: 3px 0; }
 
-/* ── Responsive ── */
+/* â”€â”€ Responsive â”€â”€ */
 @media (max-width: 768px) {
   /* Toolbar: stack search + buttons on mobile */
   .dg-toolbar { padding: 8px 12px; flex-direction: column; align-items: stretch; gap: 8px; }
@@ -417,3 +432,126 @@ th.dg-sn-col {
   .pg-btn { min-width: 32px; height: 32px; font-size: 13px; }
   .dg-filter-btn { font-size: 12px; }
 }
+
+/* fillToBottom: blank ruled rows that carry the grid down to the bottom of the screen (same look as the Accounts lists) */
+.dg-blank-row .dg-blank-td { background: #fff !important; padding: var(--dg-row-pad); }
+/* empty filler rows continue the same even-row stripe as the data rows above them (like the Staff grid) */
+.dg-table.striped .dg-blank-row:nth-child(even) .dg-blank-td { background: var(--dg-stripe) !important; }
+.dg-blank-row:hover .dg-blank-td { background: #fff !important; }
+/* checkbox + SN columns stay grey all the way down, like the data rows */
+.dg-blank-row .dg-blank-td.dg-blank-lead,
+.dg-table.striped .dg-blank-row:nth-child(even) .dg-blank-td.dg-blank-lead,
+.dg-blank-row:hover .dg-blank-td.dg-blank-lead { background: var(--dg-head-bg) !important; border-right: 1px solid #dedede; }
+
+/* â”€â”€ Remarks / details strip pinned under a fillToBottom grid (Staff Detail; same look as the Accounts lists) â”€â”€ */
+.dg-remarks-row td { background: #fff !important; border-top: 1px solid var(--dg-line); border-bottom: none; border-right: none; vertical-align: top; padding: 8px 12px; white-space: normal; font-size: var(--dg-font); color: var(--dg-text); }
+.dg-remarks-row:hover td { background: #fff !important; }
+.dg-remarks-inner { line-height: 1.55; }
+.dg-remarks-inner b { font-weight: 700; }
+.dg-remarks-inner .dg-muted { color: #9ca3af; }
+
+/* â”€â”€ Accounts grids (table.grid.dg-soft) follow exactly the same variables â”€â”€ */
+.acc-app table.grid.dg-soft { border: 1px solid var(--dg-line) !important; font-size: var(--dg-font); color: var(--dg-text); }
+.acc-app table.grid.dg-soft thead th { background: var(--dg-head-bg); color: var(--dg-head-text); font-size: var(--dg-font); font-weight: 700; line-height: var(--dg-lh); padding: var(--dg-head-pad); border-bottom: 2px solid var(--dg-line); border-right: 1px solid var(--dg-line); border-top: none; }
+.acc-app table.grid.dg-soft thead th:last-child { border-right: none; }
+.acc-app table.grid.dg-soft thead th.sortable:hover { background: #e4e4e4; }
+.acc-app table.grid.dg-soft tbody td { background: #fff; color: var(--dg-text); line-height: var(--dg-lh); padding: var(--dg-row-pad); border-bottom: 1px solid var(--dg-line); border-right: 1px solid var(--dg-line); }
+.acc-app table.grid.dg-soft tbody td:last-child { border-right: none; }
+.acc-app table.grid.dg-soft tbody tr:nth-child(even) td { background: var(--dg-stripe); }
+.acc-app table.grid.dg-soft tbody tr:hover td { background: var(--dg-hover) !important; }
+.acc-app table.grid.dg-soft tbody tr.selected td, .acc-app table.grid.dg-soft tbody tr.current td { background: var(--dg-selected) !important; color: var(--dg-text) !important; border-color: var(--dg-line); font-weight: 700; }
+.acc-app table.grid.dg-soft tbody tr.current td a, .acc-app table.grid.dg-soft tbody tr.selected td a { color: #1a56db !important; font-weight: 700; }
+.acc-app table.grid.dg-soft tbody td.sn, .acc-app table.grid.dg-soft tbody td.sel { background: var(--dg-head-bg) !important; color: #6b7280; }
+.acc-app table.grid.dg-soft tbody tr:hover td.sn, .acc-app table.grid.dg-soft tbody tr:hover td.sel { background: var(--dg-head-bg) !important; }
+.acc-app table.grid.dg-soft tbody tr.selected td.sn, .acc-app table.grid.dg-soft tbody tr.selected td.sel,
+.acc-app table.grid.dg-soft tbody tr.current td.sn, .acc-app table.grid.dg-soft tbody tr.current td.sel { background: var(--dg-selected) !important; color: var(--dg-text) !important; }
+.acc-app table.grid.dg-soft thead th.sn, .acc-app table.grid.dg-soft thead th.sel { background: var(--dg-head-bg) !important; color: var(--dg-head-text); }
+.acc-app table.grid.dg-soft tbody tr.blank td, .acc-app table.grid.dg-soft tbody tr.blank:hover td { background: #fff !important; }
+/* empty filler rows continue the even-row stripe (like the Staff grid) */
+.acc-app table.grid.dg-soft tbody tr.blank:nth-child(even) td, .acc-app table.grid.dg-soft tbody tr.blank:nth-child(even):hover td { background: var(--dg-stripe) !important; }
+.acc-app table.grid.dg-soft tbody tr.blank td.sn, .acc-app table.grid.dg-soft tbody tr.blank td.sel { background: var(--dg-head-bg) !important; }
+.acc-app table.grid.dg-soft tfoot th, .acc-app table.grid.dg-soft tfoot td { background: #f1f5f9; color: var(--dg-head-text); border-top: 2px solid #d1d5db; }
+
+/* fillToBottom grids size themselves to the screen (blank rows + remarks strip) â€” no 520px cap / inner scrollbar */
+.dg-container.dg-fill .dg-scroll-wrapper { flex: 1 1 0; min-height: 0; max-height: none; overflow-y: auto; }
+.dg-container.dg-fill { min-height: 300px; }
+.dg-container.dg-fill .dg-footer, .dg-container.dg-fill .dg-toolbar, .dg-container.dg-fill .dg-selection-bar { flex: none; }
+/* the last filler row ends exactly at the footer line â€” no second line (its bottom border + the footer's top border) */
+.dg-container.dg-fill:not(.dg-has-rest) .dg-blank-row:last-child .dg-blank-td { border-bottom: none; }   /* no leftover: the strip/footer border is the one closing line */
+.dg-container.dg-has-rest .dg-remarks-strip, .dg-container.dg-has-rest .dg-footer { border-top: none; }                  /* leftover band: the last blank row's own border is the closing line */
+.dg-remarks-strip { flex: none; background: #fff; border-top: 1px solid var(--dg-line); padding: 8px 12px; font-size: var(--dg-font); color: var(--dg-text); overflow: hidden; }
+
+/* a page whose grid fills the screen has no bottom padding, so the grid's border sits at the very bottom edge (no gap above the taskbar) */
+.page-container:has(.dg-container.dg-fill) { padding-bottom: 0; }
+
+/* The clicked / selected row keeps its blue in EVERY cell while the mouse is over it â€” hover never lightens part of it.
+   (Higher specificity than the plain hover rules, so nothing can outrank it.) */
+.dg-table .dg-row.kb-focus:hover .dg-td,
+.dg-table .dg-row.selected:hover .dg-td,
+.dg-table .dg-row.kb-focus:hover td.dg-checkbox-col,
+.dg-table .dg-row.kb-focus:hover td.dg-sn-col,
+.dg-table .dg-row.selected:hover td.dg-checkbox-col,
+.dg-table .dg-row.selected:hover td.dg-sn-col { background: var(--dg-selected) !important; }
+.acc-app table.grid.dg-soft tbody tr.current:hover td,
+.acc-app table.grid.dg-soft tbody tr.selected:hover td,
+.acc-app table.grid.dg-soft tbody tr.current:hover td.sn,
+.acc-app table.grid.dg-soft tbody tr.current:hover td.sel,
+.acc-app table.grid.dg-soft tbody tr.selected:hover td.sn,
+.acc-app table.grid.dg-soft tbody tr.selected:hover td.sel { background: var(--dg-selected) !important; }
+
+/* â”€â”€ Badges in grid cells: flat, like the Task Priority cell â€” no rounded capsule â”€â”€
+   A cell whose only content is a rounded status / type pill (Approved, Application, Manual, Admin â€¦) keeps its own
+   tint and text colour but becomes a flat full-width block: no curve, no border. (Staff ID chips, avatars and dots,
+   which are not pills, are left alone.) */
+.dg-td > span:only-child[style*="border-radius: 8px"],
+.dg-td > span:only-child[style*="border-radius: 9px"],
+.dg-td > span:only-child[style*="border-radius: 10px"],
+.dg-td > span:only-child[style*="border-radius: 11px"],
+.dg-td > span:only-child[style*="border-radius: 12px"],
+.dg-td > span:only-child[style*="border-radius: 13px"],
+.dg-td > span:only-child[style*="border-radius: 14px"],
+.dg-td > span:only-child[style*="border-radius: 15px"],
+.dg-td > span:only-child[style*="border-radius: 16px"],
+.dg-td > span:only-child[style*="border-radius: 17px"],
+.dg-td > span:only-child[style*="border-radius: 18px"],
+.dg-td > span:only-child[style*="border-radius: 20px"],
+.dg-td > span:only-child[style*="border-radius: 22px"],
+.dg-td > span:only-child[style*="border-radius: 24px"],
+.dg-td > span:only-child[style*="border-radius: 99px"],
+.dg-td > span:only-child[style*="border-radius: 100px"],
+.dg-td > span:only-child[style*="border-radius: 999px"],
+.dg-td > span:only-child[style*="border-radius: 9999px"] {
+  border-radius: 0 !important; border: none !important; box-shadow: none !important;
+  display: block !important; width: 100% !important; box-sizing: border-box; text-align: center;
+  padding: 2px 6px !important; font-size: var(--dg-font) !important;
+}
+/* the shared .badge label (used outside grids too): small corners instead of a capsule */
+/* (index.css .badge â€” overridden here so every grid and page that uses it follows the same rule) */
+.badge { border-radius: 3px !important; }
+.dg-td > .badge:only-child {
+  border-radius: 0 !important; border: none !important; display: flex !important; width: 100% !important; box-sizing: border-box;
+  justify-content: center; text-align: center; padding: 2px 6px !important; font-size: var(--dg-font) !important;
+}
+
+/* â”€â”€ Grid toolbar buttons (Advance Search, Edit, Delete, Excel, Print â€¦): one size, the same as the page action
+   buttons such as Manual Posting â€” 29px high, 12px text, 5px 12px padding â”€â”€ */
+.dg-container .dg-toolbar button:not(.dg-search-clear),
+.dg-container .dg-toolbar .btn {
+  box-sizing: border-box; height: 29px; padding: 5px 12px; font-size: 12px; line-height: 1.4;
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; white-space: nowrap;
+}
+.dg-container .dg-toolbar .dg-filter-btn svg { width: 13px; height: 13px; }
+
+.dg-ctx-item:disabled { opacity: .4; cursor: not-allowed; }
+
+/* â”€â”€ Settings grids (Official Setting, Leave, Office Visit, Public Holiday â€¦): small rows, not stretched to the screen bottom, SN column a shade darker â”€â”€ */
+.dg-container.dg-setting .dg-td { padding: 3px 8px; }
+.dg-container.dg-setting .dg-th { padding: 4px 8px; }
+.dg-container.dg-setting td.dg-sn-col, .dg-container.dg-setting td.dg-checkbox-col { background: #e5e7eb; }
+.dg-container.dg-setting .dg-row:hover td.dg-sn-col, .dg-container.dg-setting .dg-row:hover td.dg-checkbox-col { background: #dcdfe4 !important; }
+
+.dg-container.dg-fill .dg-fill-rest { flex: none; background: #fff; }
+
+/* All data grids: light SN / checkbox column, same look as the LicenseAdmin grid (stripe colour is --dg-stripe above) */
+.dg-container td.dg-sn-col, .dg-container td.dg-checkbox-col { background: #f3f4f6; }
+.dg-container .dg-row:hover td.dg-sn-col, .dg-container .dg-row:hover td.dg-checkbox-col { background: #e9ecf1 !important; }

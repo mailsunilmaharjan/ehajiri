@@ -1,0 +1,281 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+   eHajiri UI kit — the ONE place that decides how buttons, text boxes, drop-downs, labels, dialogs and
+   form headings look. Values were measured on Staff Detail / Attendance (the reference screens).
+   Change a value in :root and every page follows — eHajiri's own pages and the Accounts module, today's
+   and the ones added later. (Grids have their own single source: components/DataGrid/DataGrid.css.)
+
+   How a NEW page gets this look for free:
+     • use the normal classes — .btn / .btn-sm, .form-control, .form-label, .modal-header/.modal-body/
+       .modal-footer, .panel-head — they read the variables below;
+     • Accounts screens (inside .acc-app) are mapped to the same variables in the "Accounts mapping"
+       section at the bottom — a new Accounts page that uses .page-head / .toolbar / .actions / label /
+       input / select / .section-label / .modal > .card needs no CSS of its own.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* buttons */
+  --ui-btn-font: 13px;            /* dialog / form-footer buttons (≈34px high) */
+  --ui-btn-pad: 7px 16px;
+  --ui-btn-sm-font: 12px;         /* page-level buttons: page header, toolbars, grid toolbars (≈30px high) */
+  --ui-btn-sm-h: 30px;
+  --ui-btn-sm-pad: 5px 14px;
+  --ui-btn-weight: 500;
+  --ui-radius: 6px;
+
+  /* text boxes & drop-downs */
+  --ui-field-h: 38px;
+  --ui-field-font: 13px;
+  --ui-field-pad: 8px 12px;
+  --ui-field-border: #d1d5db;
+  --ui-field-bg: #ffffff;
+  --ui-field-text: #111827;
+  --ui-field-focus: #1a56db;
+  --ui-field-ring: 0 0 0 3px rgba(26, 86, 219, .1);
+  --ui-field-disabled-bg: #f3f4f6;
+  --ui-field-disabled-text: #6b7280;
+  --ui-placeholder: #9ca3af;
+
+  /* labels above fields */
+  --ui-label-font: 12px;
+  --ui-label-weight: 500;
+  --ui-label-color: #374151;
+
+  /* open drop-down list (Staff's SearchableSelect): hovered row, CURRENT selection row */
+  --ui-dd-border: #1a56db;
+  --ui-dd-radius: 8px;
+  --ui-dd-hover-bg: #eff6ff;
+  --ui-dd-hover-bar: #93c5fd;
+  --ui-dd-current-bg: #f8fafc;
+  --ui-dd-current-bar: #1a56db;
+  --ui-dd-current-weight: 600;
+  --ui-dd-line: #eef0f3;
+  --ui-dd-font: 13px;
+
+  /* dialogs / forms */
+  --ui-modal-radius: 12px;
+  --ui-modal-title-font: 17px;
+  --ui-modal-title-weight: 600;
+  --ui-modal-head-bg: #ffffff;
+  --ui-modal-body-bg: #f8fafc;
+  --ui-modal-foot-bg: #f9fafb;
+  --ui-modal-line: #e5e7eb;
+
+  --ui-textarea-min-h: 64px;     /* text areas (Remarks …) — same minimum height everywhere */
+  --ui-page-pad: 8px 14px 0;     /* page content padding (desktop) — small, so the data grid gets the room */
+  --ui-page-gap: 8px;            /* space between page title row / filter rows / banner and the grid */
+
+  /* tabs */
+  --ui-tab-font: 13px;
+  --ui-tab-text: #6b7280;
+  --ui-tab-active: #1a56db;
+
+  /* section headings inside forms ("PERSONAL INFORMATION" …) */
+  --ui-panel-head-bg: #f0f5fb;
+  --ui-panel-head-text: #4b6a8a;
+  --ui-panel-head-font: 11px;
+  --ui-panel-head-weight: 700;
+  --ui-panel-head-spacing: .6px;
+}
+
+/* ── eHajiri's own classes read the variables (same values as before, so nothing moves) ── */
+.btn { font-weight: var(--ui-btn-weight); }
+.btn-sm { font-size: var(--ui-btn-sm-font); }
+.form-control:focus { border-color: var(--ui-field-focus); box-shadow: var(--ui-field-ring); }
+.modal-header { background: var(--ui-modal-head-bg); border-bottom-color: var(--ui-modal-line); }
+.modal-header h2 { font-size: var(--ui-modal-title-font); font-weight: var(--ui-modal-title-weight); }
+.modal-body { background: var(--ui-modal-body-bg); }
+.modal-footer { background: var(--ui-modal-foot-bg); border-top-color: var(--ui-modal-line); }
+/* ── Flat buttons: no pill-shaped (fully round) buttons anywhere. Filter chips (All / Absent / Leave …), quick-filter pills and similar
+   buttons that set a big inline border-radius get the same corner as "Advance Search". Count badges (spans) and round icon buttons are not touched. ── */
+button[style*="border-radius: 18px"], button[style*="border-radius: 20px"], button[style*="border-radius: 22px"], button[style*="border-radius: 24px"],
+button[style*="border-radius: 100px"], button[style*="border-radius: 999px"], button[style*="border-radius: 9999px"], button[style*="border-radius: 50px"],
+a[style*="border-radius: 20px"], a[style*="border-radius: 999px"], a[style*="border-radius: 9999px"] {
+  border-radius: var(--ui-radius) !important;
+}
+
+/* ── Same field sizes everywhere (Attendance / Staff dialogs and Accounts): 38px boxes, one text-area height ── */
+select.form-control, input.form-control:not([type=checkbox]):not([type=radio]) { min-height: var(--ui-field-h); }
+/* ...but a box inside a grid cell (an editable cell value) stays compact */
+.dg-td .form-control, .dg-td select.form-control, .dg-td input.form-control { min-height: 0; }
+textarea.form-control { min-height: var(--ui-textarea-min-h); }
+body .acc-app textarea:not(table textarea) { min-height: var(--ui-textarea-min-h); }
+
+/* ── Compact page spacing for every page (desktop): less white space above and between the header rows and the grid ── */
+@media (min-width: 769px) {
+  .page-container { padding: var(--ui-page-pad); }
+  .page-header { margin-bottom: var(--ui-page-gap); }
+  .page-container > .dg-container, .page-container > .card { margin-top: 0; }
+  .dg-toolbar { padding: 6px 12px; }
+  /* a card that ends with a screen-fitting grid: the grid runs to the card's bottom edge (no empty band under it) */
+  .card:has(.dg-container.dg-fill) { padding-bottom: 0 !important; }
+  .card > .dg-container.dg-fill { margin-bottom: 0; }
+}
+
+/* section heading bar of a form panel (use on the first child of a bordered panel) */
+.panel-head {
+  padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--ui-panel-head-bg); color: var(--ui-panel-head-text);
+  font-size: var(--ui-panel-head-font); font-weight: var(--ui-panel-head-weight); letter-spacing: var(--ui-panel-head-spacing); text-transform: uppercase;
+}
+
+/* ═══════════════════════════════ Accounts mapping (.acc-app) ═══════════════════════════════════════════
+   The Accounts module has its own class names (written before it moved into eHajiri). They are mapped here
+   to the variables above — this is the only place that knows both. !important: accounts.css is loaded later. */
+body .acc-app { font-size: var(--ui-field-font) !important; }
+
+/* text boxes + drop-downs (cells inside grids keep their compact entry styling) */
+body .acc-app input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not(table input):not(.bsd input),
+body .acc-app select:not(table select) {
+  height: var(--ui-field-h) !important; padding: var(--ui-field-pad); font-size: var(--ui-field-font) !important; line-height: 1.5;
+  border: 1px solid var(--ui-field-border); border-radius: var(--ui-radius); background-color: var(--ui-field-bg); color: var(--ui-field-text);
+}
+body .acc-app textarea:not(table textarea) {
+  padding: var(--ui-field-pad); font-size: var(--ui-field-font) !important; line-height: 1.5;
+  border: 1px solid var(--ui-field-border); border-radius: var(--ui-radius); background-color: var(--ui-field-bg); color: var(--ui-field-text);
+}
+body .acc-app input:focus:not(table input), body .acc-app select:focus:not(table select), body .acc-app textarea:focus:not(table textarea) {
+  outline: none; border-color: var(--ui-field-focus); box-shadow: var(--ui-field-ring);
+}
+body .acc-app input:disabled:not(table input), body .acc-app select:disabled:not(table select), body .acc-app textarea:disabled:not(table textarea),
+body .acc-app input[readonly]:not(table input) {
+  background-color: var(--ui-field-disabled-bg); color: var(--ui-field-disabled-text); cursor: not-allowed;
+}
+body .acc-app ::placeholder { color: var(--ui-placeholder); opacity: 1; }
+body .acc-app select:not(table select) {
+  -webkit-appearance: none; appearance: none; cursor: pointer; padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important; background-position: right 12px center !important; background-size: 12px 8px !important;
+}
+body .acc-app .doc-form .bsd, body .acc-app .entry-card .bsd { min-height: var(--ui-field-h); }
+
+/* labels above fields */
+body .acc-app .form label:not(.check), body .acc-app label.block, body .acc-app .doc-form > label, body .acc-app .entry-card .doc-form > label, body .acc-app .modal label:not(.check):not(.chk) {
+  font-size: var(--ui-label-font) !important; font-weight: var(--ui-label-weight) !important; color: var(--ui-label-color) !important;
+  text-transform: none; letter-spacing: 0;
+}
+/* section headings inside a form (PRODUCT DETAILS, RECOMMENDED TRANSPORT, IN WORDS …) */
+body .acc-app .section-label, body .acc-app .form h3 {
+  font-size: var(--ui-panel-head-font) !important; font-weight: var(--ui-panel-head-weight) !important; letter-spacing: var(--ui-panel-head-spacing) !important;
+  color: var(--ui-panel-head-text) !important; text-transform: uppercase;
+}
+
+/* buttons — page level (page header, filter bars, grid toolbars, contact-table "Add") */
+body .acc-app .page-head :is(button, a.btn), body .acc-app .toolbar :is(button, a.btn), body .acc-app .pdc-bar :is(button, a.btn),
+body .acc-app .pf-contacts-head :is(button, a.btn), body .acc-app .dg-toolbar :is(button, a.btn) {
+  height: var(--ui-btn-sm-h); min-height: var(--ui-btn-sm-h); padding: var(--ui-btn-sm-pad) !important; font-size: var(--ui-btn-sm-font) !important;
+  font-weight: var(--ui-btn-weight); border-radius: var(--ui-radius); line-height: 1.4;
+}
+/* buttons — dialog / form footer (Save, Cancel …) */
+body .acc-app .actions :is(button, a.btn), body .acc-app .iv-actions :is(button, a.btn), body .acc-app .modal > .card .actions :is(button, a.btn) {
+  min-height: 34px; padding: var(--ui-btn-pad); font-size: var(--ui-btn-font) !important; font-weight: var(--ui-btn-weight); border-radius: var(--ui-radius);
+}
+body .acc-app .btn-sm, body .acc-app button.btn-sm { padding: 5px 10px !important; font-size: var(--ui-btn-sm-font) !important; }
+/* a button that sits beside a text box ("+ Add" next to Customer) is as tall as the box */
+body .acc-app .doc-form .inline > button, body .acc-app .doc-form.bill-top > button { height: var(--ui-field-h); }
+
+/* dialogs & form pages: white title strip, light body, grey footer — like Staff's Edit dialog */
+body .acc-app .modal > .card, body .acc-app .entry-card { background: var(--ui-modal-body-bg); border-radius: var(--ui-modal-radius); }
+body .acc-app .modal > .card.form > h2:first-child, body .acc-app .modal > .card > .pf-title:first-child, body .acc-app .modal > .card > h2:first-child {
+  background: var(--ui-modal-head-bg) !important; animation: none !important; border-bottom: 1px solid var(--ui-modal-line) !important;
+  font-size: var(--ui-modal-title-font) !important; font-weight: var(--ui-modal-title-weight) !important;
+}
+body .acc-app .modal > .card .actions { background: var(--ui-modal-foot-bg) !important; border-top-color: var(--ui-modal-line) !important; }
+body .acc-app .entry-card, body .acc-app .modal > .card { border-top: none !important; }
+
+/* tabs — eHajiri's simple underline tabs (the Leave & Office Visit look): grey text, blue text + blue underline on the current tab. Use  <div className="tabs"><button className="tab-btn active"> */
+body .acc-app .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin: 0 0 16px; flex-wrap: wrap; }
+body .acc-app .tab-btn {
+  padding: 10px 18px; font-size: var(--ui-tab-font); font-weight: 500; color: var(--ui-tab-text); background: transparent !important; border: none; border-bottom: 2px solid transparent;
+  border-radius: 0; margin-bottom: -2px; height: auto; min-height: 0; box-shadow: none; text-decoration: none;
+}
+body .acc-app .tab-btn:hover:not(:disabled) { color: var(--text-primary); background: transparent !important; text-decoration: none; }
+body .acc-app .tab-btn.active, body .acc-app .tab-btn.active:hover:not(:disabled) { color: var(--ui-tab-active); border-bottom-color: var(--ui-tab-active); cursor: default; }
+
+/* open drop-down lists (customer / product pickers, BS month list): same panel, hover row and CURRENT-selection row as Staff's drop-downs */
+body .acc-app .acsel-list, body .acc-app .bsd-list {
+  border: 1.5px solid var(--ui-dd-border) !important; border-radius: var(--ui-dd-radius) !important; background: #fff; font-size: var(--ui-dd-font) !important;
+  overflow: hidden;
+}
+body .acc-app .acsel-list li, body .acc-app .bsd-list li { border-bottom: 1px solid var(--ui-dd-line); border-left: 3px solid transparent; font-size: var(--ui-dd-font) !important; }
+body .acc-app .acsel-list li.hi, body .acc-app .acsel-list li:hover, body .acc-app .bsd-list li.hi, body .acc-app .bsd-list li:hover {
+  background: var(--ui-dd-hover-bg) !important; color: inherit !important; border-left-color: var(--ui-dd-hover-bar) !important;
+}
+body .acc-app .acsel-list li.cur, body .acc-app .bsd-list li.cur {
+  background: var(--ui-dd-current-bg); font-weight: var(--ui-dd-current-weight); border-left-color: var(--ui-dd-current-bar);
+}
+body .acc-app .acsel-list li.cur.hi, body .acc-app .acsel-list li.cur:hover { background: var(--ui-dd-hover-bg) !important; border-left-color: var(--ui-dd-current-bar) !important; }
+
+/* ── Compact page spacing: the data grid gets the room (no big gaps between menu, tabs, title, filter bar and grid) ── */
+body .acc-app .page-container { padding: 6px 12px 8px !important; }
+body .acc-app .page-head { margin-bottom: 6px !important; gap: 8px; min-height: 0; }
+body .acc-app .tabs { margin: 0 0 4px !important; }
+body .acc-app .toolbar { margin-bottom: 6px !important; padding: 5px 10px !important; gap: 8px; }
+body .acc-app .toolbar label { gap: 5px; font-size: var(--ui-label-font); }
+
+/* ── Date box (BS From / To): ONE border around the whole box, no lines between day | month | year, small like the other filter controls ── */
+body .acc-app .bsd { display: inline-flex; align-items: center; gap: 0; height: var(--ui-btn-sm-h); padding: 0 8px; border: 1px solid var(--ui-field-border); border-radius: var(--ui-radius); background: #fff; font-size: 12.5px; }
+body .acc-app .bsd:focus-within { border-color: var(--ui-field-focus); box-shadow: var(--ui-field-ring); }
+body .acc-app .bsd input, body .acc-app .bsd input:focus {
+  height: auto !important; min-height: 0; border: none !important; box-shadow: none !important; outline: none; border-radius: 0; background: transparent;
+  padding: 0 2px !important; font-size: 12.5px !important; line-height: 1.4;
+}
+body .acc-app .bsd input:focus { background: var(--ui-dd-hover-bg); }
+body .acc-app .bsd-ico { font-size: 12px; margin-right: 3px; }
+body .acc-app .bsd-sep { color: #9ca3af; padding: 0 1px; }
+body .acc-app .bsd-day { width: 22px; } body .acc-app .bsd-mon { width: 64px; } body .acc-app .bsd-year { width: 36px; }
+body .acc-app .doc-form .bsd, body .acc-app .entry-card .bsd { height: var(--ui-field-h); font-size: var(--ui-field-font); }
+body .acc-app .doc-form .bsd input, body .acc-app .entry-card .bsd input { font-size: var(--ui-field-font) !important; }
+body .acc-app .toolbar .bsd { height: var(--ui-btn-sm-h); min-height: var(--ui-btn-sm-h); border-color: var(--ui-field-border); border-radius: var(--ui-radius); }
+
+/* filter-bar controls (search box, selects, date boxes, FY button) are all one compact height */
+body .acc-app .toolbar { --tb-h: var(--ui-btn-sm-h); }
+body .acc-app .toolbar :is(input:not([type=checkbox]):not([type=radio]):not(.bsd input), select) { height: var(--ui-btn-sm-h) !important; padding-top: 0; padding-bottom: 0; font-size: 12.5px !important; }
+body .acc-app .toolbar .bsd { height: var(--ui-btn-sm-h) !important; }
+body .acc-app .bsd input, body .acc-app .toolbar .bsd input { height: 20px !important; }
+body .acc-app .doc-form .bsd input, body .acc-app .entry-card .bsd input { height: 26px !important; }
+
+/* ── Report tables inside <FitScroll> (components/Common/FitScroll.jsx): the header row stays frozen while the body scrolls ── */
+.fit-scroll thead { position: sticky; top: 0; z-index: 6; }
+
+/* ── Compact filter controls: put class "ui-compact-controls" on a row of date boxes / drop-downs / buttons (page header filters) — small, one line ── */
+.ui-compact-controls input:not([type=checkbox]):not([type=radio]), .ui-compact-controls select, .ui-compact-controls .form-control {
+  height: var(--ui-btn-sm-h) !important; min-height: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; font-size: 12.5px !important; width: 120px;
+}
+.ui-compact-controls .btn { height: var(--ui-btn-sm-h); padding: var(--ui-btn-sm-pad); font-size: var(--ui-btn-sm-font); }
+.ui-compact-controls select, .ui-compact-controls input:not([type=checkbox]):not([type=radio]) { border: 1px solid var(--ui-field-border); border-radius: var(--ui-radius); background-color: #fff; color: var(--ui-field-text); }
+.ui-compact-controls select { padding-left: 8px !important; padding-right: 6px !important; }
+
+/* ── Leave Calculation tabs (Current Year / Previous Year / Balance / Reports): one control height + one Fiscal Year width across all four toolbars ── */
+.lc-toolbar select.form-control { height: var(--ui-btn-sm-h) !important; min-height: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; font-size: 12.5px !important; }
+.lc-toolbar select.lc-fy { width: 150px !important; }
+.lc-toolbar .btn, .lc-toolbar .lc-tb-btn { height: var(--ui-btn-sm-h); padding: 0 12px; font-size: 12.5px; box-sizing: border-box; white-space: nowrap; }
+.lc-toolbar .dg-searchbox { height: var(--ui-btn-sm-h); box-sizing: border-box; }
+.lc-toolbar .dg-search-input { font-size: 12.5px; }
+
+/* ── Setup form modal (Settings → Fiscal Year / Branch / Department …): card style, same as order.zkattendance.com ── */
+.modal.glm-form { max-width: 460px; border-radius: 16px; font-family: 'Inter','Noto Sans Devanagari','Segoe UI',system-ui,sans-serif; box-shadow: 0 30px 80px rgba(15,23,42,.35); overflow: hidden; display: flex; flex-direction: column; padding: 0; }
+.glm-form .modal-header { justify-content: flex-start; gap: 11px; padding: 12px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; border-radius: 0; }
+.glm-form .glm-head-ic { width: 34px; height: 34px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 2px 8px rgba(15,42,61,.12); flex-shrink: 0; }
+.glm-form .glm-head-txt h2 { font-size: 15px; font-weight: 700; color: #0f2a3d; letter-spacing: -.1px; margin: 0; }
+.glm-form .glm-head-txt p { margin: 1px 0 0; font-size: 11.5px; color: #4b6477; }
+.glm-form .modal-close { margin-left: auto; width: 28px; height: 28px; border-radius: 8px; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.1); font-size: 13px; color: #0f2a3d; }
+.glm-form .modal-close:hover { background: #e2e8f0; }
+.glm-form .modal-body { background: #f8fafc; padding: 14px 18px; overflow-y: auto; flex: 1; }
+.glm-form .glm-card { background: #fff; border: 1px solid #e8edf5; border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.glm-form .glm-card .form-group:last-child { margin-bottom: 0 !important; }
+.glm-form .form-label { font-size: 11.5px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+.glm-form .form-control { border-radius: 8px; border: 1px solid #dbe3ee; padding: 10px 12px; min-height: 42px; font-size: 14.5px; background: #fff; }
+.glm-form .form-control:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); outline: 0; }
+.glm-form .modal-footer { background: #fff; border-top: 1px solid #e2e8f0; padding: 11px 18px; gap: 8px; }
+.glm-form .modal-footer .btn { padding: 6px 14px; min-height: 32px; border-radius: 8px; font-size: 12.5px; font-weight: 600; }
+.glm-form .modal-footer .btn-outline { border: 1px solid #dbe3ee; color: #334155; background: #fff; }
+.glm-form .modal-footer .btn-primary { background: linear-gradient(135deg,#2563eb,#4f46e5); border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(37,99,235,.3); }
+.modal.glm-form.glm-wide { max-width: 600px; }
+.glm-form .glm-step { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 13px; font-weight: 700; color: #0f172a; }
+.glm-form .glm-step i { font-style: normal; width: 24px; height: 24px; border-radius: 50%; background: #dbeafe; color: #1d4ed8; font-size: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+.glm-form .glm-head-ic { width: 42px; height: 42px; border-radius: 12px; font-size: 20px; }
+.glm-form .modal-header { gap: 14px; padding: 16px 22px; }
+.glm-form .glm-head-txt h2 { font-size: 17px; }
+.glm-form .glm-head-txt p { font-size: 12.5px; }
+.glm-form .modal-body { padding: 18px 22px; }
+.glm-form .glm-card { padding: 18px 20px; border-radius: 16px; }
+.glm-form .modal-footer { padding: 14px 22px; }
+.glm-form .modal-close { width: 34px; height: 34px; border-radius: 10px; }

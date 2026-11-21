@@ -26,6 +26,9 @@ import StandAloneDeviceSettings from './StandAloneDeviceSettings.jsx';
 import ProfileTab from '../Common/ProfileTab.jsx';
 import BugFinder from './BugFinder.jsx';
 import BulkImportModal from './BulkImportModal.jsx';
+import ShiftBulkImportModal from './ShiftBulkImportModal.jsx';
+import HolidayBulkImportModal from './HolidayBulkImportModal.jsx';
+import LeaveTypeBulkImportModal from './LeaveTypeBulkImportModal.jsx';
 import {
   FORMAT_OPTIONS, formatDate,
   adToBS, bsToAD,
@@ -337,7 +340,7 @@ const BSDatePicker = ({ value, onChange, error, allowedYears }) => {
 /* ═══════════════════════════════════════════════════════════
    SetupSection — mini-DataGrid with sub-nav style header
 ════════════════════════════════════════════════════════════ */
-const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShortName, bulkImport }) => {
+const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShortName, bulkImport, formCols = 1, formStep }) => {
   const { t, language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
   const fd = useDateFormat();
@@ -460,6 +463,8 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
     <div style={{ marginBottom:0 }}>
       {/* ── DataGrid (handles search, sort, pagination, keyboard nav, bulk select) ── */}
       <DataGrid
+        fillToBottom={false}
+        className="dg-setting"
         columns={columns}
         data={data}
         defaultPageSize={10}
@@ -508,16 +513,21 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
       {/* ── Add/Edit Modal ── */}
       {modal && (
         <div className="modal-overlay">
-          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+          <div className={`modal glm-form ${formCols > 1 ? 'glm-wide' : 'modal-sm'}`} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>
-                {editId ? `✏️ ${L('सम्पादन','Edit')} — ${title}` : `+ ${L('नयाँ','New')} — ${title}`}
-              </h2>
+              <div className="glm-head-ic">{editId ? '✏️' : '＋'}</div>
+              <div className="glm-head-txt">
+                <h2>{editId ? `${L('सम्पादन','Edit')} — ${title}` : `${L('नयाँ','New')} — ${title}`}</h2>
+                <p>{editId ? L('विवरण अद्यावधिक गर्नुहोस्','Update the details below') : L('नयाँ रेकर्ड थप्नुहोस्','Add a new record')}</p>
+              </div>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
+              <div className="glm-card">
+              <div className="glm-step"><i>1</i>{formStep || L('विवरण','Details')}</div>
+              <div style={{ display:'grid', gridTemplateColumns:`repeat(${formCols}, 1fr)`, gap:'12px 14px' }}>
               {fields.map((f, i) => (
-                <div key={f.key} className="form-group" style={{ marginBottom:14 }}
+                <div key={f.key} className="form-group" style={{ marginBottom:0, gridColumn: f.full ? '1 / -1' : undefined }}
                   ref={i === 0 ? firstFieldRef : undefined}>
                   <label className="form-label">
                     {f.header}
@@ -527,6 +537,8 @@ const SetupSection = ({ title, data, fields, sortKey, onSave, onDelete, autoShor
                   {errors[f.key] && <div className="form-error">{errors[f.key]}</div>}
                 </div>
               ))}
+              </div>
+              </div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(false)}>{t('Cancel')}</button>
@@ -585,9 +597,10 @@ const ShiftInlineSection = () => {
   const { t, language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
   const { shifts, addShift, updateShift, deleteShift, refreshShifts, refreshEmployees, employees } = useData();
-  const { isAdmin, isManager } = useAuth();
+  const { isAdmin, isManager, isSuperAdmin } = useAuth();
   const { settings } = useSettings();
 
+  const [bulkOpen,          setBulkOpen]          = useState(false);
   const [modal,             setModal]             = useState(false);
   const [editId,            setEditId]            = useState(null);
   const [form,              setForm]              = useState({ ...defaultShiftForm });
@@ -611,6 +624,38 @@ const ShiftInlineSection = () => {
       return u;
     });
     setErrors(p => ({ ...p, [field]:'' }));
+  };
+
+  /* Bulk import (Super Admin only): one POST per row through addShift. Name is
+     used as both Nepali and English name; code is derived like handleSave and
+     made unique. Existing names are skipped. Default=Yes is honoured only if
+     no default shift exists (the server applies a default to ALL staff). */
+  const handleShiftBulkImport = async (items) => {
+    const names = new Set(shifts.map(s => String(s.name ?? '').trim().toLowerCase()));
+    const codes = new Set(shifts.map(s => s.code));
+    let hasDefault = shifts.some(s => s.makeDefault);
+    let added = 0, failed = 0, defaultIgnored = 0;
+    for (const it of items) {
+      const key = it.name.trim().toLowerCase();
+      if (names.has(key)) continue;
+      const base = key.replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || `shift_${Date.now()}`;
+      let code = base, n = 2;
+      while (codes.has(code)) code = `${base}_${n++}`;
+      let makeDefault = false;
+      if (it.makeDefault) { if (hasDefault) defaultIgnored++; else makeDefault = true; }
+      try {
+        await addShift({ ...defaultShiftForm, name: it.name.trim(), nameEn: it.name.trim(), code,
+          startTime: it.startTime, endTime: it.endTime, workHours: it.workHours,
+          gracePeriodStart: it.gracePeriodStart, gracePeriodEnd: it.gracePeriodEnd, makeDefault });
+        names.add(key); codes.add(code); added++;
+        if (makeDefault) hasDefault = true;
+      } catch { failed++; }
+    }
+    if (hasDefault) { refreshShifts(); refreshEmployees(); }
+    const notes = [];
+    if (defaultIgnored) notes.push(L(`${defaultIgnored} सिफ्टको डिफल्ट "Yes" बेवास्ता गरियो (डिफल्ट सिफ्ट पहिले नै छ)`, `Default "Yes" ignored for ${defaultIgnored} shift(s) — a default shift already exists`));
+    if (failed) notes.push(L(`${failed} पङ्क्ति सेभ हुन सकेन`, `${failed} row(s) failed to save`));
+    return { added, skipped: items.length - added, notes };
   };
 
   const openAdd  = () => { setForm({ ...defaultShiftForm }); setErrors({}); setEditId(null); setModal(true); };
@@ -774,6 +819,8 @@ const ShiftInlineSection = () => {
   return (
     <div style={{ marginBottom:0 }}>
       <DataGrid
+        fillToBottom={false}
+        className="dg-setting"
         columns={shiftColumns}
         data={shifts}
         defaultPageSize={10}
@@ -790,12 +837,28 @@ const ShiftInlineSection = () => {
         }}
         toolbar={
           (isAdmin||isManager) && (
-            <button className="btn btn-primary btn-sm" onClick={openAdd}>
-              + {L('नयाँ सिफ्ट','Add New')}
-            </button>
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn btn-primary btn-sm" onClick={openAdd}>
+                + {L('नयाँ सिफ्ट','Add New')}
+              </button>
+              {isSuperAdmin && (
+                <button className="btn btn-outline btn-sm" onClick={() => setBulkOpen(true)}>
+                  📋 {L('बल्क आयात','Bulk Import')}
+                </button>
+              )}
+            </div>
           )
         }
       />
+
+      {isSuperAdmin && (
+        <ShiftBulkImportModal
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          existingShifts={shifts}
+          onImport={handleShiftBulkImport}
+        />
+      )}
 
       {/* ══ ADD/EDIT MODAL ══ */}
       {modal && (
@@ -1262,7 +1325,30 @@ const LeaveTypeSection = () => {
   const { language } = useLanguage();
   const L = (np, en) => language === 'np' ? np : en;
   const { settings, updateSetupList } = useSettings();
+  const { isSuperAdmin } = useAuth();
   const data = settings.leaveTypeConfigs || [];
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  /* Bulk import (Super Admin only): one blob save for the whole paste. Rows
+     whose name OR short name already exists (or repeats earlier in the paste)
+     are skipped — same duplicate rules as the Add form. Staff Mode = All,
+     Service Period = No, Auto Accumulate = No. */
+  const handleLeaveBulkImport = async (items) => {
+    const names  = new Set(data.map(d => String(d.name ?? '').trim().toLowerCase()));
+    const shorts = new Set(data.map(d => String(d.shortName ?? '').trim().toLowerCase()));
+    const base = Date.now();
+    const toAdd = [];
+    items.forEach(it => {
+      const n = it.name.trim().toLowerCase(), s = it.shortName.trim().toLowerCase();
+      if (names.has(n) || shorts.has(s)) return;
+      names.add(n); shorts.add(s);
+      toAdd.push({ ...defaultLeaveForm, ...it, name: it.name.trim(), shortName: it.shortName.trim(),
+        modeFor: ['All'], isServicePeriod: false, timesPerService: null, autoAccumulate: false,
+        id: base + toAdd.length });
+    });
+    if (toAdd.length) updateSetupList('leaveTypeConfigs', [...data, ...toAdd]);
+    return { added: toAdd.length, skipped: items.length - toAdd.length };
+  };
 
   const [modal,    setModal]    = useState(false);
   const [editId,   setEditId]   = useState(null);
@@ -1351,6 +1437,8 @@ const LeaveTypeSection = () => {
   return (
     <div>
       <DataGrid
+        fillToBottom={false}
+        className="dg-setting"
         columns={[
           { field:'name',                header:L('बिदाको नाम','Leave Name'),      width:160, render:v=><span style={{fontWeight:600}}>{v}</span> },
           { field:'shortName',           header:L('छोटो नाम','Short'),             width:70,  render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
@@ -1375,7 +1463,16 @@ const LeaveTypeSection = () => {
         onRowDoubleClick={openEdit}
         onDeleteKey={row=>setDelId(row.id)}
         onDeleteSelected={ids=>updateSetupList('leaveTypeConfigs',data.filter(d=>!ids.includes(d.id)))}
-        toolbar={<button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>}
+        toolbar={
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>
+            {isSuperAdmin && (
+              <button className="btn btn-outline btn-sm" onClick={() => setBulkOpen(true)}>
+                📋 {L('बल्क आयात','Bulk Import')}
+              </button>
+            )}
+          </div>
+        }
         contextMenu={[
           { label: L('नयाँ थप्नुस','Add New'), icon:'➕', onClick: () => openAdd() },
           'divider',
@@ -1384,6 +1481,15 @@ const LeaveTypeSection = () => {
           { label: L('मेटाउनुस','Delete'),      icon:'🗑', className:'danger', onClick: (row) => setDelId(row.id) },
         ]}
       />
+
+      {isSuperAdmin && (
+        <LeaveTypeBulkImportModal
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          existing={data}
+          onImport={handleLeaveBulkImport}
+        />
+      )}
 
       {/* Add/Edit Modal */}
       {modal && (
@@ -1579,6 +1685,8 @@ const OfficeVisitTypeSection = () => {
   return (
     <div>
       <DataGrid
+        fillToBottom={false}
+        className="dg-setting"
         columns={[
           { field:'name',      header:L('भ्रमणको नाम','Office Visit Name'), render:v=><span style={{fontWeight:600}}>{v}</span> },
           { field:'shortName', header:L('छोटो नाम','Short Name'),           render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
@@ -1669,7 +1777,27 @@ const PublicHolidaySection = () => {
   const L = (np, en) => language === 'np' ? np : en;
   const fd = useDateFormat();
   const { settings, updateSetupList } = useSettings();
+  const { isSuperAdmin } = useAuth();
+  const [bulkOpen, setBulkOpen] = useState(false);
   const allHolidays = settings.publicHolidays || [];
+
+  /* Bulk import (Super Admin only): one blob save for the whole paste. Rows
+     whose start date already has a holiday are skipped — same one-holiday-per-
+     date rule as the Add form — including duplicates inside the paste itself.
+     Branch/department/religion/handicapped default to All. */
+  const handleHolidayBulkImport = async (items) => {
+    const taken = new Set(allHolidays.map(h => h.startDate));
+    const base = Date.now();
+    const toAdd = [];
+    items.forEach(it => {
+      if (taken.has(it.startDate)) return;
+      taken.add(it.startDate);
+      toAdd.push({ ...defaultHolidayForm, name: it.name, startDate: it.startDate, endDate: it.endDate,
+        days: it.days, gender: it.gender, id: base + toAdd.length });
+    });
+    if (toAdd.length) updateSetupList('publicHolidays', [...allHolidays, ...toAdd]);
+    return { added: toAdd.length, skipped: items.length - toAdd.length };
+  };
   const todayStr = getNepalTodayISO();
   const allFYs   = settings.fiscalYears || [];
   // Prefer the FY that contains today; fall back to the one marked isDefault
@@ -1677,9 +1805,12 @@ const PublicHolidaySection = () => {
   const defaultFY = allFYs.find(fy => fy.isDefault);
   const displayFY = activeFY || defaultFY;
   const fyExpired = displayFY && displayFY.endDate < todayStr && !activeFY;
-  // If today is inside a configured FY, filter to that FY only; otherwise show all
-  const data = (displayFY && !fyExpired)
-    ? allHolidays.filter(h => h.startDate && h.startDate >= displayFY.startDate && h.startDate <= displayFY.endDate)
+  // Fiscal Year picker: '' = the current FY (default), 'all' = every holiday, else a chosen FY id.
+  const [fyPick, setFyPick] = useState('');
+  const pickedFY = fyPick && fyPick !== 'all' ? allFYs.find(f => String(f.id) === String(fyPick)) : null;
+  const filterFY = fyPick === 'all' ? null : (pickedFY || ((displayFY && !fyExpired) ? displayFY : null));
+  const data = filterFY
+    ? allHolidays.filter(h => h.startDate && h.startDate >= filterFY.startDate && h.startDate <= filterFY.endDate)
     : allHolidays;
 
   const [modal,     setModal]     = useState(false);
@@ -1821,14 +1952,25 @@ const PublicHolidaySection = () => {
             ⚠️ {L('कुनै सक्रिय आर्थिक वर्ष छैन','No active fiscal year set')}
           </span>
         )}
+        <label style={{ fontSize:12, fontWeight:600, color:'#374151', marginLeft:6 }}>{L('आर्थिक वर्ष:','Fiscal Year:')}</label>
+        <select className="form-control" value={fyPick} onChange={e => setFyPick(e.target.value)}
+          style={{ width:200, height:30, padding:'0 8px', fontSize:12.5 }}>
+          <option value="">{L('हालको आर्थिक वर्ष','Current Fiscal Year')}{displayFY ? ` (${displayFY.name})` : ''}</option>
+          <option value="all">{L('सबै आर्थिक वर्ष','All Fiscal Years')}</option>
+          {allFYs.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </select>
         <span style={{ fontSize:11, color:'#9ca3af' }}>
-          {activeFY
-            ? L('यस आर्थिक वर्षका छुट्टीहरू मात्र देखाइएका छन्','Showing holidays for this fiscal year only')
-            : L('सबै छुट्टीहरू देखाइएका छन्','Showing all holidays')}
+          {filterFY
+            ? L('चयन गरिएको आर्थिक वर्षका छुट्टीहरू मात्र देखाइएका छन्','Showing holidays for the selected fiscal year only') + ` · ${data.length}`
+            : L('सबै छुट्टीहरू देखाइएका छन्','Showing all holidays') + ` · ${data.length}`}
         </span>
       </div>
 
       <DataGrid
+
+        fillToBottom={false}
+
+        className="dg-setting"
         columns={[
           { field:'name',            header:L('छुट्टीको नाम','Holiday Name'), width:160, render:v=><span style={{fontWeight:600}}>{v}</span> },
           { field:'startDate',       header:L('सुरु मिति','Start Date'),     width:120, render:v=>v?<span style={{color:'#0369a1',fontWeight:500}}>{fd(v)}</span>:'—' },
@@ -1855,13 +1997,33 @@ const PublicHolidaySection = () => {
         onRowDoubleClick={openEdit}
         onDeleteKey={row=>setDelId(row.id)}
         onDeleteSelected={ids=>updateSetupList('publicHolidays',allHolidays.filter(d=>!ids.includes(d.id)))}
-        toolbar={<button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>}
+        toolbar={
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn btn-primary btn-sm" onClick={openAdd}>+ {L('नयाँ थप्नुस','Add New')}</button>
+            {isSuperAdmin && (
+              <button className="btn btn-outline btn-sm" onClick={() => setBulkOpen(true)}>
+                📋 {L('बल्क आयात','Bulk Import')}
+              </button>
+            )}
+          </div>
+        }
         contextMenu={[
           { label:L('नयाँ थप्नुस','Add New'), icon:'+',  onClick: () => openAdd() },
           { label:L('सम्पादन','Edit'),        icon:'✏️', onClick: row => openEdit(row) },
           { label:L('मेटाउनुस','Delete'),     icon:'🗑️', className:'danger', onClick: row => setDelId(row.id) },
         ]}
       />
+
+      {isSuperAdmin && (
+        <HolidayBulkImportModal
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          existingHolidays={allHolidays}
+          calendar={settings.defaultCalendar || 'en'}
+          formatDate={fd}
+          onImport={handleHolidayBulkImport}
+        />
+      )}
 
       {modal && (
         <div className="modal-overlay">
@@ -2109,6 +2271,10 @@ const LanguageSection = () => {
       </div>
 
       <DataGrid
+
+        fillToBottom={false}
+
+        className="dg-setting"
         columns={[
           { field:'english',  header:L('अंग्रेजी','English (Key)'), render:v=><span style={{color:'#1f2937',fontWeight:500}}>{v}</span> },
           { field:'nepali',   header:L('नेपाली','Nepali'),          render:v=>v||<span style={{color:'#fca5a5',fontStyle:'italic',fontSize:11}}>—</span> },
@@ -3486,6 +3652,8 @@ const Settings = () => {
                   </div>
                 </div>
                 <DataGrid
+                  fillToBottom={false}
+                  className="dg-setting"
                   columns={[
                     { field:'effectiveDate', header:L('प्रभावी मिति','Effective Date'),        width:160, render:v=><span style={{fontWeight:600,color:'#1a56db'}}>{fd(v)}</span> },
                     { field:'weekends',      header:L('सप्ताहन्त दिनहरू','Weekend Days'),       width:560, minWidth:560, sortable:false, filterable:false, render:v=><DayBadge dayKeys={v||[]} language={language} /> },
@@ -3797,9 +3965,11 @@ const Settings = () => {
                 {activeSetup === 'fiscalYear' && (
                   <SetupSection
                     title={L('आर्थिक वर्ष','Fiscal Year')}
+                    formCols={2}
+                    formStep={L('आर्थिक वर्ष विवरण','Fiscal year details')}
                     data={settings.fiscalYears || []}
                     fields={[
-                      { key:'name',      type:'text',    header:L('आर्थिक वर्षको नाम','Fiscal Year Name'), required:true },
+                      { key:'name',      type:'text',    header:L('आर्थिक वर्षको नाम','Fiscal Year Name'), required:true, full:true },
                       { key:'startDate', type:'date',    header:L('सुरु मिति','Start Date'),               required:true,
                         renderCell: v => (
                           <span style={{ fontWeight:500, color:'#0369a1' }}>📅 {v ? fd(v) : '—'}</span>
@@ -3808,8 +3978,10 @@ const Settings = () => {
                         renderCell: v => (
                           <span style={{ fontWeight:500, color:'#7c3aed' }}>📅 {v ? fd(v) : '—'}</span>
                         )},
+                      { key:'rankingOrder', header:L('क्रम','Rank Order'), type:'number', placeholder:'1' },
                       { key:'isDefault', type:'boolean', header:L('डिफल्ट वर्ष','Default Year') },
                     ]}
+                    sortKey="rankingOrder"
                     onSave={(id, form) => handleSetupSave('fiscalYears', id, form, true)}
                     onDelete={(id) => handleSetupDelete('fiscalYears', id)}
                   />
@@ -4547,6 +4719,8 @@ const Settings = () => {
               {/* ── Backup History Card ── */}
               <div className="card">
                 <DataGrid
+                  fillToBottom={false}
+                  className="dg-setting"
                   title={
                     <div>
                       <div style={{ fontSize:15, fontWeight:700, color:'#111827' }}>🕓 {L('ब्याकअप इतिहास','Backup History')}</div>
