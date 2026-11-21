@@ -4,7 +4,7 @@ import { useApp } from '../context';
 import { ReportButtons, ReportHeader } from '../components/Report';
 import { PeriodBar } from '../components/inputs';
 import { api, fmtMoney } from '../lib/api';
-import { fmtDate } from '../lib/dates';
+import { fmtDate, fmtDateShort } from '../lib/dates';
 
 /** Bill-wise Profit & Loss: every Sales Invoice (and Sales Return) with its cost of goods and profit. */
 export default function BillProfit() {
@@ -65,7 +65,7 @@ export default function BillProfit() {
               {rows.map((r, i) => (
                 <tr key={r.id} {...g.rowProps(r)}>
                   {g.tickTd(r)}<td className="sn">{i + 1}</td>
-                  <td>{fmtDate(r.doc_date)}</td>
+                  <td>{fmtDateShort(r.doc_date)}</td>
                   <td className="mono">{r.doc_no}{r.doc_type === 'SR' && <span className="tag">return</span>}</td>
                   <td>{r.party}</td>
                   <td className="num">{r.items}</td>

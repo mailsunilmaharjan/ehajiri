@@ -7,7 +7,7 @@ import { RemarksRow, UpdatedBy, useGrid } from '../components/DataGrid';
 import DocView from '../components/DocView';
 import VoucherView from '../components/VoucherView';
 import { authFetch, api, fmtBal, fmtMoney, waLink } from '../lib/api';
-import { fmtAd, fmtBs, fmtSaved } from '../lib/dates';
+import { fmtAd, fmtBs, fmtSaved, fmtBsShort } from '../lib/dates';
 
 const BILL_TITLE = { SI: 'Sales Invoice', SR: 'Sales Return', PB: 'Purchase Bill', PR: 'Purchase Return' };
 
@@ -70,7 +70,7 @@ export default function Ledger() {
       <tr {...rp(`ld-head ${items.length ? '' : 'ld-end'}`, 'h')}>
         {cloneElement(g.tickTd(r), { rowSpan: span, className: 'sel ld-span' })}
         <td className="sn ld-span" rowSpan={span}>{i + 1}</td>
-        <td className="nowrap ld-top ld-span" rowSpan={span}>{fmtBs(r.vdate)}<div className="ld-ad">{fmtAd(r.vdate)}</div></td>
+        <td className="nowrap ld-top ld-span" rowSpan={span}>{fmtBsShort(r.vdate)}<div className="ld-ad">{fmtAd(r.vdate)}</div></td>
         <td className="nowrap ld-top ld-span" rowSpan={span}>
           <a className="vno" onClick={() => openRow(r)}>{r.voucher_no}</a>
           <div><span className={`vt-chip vt-${r.vtype}`}>{r.day_type}</span></div>
@@ -224,7 +224,7 @@ export default function Ledger() {
                 <tr key={r._k} {...g.rowProps(r, r.memo ? `pdc-memo pdc-${r.cheque_status}` : '')}>
                   {g.tickTd(r)}
                   <td className="sn">{i + 1}</td>
-                  <td className="nowrap">{fmtBs(r.vdate)}<span className="dl-sep">|</span>{fmtAd(r.vdate)}</td>
+                  <td className="nowrap">{fmtBsShort(r.vdate)}<span className="dl-sep">|</span>{fmtAd(r.vdate)}</td>
                   <td className="nowrap"><a className="vno" title={r.memo ? 'Post-dated cheque — open the bill' : r.source_doc_id ? 'Open' : 'Open the voucher'} onClick={() => openRow(r)}>{r.voucher_no}</a></td>
                   <td className="nowrap"><span className={`vt-chip vt-${r.vtype}`}>{r.day_type}</span></td>
                   <td>

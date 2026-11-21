@@ -31,7 +31,8 @@ router.get('/parties', ah(async (req, res) => {
     + ' (SELECT COUNT(*) FROM acc_party_contacts c WHERE c.account_id = a.id) AS contact_count,'
     + " (SELECT string_agg(c.name, E'\\n' ORDER BY c.sort, c.id) FROM acc_party_contacts c WHERE c.account_id = a.id) AS contact_names,"
     + " (SELECT c.name || COALESCE(' · ' || c.mobile1, '') FROM acc_party_contacts c WHERE c.account_id = a.id ORDER BY c.sort, c.id LIMIT 1) AS main_contact,"
-    + " (SELECT COALESCE(NULLIF(u.full_name, ''), u.username) FROM users u WHERE u.username = COALESCE(a.updated_by, a.created_by)) AS saved_by_name"
+    + " (SELECT COALESCE(NULLIF(u.full_name, ''), u.username) FROM users u WHERE u.username = COALESCE(a.updated_by, a.created_by)) AS saved_by_name,"
+    + ' (SELECT p.name FROM acc_ledgers p WHERE p.id = a.parent_party_id) AS parent_name'   // sub-ledger: its main party
     + ' FROM acc_ledgers a JOIN acc_groups g ON g.id = a.group_id'
     + ` WHERE ${where.join(' AND ')} ORDER BY a.name`, params)).rows;
   for (const r of rows) { r.balance = money(r.balance); if (r.linked_balance != null) r.linked_balance = money(r.linked_balance); }
@@ -159,6 +160,34 @@ router.post('/parties', ah(async (req, res) => {
       r.linked_party_id = c.id;
     }
     await audit(t, user, 'create', b.party_type, r.id, b);
+    return r;
+  });
+  res.json(row);
+}));
+
+/** Sub-ledger: a sub-company under a main customer / supplier — its own ledger (own name, PAN, address, phone and
+ *  balance) in the same group, linked to the main party by parent_party_id. The contact person, contact list, price
+ *  level and credit terms are taken from the main party. Body: { parent_id, name, pan, address, phone }. */
+router.post('/parties/sub-ledger', ah(async (req, res) => {
+  const b = req.body || {};
+  const parent = await one('SELECT * FROM acc_ledgers WHERE id = %s AND party_type IS NOT NULL', [+b.parent_id || 0]) || bad('Choose the main customer / supplier.');
+  const name = String(b.name || '').trim() || bad('Sub company name is required.');
+  if (await one('SELECT id FROM acc_ledgers WHERE LOWER(name) = LOWER(%s)', [name])) bad('A ledger with this name already exists.');
+  const pan = checkPan(b.pan);
+  if (pan && await one('SELECT id FROM acc_ledgers WHERE pan = %s AND party_type = %s', [pan, parent.party_type])) bad(`Another ${parent.party_type} already has PAN ${pan}.`);
+  const ph = phone(b.phone, 'Phone');
+  const user = userOf(req);
+  const row = await tx(async (t) => {
+    const g = await t.one('SELECT * FROM acc_groups WHERE id = %s', [parent.group_id]);
+    const r = await t.one(
+      'INSERT INTO acc_ledgers (code, name, group_id, kind, party_type, opening_balance, pan, phone, address, contact_person,'
+      + ' credit_limit, credit_days, price_level, active, created_by, updated_by, updated_at, parent_party_id)'
+      + " VALUES (%s,%s,%s,'party',%s,0,%s,%s,%s,%s,%s,%s,%s,1,%s,%s,NOW(),%s) RETURNING *",
+      [await nextCode(t, g), name, g.id, parent.party_type, pan, ph, nz(b.address), parent.contact_person,
+        money(parent.credit_limit), parent.credit_days || 0, parent.price_level || 'mrp', user, user, parent.id]);
+    // the contact person(s) stay the same as the main party's
+    await saveContacts(t, r.id, (await t.query('SELECT * FROM acc_party_contacts WHERE account_id = %s ORDER BY sort, id', [parent.id])).rows);
+    await audit(t, user, 'create', parent.party_type, r.id, { sub_ledger_of: parent.id, main: parent.name, name, pan, address: b.address, phone: ph });
     return r;
   });
   res.json(row);

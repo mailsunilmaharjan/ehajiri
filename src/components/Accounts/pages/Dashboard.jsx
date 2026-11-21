@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from '../lib/router';
 import { useApp } from '../context';
 import { api, fmtBal, fmtMoney } from '../lib/api';
-import { fmtDate } from '../lib/dates';
+import { fmtDate, fmtDateShort } from '../lib/dates';
 
 export default function Dashboard() {
   const { fy, today, accounts, company } = useApp();
@@ -49,7 +49,7 @@ export default function Dashboard() {
               {recent.map((v, idx) => (
                 <tr key={v.id} className={v.status === 'cancelled' ? 'cancelled' : ''}>
                   <td className="sn">{idx + 1}</td>
-                  <td>{fmtDate(v.vdate)}</td><td>{v.voucher_no}</td><td>{v.narration}</td><td className="num">{fmtMoney(v.amount)}</td>
+                  <td>{fmtDateShort(v.vdate)}</td><td>{v.voucher_no}</td><td>{v.narration}</td><td className="num">{fmtMoney(v.amount)}</td>
                 </tr>
               ))}
             </tbody>

@@ -3638,6 +3638,14 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version    : 182,
+    description: 'Accounts: customer / supplier sub-ledgers — a sub-company (own name, PAN, address, phone) under a main party. Adds acc_ledgers.parent_party_id (nullable, self-reference). Additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_ledgers ADD COLUMN IF NOT EXISTS parent_party_id INTEGER REFERENCES acc_ledgers(id) ON DELETE SET NULL`);
+      await client.query(`CREATE INDEX IF NOT EXISTS ix_acc_ledgers_parent_party ON acc_ledgers(parent_party_id)`);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

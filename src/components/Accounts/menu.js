@@ -27,14 +27,14 @@ export const ACCOUNTS_MENU = [
 ];
 
 // Landing pages ("Master", "Posting", "Reports") — the Accounts dropdown lists only these; each page shows every menu & sub-menu
-// as cards in the Chart of Accounts look. Item = [path, label, icon, key-hint?]; an item whose label starts with "+" is shown
-// as a blue button under that card's list. Rendered by pages/MenuHub.jsx at /accounts/master, /posting, /reports.
+// as cards in the Chart of Accounts look. Item = [path, label, icon, key-hint?]; an item whose label starts with "+" is an
+// action (opens a New … form) and shows as a blue row in its place in the list. Rendered by pages/MenuHub.jsx at /accounts/master, /posting, /reports.
 // `actions` = blue buttons on the right of the page header: [path, label].
 export const ACCOUNTS_HUBS = {
   master: { title: 'Master', icon: 'database', actions: [['/accounts?new=ledger', 'New Ledger'], ['/customers?new=1', 'New Customer'], ['/suppliers?new=1', 'New Supplier']], groups: [
     { title: 'Parties', icon: 'users', cards: [
-      ['/customers', 'Customers (Debtors)', 'users'], ['/suppliers', 'Suppliers (Creditors)', 'truck'],
-      ['/customers?new=1', '+ Customer Sub Ledger', 'userPlus'], ['/suppliers?new=1', '+ Supplier Sub Ledger', 'userPlus'],
+      ['/customers', 'Customers (Debtors)', 'users'], ['/customers?sub=1', '+ Create Customer Sub Ledger', 'userPlus'],
+      ['/suppliers', 'Suppliers (Creditors)', 'truck'], ['/suppliers?sub=1', '+ Create Supplier Sub Ledger', 'userPlus'],
     ] },
     { title: 'Accounts Setup', icon: 'list', cards: [
       ['/accounts', 'Chart of Accounts', 'list'], ['/accounts?new=ledger', '+ New Ledger', 'edit3'],

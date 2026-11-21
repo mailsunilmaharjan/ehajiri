@@ -64,6 +64,12 @@ export const fmtBs = (iso) => {
   const b = adToBs(iso);
   return b ? `${pad(b.day)}-${BS_MONTHS[b.month - 1]}-${b.year}` : '';
 };
+/** Short Nepali month for grid cells: 01-Bai-2083 (Ashadh = Asa, Ashwin = Asw so the two stay distinct). */
+export const BS_SHORT = ['Bai', 'Jes', 'Asa', 'Shr', 'Bha', 'Asw', 'Kar', 'Man', 'Pou', 'Mag', 'Fal', 'Cha'];
+export const fmtBsShort = (iso) => {
+  const b = adToBs(iso);
+  return b ? `${pad(b.day)}-${BS_SHORT[b.month - 1]}-${b.year}` : '';
+};
 export const fmtAd = (iso) => {
   if (!iso) return '';
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
@@ -77,6 +83,12 @@ export const fmtDate = (iso) => {
   if (!iso) return '';
   if (display === 'AD') return fmtAd(iso);
   return fmtBs(iso) || fmtAd(iso);
+};
+/** Same as fmtDate but with the short Nepali month (01-Bai-2083) — used in grid cells only; headers / prints keep the full month. */
+export const fmtDateShort = (iso) => {
+  if (!iso) return '';
+  if (display === 'AD') return fmtAd(iso);
+  return fmtBsShort(iso) || fmtAd(iso);
 };
 /** The other calendar, for the mouse-over tooltip. */
 export const altDate = (iso) => {

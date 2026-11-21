@@ -8,7 +8,7 @@ import ContextMenu from '../components/ContextMenu';
 import TransportDialog from '../components/TransportDialog';
 import { DeleteDialog } from '../components/Guards';
 import { api, fmtMoney } from '../lib/api';
-import { fmtAd, fmtBs, fmtDate } from '../lib/dates';
+import { fmtAd, fmtBs, fmtDate, fmtBsShort } from '../lib/dates';
 import { DOCS, payLabel, shortDocNo, statusLabel } from '../lib/docs';
 import Avatar from '../../Common/Avatar.jsx';
 import HoverCard from '../../Common/HoverCard.jsx';
@@ -153,7 +153,7 @@ export default function DocList() {
                 onClick={() => setCur(r.id)} onDoubleClick={() => view(r.id)} onContextMenu={(e) => { setCur(r.id); rowMenu(e, r); }}>
                 <td className="sel" onDoubleClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggleSel(r.id)} /></td>
                 <td className="sn">{idx + 1}</td>
-                <td className="nowrap">{fmtBs(r.doc_date)}<span className="dl-sep">|</span>{fmtAd(r.doc_date)}</td>
+                <td className="nowrap">{fmtBsShort(r.doc_date)}<span className="dl-sep">|</span>{fmtAd(r.doc_date)}</td>
                 {type === 'PB' && <td className="nowrap">{r.supplier_bill_no}</td>}
                 <td className="nowrap"><a title={r.doc_no} onClick={() => view(r.id)}>{shortDocNo(r.doc_no)}</a>
                   {r.status !== 'posted' && <span className={`tag st-${r.status}`}>{statusLabel(r.status, type)}</span>}

@@ -6,7 +6,8 @@ import { api, fmtBal, fmtMoney, waLink } from '../lib/api';
 import { useShortcuts } from '../lib/keys';
 import { Amount, Kbd, LastSaved } from '../components/inputs';
 import ContextMenu from '../components/ContextMenu';
-import { fmtDate } from '../lib/dates';
+import { fmtDate, fmtDateShort } from '../lib/dates';
+import SearchableSelect from '../../Common/SearchableSelect.jsx';
 
 const LEVELS = [['mrp', 'Retail (MRP)'], ['dealer', 'Dealer'], ['partner', 'Partner']];
 const blankContact = () => ({ name: '', post: '', dept: '', mobile1: '', mobile2: '', email: '', remarks: '' });
@@ -30,6 +31,23 @@ export default function Parties({ type }) {
   useEffect(() => { load(); setEdit(null); setCur(null); }, [type]);
   // ?new=1 (from Chart of Accounts → Parties) opens a blank customer / supplier form straight away
   useEffect(() => { if (sp.get('new') && canEdit) { open(null); setSp({}, { replace: true }); } }, [sp, type]);
+
+  // ── Sub ledger: a sub-company under a main customer / supplier (own name, PAN, address, phone; same contact person) ──
+  const [sub, setSub] = useState(null);       // { parent_id, name, pan, address, phone }
+  const openSub = (parentId = '') => setSub({ parent_id: parentId ? String(parentId) : '', name: '', pan: '', address: '', phone: '' });
+  // ?sub=1 (from Master → Parties → Create … Sub Ledger) opens the form straight away
+  useEffect(() => { if (sp.get('sub') && canEdit) { openSub(); setSp({}, { replace: true }); } }, [sp, type]);
+  const subParent = sub?.parent_id ? rows.find((r) => String(r.id) === String(sub.parent_id)) : null;
+  const saveSub = async (e) => {
+    e?.preventDefault();
+    if (!sub) return;
+    try {
+      await api.post('/parties/sub-ledger', sub);
+      setSub(null); await load(); await reload();
+      notify(`${word} sub ledger saved`);
+    } catch (err) { notify(err.message, 'err'); }
+  };
+  useShortcuts({ save: () => saveSub(), close: () => setSub(null) }, !!sub);
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -94,6 +112,7 @@ export default function Parties({ type }) {
     setMenu({ x: e.clientX, y: e.clientY, title: r ? r.name : (isCus ? 'Customers' : 'Suppliers'), items: [
       canEdit && { icon: '➕', label: `Add ${word.toLowerCase()}`, onClick: () => open(null) },
       r && canEdit && { icon: '✏️', label: `Edit ${word.toLowerCase()}`, onClick: () => open(r) },
+      r && canEdit && { icon: '🏢', label: 'Add sub ledger under this', onClick: () => openSub(r.parent_party_id || r.id) },
       r && { icon: '📄', label: 'Ledger statement', onClick: () => ledger(r) },
       r && r.linked_party_id && { icon: '🔗', label: `${otherWord} ledger (same party)`, onClick: () => nav(`/ledger?account=${r.linked_party_id}&from=${fy.start_date}&to=${today}`) },
       r && canEdit && (isCus ? { icon: '📥', label: 'Receive payment', onClick: () => nav('/entry/receipt') } : { icon: '📤', label: 'Make payment', onClick: () => nav('/entry/supplier_payment') }),
@@ -109,14 +128,16 @@ export default function Parties({ type }) {
         <h1>{isCus ? 'Customers' : 'Suppliers'}</h1>
         <span className="muted">{isCus ? 'Sundry Debtors' : 'Sundry Creditors'}</span>
         <span className="spacer" />
+        <button className="ghost edit-only" onClick={() => openSub()}>＋ Sub ledger</button>
         <button className="edit-only" data-new title="F1 / Alt+N" onClick={() => open(null)}>＋ New {word.toLowerCase()} <kbd className="kbd">F1</kbd></button>
       </header>
+      {/* toolbar: filters on the left, search on the right (same place as the other grids) */}
       <div className="pdc-bar">
-        <span className="tb-search"><input data-find title="Ctrl+F" value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Search name, PAN, phone, address, contact…" />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
         <label className="check small"><input type="checkbox" checked={onlyDue} onChange={(e) => setOnlyDue(e.target.checked)} /> Only with balance</label>
         <span className="spacer" />
         <span className="muted small">{shown.length} of {rows.length}</span>
+        <span className="tb-search"><input data-find title="Ctrl+F" value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Search name, PAN, phone, address, contact…" />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
       </div>
       <section className="card">
         <table ref={gridRef} className="grid dg-soft" onContextMenu={(e) => rowMenu(e, null)}>
@@ -136,14 +157,14 @@ export default function Parties({ type }) {
                   <td className="sel" onDoubleClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)}
                     onChange={() => setSel((s) => { const n = new Set(s); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} /></td>
                   <td className="sn">{idx + 1}</td>
-                  <td className="pname">{r.name}{!r.active && <span className="tag">inactive</span>}{r.linked_party_id && <span className="tag" title={`Also a ${otherWord.toLowerCase()} — ${isCus ? 'payable' : 'receivable'} ${fmtBal(r.linked_balance)}`}>also {otherWord.toLowerCase()}</span>}</td>
+                  <td className="pname">{r.name}{r.parent_name && <span className="tag" title={`Sub ledger of ${r.parent_name}`}>↳ under {r.parent_name}</span>}{!r.active && <span className="tag">inactive</span>}{r.linked_party_id && <span className="tag" title={`Also a ${otherWord.toLowerCase()} — ${isCus ? 'payable' : 'receivable'} ${fmtBal(r.linked_balance)}`}>also {otherWord.toLowerCase()}</span>}</td>
                   <td>{r.pan}</td><td className="nowrap">{r.office_phone}</td>
                   <td className="nowrap">{(r.whatsapp || r.phone) && <a href={waLink(r.whatsapp || r.phone, `Namaste ${r.name},`)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{r.whatsapp || r.phone}</a>}</td>
                   <td>{r.main_contact}{r.contact_count > 1 && <span className="tag">+{r.contact_count - 1}</span>}</td>
                   <td>{r.address}</td>
                   {isCus && <td>{LEVELS.find((l) => l[0] === r.price_level)?.[1]}</td>}
                   <td className="num">{r.credit_days ? `${r.credit_days} d` : ''}{r.credit_limit ? ` · ${fmtMoney(r.credit_limit)}` : ''}</td>
-                  <td className="nowrap">{r.last_date ? fmtDate(r.last_date) : ''}</td>
+                  <td className="nowrap">{r.last_date ? fmtDateShort(r.last_date) : ''}</td>
                   <td className={`num b ${over ? 'neg' : ''}`}>{fmtBal(r.balance)}{over && <span className="tag">over limit</span>}</td>
                   <td className="nowrap">{r.saved_by_name || r.updated_by || r.created_by}</td>
                 </tr>
@@ -170,6 +191,41 @@ export default function Parties({ type }) {
             <th className="num">{fmtBal(total)}</th><th /></tr></tfoot>
         </table>
       </section>
+      {sub && (
+        <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setSub(null)}>
+          <form className="card form acc-cardform" onSubmit={saveSub} autoComplete="off">
+            <h2 className="acc-head"><span className="acc-head-ic">🏢</span><span className="acc-head-txt">Create {word} Sub Ledger
+              <small>A sub company under a main {word.toLowerCase()} — its own ledger and balance; the contact person stays the same</small></span></h2>
+            <div className="acc-card">
+              <div className="acc-step"><i>1</i>Main {word.toLowerCase()}</div>
+              <label className="full">Main {word} Name *
+                <SearchableSelect value={sub.parent_id} onChange={(v) => setSub({ ...sub, parent_id: v })}
+                  placeholder={`— Select the main ${word.toLowerCase()} —`}
+                  options={rows.filter((r) => !r.parent_party_id).map((r) => ({ value: String(r.id), label: r.name,
+                    sub: [r.pan && `PAN ${r.pan}`, r.address].filter(Boolean).join(' · ') }))} />
+              </label>
+              <label className="full">Contact Name (same as the main {word.toLowerCase()})
+                <input readOnly tabIndex={-1} value={subParent ? (subParent.main_contact || subParent.contact_person || '—') : ''} placeholder="Choose the main party first" />
+              </label>
+            </div>
+            <div className="acc-card">
+              <div className="acc-step"><i>2</i>Sub company</div>
+              <label className="full">Sub Company Name *<input autoFocus value={sub.name} onChange={(e) => setSub({ ...sub, name: e.target.value })} required /></label>
+              <label>PAN / VAT No.<input value={sub.pan} maxLength={9} inputMode="numeric" placeholder="9 digits"
+                onChange={(e) => setSub({ ...sub, pan: e.target.value.replace(/\D/g, '') })} /></label>
+              <label>Phone<input value={sub.phone} inputMode="tel" placeholder="98XXXXXXXX"
+                onChange={(e) => setSub({ ...sub, phone: e.target.value.replace(/[^\d+\-/\s]/g, '') })} /></label>
+              <label className="full">Address<input value={sub.address} onChange={(e) => setSub({ ...sub, address: e.target.value })} /></label>
+            </div>
+            <div className="actions">
+              <span className="spacer" />
+              <button type="button" className="ghost" onClick={() => setSub(null)}>Close <Kbd>Esc</Kbd></button>
+              <button data-save disabled={!sub.parent_id || !sub.name.trim()}>Save <Kbd>Ctrl+S</Kbd></button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
 
       {edit && (

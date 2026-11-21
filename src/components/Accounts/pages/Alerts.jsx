@@ -4,7 +4,7 @@ import { useApp } from '../context';
 import DocView from '../components/DocView';
 import { useGrid } from '../components/DataGrid';
 import { api, fmtMoney, fmtStamp, waLink } from '../lib/api';
-import { fmtDate } from '../lib/dates';
+import { fmtDate, fmtDateShort } from '../lib/dates';
 
 function Remind({ docId, kind, phone, email }) {
   const { notify, company, canEdit } = useApp();
@@ -89,7 +89,7 @@ export default function Alerts() {
   const billRow = (late) => (r) => (
     <>
       <td>{r.party}</td><td>{r.id ? <a onClick={() => view(r.id)}>{r.doc_no}</a> : r.doc_no}</td>
-      <td>{fmtDate(r.doc_date)}</td><td>{fmtDate(r.due_date)}</td>
+      <td>{fmtDateShort(r.doc_date)}</td><td>{fmtDateShort(r.due_date)}</td>
       <td className={`num ${late ? 'neg' : ''}`}>{late ? `${r.days_overdue} late` : r.days_overdue === 0 ? 'today' : `in ${-r.days_overdue}`}</td>
       <td className="num">{fmtMoney(r.outstanding)}</td>
       <td><Remind docId={r.id} kind="due" phone={r.phone} email={r.email} /></td>
@@ -98,7 +98,7 @@ export default function Alerts() {
   const payRow = (late) => (r) => (
     <>
       <td>{r.party}</td><td>{r.id ? <a onClick={() => view(r.id)}>{r.doc_no}</a> : r.doc_no}</td>
-      <td>{fmtDate(r.doc_date)}</td><td>{fmtDate(r.due_date)}</td>
+      <td>{fmtDateShort(r.doc_date)}</td><td>{fmtDateShort(r.due_date)}</td>
       <td className={`num ${late ? 'neg' : ''}`}>{late ? `${r.days_overdue} late` : r.days_overdue === 0 ? 'today' : `in ${-r.days_overdue}`}</td>
       <td className="num">{fmtMoney(r.outstanding)}</td><td />
     </>
@@ -106,7 +106,7 @@ export default function Alerts() {
   const svcHead = <><th>Party</th><th>Service</th><th>Bill</th><th>Expires</th><th className="num">Days left</th><th>Remind</th></>;
   const svcRow = (remind) => (s) => (
     <>
-      <td>{s.party}</td><td>{s.item}</td><td><a onClick={() => view(s.doc_id)}>{s.doc_no}</a></td><td>{fmtDate(s.service_to)}</td>
+      <td>{s.party}</td><td>{s.item}</td><td><a onClick={() => view(s.doc_id)}>{s.doc_no}</a></td><td>{fmtDateShort(s.service_to)}</td>
       <td className={`num ${s.days_left < 0 ? 'neg' : ''}`}>{s.days_left < 0 ? `expired ${-s.days_left} d ago` : s.days_left}</td>
       <td>{remind && <Remind docId={s.doc_id} kind="service" phone={s.phone} email={s.email} />}</td>
     </>
@@ -120,7 +120,7 @@ export default function Alerts() {
         head={<><th>When</th><th>Type</th><th>Task</th><th>Bill</th><th>Assigned to</th><th>Done</th></>}
         row={(r) => (
           <>
-            <td className={`nowrap ${r.days < 0 ? 'neg' : ''}`}>{fmtDate(r.remind_on)}<br /><small className="muted">
+            <td className={`nowrap ${r.days < 0 ? 'neg' : ''}`}>{fmtDateShort(r.remind_on)}<br /><small className="muted">
               {r.days < 0 ? `${-r.days} day(s) ago` : 'today'}</small></td>
             <td>{r.kind === 'cheque' ? '🧾 Cheque' : '📞 Follow-up'}
               {r.kind === 'followup' && r.priority && r.priority !== 'normal' && <span className={`tag prio-${r.priority}`}>{r.priority}</span>}</td>

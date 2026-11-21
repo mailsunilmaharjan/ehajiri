@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import DocView from '../components/DocView';
 import { RemarksRow, useGrid } from '../components/DataGrid';
 import { api } from '../lib/api';
-import { fmtDate } from '../lib/dates';
+import { fmtDate, fmtDateShort } from '../lib/dates';
 import { DOCS } from '../lib/docs';
 
 const STATUS = { in_stock: ['In stock', 'st-posted'], sold: ['Sold', 'st-open'], returned: ['Returned to supplier', 'st-cancelled'], cancelled: ['Cancelled', 'st-cancelled'] };
@@ -39,7 +39,7 @@ export default function SerialSearch() {
                 <td className="mono"><b>{r.serial_no}</b></td>
                 <td>{r.item} <small className="muted">{r.code}</small></td>
                 <td><span className={`tag ${STATUS[r.status]?.[1]}`}>{STATUS[r.status]?.[0] || r.status}</span></td>
-                <td>{r.warranty_until ? <>{fmtDate(r.warranty_until)} <span className={`tag ${r.warranty_status === 'in warranty' ? 'st-posted' : 'st-cancelled'}`}>{r.warranty_status}</span></> : '—'}</td>
+                <td>{r.warranty_until ? <>{fmtDateShort(r.warranty_until)} <span className={`tag ${r.warranty_status === 'in warranty' ? 'st-posted' : 'st-cancelled'}`}>{r.warranty_status}</span></> : '—'}</td>
                 <td className="small">
                   {r.history.length === 0 && 'Opening stock'}
                   {r.history.map((h) => (

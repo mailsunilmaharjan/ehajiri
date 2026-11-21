@@ -6,7 +6,7 @@ import { PeriodBar } from '../components/inputs';
 import VoucherView from '../components/VoucherView';
 import { RemarksRow, UpdatedBy, useGrid } from '../components/DataGrid';
 import { api, fmtMoney } from '../lib/api';
-import { fmtAd, fmtBs, fmtSaved } from '../lib/dates';
+import { fmtAd, fmtBs, fmtSaved, fmtBsShort } from '../lib/dates';
 
 const COLS = 10;
 const VAT_KEYS = ['input_vat', 'output_vat'];
@@ -78,7 +78,7 @@ export default function DayBook({ fixedType = '', title = 'Day Book', sub = '', 
                 <tr key={v.id} {...g.rowProps(v, v.status === 'cancelled' ? 'cancelled' : '')}>
                   {g.tickTd(v)}
                   <td className="sn">{idx + 1}</td>
-                  <td className="nowrap">{fmtBs(v.vdate)}<span className="dl-sep">|</span>{fmtAd(v.vdate)}</td>
+                  <td className="nowrap">{fmtBsShort(v.vdate)}<span className="dl-sep">|</span>{fmtAd(v.vdate)}</td>
                   <td className="nowrap"><a onClick={() => setOpen(v)}>{v.voucher_no}</a>{v.status === 'cancelled' && <span className="tag">cancelled</span>}</td>
                   <td className="nowrap"><span className={`vt-chip vt-${v.vtype}`}>{v.day_type || v.type_name}</span></td>
                   <td><Accs list={s.dr} />

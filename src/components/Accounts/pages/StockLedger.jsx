@@ -6,7 +6,7 @@ import { AccountSelect, PeriodBar } from '../components/inputs';
 import DocView from '../components/DocView';
 import { RemarksRow, useGrid } from '../components/DataGrid';
 import { api, fmtMoney } from '../lib/api';
-import { fmtAd, fmtBs } from '../lib/dates';
+import { fmtAd, fmtBs, fmtBsShort } from '../lib/dates';
 
 const q = (n) => (n ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 }) : '');
 
@@ -52,7 +52,7 @@ export default function StockLedger() {
               {srows.map((r, i) => (
                 <tr key={r._k} {...g.rowProps(r)}>
                   {g.tickTd(r)}<td className="sn">{i + 1}</td>
-                  <td className="nowrap">{fmtBs(r.date)}<span className="dl-sep">|</span>{fmtAd(r.date)}</td>
+                  <td className="nowrap">{fmtBsShort(r.date)}<span className="dl-sep">|</span>{fmtAd(r.date)}</td>
                   <td>{r.doc_id ? <a onClick={() => openDoc(r)}>{r.doc_no}</a> : '—'}</td>
                   <td className="small">{r.kind}</td><td>{r.particulars}</td>
                   <td className="num">{q(r.qty_in)}</td><td className="num">{q(r.qty_out)}</td>

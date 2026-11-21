@@ -19,24 +19,22 @@ export default function MenuHub({ hub }) {
       <div className="coa-st-quick hub-st">
         {h.groups.map((g) => {
           const items = g.cards.filter(([, label]) => !label.startsWith('+'));
-          const adds = g.cards.filter(([, label]) => label.startsWith('+'));
           return (
             <section key={g.title} className="coa-st-card">
               <h3><MIcon name={g.icon} size={18} />{g.title}<b>{items.length}</b></h3>
               <div className="coa-st-list">
-                {items.map(([to, label, icon, key]) => (
-                  <Link key={to} to={to} className="coa-st-led">
-                    <MIcon name={icon} size={15} />
-                    <span className="nm">{label}</span>
-                    {key && <kbd>{key}</kbd>}
-                  </Link>
-                ))}
+                {/* every item in its own place; a "+ …" item is an action (opens a New … form) — shown as a blue row */}
+                {g.cards.map(([to, label, icon, key]) => {
+                  const add = label.startsWith('+');
+                  return (
+                    <Link key={to} to={to} className={`coa-st-led${add ? ' hub-add' : ''}`}>
+                      {add ? <span className="hub-plus">＋</span> : <MIcon name={icon} size={15} />}
+                      <span className="nm">{add ? label.replace(/^\+\s*/, '') : label}</span>
+                      {key && <kbd>{key}</kbd>}
+                    </Link>
+                  );
+                })}
               </div>
-              {adds.length > 0 && (
-                <div className="hub-st-btns">
-                  {adds.map(([to, label]) => <button key={to} type="button" onClick={() => nav(to)}>＋ {label.replace(/^\+\s*/, '')}</button>)}
-                </div>
-              )}
             </section>
           );
         })}
