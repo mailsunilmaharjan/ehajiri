@@ -367,6 +367,7 @@ export default function DocEntry() {
       </header>
       <section className="card entry-card">
         <div className={`doc-form bill-top ${type === 'SI' ? 'si' : isSale || type === 'PB' ? '' : 'two'}`}>
+          <div className="acc-step"><i>1</i>{isQuote ? 'Quotation details' : `${partyWord} & bill details`}</div>
           <label>{partyWord} Name *
             <span className="inline">
               {isQuote && !f.party_id ? (
@@ -413,6 +414,7 @@ export default function DocEntry() {
         {isQuote && <QuoteTop f={f} setF={setF} templates={templates} docId={editId}
           party={isQuote && f.contact_id && !f.party_id ? { contact_names: (contactSel?.persons || []).map((p) => p.name).join('\n') } : party} />}
         {!isQuote && <div className={`doc-form pay-row pay-${f.payment_mode}`}>
+          <div className="acc-step"><i>2</i>Payment</div>
           <label>Payment Mode
             <select value={f.payment_mode} onChange={(e) => setMode(e.target.value)}>
               {PAY_MODES.map(([v, l]) => <option key={v} value={v} disabled={!f.party_id && (v === 'credit' || v === 'cheque')}>{l}</option>)}
@@ -513,7 +515,7 @@ export default function DocEntry() {
           )}
         </div>}
 
-        <div className="section-label">{isSale ? 'PRODUCT DETAILS' : 'ITEMS'}</div>
+        <div className="acc-step acc-step-out"><i>{isQuote ? 2 : 3}</i>{isSale ? 'Product details' : 'Items'}</div>
         <table className="grid entry bill-grid">
           <thead><tr>
             <th className="sn">SN</th><th style={{ minWidth: 280 }}>PRODUCT NAME</th><th style={{ width: 90 }}>HS CODE</th>

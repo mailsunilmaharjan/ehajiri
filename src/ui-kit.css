@@ -392,3 +392,20 @@ body .acc-app .card.form .actions button.ghost, body .acc-app .party-full .pf-ac
 /* bill / voucher entry screens: grey page behind one white rounded card, no coloured top bar */
 body .acc-app .card.entry-card { background: #fff; padding: 20px; border-top: 1px solid #e8edf5 !important; }
 body .acc-app .card.entry-card .section-label { margin-top: 6px; }
+
+/* ── Bill entry screens (Sales Invoice, Sales Order/Quotation/Return, Purchase …): grey form with white section cards ── */
+body .acc-app .card.entry-card { background: #f8fafc !important; padding: 16px 18px 0 !important; }
+body .acc-app .card.entry-card > .doc-form, body .acc-app .card.entry-card > .inv-foot {
+  background: #fff; border: 1px solid #e8edf5; border-radius: 14px; padding: 16px 18px; margin: 0 0 12px; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+body .acc-app .card.entry-card > .section-label { margin: 4px 4px 8px; display: flex; align-items: center; gap: 8px; color: #0f172a !important; font-size: 12.5px !important; text-transform: none; letter-spacing: 0 !important; }
+body .acc-app .card.entry-card > .section-label::before { content: ''; width: 4px; height: 14px; border-radius: 2px; background: #2563eb; }
+body .acc-app .card.entry-card > table.grid { background: #fff; border: 1px solid #e8edf5 !important; border-radius: 14px; border-collapse: separate; border-spacing: 0; overflow: hidden; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+body .acc-app .card.entry-card > table.grid thead th:first-child { border-top-left-radius: 13px; }
+body .acc-app .card.entry-card > table.grid thead th:last-child { border-top-right-radius: 13px; }
+body .acc-app .card.entry-card > .actions { margin: 16px -18px 0 !important; border-radius: 0 !important; }
+
+/* numbered section headings on the Accounts entry screens (same look as "① Company details" on the other forms) */
+body .acc-app .acc-step { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin: 0 0 4px; font-size: 13px; font-weight: 700; color: #0f172a; }
+body .acc-app .acc-step i { font-style: normal; width: 22px; height: 22px; border-radius: 50%; background: #dbeafe; color: #1d4ed8; font-size: 11.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+body .acc-app .acc-step.acc-step-out { margin: 4px 4px 8px; }
