@@ -302,7 +302,7 @@ const LeaveApplyModal = () => {
   return (
     <div className="modal-overlay" style={{ zIndex: 10000 }}>
       <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
-      <div className="modal modal-lg"
+      <div className="modal modal-lg glm-form glm-plain"
         style={{ maxWidth: 680, maxHeight: '92vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}>
 

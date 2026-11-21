@@ -289,3 +289,11 @@ body .acc-app .doc-form .bsd input, body .acc-app .entry-card .bsd input { heigh
 .glm-shift .form-group { margin-bottom: 0; }
 .glm-shift .form-row { gap: 12px; }
 .glm-shift .modal-footer { background: #fff; }
+
+/* ── Plain-header card modals (Apply for Leave / Office Visit / Late-Early / Missing Attendance, Leave Type, Visit Type, Public Holiday) ──
+   Same look as the setup forms: grey page, grey header, one white rounded card for the fields, compact buttons. */
+.modal.glm-form.glm-plain { max-width: 720px; background: #f8fafc; }
+.glm-plain .modal-header > h2 { font-size: 16px; font-weight: 700; color: #0f2a3d; margin: 0; letter-spacing: -.1px; }
+.glm-plain .modal-header { background: #f8fafc; padding: 14px 20px; }
+.glm-plain .modal-body { background: #fff; margin: 14px 18px; padding: 16px 18px; border: 1px solid #e8edf5; border-radius: 14px; box-shadow: 0 1px 2px rgba(15,23,42,.04); flex: 0 1 auto; }
+.glm-plain .modal-footer { background: #f8fafc; border-top: 1px solid #e2e8f0; }

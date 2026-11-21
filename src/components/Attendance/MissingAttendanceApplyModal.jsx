@@ -157,7 +157,7 @@ const MissingAttendanceApplyModal = () => {
 
   return (
     <div className="modal-overlay" style={{ zIndex: 10000 }}>
-      <div className="modal modal-lg" style={{ maxWidth: 620, maxHeight: '92vh', overflowY: 'auto' }}
+      <div className="modal modal-lg glm-form glm-plain" style={{ maxWidth: 620, maxHeight: '92vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}>
 
         <div className="modal-header" style={{ position: 'sticky', top: 0, zIndex: 10 }}>

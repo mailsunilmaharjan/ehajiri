@@ -1498,7 +1498,7 @@ const LeaveTypeSection = () => {
       {/* Add/Edit Modal */}
       {modal && (
         <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth:680, width:'95%' }} onClick={e => e.stopPropagation()}>
+          <div className="modal glm-form glm-plain" style={{ maxWidth:680, width:'95%' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ बिदा प्रकार','New Leave Type')}`}</h2>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
@@ -1720,7 +1720,7 @@ const OfficeVisitTypeSection = () => {
 
       {modal && (
         <div className="modal-overlay">
-          <div className="modal modal-sm" onClick={e=>e.stopPropagation()}>
+          <div className="modal modal-sm glm-form glm-plain" style={{ maxWidth:520 }} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ भ्रमण प्रकार','New Office Visit Type')}`}</h2>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
@@ -2031,7 +2031,7 @@ const PublicHolidaySection = () => {
 
       {modal && (
         <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth:700, width:'95%' }} onClick={e=>e.stopPropagation()}>
+          <div className="modal glm-form glm-plain" style={{ maxWidth:700, width:'95%' }} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editId ? `✏️ ${L('सम्पादन','Edit')}` : `+ ${L('नयाँ सार्वजनिक छुट्टी','New Public Holiday')}`}</h2>
               <button className="modal-close" onClick={()=>setModal(false)}>✕</button>
@@ -4054,6 +4054,7 @@ const Settings = () => {
                 {activeSetup === 'grade' && (
                   <SetupSection
                     title={L('ग्रेड','Grade')}
+                    formStep={L('ग्रेड विवरण','Grade details')}
                     data={[...(settings.grades || [])].sort((a,b)=>(a.rankingOrder??9999)-(b.rankingOrder??9999))}
                     fields={[
                       { key:'name',         header:L('ग्रेड','Grade'),         required:true },
@@ -4069,6 +4070,7 @@ const Settings = () => {
                 {activeSetup === 'mode' && (
                   <SetupSection
                     title={L('नियुक्ति प्रकार','Employment Mode')}
+                    formStep={L('नियुक्ति प्रकार विवरण','Employment mode details')}
                     data={settings.modes || []}
                     fields={[
                       { key:'name',      header:L('मोड','Mode'), required:true },
@@ -4082,6 +4084,7 @@ const Settings = () => {
                 {activeSetup === 'religion' && (
                   <SetupSection
                     title={L('धर्म','Religion')}
+                    formStep={L('धर्म विवरण','Religion details')}
                     data={settings.religions || []}
                     fields={[
                       { key:'name',      header:L('धर्म','Religious'), required:true },
@@ -4095,6 +4098,7 @@ const Settings = () => {
                 {activeSetup === 'status' && (
                   <SetupSection
                     title={L('स्थिति','Status')}
+                    formStep={L('स्थिति विवरण','Status details')}
                     data={settings.statuses || []}
                     fields={[
                       { key:'name',       header:L('स्थिति नाम','Status Name'), required:true },
@@ -4113,6 +4117,7 @@ const Settings = () => {
                 {activeSetup === 'jobTiming' && (
                   <SetupSection
                     title={L('कार्य समय प्रकार','Job Timing')}
+                    formStep={L('कार्य समय विवरण','Job timing details')}
                     data={settings.jobTimings || []}
                     fields={[
                       { key:'name',      header:L('कार्य समय','Job Timing'), required:true },

@@ -274,7 +274,7 @@ const OfficeVisitApplyModal = () => {
   return (
     <div className="modal-overlay" style={{ zIndex: 10000 }}>
       <AlertPopup alert={saveAlert} onClose={() => setSaveAlert(null)} />
-      <div className="modal modal-lg" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+      <div className="modal modal-lg glm-form glm-plain" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
