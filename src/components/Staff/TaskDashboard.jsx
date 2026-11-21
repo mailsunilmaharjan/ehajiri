@@ -4,8 +4,8 @@ import api from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
 import { getNepalTodayISO, addDaysISO } from '../../utils/dateUtils.js';
-import DataGrid from '../DataGrid/DataGrid.jsx';
 import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
+import DataGrid from '../DataGrid/DataGrid.jsx';
 
 /* Task module landing page — now the direct target of the top-nav "Task"
    item (Task is a plain link, no dropdown, same convention as Payroll — see
@@ -22,12 +22,10 @@ import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
    have (TaskSettings.jsx's cards page still exists but nothing links to it
    from the nav anymore).
 
-   Layout: Today's / Yesterday's summary tiles first, then a Task-Category-
-   wise breakdown of ONLY today's tasks — one real DataGrid per category (the
-   same shared component/standard styling as Staff Detail etc., not a hand-
-   rolled table), two categories per row, 15 rows/page. Each grid's row click
-   reuses the openTaskId/openEvent deep link TaskList.jsx already opens the
-   Followup History panel from (see its openTaskIdParam effect). */
+   Layout: four summary cards only — Today's, Yesterday's, This Week's (Sun-Sat)
+   and Upcoming Week's tasks — each with Total / Processing / Pending / Completed /
+   Cancels / Transfer. The old per-category task lists were removed: one grid per
+   category made the page slow to open. */
 
 const STYLES = `
   .tdb-grid6 { display:grid; grid-template-columns:repeat(6, 1fr); gap:8px; }
@@ -36,47 +34,43 @@ const STYLES = `
   .tdb-section { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px 18px; }
   .tdb-section-title { font-size:14px; font-weight:800; color:#1e293b; margin:0 0 12px 0; display:flex; align-items:center; gap:8px; }
   .tdb-section-date { font-size:11.5px; font-weight:600; color:#94a3b8; }
-  .tdb-page-heading { font-size:15px; font-weight:800; color:#1e293b; margin:0 0 12px 0; display:flex; align-items:center; gap:8px; }
-  .tdb-cat-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
-  .tdb-cat-grid .dg-container { min-width:0; }
-  .tdb-cat-chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
-  .tdb-cat-chip { font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
-  .tdb-status-badge { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
   @media(max-width:720px){ .tdb-summary-cols{ grid-template-columns:1fr; } }
-  @media(max-width:1100px){ .tdb-cat-grid{ grid-template-columns:1fr; } }
   @media(max-width:720px){ .tdb-grid6{ grid-template-columns:repeat(3,1fr); } }
   @media(max-width:480px){ .tdb-grid6{ grid-template-columns:repeat(2,1fr); } }
 `;
 
+// Each category has its own light tint (bg + border) and a status filter used when its tile is clicked.
 const STAT_DEFS = [
-  { key: 'total',      label: 'Total',      icon: '📋' },
-  { key: 'processing', label: 'Processing', icon: '⚙️' },
-  { key: 'pending',    label: 'Pending',    icon: '⏳' },
-  { key: 'complete',   label: 'Completed',  icon: '✅' },
-  { key: 'cancel',     label: 'Cancels',    icon: '✖️' },
-  { key: 'transfer',   label: 'Transfer',   icon: '🔁' },
+  { key: 'total',      label: 'Total',      icon: '📋', bg: '#f1f5f9', border: '#cbd5e1', test: () => true },
+  { key: 'processing', label: 'Processing', icon: '⚙️', bg: '#eff6ff', border: '#bfdbfe', test: t => t.status === 'in_progress' },
+  { key: 'pending',    label: 'Pending',    icon: '⏳', bg: '#fffbeb', border: '#fde68a', test: t => t.status === 'pending' },
+  { key: 'complete',   label: 'Completed',  icon: '✅', bg: '#f0fdf4', border: '#bbf7d0', test: t => t.status === 'completed' },
+  { key: 'cancel',     label: 'Cancels',    icon: '✖️', bg: '#fef2f2', border: '#fecaca', test: t => t.status === 'cancelled' },
+  { key: 'transfer',   label: 'Transfer',   icon: '🔁', bg: '#f5f3ff', border: '#ddd6fe', test: t => !!t.hasTransfer },
 ];
 
 const STATUS_STYLE = {
-  pending:     { bg: '#fffbeb', color: '#b45309', label: 'Pending' },
-  in_progress: { bg: '#eff6ff', color: '#1d4ed8', label: 'Processing' },
-  completed:   { bg: '#f0fdf4', color: '#065f46', label: 'Completed' },
-  cancelled:   { bg: '#fff5f5', color: '#991b1b', label: 'Cancelled' },
+  pending:     { color: '#b45309', label: 'Pending' },
+  in_progress: { color: '#1d4ed8', label: 'Processing' },
+  completed:   { color: '#15803d', label: 'Completed' },
+  cancelled:   { color: '#dc2626', label: 'Cancelled' },
 };
 
-const StatTile = ({ label, value, icon }) => (
-  <div className="tdb-card">
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, minWidth: 0 }}>
-      <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
-      <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+const StatTile = ({ label, value, icon, bg, border, onClick }) => {
+  const clickable = value > 0;
+  return (
+    <div className="tdb-card" onClick={clickable ? onClick : undefined}
+      title={clickable ? `Click to see these ${value} task${value === 1 ? '' : 's'}` : ''}
+      style={{ background: bg, borderColor: border, cursor: clickable ? 'pointer' : 'default', transition: 'box-shadow .12s, transform .12s' }}
+      onMouseEnter={e => { if (clickable) { e.currentTarget.style.boxShadow = '0 3px 10px rgba(15,23,42,.14)'; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = ''; e.currentTarget.style.transform = ''; }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, minWidth: 0 }}>
+        <span style={{ fontSize: 12, flexShrink: 0 }}>{icon}</span>
+        <span style={{ fontSize: 11, color: '#475569', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      </div>
+      <span style={{ fontSize: 19, fontWeight: 800, color: '#1e293b', lineHeight: 1 }}>{value}</span>
     </div>
-    <span style={{ fontSize: 19, fontWeight: 800, color: '#1e293b', lineHeight: 1 }}>{value}</span>
-  </div>
-);
-
-const StatusBadge = ({ status }) => {
-  const s = STATUS_STYLE[status] || { bg: '#f1f5f9', color: '#64748b', label: status || '—' };
-  return <span className="tdb-status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
+  );
 };
 
 const emptyStats = () => ({ total: 0, pending: 0, processing: 0, complete: 0, cancel: 0, transfer: 0 });
@@ -111,25 +105,6 @@ const bucketStats = (tasks, matches) => {
   return s;
 };
 
-// Groups today's tasks (see isDueTodayOrOverdue above) by Task Category —
-// only the categories that actually have one show up, each with its own
-// mini "Total / Completed / Uncompleted" tally alongside the row list (SN,
-// Task Name, Company Name, Mobile, Address, Status), matching the
-// per-category tables in the original Excel mockup.
-const groupTodayByCategory = (tasks, todayISO) => {
-  const map = new Map();
-  tasks.forEach(t => {
-    if (!isDueTodayOrOverdue(t, todayISO)) return;
-    const key = t.categoryName || 'Uncategorized';
-    if (!map.has(key)) map.set(key, { categoryName: key, rows: [], total: 0, completed: 0, uncompleted: 0 });
-    const g = map.get(key);
-    g.rows.push(t);
-    g.total++;
-    if (t.status === 'completed') g.completed++; else g.uncompleted++;
-  });
-  return [...map.values()].sort((a, b) => b.total - a.total);
-};
-
 export default function TaskDashboard() {
   const navigate = useNavigate();
   const { isAdmin, isSuperAdmin, isBranchManager, isDeptHead } = useAuth();
@@ -159,30 +134,62 @@ export default function TaskDashboard() {
   const today = getNepalTodayISO();
   const yesterday = useMemo(() => addDaysISO(today, -1), [today]);
 
-  const buckets = useMemo(() => ([
-    { key: 'today',     title: "Today's Task",     dateISO: today,
-      stats: bucketStats(tasks, t => isDueTodayOrOverdue(t, today)) },
-    { key: 'yesterday', title: "Yesterday's Task",  dateISO: yesterday,
-      stats: bucketStats(tasks, t => (t.dueDate ? String(t.dueDate).split('T')[0] : null) === yesterday) },
-  ]), [tasks, today, yesterday]);
+  // Nepal's week runs Sunday -> Saturday. "This week" is the one containing today; "Upcoming week" is the next one.
+  const weekStart = useMemo(() => addDaysISO(today, -new Date(`${today}T00:00:00`).getDay()), [today]);
+  const weekEnd = useMemo(() => addDaysISO(weekStart, 6), [weekStart]);
+  const nextStart = useMemo(() => addDaysISO(weekStart, 7), [weekStart]);
+  const nextEnd = useMemo(() => addDaysISO(weekStart, 13), [weekStart]);
 
-  const categoryGroups = useMemo(() => groupTodayByCategory(tasks, today), [tasks, today]);
+  // Summary only — no per-category lists (rendering one grid per category made this page slow to open).
+  const buckets = useMemo(() => {
+    const dueOf = (t) => (t.dueDate ? String(t.dueDate).split('T')[0] : null);
+    const inRange = (t, a, b) => { const d = dueOf(t); return !!d && d >= a && d <= b; };
+    // `match` picks the bucket's tasks — used for the counts AND for the list shown when a tile is clicked.
+    const defs = [
+      { key: 'today',     title: "Today's Task",         range: fd(today),
+        match: t => isDueTodayOrOverdue(t, today) },
+      { key: 'yesterday', title: "Yesterday's Task",     range: fd(yesterday),
+        match: t => dueOf(t) === yesterday },
+      { key: 'week',      title: "This Week's Task",     range: `${fd(weekStart)} → ${fd(weekEnd)}`,
+        match: t => inRange(t, weekStart, weekEnd) },
+      { key: 'next',      title: "Upcoming Week's Task", range: `${fd(nextStart)} → ${fd(nextEnd)}`,
+        match: t => inRange(t, nextStart, nextEnd) },
+      // Field Visit = tasks flagged "Field Visit" (the same ones the Field Visit page lists).
+      // Today uses the same rule as Today's Task (due today, or still open and overdue);
+      // Upcoming is everything due after today.
+      { key: 'fvToday',   title: "🚗 Today's Field Visit",  range: fd(today),
+        match: t => !!t.isFieldVisit && isDueTodayOrOverdue(t, today) },
+      { key: 'fvNext',    title: '🚗 Upcoming Field Visit', range: `after ${fd(today)}`,
+        match: t => { const d = dueOf(t); return !!t.isFieldVisit && !!d && d > today; } },
+    ];
+    return defs.map(b => ({ ...b, stats: bucketStats(tasks, b.match) }));
+  }, [tasks, today, yesterday, weekStart, weekEnd, nextStart, nextEnd, fd]);
 
+  // Clicking a tile opens that bucket's tasks (filtered by the tile's status) in a popup grid.
+  const [drill, setDrill] = useState(null);   // { bucket, def }
+  const drillRows = useMemo(
+    () => drill ? tasks.filter(t => drill.bucket.match(t) && drill.def.test(t)) : [],
+    [drill, tasks]);
   const openTask = (row) => navigate(`/staff/task?openTaskId=${row.id}&openEvent=view`);
-
-  const categoryColumns = useMemo(() => [
-    { field: 'title', header: 'Task Name', width: 180 },
-    { field: 'customerName', header: 'Company Name', width: 160,
+  const drillColumns = useMemo(() => [
+    { field: 'title', header: 'Task Name', minWidth: 200,
+      render: (v, row) => (
+        <span style={{ textDecoration: (row.status === 'completed' || row.status === 'cancelled') ? 'line-through' : 'none',
+          color: row.status === 'completed' ? '#9ca3af' : row.status === 'cancelled' ? '#c2706f' : '#1f2937' }}>{v}</span>) },
+    { field: 'customerName', header: 'Company Name', width: 170,
       render: v => v || <span style={{ color: '#d1d5db' }}>—</span> },
     { field: 'customerMobile', header: 'Mobile', width: 120,
       render: (v, row) => v || row.customerPhone || <span style={{ color: '#d1d5db' }}>—</span> },
-    { field: 'customerAddress', header: 'Address', width: 160,
-      render: (v, row) => v || row.customerCompanyAddress || <span style={{ color: '#d1d5db' }}>—</span> },
-    { field: 'status', header: 'Status', width: 110, render: v => <StatusBadge status={v} /> },
-  ], []);
+    { field: 'dueDate', header: 'Due Date', width: 120,
+      render: v => v ? fd(String(v).split('T')[0]) : <span style={{ color: '#d1d5db' }}>—</span> },
+    { field: 'assignees', header: 'Assigned To', width: 170, sortable: false, filterable: false,
+      render: v => Array.isArray(v) && v.length ? v.map(a => a.name).join(', ') : <span style={{ color: '#d1d5db' }}>—</span> },
+    { field: 'status', header: 'Status', width: 100, align: 'center',
+      render: v => { const s = STATUS_STYLE[v] || { color: '#6b7280', label: v || '—' }; return <span style={{ fontSize: 12.5, fontWeight: 600, color: s.color }}>{s.label}</span>; } },
+  ], [fd]);
 
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <style>{STYLES}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <h1 className="page-title">📊 Task Dashboard</h1>
@@ -247,53 +254,52 @@ export default function TaskDashboard() {
             {buckets.map(b => (
               <div key={b.key} className="tdb-section">
                 <h2 className="tdb-section-title">
-                  {b.title} <span className="tdb-section-date">({fd(b.dateISO)})</span>
+                  {b.title} <span className="tdb-section-date">({b.range})</span>
                 </h2>
                 <div className="tdb-grid6">
                   {STAT_DEFS.map(def => (
-                    <StatTile key={def.key} label={def.label} value={b.stats[def.key]} icon={def.icon} iconBg={def.iconBg} />
+                    <StatTile key={def.key} label={def.label} value={b.stats[def.key]} icon={def.icon}
+                      bg={def.bg} border={def.border} onClick={() => setDrill({ bucket: b, def })} />
                   ))}
                 </div>
               </div>
             ))}
           </div>
-
-          <h2 className="tdb-page-heading">
-            🗂️ Task Categories — Today's Task <span className="tdb-section-date">({fd(today)})</span>
-          </h2>
-
-          {categoryGroups.length === 0 ? (
-            <div className="tdb-section" style={{ textAlign: 'center', color: '#9ca3af', fontSize: 13.5, padding: 32 }}>
-              No tasks due today.
-            </div>
-          ) : (
-            <div className="tdb-cat-grid">
-              {categoryGroups.map(g => (
-                <DataGrid
-                  key={g.categoryName}
-                  title={g.categoryName}
-                  toolbarLeft={
-                    <div className="tdb-cat-chips">
-                      <span className="tdb-cat-chip" style={{ background: '#e2e8f0', color: '#374151' }}>Total: {g.total}</span>
-                      <span className="tdb-cat-chip" style={{ background: '#f0fdf4', color: '#065f46' }}>Completed: {g.completed}</span>
-                      <span className="tdb-cat-chip" style={{ background: '#fff5f5', color: '#991b1b' }}>Uncompleted: {g.uncompleted}</span>
-                    </div>
-                  }
-                  columns={categoryColumns}
-                  data={g.rows}
-                  rowKey="id"
-                  defaultPageSize={15}
-                  pageSizeOptions={[15, 25, 50]}
-                  compact
-                  showCheckbox={false}
-                  showFilterButton={false}
-                  searchPlaceholder="Search..."
-                  onRowClick={openTask}
-                />
-              ))}
-            </div>
-          )}
         </>
+      )}
+
+      {drill && (
+        <div onClick={() => setDrill(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 14, width: 'min(1080px, 100%)', maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 20px 60px rgba(0,0,0,.3)', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', background: drill.def.bg, borderBottom: `1px solid ${drill.def.border}` }}>
+              <span style={{ fontSize: 16 }}>{drill.def.icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#1e293b' }}>{drill.bucket.title} — {drill.def.label}
+                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, color: '#475569' }}>({drillRows.length})</span></div>
+                <div style={{ fontSize: 11.5, color: '#64748b' }}>{drill.bucket.range} · click a row to open the task</div>
+              </div>
+              <button onClick={() => setDrill(null)} aria-label="Close"
+                style={{ border: 'none', background: 'transparent', fontSize: 22, lineHeight: 1, cursor: 'pointer', color: '#64748b', padding: '0 6px' }}>×</button>
+            </div>
+            <div style={{ padding: 14, overflow: 'auto' }}>
+              <DataGrid
+                columns={drillColumns}
+                data={drillRows}
+                rowKey="id"
+                defaultPageSize={15}
+                pageSizeOptions={[15, 25, 50]}
+                compact
+                showCheckbox={false}
+                showFilterButton={false}
+                searchPlaceholder="Search..."
+                onRowClick={openTask}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

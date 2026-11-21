@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { tripTracker } from '../../utils/tripTracker.js';
 import { isMobileMode } from '../../utils/native.js';
+import { useModuleFlags } from '../../context/ModuleFlagsContext.jsx';
 
 /**
  * Keeps the Field Visit route tracker in step with the server's open trip, app-wide
@@ -12,21 +13,24 @@ import { isMobileMode } from '../../utils/native.js';
  */
 const TripTrackerHost = ({ bottom = 24, left = 150 }) => {
   const { currentUser } = useAuth();
+  const { flags } = useModuleFlags();
+  const enabled = flags.fieldVisitTrackingEnabled === true;   // Module control: Field Visit tracking (default OFF)
   const [st, setSt] = useState(tripTracker.getStatus());
 
   useEffect(() => tripTracker.subscribe(setSt), []);
 
   useEffect(() => {
     // The mobile app captures GPS ONLY at the Check out / Check in taps — no continuous route recording.
-    if (!currentUser?.id || isMobileMode()) { tripTracker.stop(); return undefined; }
+    tripTracker.setAllowed(enabled);
+    if (!enabled || !currentUser?.id || isMobileMode()) { tripTracker.stop(); return undefined; }
     tripTracker.sync();
     const t = setInterval(() => tripTracker.sync(), 5 * 60 * 1000);
     const onFocus = () => tripTracker.sync();
     window.addEventListener('focus', onFocus);
     return () => { clearInterval(t); window.removeEventListener('focus', onFocus); };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, enabled]);
 
-  if (!st.tracking) return null;
+  if (!enabled || !st.tracking) return null;
   return (
     <div title="Your location is recorded while this field visit trip is open, until you check in at the office."
       style={{ position: 'fixed', bottom, left, zIndex: 1500, display: 'inline-flex', alignItems: 'center', gap: 6,

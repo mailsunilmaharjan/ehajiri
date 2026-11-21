@@ -157,7 +157,7 @@ const Layout = ({ children }) => {
                     ? <React.Suspense fallback={null}><MobileCheckIn /></React.Suspense>
                     : <OnlineAttendanceApplyModal />}
                   {moduleFlags.chatEnabled && <ChatDock />}
-                  {moduleFlags.supportHelpEnabled !== false && <SupportChat />}
+                  {moduleFlags.supportHelpEnabled === true && <SupportChat />}
                   <NativeBridge />
                 </ChatProvider>
               </AttendanceNotificationProvider>

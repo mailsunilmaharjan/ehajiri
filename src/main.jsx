@@ -9,8 +9,10 @@ import { SettingsProvider } from './context/SettingsContext.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { installGlobalErrorReporting } from './utils/bugReporter.js'
 import { getTenantPrefix } from './utils/tenantPath.js'
+import { installUploadGuard } from './utils/uploadGuard.js'
 import { reloadOnceForChunkError } from './utils/chunkReload.js'
 import './index.css'
+import './ui-kit.css'
 
 // Bug Finder (Settings → Bug Finder): catches crashes outside React's render
 // cycle (event handlers, timers, fetches) — render-time crashes are caught
@@ -22,6 +24,9 @@ installGlobalErrorReporting()
 window.addEventListener('vite:preloadError', (e) => {
   if (reloadOnceForChunkError()) e.preventDefault()
 })
+
+// Blocks programs / scripts / disguised files the moment they are picked in any file input (server re-checks every upload).
+installUploadGuard()
 
 // Registers the (deliberately no-op / non-caching) service worker so the
 // browser recognizes the app as installable — see public/service-worker.js

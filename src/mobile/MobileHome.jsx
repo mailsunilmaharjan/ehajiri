@@ -15,6 +15,7 @@ import { Icon, useMT } from './kit.jsx';
 import { useMyLeaveBalance, useMyApprovals, useExtraRequests, monthRange } from './hooks.js';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useTaskAssignedBeepAlert } from '../hooks/useBeepAlert.js';
+import MobileSummary, { FieldVisitCard } from './MobileSummary.jsx';
 
 const hhmm = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d) ? String(v).slice(0, 5) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }); };
 
@@ -111,6 +112,7 @@ export default function MobileHome() {
 
   const actions = [
     flags.dutyRosterEnabled && canView('dutyRoster') && { label: 'Duty Roster', icon: '🗓️', bg: '#e0e7ff', fn: () => navigate('/m/roster'), badge: rosterNew },
+    { label: 'Holidays', icon: '🎉', bg: '#fef3c7', fn: () => navigate('/m/holidays') },
     canView('leaveApply') && { label: 'Apply Leave', icon: '📝', bg: '#ede9fe', fn: openLeave },
     canView('officeVisitApply') && { label: 'Office Visit', icon: '🏢', bg: '#ccfbf1', fn: openVisit },
     canView('manualPostingApply') && { label: 'Late / Early', icon: '⏱️', bg: '#fef3c7', fn: openManual },
@@ -128,6 +130,9 @@ export default function MobileHome() {
           {day?.lateFormatted && /late/i.test(day.lateFormatted) && <span className="m-chip warn">{day.lateFormatted}</span>}
         </div>
       </div>
+
+      <MobileSummary />
+      <FieldVisitCard />
 
       {onlineOn && checkedOut && (
         <div className="m-donepill"><span>✅</span>{mt('Done for today')}</div>

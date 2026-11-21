@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { biometricAvailable, hasLoginSecret, clearLoginSecret, isNative, nativePlugin } from '../utils/native.js';
 import { useNavigate } from 'react-router-dom';
+import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { useMissingAttendanceApply } from '../context/MissingAttendanceApplyContext.jsx';
@@ -12,7 +13,7 @@ import { useIsAdmin } from './MobileAdmin.jsx';
 export default function MobileMore() {
   const mt = useMT();
   const navigate = useNavigate();
-  const { currentUser, logout, canView } = useAuth();
+  const { currentUser, logout, canView, isEmployee: isEmployeeRole } = useAuth();
   const { language, changeLanguage } = useLanguage();
   const isAdmin = useIsAdmin();
   const [diag, setDiag] = useState(null);
@@ -33,6 +34,14 @@ export default function MobileMore() {
   const toggleBio = async () => {
     if (bio.on) { await clearLoginSecret(); localStorage.removeItem('ehajiri_bio_declined'); setBio(b => ({ ...b, on: false, note: 'Turned off' })); }
     else { localStorage.removeItem('ehajiri_bio_declined'); setBio(b => ({ ...b, note: 'Sign out and sign in again with your password, then choose Enable' })); }
+  };
+
+  // Attendance alerts (phone push when someone punches / is late) — per user, mutable here
+  const [punchAlerts, setPunchAlerts] = useState(null);   // null = not loaded / no phone registered
+  useEffect(() => { if (!isNative()) return; api.get('/push/prefs').then(r => { if (r?.devices > 0) setPunchAlerts(!!r.punchAlerts); }).catch(() => {}); }, []);
+  const togglePunchAlerts = async () => {
+    const next = !punchAlerts; setPunchAlerts(next);
+    try { await api.put('/push/prefs', { punchAlerts: next }); } catch { setPunchAlerts(!next); }
   };
 
   const Item = ({ icon, label, sub, onClick, danger }) => (
@@ -57,11 +66,14 @@ export default function MobileMore() {
       <div className="m-card m-flat">
         <Item icon="check" label={mt('Approvals')} sub={mt('Recommend, approve or reject requests')} onClick={() => navigate('/m/approvals')} />
         <Item icon="cal" label={mt('My Attendance')} onClick={() => navigate('/m/attendance')} />
+        <Item icon="cal" label={mt('Public Holidays')} sub={isAdmin ? mt('View, add and edit holidays') : mt('Holidays of each month')} onClick={() => navigate('/m/holidays')} />
+        {!isEmployeeRole && <Item icon="user" label={mt('Staff')} sub={mt('Office · Field Visit · On Leave · On Office Visit')} onClick={() => navigate('/m/staff')} />}
         <Item icon="task" label={mt('Tasks')} onClick={() => navigate('/staff/task')} />
         {isAdmin && <Item icon="briefcase" label={mt('Device Management')} sub={mt('Attendance devices, status and actions')} onClick={() => navigate('/m/devices')} />}
         <Item icon="money" label={mt('My Payslips')} onClick={() => navigate('/payroll/my')} />
         {canView('missingAttendanceApply') && <Item icon="clock" label={mt('Missing punch')} onClick={() => openMissing()} />}
         <Item icon="user" label={mt('Profile')} onClick={() => navigate('/profile')} />
+        {punchAlerts !== null && <Item icon="clock" label={mt('Attendance alerts')} sub={punchAlerts ? mt('On — tap to mute') : mt('Muted — tap to turn on')} onClick={togglePunchAlerts} />}
         {bio.avail && <Item icon="finger" label={mt('Fingerprint / face sign-in')} sub={bio.note ? mt(bio.note) : bio.on ? mt('On — tap to turn off') : mt('Off')} onClick={toggleBio} />}
         <Item icon="globe" label={mt('Screen info')} sub={mt('For support — shows your screen sizes')} onClick={showDiag} />
         <Item icon="help" label={mt('Help & Support')} sub="Ask a question or chat with support" onClick={() => window.dispatchEvent(new Event('ehajiri:open-help'))} />

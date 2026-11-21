@@ -167,6 +167,14 @@ body .acc-app .section-label, body .acc-app .form h3 {
   color: var(--ui-panel-head-text) !important; text-transform: uppercase;
 }
 
+/* Accounts buttons: same colour & size as the Staff list "Working" toggle (blue #1a56db, 30px high, 0 11px, 12px semibold, 6px corners).
+   Scoped to .acc-app so the rest of eHajiri keeps its own button sizes. Colour itself is set in Accounts/accounts.embed.css. */
+body .acc-app {
+  --acc-btn-bg: #1a56db; --acc-btn-bg-hover: #1245b0;
+  --ui-btn-sm-h: 30px; --ui-btn-sm-pad: 0 11px; --ui-btn-sm-font: 12px;
+  --ui-btn-pad: 0 11px; --ui-btn-font: 12px; --ui-btn-weight: 600; --ui-radius: 6px;
+}
+
 /* buttons — page level (page header, filter bars, grid toolbars, contact-table "Add") */
 body .acc-app .page-head :is(button, a.btn), body .acc-app .toolbar :is(button, a.btn), body .acc-app .pdc-bar :is(button, a.btn),
 body .acc-app .pf-contacts-head :is(button, a.btn), body .acc-app .dg-toolbar :is(button, a.btn) {
@@ -175,7 +183,7 @@ body .acc-app .pf-contacts-head :is(button, a.btn), body .acc-app .dg-toolbar :i
 }
 /* buttons — dialog / form footer (Save, Cancel …) */
 body .acc-app .actions :is(button, a.btn), body .acc-app .iv-actions :is(button, a.btn), body .acc-app .modal > .card .actions :is(button, a.btn) {
-  min-height: 34px; padding: var(--ui-btn-pad); font-size: var(--ui-btn-font) !important; font-weight: var(--ui-btn-weight); border-radius: var(--ui-radius);
+  min-height: var(--ui-btn-sm-h); padding: var(--ui-btn-pad); font-size: var(--ui-btn-font) !important; font-weight: var(--ui-btn-weight); border-radius: var(--ui-radius);
 }
 body .acc-app .btn-sm, body .acc-app button.btn-sm { padding: 5px 10px !important; font-size: var(--ui-btn-sm-font) !important; }
 /* a button that sits beside a text box ("+ Add" next to Customer) is as tall as the box */
@@ -605,3 +613,21 @@ body .acc-app .page-container > .page-head:first-child {
   padding: 12px 18px; min-height: 56px; box-sizing: border-box; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(15,23,42,.04);
 }
 body .acc-app .page-container > .page-head:first-child h1 { color: var(--ui-modal-title-color); font-size: 16px !important; font-weight: 700; }
+
+/* Monthly Expenses & Profit: six summary boxes (Purchase, Sales, Income, Expenses, Damage / Loss, Profit / Loss) */
+body .acc-app .pl-kpis.mp-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1100px) { body .acc-app .pl-kpis.mp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+body .acc-app .mp-table td .neg small, body .acc-app .mp-table th .neg small { font-weight: 600; }
+
+/* ── VAT reports (IRD Sales Book, Purchase Book, VAT Return) ── */
+body .acc-app .vat-book th, body .acc-app .vat-return th, body .acc-app .vat-form-table th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+body .acc-app .vat-book th small, body .acc-app .vat-return th small { font-weight: 500; color: #64748b; font-size: 10.5px; }
+body .acc-app .vat-book tr.vat-month td, body .acc-app .vat-form-table tr.vat-month td { background: #eff6ff !important; color: #1e3a8a; font-weight: 700; }
+body .acc-app .vat-book tr.vat-subtotal td, body .acc-app .vat-form-table tr.vat-subtotal td { background: #f1f5f9 !important; font-weight: 700; border-top: 1px solid #cbd5e1; }
+body .acc-app .vat-book tr.vat-cancel td { color: #9ca3af; text-decoration: line-through; }
+body .acc-app .vat-book tr.vat-cancel td .tag { text-decoration: none; }
+body .acc-app .vat-return tr.selected td { background: #dbeafe !important; }
+body .acc-app .vat-form { margin-top: 16px; background: #fff; border: 1px solid #e8edf5; border-radius: 14px; padding: 14px 16px; max-width: 820px; }
+body .acc-app .vat-form-head { font-size: 14px; font-weight: 700; color: #0f2a3d; margin-bottom: 10px; }
+body .acc-app .vat-form-table tfoot tr.pl-loss th { background: #fee2e2 !important; color: #7f1d1d; }
+body .acc-app .vat-form-table tfoot tr.pl-profit th { background: #dcfce7 !important; color: #14532d; }

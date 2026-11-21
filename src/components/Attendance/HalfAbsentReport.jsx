@@ -194,8 +194,8 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
   const depts    = [...new Set(filteredEmps.map(e=>e.department).filter(Boolean))].sort().map(d=>({value:d,label:d}));
   const posts    = [...new Set(filteredEmps.map(e=>e.position).filter(Boolean))].sort().map(p=>({value:p,label:p}));
 
-  const Lbl  = ({ text }) => <div style={{ fontSize:13,fontWeight:600,color:'#111827',marginBottom:6 }}>{text}</div>;
-  const Field = ({ label, children }) => <div style={{ position:'relative',overflow:'visible' }}><Lbl text={label}/>{children}</div>;
+  // Lbl moved to module level (see Field)
+  // Field moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   return (
     <div className="modal-overlay">
@@ -716,3 +716,7 @@ const HalfAbsentReport = () => {
 };
 
 export default HalfAbsentReport;
+
+const Field = ({ label, children }) => <div style={{ position:'relative',overflow:'visible' }}><Lbl text={label}/>{children}</div>;
+
+const Lbl = ({ text }) => <div style={{ fontSize:13,fontWeight:600,color:'#111827',marginBottom:6 }}>{text}</div>;

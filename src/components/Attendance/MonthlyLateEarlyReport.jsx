@@ -16,6 +16,7 @@ import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { makeOrgShortNames } from '../../utils/orgShortNames.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
+import { DutyLines, ShiftLines, dutyInLines, dutyOutLines, dutyHtml } from './DutyStack.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -162,13 +163,8 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
   const depts    = [...new Set(filteredEmps.map(e=>e.department).filter(Boolean))].sort().map(d=>({value:d,label:d}));
   const posts    = [...new Set(filteredEmps.map(e=>e.position).filter(Boolean))].sort().map(p=>({value:p,label:p}));
 
-  const Lbl = ({ text }) => <div style={{ fontSize:13,fontWeight:600,color:'#111827',marginBottom:6 }}>{text}</div>;
-  const Field = ({ label, children }) => (
-    <div style={{ position:'relative', overflow:'visible' }}>
-      <Lbl text={label} />
-      {children}
-    </div>
-  );
+  // Lbl moved to module level (a component defined in render remounts its children, closing open dropdowns)
+  // Field moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   return (
     <div className="modal-overlay">
@@ -390,11 +386,12 @@ const MonthlyLateEarlyReport = () => {
     },
     {
       field:'shiftDisplay', header:L('सिफ्ट','Shift'),
-      render: v => <span style={{ color:'#1f2937', fontFamily:'monospace', whiteSpace:'nowrap' }}>{v}</span>,
+      render: v => <span style={{ fontFamily:'monospace' }}><ShiftLines value={v} /></span>,
     },
     {
       field:'timeIn', header:L('आउने समय','In Time'), align:'center',
       render: (v, row) => {
+        if (row.duties && v) return <DutyLines lines={dutyInLines(row.duties)} />;
         const warn = row.punches === 1;
         return v
           ? <strong style={{ fontFamily:'monospace', color: warn?'#f59e0b':'#3b82f6' }}
@@ -406,9 +403,9 @@ const MonthlyLateEarlyReport = () => {
     },
     {
       field:'timeOut', header:L('जाने समय','Out Time'), align:'center',
-      render: v => v
+      render: (v, row) => (row.duties && row.timeIn) ? <DutyLines lines={dutyOutLines(row.duties)} /> : (v
         ? <strong style={{ fontFamily:'monospace', color:'#6b7280' }}>{fmtTime(v)}</strong>
-        : <span style={{ color:'#d1d5db' }}>—</span>,
+        : <span style={{ color:'#d1d5db' }}>—</span>),
     },
     {
       field:'lateInFormatted', header:L('कैफियत','Remarks'), sortable:false, wrap:true, fill:true,
@@ -444,9 +441,9 @@ const MonthlyLateEarlyReport = () => {
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${deptShortOf(r)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;color:#7c3aed;font-weight:700">${resolveShort(r)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-weight:600">${fd(r.date)||r.date}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.shiftDisplay||''}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${fmtTime(r.timeIn)}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${fmtTime(r.timeOut)}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${(r.shiftDisplay||'').replace(/\n/g,'<br>')}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.duties ? dutyHtml(dutyInLines(r.duties)) : fmtTime(r.timeIn)}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.duties ? dutyHtml(dutyOutLines(r.duties)) : fmtTime(r.timeOut)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede">${[r.lateInFormatted,r.earlyOutFormatted].filter(Boolean).join(' | ')||''}</td>
     </tr>`).join('');
     const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:11px">
@@ -464,7 +461,7 @@ const MonthlyLateEarlyReport = () => {
     const headers = ['Person','Post','Dept.','Branch','Date','Shift','In Time','Out Time','Remarks'];
     const dataRows = records.map(r => [
       r.fullName, postShortOf(r), deptShortOf(r), r.branchShort,
-      r.date, r.shiftDisplay, fmtTime(r.timeIn), fmtTime(r.timeOut),
+      r.date, (r.shiftDisplay||'').replace(/\n/g,' + '), fmtTime(r.timeIn), fmtTime(r.timeOut),
       [r.lateInFormatted, r.earlyOutFormatted].filter(Boolean).join(' | ') || '',
     ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
     downloadCSV(getExcelHeaderRows(settings, language, rptTitle, rptSub()) + headers.join(',') + '\n' + dataRows,
@@ -654,3 +651,12 @@ const MonthlyLateEarlyReport = () => {
 };
 
 export default MonthlyLateEarlyReport;
+
+const Lbl = ({ text }) => <div style={{ fontSize:13,fontWeight:600,color:'#111827',marginBottom:6 }}>{text}</div>;
+
+const Field = ({ label, children }) => (
+  <div style={{ position:'relative', overflow:'visible' }}>
+    <Lbl text={label} />
+    {children}
+  </div>
+);

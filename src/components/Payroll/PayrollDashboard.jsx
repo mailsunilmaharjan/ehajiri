@@ -63,7 +63,7 @@ const PayrollDashboard = () => {
   );
 
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
         <h1 className="page-title">💰 Payroll</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

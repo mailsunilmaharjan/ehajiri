@@ -62,6 +62,8 @@ function onGeoError(e) {
   emit();
 }
 
+let allowed = false;   // off until TripTrackerHost has read the tenant's module flag
+
 async function flush() {
   if (!sessionId) return;
   if (sending) return sending;
@@ -127,7 +129,10 @@ export const tripTracker = {
   subscribe(fn) { listeners.add(fn); fn({ ...status }); return () => listeners.delete(fn); },
   getStatus: () => ({ ...status }),
   /** Re-read the server's active trip and start/stop tracking to match. */
+  /** Set by TripTrackerHost from the tenant's module flag. While false, nothing is ever recorded. */
+  setAllowed(v) { allowed = !!v; if (!allowed) stop(); },
   async sync() {
+    if (!allowed) { stop(); return; }   // module "Field Visit tracking" is off for this tenant
     if (isMobileMode()) { stop(); return; }   // phone app: GPS only at the Check in / Check out taps, never a continuous route
     try {
       const s = await api.get('/field-visit/session/active');

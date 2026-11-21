@@ -175,7 +175,7 @@ const MissingAttendanceRequests = () => {
   ];
 
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: '8px 14px 0' }}>
       <h1 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>📩 Missing Attendance Requests</h1>
       <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
         Requests you need to recommend/approve, and requests you've submitted yourself.

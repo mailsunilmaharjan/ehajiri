@@ -21,6 +21,35 @@ export const ACCOUNTS_MENU = [
     ['/serials', 'Serial No. Search', 'key'], ['/day-book', 'Day Book', 'calendar'], ['/ledger', 'Ledger', 'fileText', 'Ctrl+L'],
     ['/trial-balance', 'Trial Balance', 'calculator'], ['/profit-loss', 'Profit & Loss Account', 'trendingUp'],
     ['/bill-profit', 'Bill-wise Profit & Loss', 'fileText'], ['/monthly-profit', 'Monthly Expenses & Profit', 'barChart'],
+    ['/vat-purchase', 'VAT Purchase Book', 'truck'], ['/vat-sales', 'VAT Sales Book', 'fileText'], ['/vat-return', 'VAT Return (IRD)', 'calculator'],
     ['/audit', 'Audit Trail', 'shield'],
   ] },
 ];
+
+// Landing pages ("Master", "Posting", "Reports") — the Accounts dropdown lists only these; each page shows every menu & sub-menu
+// as columns of cards. Item = [path, label, icon, hint?]. Rendered by pages/MenuHub.jsx at /accounts/master, /posting, /reports.
+// `actions` = quick buttons on top: [path, label].
+export const ACCOUNTS_HUBS = {
+  master: { title: 'Master', icon: 'database', actions: [['/customers', 'Customers'], ['/suppliers', 'Suppliers'], ['/products', 'Products']], groups: [
+    { title: 'Parties', icon: 'users', cards: [['/customers', 'Customers (Debtors)', 'users'], ['/suppliers', 'Suppliers (Creditors)', 'truck']] },
+    { title: 'Inventory Setup', icon: 'grid', cards: [['/products', 'Products & Categories', 'grid']] },
+    { title: 'Accounts Setup', icon: 'list', cards: [['/accounts', 'Chart of Accounts', 'list'], ['/company', 'Company Setup', 'sliders']] },
+    { title: 'Templates', icon: 'edit3', cards: [['/quote-templates', 'Quotation Templates', 'edit3']] },
+  ] },
+  posting: { title: 'Posting', icon: 'edit3', actions: [['/docs/SI/new', 'Sales Invoice'], ['/docs/PB/new', 'Purchase Invoice'], ['/entry/journal', 'Journal Voucher']], groups: [
+    { title: 'Purchase Posting', icon: 'truck', cards: [['/docs/PB', 'Purchase Invoice', 'fileText'], ['/docs/PO', 'Purchase Order', 'clipboard'], ['/docs/PR', 'Purchase Return', 'logOut']] },
+    { title: 'Sales Posting', icon: 'trendingUp', cards: [['/docs/QT', 'Sales Quotation', 'mail'], ['/docs/SO', 'Sales Order', 'clipboard'], ['/docs/SI', 'Sales Invoice', 'fileText'], ['/docs/SR', 'Sales Return', 'logOut']] },
+    { title: 'Vouchers', icon: 'edit3', cards: [
+      ['/entry/expense', 'Expenses Voucher', 'fileText'], ['/journals', 'Journal Voucher', 'edit3'], ['/entry/supplier_payment', 'Supplier Payment', 'fileText'],
+      ['/entry/receipt', 'Payment Received', 'fileText'], ['/entry/transfer', 'Cash / Bank Transfer', 'fileText'], ['/entry/capital_loan', 'Capital / Loan Received', 'fileText'],
+      ['/entry/staff_advance', 'Staff Advance / Loan', 'users'], ['/entry/asset_purchase', 'Asset Purchase', 'fileText'], ['/entry/asset_sale', 'Asset Sale', 'fileText'],
+    ] },
+  ] },
+  reports: { title: 'Reports', icon: 'barChart', actions: [['/ledger', 'Ledger'], ['/trial-balance', 'Trial Balance'], ['/profit-loss', 'Profit & Loss']], groups: [
+    { title: 'Books & Ledgers', icon: 'fileText', cards: [['/day-book', 'Day Book', 'calendar'], ['/ledger', 'Ledger', 'fileText', 'Ctrl+L'], ['/trial-balance', 'Trial Balance', 'calculator']] },
+    { title: 'Profit & Loss', icon: 'trendingUp', cards: [['/profit-loss', 'Profit & Loss Account', 'trendingUp'], ['/bill-profit', 'Bill-wise Profit & Loss', 'fileText'], ['/monthly-profit', 'Monthly Expenses & Profit', 'barChart']] },
+    { title: 'Inventory Reports', icon: 'grid', cards: [['/stock-summary', 'Stock Summary', 'barChart'], ['/stock-ledger', 'Stock Ledger', 'list', 'Ctrl+K'], ['/serials', 'Serial No. Search', 'key']] },
+    { title: 'VAT Reports (IRD)', icon: 'calculator', cards: [['/vat-purchase', 'VAT Purchase Book', 'truck'], ['/vat-sales', 'VAT Sales Book', 'fileText'], ['/vat-return', 'VAT Return (IRD)', 'calculator']] },
+    { title: 'Alerts & Audit', icon: 'bell', cards: [['/alerts', 'Alerts (due & expiry)', 'bell'], ['/audit', 'Audit Trail', 'shield']] },
+  ] },
+};

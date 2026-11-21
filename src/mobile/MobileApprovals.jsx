@@ -7,6 +7,8 @@ import Avatar from '../components/Common/Avatar.jsx';
 import { getNepalTodayISO } from '../utils/dateUtils.js';
 import { Empty, Sheet, Spinner, useMT } from './kit.jsx';
 import { useExtraRequests, useMyApprovals, useApprovalRules } from './hooks.js';
+import useRecoApproval from '../hooks/useRecoApproval.js';
+import { PersonPick } from './fields.jsx';
 
 /* One place for everyone who recommends or approves: Leave, Office Visit, Overtime, Late In / Early Out, Missing Attendance and
    Online Attendance. Each list has a "For recommendation" part (you are the recommender) and a "For approval" part (you are the
@@ -43,8 +45,18 @@ export default function MobileApprovals() {
   }, []);
   useEffect(() => { loadOt(); }, [loadOt]);
 
-  const otItems = useMemo(() => (ot || []).map(x => ({ ...x, empName: x.fullName, ...rules(x.employeeId, !!x.recommendedBy) }))
-    .filter(x => x.visible && (x.canRecommend || x.canApprove)), [ot, rules]);
+  // an OT the recommender sent to one specific approver can only be approved/rejected by that person (admins excepted)
+  const isAdminRole = ['admin', 'superAdmin'].includes(currentUser?.role);
+  const otItems = useMemo(() => (ot || []).map(x => {
+    const r = rules(x.employeeId, !!x.recommendedBy);
+    const notMine = !isAdminRole && x.pickedApproverId && String(x.pickedApproverId) !== String(currentUser?.id);
+    return { ...x, empName: x.fullName, ...r, canApprove: r.canApprove && !notMine };
+  }).filter(x => x.visible && (x.canRecommend || x.canApprove)), [ot, rules, isAdminRole, currentUser]);
+
+  // Recommending an OT: choose which approver it goes to (several configured → pick; one → automatic)
+  const { getApprovalIds, refresh: refreshReco } = useRecoApproval();
+  const [otAppr, setOtAppr] = useState('');
+  useEffect(() => { refreshReco?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lists = {
     leave: mine.leaves, visit: mine.visits, ot: otItems,
@@ -60,6 +72,9 @@ export default function MobileApprovals() {
   const perform = async () => {
     const { kind, item, action } = act;
     if (action === 'reject' && !remark.trim()) { setErr(mt('Please write the reason for rejecting')); return; }
+    const otApprIds = kind === 'ot' && action === 'recommend' ? getApprovalIds(item.employeeId).map(String) : [];
+    if (otApprIds.length > 1 && !otAppr) { setErr(mt('Please choose an Approval Authority')); return; }
+    const pickedAppr = otApprIds.length === 1 ? otApprIds[0] : (otAppr || null);
     setBusy(true); setErr('');
     const body = { comment: remark.trim() };
     try {
@@ -69,8 +84,8 @@ export default function MobileApprovals() {
       else if (kind === 'missing') await api.patch(`/attendance/missing-requests/${item.id}/${action}`, body);
       else if (kind === 'online') await api.patch(`/online-attendance/${item.id}/${action}`, body);
       else if (kind === 'ot') {
-        if (item.approvalId) await api.patch(`/overtime/${item.approvalId}/${action}`, action === 'approve' ? { ...body, approvedOTMins: item.otMinutes } : body);
-        else if (action === 'recommend') await api.post('/overtime/recommend-inline', { employeeId: item.employeeId, date: item.date, otMinutes: item.otMinutes, comment: remark.trim() });
+        if (item.approvalId) await api.patch(`/overtime/${item.approvalId}/${action}`, action === 'approve' ? { ...body, approvedOTMins: item.otMinutes } : action === 'recommend' ? { ...body, approvalId: pickedAppr } : body);
+        else if (action === 'recommend') await api.post('/overtime/recommend-inline', { employeeId: item.employeeId, date: item.date, otMinutes: item.otMinutes, comment: remark.trim(), approvalId: pickedAppr });
         else await api.post('/overtime/approve-inline', { employeeId: item.employeeId, date: item.date, otMinutes: item.otMinutes, action, comment: remark.trim() });
       }
       setDone({ recommend: mt('Recommended'), approve: mt('Approved'), reject: mt('Rejected') }[action]);
@@ -98,7 +113,7 @@ export default function MobileApprovals() {
     return <div>{pts.map(p => <a key={p.l} className="m-apc-loc" href={p.url} target="_blank" rel="noopener noreferrer"><span>📍</span><span className="m-ell">{p.l}{p.pl ? ` · ${p.pl}` : ''}</span></a>)}</div>;
   };
 
-  const open = (k, x, action) => { setRemark(''); setErr(''); setAct({ kind: k, item: x, action }); };
+  const open = (k, x, action) => { setRemark(''); setErr(''); setOtAppr(x.pickedApproverId ? String(x.pickedApproverId) : ''); setAct({ kind: k, item: x, action }); };
   const Card = ({ k, x, mode }) => {
     const e = empOf(x.employeeId);
     const [first, ...rest] = summary(k, x).filter(Boolean);
@@ -152,6 +167,9 @@ export default function MobileApprovals() {
           footer={<><button className="m-btn m-ghost" onClick={() => setAct(null)}>{mt('Cancel')}</button>
             <button className={`m-btn ${act.action === 'reject' ? 'm-bad' : act.action === 'approve' ? 'm-ok' : 'm-warn'}`} disabled={busy} onClick={perform}>{busy ? '…' : mt('Confirm')}</button></>}>
           <div className="m-card m-flat" style={{ padding: 12, marginBottom: 12 }}>{summary(act.kind, act.item).filter(Boolean).map((r, i) => <div key={i} style={i === 0 ? { fontWeight: 700 } : { fontSize: 13, color: 'var(--m-sub)' }}>{r}</div>)}{act.kind === 'online' && <Locs x={act.item} />}</div>
+          {act.kind === 'ot' && act.action === 'recommend' && getApprovalIds(act.item.employeeId).length > 1 && (
+            <PersonPick label={mt('Send to Approval Authority')} ids={getApprovalIds(act.item.employeeId)} getEmp={(id) => empOf(id)} value={otAppr} onChange={setOtAppr} required />
+          )}
           <div className="m-field"><label>{mt('Remarks')}{act.action === 'reject' ? ' *' : ` (${mt('optional')})`}</label>
             <textarea className={`m-input${err && act.action === 'reject' && !remark.trim() ? ' err' : ''}`} rows={4} autoFocus value={remark} onChange={e => { setRemark(e.target.value); setErr(''); }}
               placeholder={act.action === 'reject' ? mt('Why is it being rejected?') : mt('Add a remark for the applicant')} /></div>

@@ -297,6 +297,31 @@ export const AuthProvider = ({ children }) => {
         // THIS tenant's cached identity (AuthProvider reads it
         // synchronously on mount) until its first API call 401s.
         logout();
+        // Single sign-in: the password is already in hand, so sign in to that
+        // company directly (same origin, its /t/<sub>/api) and open its
+        // dashboard — no second email/password screen. The password is only
+        // ever sent to that tenant's own login endpoint, never put in a URL.
+        // Wrong password → say so here. Anything else (licence block, network)
+        // falls through to the old redirect so the company's own login page
+        // can show the proper message.
+        try {
+          const r = await fetch(`/t/${result.subdomain}/api/auth/login`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (r.ok && data.token && !data.redirect) {
+            const { token, ...user } = data;
+            localStorage.setItem('current_user', JSON.stringify(user));
+            setToken(token);
+            window.location.href = `/t/${result.subdomain}/dashboard`;
+            return true;
+          }
+          if ((r.status === 401 || r.status === 400) && !data.licenseError) {
+            setError('इमेल वा पासवर्ड गलत छ');
+            return false;
+          }
+        } catch { /* fall back to the redirect below */ }
         const qs = result.redirectToken ? `?et=${encodeURIComponent(result.redirectToken)}` : '';
         window.location.href = `/t/${result.subdomain}/login${qs}`;
         return true;

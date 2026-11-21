@@ -48,16 +48,17 @@ export function useMyApprovals() {
   return useMemo(() => {
     const me = String(currentUser?.id);
     const ids = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(String);
-    const isReco = (e) => ids(assignments[String(e)]?.reco).includes(me);
-    const isAppr = (e) => ids(assignments[String(e)]?.approval).includes(me);
+    // configured for the employee AND (when the applicant picked one person) that person
+    const isReco = (e, pick) => ids(assignments[String(e)]?.reco).includes(me) && (!pick || String(pick) === me);
+    const isAppr = (e, pick) => ids(assignments[String(e)]?.approval).includes(me) && (!pick || String(pick) === me);
     const hasReco = (e) => ids(assignments[String(e)]?.reco).length > 0;
     const isAdminRole = ['admin', 'superAdmin'].includes(currentUser?.role);
-    const mine = (x) => (String(x.employeeId) === me && !isAdminRole ? false : (isReco(x.employeeId) || isAppr(x.employeeId)));
+    const mine = (x) => (String(x.employeeId) === me && !isAdminRole ? false : (isReco(x.employeeId, x.recoId) || isAppr(x.employeeId, x.approvalId)));
     const decorate = (x) => ({
       ...x,
       empName: employees.find(e => String(e.id) === String(x.employeeId))?.fullName || `#${x.employeeId}`,
-      canRecommend: isReco(x.employeeId) && !x.recommendedBy,
-      canApprove: isAppr(x.employeeId) && (!compulsory || !!x.recommendedBy || !hasReco(x.employeeId)) && !(compulsory && hasReco(x.employeeId) && isReco(x.employeeId)),
+      canRecommend: isReco(x.employeeId, x.recoId) && !x.recommendedBy,
+      canApprove: isAppr(x.employeeId, x.approvalId) && (!compulsory || !!x.recommendedBy || !hasReco(x.employeeId)) && !(compulsory && hasReco(x.employeeId) && isReco(x.employeeId)),
     });
     const pend = (arr) => (arr || []).filter(x => x.status === 'pending' && mine(x)).map(decorate).filter(x => x.canRecommend || x.canApprove);
     return { leaves: pend(leaves), visits: pend(officeVisits) };
@@ -114,8 +115,9 @@ export function useExtraRequests() {
     const ids = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(String);
     const isAdminRole = ['admin', 'superAdmin'].includes(currentUser?.role);
     const cfg = (e) => assignments[String(e)] || {};
-    const isReco = (e) => ids(cfg(e).reco).includes(me);
-    const isAppr = (e) => ids(cfg(e).approval).includes(me);
+    // configured for the employee AND (when the applicant picked one person) that person
+    const isReco = (e, pick) => ids(cfg(e).reco).includes(me) && (!pick || String(pick) === me);
+    const isAppr = (e, pick) => ids(cfg(e).approval).includes(me) && (!pick || String(pick) === me);
     const none = (e) => ids(cfg(e).reco).length === 0 && ids(cfg(e).approval).length === 0;
     const decorate = (x, recoBy) => {
       const e = x.employeeId;
@@ -124,9 +126,9 @@ export function useExtraRequests() {
       return {
         ...x,
         empName: x.fullName || '',
-        canRecommend: isReco(e) && !recoBy,
-        canApprove: override || (isAppr(e) && (!compulsory || !!recoBy || !hasReco) && !(compulsory && hasReco && isReco(e))),
-        visible: (String(e) !== me || isAdminRole) && (isReco(e) || isAppr(e) || override),
+        canRecommend: isReco(e, x.recoId) && !recoBy,
+        canApprove: override || (isAppr(e, x.approvalId) && (!compulsory || !!recoBy || !hasReco) && !(compulsory && hasReco && isReco(e))),
+        visible: (String(e) !== me || isAdminRole) && (isReco(e, x.recoId) || isAppr(e, x.approvalId) || override),
       };
     };
     const man = manual.map(x => decorate(x, x.recommendedById));

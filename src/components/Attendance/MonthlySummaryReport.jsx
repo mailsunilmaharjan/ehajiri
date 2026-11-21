@@ -14,6 +14,7 @@ import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.j
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import ExcelJS from 'exceljs';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
+import FitScroll from '../Common/FitScroll.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -76,15 +77,8 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
   const depts    = [...new Set(filteredEmps.map(e=>e.department).filter(Boolean))].sort().map(d=>({value:d,label:d}));
   const posts    = [...new Set(filteredEmps.map(e=>e.position).filter(Boolean))].sort().map(p=>({value:p,label:p}));
 
-  const Lbl = ({ text }) => (
-    <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:6 }}>{text}</div>
-  );
-  const Field = ({ label, children }) => (
-    <div style={{ position:'relative', overflow:'visible' }}>
-      <Lbl text={label} />
-      {children}
-    </div>
-  );
+  // Lbl moved to module level (a component defined in render remounts its children, closing open dropdowns)
+  // Field moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   return (
     <div className="modal-overlay">
@@ -637,7 +631,7 @@ const MonthlySummaryReport = () => {
 
       {/* ── Table ── */}
       {!loading && data && (
-        <div style={{ overflowX:'auto', borderRadius:8,
+        <FitScroll style={{ borderRadius:8,
           border:'1px solid #dedede', boxShadow:'0 1px 3px rgba(0,0,0,.07)' }}>
           <table style={{ borderCollapse:'collapse', width:'100%' }}>
             <thead>
@@ -685,9 +679,9 @@ const MonthlySummaryReport = () => {
               )}
               {rows.map((r, idx) => (
                 <tr key={r.id}
-                  style={{ background: idx%2===0 ? 'white' : '#f3f4f6' }}
+                  style={{ background: idx%2===0 ? 'white' : '#f7f8fa' }}
                   onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
-                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f3f4f6'}>
+                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f7f8fa'}>
                   <td style={{ ...TD_BASE, background:'#efefef', fontWeight:700, color:'#6b7280', borderRight:'1px solid #dedede' }}>
                     {idx+1}
                   </td>
@@ -748,7 +742,7 @@ const MonthlySummaryReport = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </FitScroll>
       )}
 
       {!loading && rows.length > 0 && (
@@ -775,3 +769,14 @@ const MonthlySummaryReport = () => {
 };
 
 export default MonthlySummaryReport;
+
+const Lbl = ({ text }) => (
+  <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:6 }}>{text}</div>
+);
+
+const Field = ({ label, children }) => (
+  <div style={{ position:'relative', overflow:'visible' }}>
+    <Lbl text={label} />
+    {children}
+  </div>
+);

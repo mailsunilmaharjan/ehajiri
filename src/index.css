@@ -746,3 +746,34 @@ html.native-app body { overscroll-behavior-y: none; }
 /* Phone app: the Help button is reached from More > Help & Support instead of floating over the screens */
 html.mobile-mode .help-fab { display: none !important; }
 html.mobile-mode .help-panel { bottom: 76px !important; height: calc(100vh - 140px) !important; z-index: 2500 !important; }
+
+/* ── Task page: category quick-filter chips + their red notification badges ──
+   Sizes scale with the screen width (clamp) so text stays readable from a 1024px laptop to a 1920px+
+   monitor; chips wrap onto extra rows instead of scrolling, and the red count / bell sit INSIDE the chip
+   so nothing is clipped. */
+.task-cat-row { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.task-cat-chip {
+  display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+  min-height: clamp(30px, 0.3vw + 26px, 38px); padding: 3px clamp(11px, 0.3vw + 8px, 16px);
+  border: 1px solid transparent; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  font-size: clamp(13px, 0.25vw + 10.5px, 16px); font-weight: 600; line-height: 1.2;
+  background: #f1f5f9; color: #334155;
+}
+.task-cat-chip:hover { background: #e2e8f0; }
+.task-cat-chip.on { background: #dbeafe; color: #1a56db; border-color: #93c5fd; }
+.task-cat-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: clamp(20px, 0.2vw + 17px, 26px); height: clamp(20px, 0.2vw + 17px, 26px); padding: 0 6px; box-sizing: border-box;
+  border-radius: 999px; background: #dc2626; color: #fff;
+  font-size: clamp(11.5px, 0.2vw + 9.5px, 14px); font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 3px rgba(220,38,38,.45);
+}
+.task-cat-bell { font-size: clamp(13px, 0.25vw + 10.5px, 16px); line-height: 1; }
+/* the blinking "new task" dot beside a task title: a touch larger so it is easy to see */
+.task-unread-dot { width: 9px !important; height: 9px !important; }
+
+/* Task page header: "Task Type" and "Staff" searchable dropdowns (replace the category chip row) */
+.task-head-filters { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 14px 22px; }
+.task-head-field { display: flex; align-items: center; gap: 8px; }
+.task-head-field > label { font-size: clamp(13px, 0.25vw + 10.5px, 15px); font-weight: 700; color: #475569; white-space: nowrap; margin: 0; }
+.task-head-field .form-control, .task-head-field input { font-size: clamp(13px, 0.25vw + 10.5px, 15px); }

@@ -7,6 +7,8 @@ import SearchableSelect from '../Common/SearchableSelect.jsx';
 import DataGrid from '../DataGrid/DataGrid.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import api from '../../api/client.js';
+import { useSearchParams } from 'react-router-dom';
+import { categoryMeta } from '../../utils/notifCategories.js';
 
 /* ─── helpers ─────────────────────────────────── */
 const fmtFull = (d) => d ? new Date(d).toLocaleString() : '—';
@@ -476,6 +478,9 @@ const StaffMessage = () => {
   const { settings } = useSettings();
   const { clearMsgCount } = useNotifications();
 
+  // ?cat=leave (from the bell) narrows the inbox to one notification category
+  const [searchParams, setSearchParams] = useSearchParams();
+  const catFilter = searchParams.get('cat');
   const [folder,    setFolder]    = useState('inbox');
   const [inbox,     setInbox]     = useState([]);
   const [sent,      setSent]      = useState([]);
@@ -632,6 +637,7 @@ const StaffMessage = () => {
     try {
       await api.put(`/messages/${msgId}/read`, {});
       setInbox(prev => prev.map(m => m.id === msgId ? { ...m, is_read: true } : m));
+      window.dispatchEvent(new Event('ehajiri:messages-changed'));   // refresh the bell
     } catch (_) {}
   };
 
@@ -713,6 +719,9 @@ const StaffMessage = () => {
   const currentList = folder !== 'inbox' ? sent
     : activeFolder ? inbox.filter(m => folderSubtree(activeFolder.id).has(m.folder_id))
     : inbox;
+  const visibleList = (folder === 'inbox' && catFilter)
+    ? currentList.filter(m => (m.category || 'message') === catFilter)
+    : currentList;
 
   const columns = useMemo(() => {
     const typeCol = {
@@ -908,10 +917,17 @@ const StaffMessage = () => {
             </div>
           ) : (
             <div className="dg-fixed-height" style={{ height: '100%' }}>
+              {folder === 'inbox' && catFilter && (
+                <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', fontSize:12, background:'#eff6ff', borderBottom:'1px solid #bfdbfe', color:'#1e40af' }}>
+                  <span>{categoryMeta(catFilter).icon} Showing <strong>{categoryMeta(catFilter).label}</strong> notifications</span>
+                  <button onClick={() => setSearchParams({})}
+                    style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'#1e40af', fontWeight:600 }}>Show all ✕</button>
+                </div>
+              )}
               <DataGrid
-                key={folder}
+                key={folder + (catFilter || '')}
                 columns={columns}
-                data={currentList}
+                data={visibleList}
                 rowKey="id"
                 title={folder !== 'inbox' ? 'Sent' : activeFolder ? `📁 ${activeFolder.name}` : 'Inbox'}
                 showCheckbox={folder === 'inbox'}

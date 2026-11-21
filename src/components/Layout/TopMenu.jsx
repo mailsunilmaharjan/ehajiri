@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth }         from '../../context/AuthContext.jsx';
 import { useModuleFlags }  from '../../context/ModuleFlagsContext.jsx';
@@ -8,6 +8,12 @@ import { useNotifications } from '../Notifications/AttendanceToasts.jsx';
 import { useChat } from '../../context/ChatContext.jsx';
 import useRecoApproval from '../../hooks/useRecoApproval.js';
 import api from '../../api/client.js';
+import { ACCOUNTS_MENU, ACCOUNTS_HUBS } from '../Accounts/menu.js';
+import { useCart } from '../Accounts/lib/cart.js';
+import { NOTIF_CATEGORIES } from '../../utils/notifCategories.js';
+
+// the cart pop-up is only loaded when someone opens it
+const CartDrawer = lazy(() => import('../Accounts/CartDrawer.jsx'));
 import './TopMenu.css';
 
 // Inline SVG flags — Windows doesn't render emoji flags (🇬🇧 shows as "GB"),
@@ -29,62 +35,15 @@ const FlagNepal = () => (
   </svg>
 );
 
-// Crisp stroke-based menu icons — replaces plain emoji, which render
-// inconsistently across OS/browser emoji fonts (blurry, mismatched weight
-// and color, sometimes missing glyphs entirely) and look muddy at this
-// size. Same approach as the Dashboard's stat-card icons: one consistent
-// line weight reads as far more polished across every machine.
-const MENU_ICON_PATHS = {
-  users:        <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
-  fileText:     <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>,
-  checkSquare:  <><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>,
-  truck:        <><rect x="1" y="3" width="15" height="13" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></>,
-  grid:         <><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></>,
-  phone:        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />,
-  userPlus:     <><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" /></>,
-  messageSquare:<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
-  messageCircle:<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />,
-  calendar:     <><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
-  briefcase:    <><rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></>,
-  calculator:   <><rect x="4" y="2" width="16" height="20" rx="2" /><line x1="8" y1="6" x2="16" y2="6" /><line x1="8" y1="10" x2="8.01" y2="10" /><line x1="12" y1="10" x2="12.01" y2="10" /><line x1="16" y1="10" x2="16.01" y2="10" /><line x1="8" y1="14" x2="8.01" y2="14" /><line x1="12" y1="14" x2="12.01" y2="14" /><line x1="16" y1="14" x2="16.01" y2="14" /><line x1="8" y1="18" x2="16" y2="18" /></>,
-  barChart:     <><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></>,
-  list:         <><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></>,
-  activity:     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
-  trendingUp:   <><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></>,
-  clock:        <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
-  mail:         <><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22 6 12 13 2 6" /></>,
-  clipboard:    <><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" ry="1" /></>,
-  edit3:        <><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></>,
-  globe:        <><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></>,
-  bell:         <><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></>,
-  user:         <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
-  sliders:      <><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></>,
-  key:          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />,
-  shield:       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
-  database:     <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>,
-  logOut:       <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
+import { MIcon } from './menuIcons.jsx';
+// Menu label with its Alt+letter shortcut underlined (first matching letter; none if the label has no such letter,
+// e.g. the Nepali label — the shortcut still works).
+const Hot = ({ text, k }) => {
+  const s = String(text ?? '');
+  const i = s.toLowerCase().indexOf(k);
+  if (i < 0) return s;
+  return <>{s.slice(0, i)}<u style={{ textDecorationThickness: 1.5, textUnderlineOffset: 3 }}>{s[i]}</u>{s.slice(i + 1)}</>;
 };
-// Each icon gets its own fixed color rather than inheriting the (mostly
-// uniform gray/blue) surrounding text color — a plain dropdown reads as
-// flat and samey; a distinct color per icon makes each item instantly
-// scannable at a glance, same idea as the colored icon circles on the
-// Dashboard's stat cards.
-const MENU_ICON_COLORS = {
-  users: '#7c3aed', fileText: '#1a56db', checkSquare: '#059669', truck: '#f97316', grid: '#0891b2',
-  phone: '#0e9f6e', userPlus: '#db2777', messageSquare: '#0ea5e9', messageCircle: '#06b6d4',
-  calendar: '#1a56db', briefcase: '#d97706', calculator: '#7c3aed', barChart: '#4f46e5',
-  list: '#475569', activity: '#e11d48', trendingUp: '#059669', clock: '#ea580c',
-  mail: '#d97706', clipboard: '#0d9488', edit3: '#8b5cf6', globe: '#0284c7',
-  bell: '#f97316', user: '#1a56db', sliders: '#64748b', key: '#d97706',
-  shield: '#059669', database: '#4f46e5', logOut: '#dc2626',
-};
-const MIcon = ({ name, size = 15, style, color }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color || MENU_ICON_COLORS[name] || 'currentColor'}
-    strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-    style={{ flexShrink: 0, ...style }}>
-    {MENU_ICON_PATHS[name]}
-  </svg>
-);
 
 const TopMenu = () => {
   const {
@@ -95,7 +54,7 @@ const TopMenu = () => {
   } = useAuth();
   const { flags: moduleFlags } = useModuleFlags();
   const { t, language, changeLanguage } = useLanguage();
-  const { stats, filteredLeaves, filteredVisits, filteredEmployees } = useData();
+  const { stats, filteredLeaves, filteredVisits, filteredEmployees, leaves: allLeavesRaw, officeVisits: allVisitsRaw } = useData();
   const { msgCount, taskCount, fieldVisitTaskCount } = useNotifications();
   const { totalUnread: chatUnread } = useChat();
   const { assignments: recoConfig } = useRecoApproval();
@@ -104,6 +63,9 @@ const TopMenu = () => {
 
   const [openDropdown,       setOpenDropdown]       = useState(null);
   const [attnReportsOpen,    setAttnReportsOpen]    = useState(false);
+  const [accSection,         setAccSection]         = useState(null);   // open section of the Accounts menu
+  const [accAlerts,          setAccAlerts]          = useState(0);      // Accounts alerts (bills due, services expiring, low stock …)
+  const [cartOpen,           setCartOpen]           = useState(false);
   const [halfMonthlyOpen,    setHalfMonthlyOpen]    = useState(false);
   const [mobileOpen,         setMobileOpen]         = useState(false);
   const menuRef    = useRef();
@@ -169,6 +131,93 @@ const TopMenu = () => {
   };
 
   const isActive = (path) => location.pathname.startsWith(path);
+
+  // Accounts module: alert count for the bell (refreshed every 5 min and whenever the Alerts page changes something)
+  const accountsOn = !!(canView('accounts') && moduleFlags.accountingEnabled);
+  const accCart = useCart();
+  useEffect(() => {
+    if (!accountsOn) { setAccAlerts(0); return undefined; }
+    const load = () => api.get('/accounts/alerts').then(a => setAccAlerts(a?.count || 0)).catch(() => {});
+    load();
+    const timer = setInterval(load, 5 * 60 * 1000);
+    window.addEventListener('ehl:acc-alerts', load);
+    return () => { clearInterval(timer); window.removeEventListener('ehl:acc-alerts', load); };
+  }, [accountsOn]);
+
+  const toggleAccountsMenu = () => {
+    if (openDropdown !== 'accounts') {
+      setAccSection(ACCOUNTS_MENU.find(sec => sec.items?.some(([to]) => location.pathname.startsWith('/accounts' + to)))?.title || null);
+    }
+    toggleDropdown('accounts');
+  };
+
+  // Keyboard: Alt+S Staff · Alt+T Task · Alt+L Leave · Alt+E Attendance · Alt+P Payroll · Alt+A Accounts.
+  // Dropdown menus open (press again to close); Task / Payroll are plain links and go straight to their dashboard.
+  // Always reads the latest state through a ref, so the listener is registered once.
+  const menuKeysRef = useRef({});
+  menuKeysRef.current = {
+    s: () => toggleDropdown('staff'),
+    l: () => toggleDropdown('leave'),
+    e: () => toggleDropdown('attendance'),
+    t: (canView('task') && moduleFlags.taskEnabled) ? () => navTo('/staff/task/dashboard') : null,
+    p: canView('payroll') ? () => navTo('/payroll/dashboard') : null,
+    a: accountsOn ? toggleAccountsMenu : null,
+  };
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
+      if (window.__ehFieldAlt > 0) return;               // a form (e.g. Staff Detail) is using Alt+letter to jump between fields
+      const act = menuKeysRef.current[(e.key || '').toLowerCase()];
+      if (!act) return;
+      e.preventDefault();
+      act();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  // Keyboard inside an open menu (after Alt+S / Alt+L / Alt+E / Alt+A …): ↓ / ↑ move the highlight through the visible items, Enter opens the
+  // highlighted one (a group header such as "Reports" expands, and the arrows then continue through its sub-items), Esc closes the menu.
+  // Works on whatever is rendered inside the open dropdown, so every menu — including the nested Attendance and Accounts ones — behaves the same.
+  const kbIdxRef = useRef(-1);
+  useEffect(() => {
+    kbIdxRef.current = -1;
+    const clear = () => document.querySelectorAll('.tm-kb').forEach(el => el.classList.remove('tm-kb'));
+    clear();
+    if (!openDropdown) return undefined;
+    const items = () => {
+      const dd = document.querySelector('.tm-dropdown.show');
+      if (!dd) return [];
+      return [...dd.querySelectorAll('.tm-dropdown-item, .tm-sub-item, .tm-reports-header')].filter(el => el.getClientRects().length > 0);
+    };
+    const onKey = (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const t = e.target;
+      if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;   // typing in a field — not ours
+      if (e.key === 'Escape') { setOpenDropdown(null); return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
+      const list = items();
+      if (!list.length) return;
+      if (e.key === 'Enter') {
+        const cur = list[kbIdxRef.current];
+        if (!cur) return;                        // nothing highlighted yet — leave Enter alone
+        e.preventDefault();
+        cur.click();
+        // a group header only expands: keep the highlight on it (its new sub-items are reachable with ↓)
+        return;
+      }
+      e.preventDefault();
+      const n = list.length;
+      let i = kbIdxRef.current;
+      i = e.key === 'ArrowDown' ? (i < 0 ? 0 : (i + 1) % n) : (i < 0 ? n - 1 : (i - 1 + n) % n);
+      kbIdxRef.current = i;
+      clear();
+      list[i].classList.add('tm-kb');
+      list[i].scrollIntoView({ block: 'nearest' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); clear(); };
+  }, [openDropdown]);
+
   const handleLogout = () => { logout(); navigate('/login'); };
   const navTo = (path) => {
     setOpenDropdown(null);
@@ -184,8 +233,6 @@ const TopMenu = () => {
   // server refuses self-approval for everyone below admin), so it must not
   // count as "awaiting your approval" in the menu badge or the bell.
   const isOthers = (empId) => isAdmin || String(empId) !== String(currentUser?.id);
-  const pendingCount     = filteredLeaves.filter(l => l.status === 'pending' && isOthers(l.employeeId)).length
-                         + filteredVisits.filter(v => v.status === 'pending' && isOthers(v.employeeId)).length;
   const leaveActive      = isActive('/leave') || isActive('/office-visit');
   const attendanceActive = isActive('/attendance');
 
@@ -194,15 +241,23 @@ const TopMenu = () => {
   // Recommendator & Approval) — the bell's per-category counts need to match
   // that same scope, or clicking through to "12 pending" would land on a
   // page showing far fewer (or different) rows than the badge promised.
-  const isMyRecoOrApproval = (empId) => {
+  // `rec` (the application itself) narrows it to the one recommender/approver the applicant picked.
+  const isMyRecoOrApproval = (empId, rec) => {
     if (!isOthers(empId)) return false;
+    const me = String(currentUser?.id);
     const a = recoConfig[String(empId)] || {};
-    const recoIds = Array.isArray(a.reco) ? a.reco : (a.reco ? [a.reco] : []);
-    const apprIds = Array.isArray(a.approval) ? a.approval : (a.approval ? [a.approval] : []);
-    return [...recoIds, ...apprIds].map(String).includes(String(currentUser?.id));
+    const recoIds = (Array.isArray(a.reco) ? a.reco : (a.reco ? [a.reco] : [])).map(String);
+    const apprIds = (Array.isArray(a.approval) ? a.approval : (a.approval ? [a.approval] : [])).map(String);
+    const asReco = recoIds.includes(me) && (!rec?.recoId || String(rec.recoId) === me);
+    const asAppr = apprIds.includes(me) && (!rec?.approvalId || String(rec.approvalId) === me);
+    return asReco || asAppr;
   };
-  const myPendingLeaves = filteredLeaves.filter(l => l.status === 'pending' && isMyRecoOrApproval(l.employeeId)).length;
-  const myPendingVisits = filteredVisits.filter(v => v.status === 'pending' && isMyRecoOrApproval(v.employeeId)).length;
+  // Counted from the company-wide lists (not the org-scoped filteredLeaves/filteredVisits): someone can be
+  // the configured recommender/approver for staff outside their own branch/department.
+  const myPendingLeaves = (allLeavesRaw || []).filter(l => l.status === 'pending' && isMyRecoOrApproval(l.employeeId, l)).length;
+  const myPendingVisits = (allVisitsRaw || []).filter(v => v.status === 'pending' && isMyRecoOrApproval(v.employeeId, v)).length;
+  // menu badge = only what THIS login has to recommend/approve (not every pending application in the company)
+  const pendingCount = myPendingLeaves + myPendingVisits;
 
   // Missing Attendance requests assigned to the current user (as recommender/
   // approver, or any pending/recommended one if a manager) — same "Assigned
@@ -210,8 +265,15 @@ const TopMenu = () => {
   // (that only covers Leave/Visit), so it's fetched separately here just for
   // the notification bell's summary.
   const [missingAssignedCount, setMissingAssignedCount] = useState(0);
+  // Late In / Early Out requests assigned to me (configured recommender/approver, or picked on the row)
+  const [lateEarlyAssignedCount, setLateEarlyAssignedCount] = useState(0);
   const fetchMissingAssigned = () => {
-    if (!isManager) return;
+    if (!currentUser?.id) return;
+    api.get('/attendance/manual-postings').then(rows => {
+      const list = Array.isArray(rows) ? rows : [];
+      setLateEarlyAssignedCount(list.filter(r => r.status === 'pending' && (isMyRecoOrApproval(r.employeeId)
+        || (isOthers(r.employeeId) && (String(r.recommendedById) === String(currentUser.id) || String(r.approvedById) === String(currentUser.id))))).length);
+    }).catch(() => {});
     api.get('/attendance/missing-requests').then(rows => {
       const list = Array.isArray(rows) ? rows : [];
       // "Any pending request" only counts for staff in this manager's own
@@ -228,8 +290,27 @@ const TopMenu = () => {
       setMissingAssignedCount(assignedToMe.length);
     }).catch(() => {});
   };
-  useEffect(() => { fetchMissingAssigned(); }, [isManager, currentUser?.id, filteredEmployees]); // eslint-disable-line react-hooks/exhaustive-deps
-  const notifTotal = myPendingLeaves + myPendingVisits + missingAssignedCount;
+  useEffect(() => { fetchMissingAssigned(); }, [isManager, currentUser?.id, filteredEmployees, recoConfig]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Unread inbox notifications by category (leave / office visit / overtime / task / field visit / accounts / quotation …).
+  // These are the same messages that land in Staff → Message, so a decision on your leave / OT / visit shows up here too.
+  const [unreadByCat, setUnreadByCat] = useState({});
+  const loadUnreadByCat = () => {
+    if (!currentUser?.id) return;
+    api.get('/messages/unread-summary').then(rows => {
+      const m = {};
+      (Array.isArray(rows) ? rows : []).forEach(r => { m[r.category] = r.count; });
+      setUnreadByCat(m);
+    }).catch(() => {});
+  };
+  useEffect(() => {
+    loadUnreadByCat();
+    const timer = setInterval(loadUnreadByCat, 2 * 60 * 1000);
+    window.addEventListener('ehajiri:messages-changed', loadUnreadByCat);
+    return () => { clearInterval(timer); window.removeEventListener('ehajiri:messages-changed', loadUnreadByCat); };
+  }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const unreadTotal = Object.values(unreadByCat).reduce((a, b) => a + b, 0);
+  const pendingTotal = myPendingLeaves + myPendingVisits + missingAssignedCount + lateEarlyAssignedCount;
+  const notifTotal = pendingTotal + unreadTotal;
 
   const Chevron = ({ cls = '' }) => (
     <svg className={`tm-chevron ${cls}`} viewBox="0 0 20 20" fill="currentColor">
@@ -264,13 +345,7 @@ const TopMenu = () => {
 
       {/* ── Brand ── */}
       <div className="tm-brand" onClick={() => navigate('/dashboard')}>
-        <div className="tm-logo">EH</div>
-        <div className="tm-brand-text">
-          <span className="tm-brand-name">
-            <span style={{ color: '#111827' }}>eHajiri</span>{' '}
-            <span style={{ color: '#1a56db' }}>TMS</span>
-          </span>
-        </div>
+        <img className="tm-brand-logo" src="/icons/ehajiri-logo.png?v=2" alt="eHajiri" draggable={false} />
       </div>
 
       {/* ── Mobile toggle ── */}
@@ -284,9 +359,10 @@ const TopMenu = () => {
         {/* 1. Staff dropdown — all authenticated users */}
         <div
           className={`tm-item ${isActive('/users') || isActive('/chat') || (isActive('/staff/') && !isActive('/staff/task') && !isActive('/staff/field-visit')) ? 'active' : ''} ${openDropdown === 'staff' ? 'open' : ''}`}
+          title="Alt+S"
           onClick={() => toggleDropdown('staff')}
         >
-          <span>{t('Staff')}</span>
+          <span><Hot text={t('Staff')} k="s" /></span>
           <Chevron />
 
           <div
@@ -357,9 +433,10 @@ const TopMenu = () => {
         {canView('task') && moduleFlags.taskEnabled && (
           <div
             className={`tm-item ${(isActive('/staff/task') || isActive('/staff/field-visit')) ? 'active' : ''}`}
+            title="Alt+T"
             onClick={() => navTo('/staff/task/dashboard')}
           >
-            <span>{t('Task')}</span>
+            <span><Hot text={t('Task')} k="t" /></span>
             {(taskCount + fieldVisitTaskCount) > 0 && (
               <span className="tm-badge" style={{ marginLeft: 4 }}>{taskCount + fieldVisitTaskCount}</span>
             )}
@@ -369,9 +446,10 @@ const TopMenu = () => {
         {/* 3. Leave & Office Visit — all authenticated */}
         <div
           className={`tm-item ${leaveActive ? 'active' : ''} ${openDropdown === 'leave' ? 'open' : ''}`}
+          title="Alt+L"
           onClick={() => toggleDropdown('leave')}
         >
-          <span>{t('Leave & Office Visit')}</span>
+          <span><Hot text={t('Leave & Office Visit')} k="l" /></span>
           {isManager && pendingCount > 0 && (
             <span className="tm-badge" style={{ marginLeft: 4 }}>{pendingCount}</span>
           )}
@@ -417,9 +495,10 @@ const TopMenu = () => {
         {/* 4. Attendance — all authenticated (employee sees own reports only) */}
         <div
           className={`tm-item ${attendanceActive ? 'active' : ''} ${openDropdown === 'attendance' ? 'open' : ''}`}
+          title="Alt+E"
           onClick={() => toggleDropdown('attendance')}
         >
-          <span>{t('Attendance')}</span>
+          <span><Hot text={t('Attendance')} k="e" /></span>
           <Chevron />
 
           <div
@@ -541,8 +620,38 @@ const TopMenu = () => {
             optional bigger feature area with its own on/off toggle, same
             convention as myNotes/staffContact/leaveApply etc.). */}
         {canView('payroll') && (
-          <div className={`tm-item ${isActive('/payroll') ? 'active' : ''}`} onClick={() => navTo('/payroll/dashboard')}>
-            <span>{t('Payroll')}</span>
+          <div className={`tm-item ${isActive('/payroll') ? 'active' : ''}`} title="Alt+P" onClick={() => navTo('/payroll/dashboard')}>
+            <span><Hot text={t('Payroll')} k="p" /></span>
+          </div>
+        )}
+
+        {/* 6. Accounts (accounting + inventory) — plain link, shown only when a Super Admin has enabled the
+            module for this company AND the user has the `accounts` page permission. */}
+        {accountsOn && (
+          <div
+            title="Alt+A"
+            className={`tm-item ${isActive('/accounts') ? 'active' : ''} ${openDropdown === 'accounts' ? 'open' : ''}`}
+            onClick={toggleAccountsMenu}
+          >
+            <span><Hot text={t('Accounts')} k="a" /></span>
+            <Chevron />
+
+            <div
+              className={`tm-dropdown attn-dd ${openDropdown === 'accounts' ? 'show' : ''}`}
+              onClick={e => e.stopPropagation()}
+            >
+              {Object.entries(ACCOUNTS_HUBS).map(([k, h]) => (
+                <div key={k}
+                  className={`tm-reports-header ${location.pathname === '/accounts/' + k ? 'open' : ''}`}
+                  onClick={() => navTo('/accounts/' + k)}>
+                  <MIcon name={h.icon} size={15} />
+                  <span style={{ flex: 1 }}>{h.title}</span>
+                </div>
+              ))}
+              <div className="tm-dropdown-item" onClick={() => navTo('/accounts')}>
+                <MIcon name="activity" /> Dashboard
+              </div>
+            </div>
           </div>
         )}
 
@@ -552,21 +661,42 @@ const TopMenu = () => {
       <div className="tm-right">
 
         {/* Pending approvals bell */}
-        {isManager && notifTotal > 0 && (
+        {accountsOn && (
+          <div className="tm-bell" title={`Cart${accCart.length ? ` (${accCart.length})` : ''}`} onClick={() => { setOpenDropdown(null); setCartOpen(true); }}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>🛒</span>
+            {accCart.length > 0 && <span className="tm-bell-badge">{accCart.length}</span>}
+          </div>
+        )}
+
+        {(notifTotal > 0 || accAlerts > 0) && (
           <div
             className={`tm-bell ${openDropdown === 'bell' ? 'open' : ''}`}
-            title={`${notifTotal} ${t('Pending Approvals')}`}
+            title={`${notifTotal + accAlerts} ${t('Notifications')}`}
             onClick={() => { toggleDropdown('bell'); fetchMissingAssigned(); }}
           >
             <MIcon name="bell" size={18} color="currentColor" style={{ verticalAlign: 'middle' }} />
-            <span className="tm-bell-badge">{notifTotal}</span>
+            <span className="tm-bell-badge">{notifTotal + accAlerts}</span>
 
             <div
               className={`tm-dropdown notif-dd ${openDropdown === 'bell' ? 'show' : ''}`}
               onClick={e => e.stopPropagation()}
             >
-              <div className="tm-dropdown-header">{t('Pending Approvals')}</div>
+              <div className="tm-dropdown-header">{t('Notifications')}</div>
 
+              {/* Unread notifications, grouped by category — same messages as Staff → Message */}
+              {NOTIF_CATEGORIES.filter(c => unreadByCat[c.key] > 0).map(c => (
+                <div key={c.key} className="tm-dropdown-item" onClick={() => navTo(`/staff/message?cat=${c.key}`)}>
+                  <span style={{ width: 18, textAlign: 'center' }}>{c.icon}</span> {c.label}
+                  <span className="tm-badge" style={{ marginLeft: 'auto' }}>{unreadByCat[c.key]}</span>
+                </div>
+              ))}
+              {accAlerts > 0 && (
+                <div className="tm-dropdown-item" title="Bills due, services expiring, low stock" onClick={() => navTo('/accounts/alerts')}>
+                  <span style={{ width: 18, textAlign: 'center' }}>📒</span> Accounts alerts
+                  <span className="tm-badge" style={{ marginLeft: 'auto' }}>{accAlerts}</span>
+                </div>
+              )}
+              {pendingTotal > 0 && <div className="tm-dropdown-header">{t('Pending Approvals')}</div>}
               {myPendingLeaves > 0 && (
                 <div className="tm-dropdown-item" onClick={() => navTo('/leave/approval')}>
                   <MIcon name="calendar" /> {t('Leave Application')}
@@ -579,6 +709,12 @@ const TopMenu = () => {
                   <span className="tm-badge" style={{ marginLeft: 'auto' }}>{myPendingVisits}</span>
                 </div>
               )}
+              {lateEarlyAssignedCount > 0 && (
+                <div className="tm-dropdown-item" onClick={() => navTo('/attendance/manual-postings')}>
+                  <MIcon name="clock" /> {t('Late In / Early Out Requests')}
+                  <span className="tm-badge" style={{ marginLeft: 'auto' }}>{lateEarlyAssignedCount}</span>
+                </div>
+              )}
               {missingAssignedCount > 0 && (
                 <div className="tm-dropdown-item" onClick={() => navTo('/attendance/missing-requests')}>
                   <MIcon name="mail" /> {t('Missing Attendance Requests')}
@@ -587,6 +723,12 @@ const TopMenu = () => {
               )}
             </div>
           </div>
+        )}
+
+        {cartOpen && (
+          <Suspense fallback={null}>
+            <CartDrawer onClose={() => setCartOpen(false)} go={(to) => { setCartOpen(false); navigate('/accounts' + to); }} />
+          </Suspense>
         )}
 
         {/* Language toggle */}

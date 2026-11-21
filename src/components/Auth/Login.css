@@ -201,6 +201,8 @@
   padding: 4px 14px;
   margin-top: 10px;
 }
+.login-logo-brand { height: 58px; width: auto; display: block; margin-bottom: 8px; }
+.login-app-badge .badge-logo { height: 19px; width: auto; display: block; }
 .login-app-badge .badge-name { font-size: 12px; font-weight: 700; color: #1a56db; }
 .login-app-badge .badge-tms  { font-size: 12px; font-weight: 800; color: #7e3af2; }
 .login-app-badge .badge-sep  { font-size: 11px; color: #9ca3af; }

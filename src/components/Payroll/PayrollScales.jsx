@@ -68,7 +68,7 @@ export default function PayrollScales() {
 
   if (loading) return <div style={{ padding: 48, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>;
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <PageHeader title="🏛️ Pay Scales (government grades)"><PrimaryBtn onClick={() => openNew(null)}>+ New pay scale</PrimaryBtn></PageHeader>
       <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', borderRadius: 10, padding: '10px 14px', fontSize: 12.5, marginBottom: 16, lineHeight: 1.5 }}>
         Enter the grades from your official salary sheet: <b>starting salary</b>, the <b>grade rate</b> added for each year of grade, and the maximum grades (if any).

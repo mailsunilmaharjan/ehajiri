@@ -43,6 +43,7 @@ const OfficeVisitApproval = ({ embedded = false } = {}) => {
     getEmployeeName, getEmployeeById,
   } = useData();
 
+  const [showPending, setShowPending] = useState(false);
   const [actionModal, setActionModal] = useState(null);
   const [comment,     setComment]     = useState('');
   const [toast,       setToast]       = useState(null);
@@ -54,13 +55,17 @@ const OfficeVisitApproval = ({ embedded = false } = {}) => {
   const showToast = (msg, type) => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   /* ── Helpers ── */
-  const isRecommenderFor = (empId) => {
+  const isRecommenderFor = (empId, rec) => {
+    // the applicant picked one recommender: only that person (admins excepted)
+    if (rec?.recoId && String(rec.recoId) !== String(currentUser.id)) return false;
     const r = recoConfig[String(empId)]?.reco;
     const ids = Array.isArray(r) ? r : (r ? [r] : []);
     return ids.map(String).includes(String(currentUser.id));
   };
 
-  const isApproverFor = (empId) => {
+  const isApproverFor = (empId, rec) => {
+    // the applicant picked one approver: only that person (admins excepted)
+    if (rec?.approvalId && String(rec.approvalId) !== String(currentUser.id)) return false;
     const a = recoConfig[String(empId)]?.approval;
     const ids = Array.isArray(a) ? a : (a ? [a] : []);
     return ids.map(String).includes(String(currentUser.id));
@@ -116,7 +121,7 @@ const OfficeVisitApproval = ({ embedded = false } = {}) => {
   // Never your own application (unless admin/superAdmin) — see LeaveApproval.
   const isSelf  = (v) => String(v.employeeId) === String(currentUser.id)
     && !['admin', 'superAdmin'].includes(currentUser.role);
-  const isMine  = (v) => !isSelf(v) && (isRecommenderFor(v.employeeId) || isApproverFor(v.employeeId));
+  const isMine  = (v) => !isSelf(v) && (isRecommenderFor(v.employeeId, v) || isApproverFor(v.employeeId, v));
   const myVisits = officeVisits.filter(isMine);
   const pending  = myVisits.filter(v => v.status === 'pending');
   const all      = [...myVisits].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));
@@ -149,8 +154,8 @@ const OfficeVisitApproval = ({ embedded = false } = {}) => {
     )},
     { field:'actions', header:t('Actions'), width:180, filterable:false, sortable:false,
       render:(_, row) => {
-        const amReco      = isRecommenderFor(row.employeeId);
-        const amApprover  = isApproverFor(row.employeeId) && canShowApprove(row.employeeId);
+        const amReco      = isRecommenderFor(row.employeeId, row);
+        const amApprover  = isApproverFor(row.employeeId, row) && canShowApprove(row.employeeId);
         const canApprove  = canApproveVisit(row);
         const alreadyReco = !!row.recommendedBy;
 
@@ -173,11 +178,11 @@ const OfficeVisitApproval = ({ embedded = false } = {}) => {
                 title={canApprove ? t('Approve') : 'Awaiting recommendation first'}
                 onClick={e => { e.stopPropagation(); if (canApprove) { setActionModal({ id:row.id, type:'approve', visit:row }); setComment(''); } }}>✓</button>
             )}
-            {isApproverFor(row.employeeId) && (
+            {isApproverFor(row.employeeId, row) && (
               <button className="dg-action-btn reject"
                 onClick={e => { e.stopPropagation(); setActionModal({ id:row.id, type:'reject', visit:row }); setComment(''); }}>✗</button>
             )}
-            {!amReco && !isApproverFor(row.employeeId) && <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>}
+            {!amReco && !isApproverFor(row.employeeId, row) && <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>}
           </div>
         );
       }
@@ -219,93 +224,33 @@ const OfficeVisitApproval = ({ embedded = false } = {}) => {
           { label:t('Approved'),  count:myVisits.filter(v=>v.status==='approved').length, bg:'#d1fae5', color:'#0e9f6e' },
           { label:t('Rejected'),  count:myVisits.filter(v=>v.status==='rejected').length, bg:'#fde8e8', color:'#f05252' },
         ].map((s, i) => (
-          <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:6, background:s.bg, color:s.color, borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:600 }}>
+          <span key={i} onClick={i === 0 ? () => setShowPending(true) : undefined} title={i === 0 ? 'Click to view pending applications' : undefined} style={{ display:'inline-flex', alignItems:'center', gap:6, background:s.bg, color:s.color, borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:600, cursor: i === 0 ? 'pointer' : 'default', textDecoration: i === 0 ? 'underline' : 'none' }}>
             {s.label}: <strong style={{ fontSize:14 }}>{s.count}</strong>
           </span>
         ))}
       </div>
 
-      {/* Pending cards */}
-      {pending.length > 0 && (
-        <div className="card" style={{ marginBottom:20, borderLeft:'4px solid #e3a008' }}>
-          <div className="card-header" style={{ background:'#fffbeb' }}>
-            <h3>⏳ Pending Office Visit Applications ({pending.length})</h3>
+      {/* Pending applications — shown in a popup grid (only the ones assigned to me) */}
+      {showPending && (
+        <div className="modal-overlay" onClick={() => setShowPending(false)}>
+          <div className="modal" style={{ width:"min(1150px, 96vw)", maxWidth:"96vw" }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⏳ Pending Office Visit Applications ({pending.length})</h2>
+              <button className="modal-close" onClick={() => setShowPending(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <DataGrid columns={columns} data={pending} defaultPageSize={10}
+                showSearch={true} searchPlaceholder={t("Search")+"..."} compact={true} />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setShowPending(false)}>{t("Close")}</button>
+            </div>
           </div>
-          {pending.map(v => {
-            const amReco      = isRecommenderFor(v.employeeId);
-            const amApprover  = isApproverFor(v.employeeId) && canShowApprove(v.employeeId);
-            const canApprove  = canApproveVisit(v);
-            const alreadyReco = !!v.recommendedBy;
-
-            return (
-              <div key={v.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                padding:'12px 18px', borderBottom:'1px solid #f9fafb', flexWrap:'wrap', gap:10 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  {getEmployeeById(v.employeeId)?.profilePhoto ? (
-                    <div style={{ width:38, height:38, borderRadius:'50%', overflow:'hidden', flexShrink:0, background:'#fdf3d0' }}>
-                      <img src={getEmployeeById(v.employeeId).profilePhoto} alt=""
-                        style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
-                    </div>
-                  ) : (
-                    <div style={{ width:38, height:38, borderRadius:'50%', background:'#fdf3d0',
-                      color:'#e3a008', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>
-                      {getEmployeeName(v.employeeId)[0]}
-                    </div>
-                  )}
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:'#111827' }}>{getEmployeeName(v.employeeId)}</div>
-                    <div style={{ fontSize:12, color:'#374151' }}>
-                      {v.purpose || v.officialVisit}
-                      {v.visitType && <span style={{ marginLeft:6, fontSize:11, fontWeight:600,
-                        color: v.visitType==='International'?'#7c3aed':'#059669' }}>
-                        {v.visitType==='International'?'🌍':'🇳🇵'} {v.visitType}
-                      </span>}
-                      {v.country && ` · ${v.country}`}
-                    </div>
-                    <div style={{ fontSize:11, color:'#6b7280' }}>{v.address||v.location} · {v.fromDate} – {v.toDate}</div>
-                    {isRecoCompulsory && hasRecommenderFor(v.employeeId) && (
-                      <div style={{ marginTop:3 }}>
-                        {alreadyReco
-                          ? <RecoTag name={getEmployeeName(v.recommendedBy)} />
-                          : <span style={{ fontSize:11, color:'#92400e', background:'#fef3c7', padding:'1px 8px', borderRadius:6 }}>
-                              ⏳ Awaiting Recommendation
-                            </span>
-                        }
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                  {amReco && !alreadyReco && (
-                    <button className="btn btn-sm" style={{ background:'#059669', color:'white', border:'none', cursor:'pointer', fontSize:12, padding:'5px 12px', borderRadius:6 }}
-                      onClick={() => { setActionModal({ id:v.id, type:'recommend', visit:v }); setComment(''); }}>
-                      👍 Recommend
-                    </button>
-                  )}
-                  {amApprover && (
-                    <button className="btn btn-sm btn-success"
-                      disabled={!canApprove}
-                      style={{ opacity: canApprove ? 1 : 0.4, cursor: canApprove ? 'pointer' : 'not-allowed' }}
-                      title={canApprove ? '' : 'Recommendation required before approval'}
-                      onClick={() => { if (canApprove) { setActionModal({ id:v.id, type:'approve', visit:v }); setComment(''); } }}>
-                      ✓ {t('Approve')}
-                    </button>
-                  )}
-                  {isApproverFor(v.employeeId) && (
-                    <button className="btn btn-sm btn-danger"
-                      onClick={() => { setActionModal({ id:v.id, type:'reject', visit:v }); setComment(''); }}>
-                      ✗ {t('Reject')}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
       )}
 
       {/* Full grid */}
-      <DataGrid columns={columns} data={all} defaultPageSize={10}
+      <DataGrid columns={columns} data={embedded ? pending : all} defaultPageSize={10}
         showSearch={true} searchPlaceholder={t('Search')+'...'} title={t('Visit Applications')} compact={true} />
 
       {/* Action Modal */}

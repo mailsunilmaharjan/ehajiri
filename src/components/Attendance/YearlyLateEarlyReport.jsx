@@ -13,6 +13,7 @@ import ViewYearlyBtn from './ViewYearlyBtn.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
+import { DutyLines, ShiftLines, dutyInLines, dutyOutLines, dutyHtml } from './DutyStack.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -240,11 +241,12 @@ const YearlyLateEarlyReport = () => {
     },
     {
       field:'shiftDisplay', header:L('सिफ्ट','Shift'),
-      render: v => <span style={{ color:'#1f2937', fontFamily:'monospace', whiteSpace:'nowrap' }}>{v}</span>,
+      render: v => <span style={{ fontFamily:'monospace' }}><ShiftLines value={v} /></span>,
     },
     {
       field:'timeIn', header:L('आउने समय','In Time'), align:'center',
       render: (v, row) => {
+        if (row.duties && v) return <DutyLines lines={dutyInLines(row.duties)} />;
         const warn = row.punches === 1;
         return v
           ? <strong style={{ fontFamily:'monospace', color:warn?'#d97706':'#1a56db' }}
@@ -256,9 +258,9 @@ const YearlyLateEarlyReport = () => {
     },
     {
       field:'timeOut', header:L('जाने समय','Out Time'), align:'center',
-      render: v => v
+      render: (v, row) => (row.duties && row.timeIn) ? <DutyLines lines={dutyOutLines(row.duties)} /> : (v
         ? <strong style={{ fontFamily:'monospace', color:'#374151' }}>{fmtTime(v)}</strong>
-        : <span style={{ color:'#d1d5db' }}>—</span>,
+        : <span style={{ color:'#d1d5db' }}>—</span>),
     },
     {
       field:'lateInFormatted', header:L('कैफियत','Remarks'), sortable:false, wrap:true, fill:true,
@@ -295,9 +297,9 @@ const YearlyLateEarlyReport = () => {
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.deptShort||''}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.branchShort||''}</td>
       <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.date}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${r.shiftDisplay||''}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${fmtTime(r.timeIn)}</td>
-      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${fmtTime(r.timeOut)}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center">${(r.shiftDisplay||'').replace(/\n/g,'<br>')}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.duties ? dutyHtml(dutyInLines(r.duties)) : fmtTime(r.timeIn)}</td>
+      <td style="padding:4px 6px;border:1px solid #dedede;text-align:center;font-family:monospace">${r.duties ? dutyHtml(dutyOutLines(r.duties)) : fmtTime(r.timeOut)}</td>
       <td style="padding:4px 6px;border:1px solid #dedede">${[r.lateInFormatted,r.earlyOutFormatted].filter(Boolean).join(' | ')||''}</td>
     </tr>`).join('');
     const contentHtml = `<table style="border-collapse:collapse;width:100%;font-size:11px">
@@ -315,7 +317,7 @@ const YearlyLateEarlyReport = () => {
     const headers = ['Person','Post','Dept.','Branch','Date','Shift','In Time','Out Time','Remarks'];
     const dataRows = allRecs.map(r => [
       r.fullName, r.postShort, r.deptShort, r.branchShort,
-      r.date, r.shiftDisplay, fmtTime(r.timeIn), fmtTime(r.timeOut),
+      r.date, (r.shiftDisplay||'').replace(/\n/g,' + '), fmtTime(r.timeIn), fmtTime(r.timeOut),
       [r.lateInFormatted, r.earlyOutFormatted].filter(Boolean).join(' | ') || '',
     ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
     downloadCSV(getExcelHeaderRows(settings, language, rptTitle, rptSub) + headers.join(',') + '\n' + dataRows,

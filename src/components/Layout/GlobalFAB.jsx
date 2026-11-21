@@ -82,8 +82,10 @@ const GlobalFAB = () => {
         // meant to be the topmost, focused UI element blocking everything
         // else. Confirmed visible bleeding through the Copy/Transfer
         // Samples modal (Settings → Attendance Device) at 9999.
-        position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', zIndex: 500,
-        display: 'flex', flexDirection: 'column-reverse', alignItems: 'center', gap: 10,
+        // Right edge, middle of the screen: the + button's centre sits on the vertical middle and stays
+        // put when the menu opens (its quick actions open below it).
+        position: 'fixed', right: 14, top: 'calc(50% - 26px)', zIndex: 500,
+        display: 'flex', flexDirection: 'column-reverse', alignItems: 'flex-end', gap: 10,
       }}
     >
       {/* Action items */}
@@ -91,7 +93,7 @@ const GlobalFAB = () => {
         <div
           key={i}
           style={{
-            display: 'flex', alignItems: 'center', gap: 10,
+            display: 'flex', alignItems: 'center', gap: 10, paddingRight: 4,
             animation: 'fabItemIn .15s ease both',
             animationDelay: `${i * 40}ms`,
           }}

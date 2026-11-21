@@ -104,12 +104,12 @@ export default function MobileAttendance() {
       {days.map(d => {
         const [c, text] = KIND(d.status); const off = isOff(d) && !d.timeIn;
         const [bg, fg] = TONE[c] || TONE.gray;
-        const badges = [d.lateFormatted && ['warn', `${mt('Late in')} ${cleanLate(d.lateFormatted)}`], d.earlyFormatted && ['bad', `${mt('Early out')} ${cleanLate(d.earlyFormatted)}`], d.otFormatted && ['info', `OT ${d.otFormatted}`]].filter(Boolean);
+        const badges = [d.lateFormatted && ['warn', `${mt('Late in')} ${cleanLate(d.lateFormatted)}`], d.earlyFormatted && ['bad', `${mt('Early out')} ${cleanLate(d.earlyFormatted)}`], d.otFormatted && ['info', `OT ${d.otFormatted}`], d.isPublicHoliday && d.holidayName && !(c === 'info' || c === 'gray') && ['info', `🎉 ${d.holidayName}`]].filter(Boolean);
         return (
           <div key={d.dateStr} className={`m-lday${off ? ' off' : ''}${d.dateStr === today ? ' today' : ''}`} data-st={c}>
             <div className="m-ltile" style={{ background: bg, color: fg }}><b>{dayNum(d)}</b><span>{wd(d)}</span></div>
             <div className="m-grow" style={{ minWidth: 0 }}>
-              <div className="m-row" style={{ gap: 6 }}><b style={{ color: fg }}>{c === 'warn' ? text : mt(text)}</b>{d.dateStr === today && <span className="m-chip info">{mt('Today')}</span>}</div>
+              <div className="m-row" style={{ gap: 6 }}><b style={{ color: fg }}>{d.isPublicHoliday && d.holidayName && (c === 'info' || c === 'gray') ? `🎉 ${d.holidayName}` : c === 'warn' ? text : mt(text)}</b>{d.dateStr === today && <span className="m-chip info">{mt('Today')}</span>}</div>
               {d.timeIn
                 ? <div className="m-ltimes"><span>↘ {hhmm(d.timeIn)}</span><span>↗ {d.timeOut ? hhmm(d.timeOut) : '—'}</span>{d.totalFormatted && <span className="m-lwork">⏱ {d.totalFormatted}</span>}</div>
                 : (!off && <div className="m-muted" style={{ fontSize: 12.5 }}>{mt('No punch')}</div>)}
@@ -160,7 +160,7 @@ export default function MobileAttendance() {
       </div>
       {sel && (() => { const [c, text] = KIND(sel.status); return (
         <div className="m-card" style={{ padding: 14 }}>
-          <div className="m-row"><b className="m-grow">{fd(sel.dateStr)} · {wd(sel)}</b><span className={`m-chip ${c}`}>{c === 'warn' ? text : mt(text)}</span></div>
+          <div className="m-row"><b className="m-grow">{fd(sel.dateStr)} · {wd(sel)}</b><span className={`m-chip ${c}`}>{sel.isPublicHoliday && sel.holidayName && (c === 'info' || c === 'gray') ? `🎉 ${sel.holidayName}` : c === 'warn' ? text : mt(text)}</span></div>
           {sel.timeIn && <div style={{ marginTop: 6 }}>{hhmm(sel.timeIn)} – {hhmm(sel.timeOut)}{sel.totalFormatted ? ` · ${sel.totalFormatted}` : ''}</div>}
           {sel.remarks && <div className="m-muted" style={{ marginTop: 4, fontSize: 12.5 }}>{sel.remarks}</div>}
         </div>); })()}

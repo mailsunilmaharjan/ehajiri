@@ -46,6 +46,7 @@ const LeaveApproval = ({ embedded = false } = {}) => {
     getEmployeeName, getEmployeeById, getLeaveTypeName, getLeaveTypeColor,
   } = useData();
 
+  const [showPending, setShowPending] = useState(false);
   const [actionModal, setActionModal] = useState(null); // { id, type: 'approve'|'reject'|'recommend', leave }
   const [comment,     setComment]     = useState('');
   const [toast,       setToast]       = useState(null);
@@ -70,13 +71,17 @@ const LeaveApproval = ({ embedded = false } = {}) => {
   };
 
   /* ── Helpers ── */
-  const isRecommenderFor = (empId) => {
+  const isRecommenderFor = (empId, rec) => {
+    // the applicant picked one recommender: only that person (admins excepted)
+    if (rec?.recoId && String(rec.recoId) !== String(currentUser.id)) return false;
     const r = recoConfig[String(empId)]?.reco;
     const ids = Array.isArray(r) ? r : (r ? [r] : []);
     return ids.map(String).includes(String(currentUser.id));
   };
 
-  const isApproverFor = (empId) => {
+  const isApproverFor = (empId, rec) => {
+    // the applicant picked one approver: only that person (admins excepted)
+    if (rec?.approvalId && String(rec.approvalId) !== String(currentUser.id)) return false;
     const a = recoConfig[String(empId)]?.approval;
     const ids = Array.isArray(a) ? a : (a ? [a] : []);
     return ids.map(String).includes(String(currentUser.id));
@@ -136,7 +141,7 @@ const LeaveApproval = ({ embedded = false } = {}) => {
   // that always failed with "You cannot act on your own application."
   const isSelf = (l) => String(l.employeeId) === String(currentUser.id)
     && !['admin', 'superAdmin'].includes(currentUser.role);
-  const isMine = (l) => !isSelf(l) && (isRecommenderFor(l.employeeId) || isApproverFor(l.employeeId));
+  const isMine = (l) => !isSelf(l) && (isRecommenderFor(l.employeeId, l) || isApproverFor(l.employeeId, l));
   const myLeaves       = leaves.filter(isMine);
   const pendingLeaves  = myLeaves.filter(l => l.status === 'pending');
   const allLeaves      = [...myLeaves].sort((a, b) => new Date(b.appliedDate) - new Date(a.appliedDate));
@@ -187,8 +192,8 @@ const LeaveApproval = ({ embedded = false } = {}) => {
     )},
     { field:'actions', header:t('Actions'), width:180, filterable:false, sortable:false,
       render:(_, row) => {
-        const amReco     = isRecommenderFor(row.employeeId);
-        const amApprover = isApproverFor(row.employeeId) && canShowApprove(row.employeeId);
+        const amReco     = isRecommenderFor(row.employeeId, row);
+        const amApprover = isApproverFor(row.employeeId, row) && canShowApprove(row.employeeId);
         const canApprove = canApproveLeave(row);
         const alreadyReco = !!row.recommendedBy;
 
@@ -220,13 +225,13 @@ const LeaveApproval = ({ embedded = false } = {}) => {
               </button>
             )}
             {/* Reject button */}
-            {isApproverFor(row.employeeId) && (
+            {isApproverFor(row.employeeId, row) && (
               <button className="dg-action-btn reject" title={t('Reject')}
                 onClick={e => { e.stopPropagation(); setActionModal({ id:row.id, type:'reject', leave:row }); setComment(''); }}>
                 ✗
               </button>
             )}
-            {!amReco && !isApproverFor(row.employeeId) && (
+            {!amReco && !isApproverFor(row.employeeId, row) && (
               <span style={{ fontSize:11, color:'#9ca3af' }}>—</span>
             )}
           </div>
@@ -270,89 +275,33 @@ const LeaveApproval = ({ embedded = false } = {}) => {
           { label:t('Approved'),  count:myLeaves.filter(l=>l.status==='approved').length, bg:'#d1fae5', color:'#0e9f6e' },
           { label:t('Rejected'),  count:myLeaves.filter(l=>l.status==='rejected').length, bg:'#fde8e8', color:'#f05252' },
         ].map((s, i) => (
-          <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:6, background:s.bg, color:s.color, borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:600 }}>
+          <span key={i} onClick={i === 0 ? () => setShowPending(true) : undefined} title={i === 0 ? 'Click to view pending applications' : undefined} style={{ display:'inline-flex', alignItems:'center', gap:6, background:s.bg, color:s.color, borderRadius:6, padding:'3px 12px', fontSize:12, fontWeight:600, cursor: i === 0 ? 'pointer' : 'default', textDecoration: i === 0 ? 'underline' : 'none' }}>
             {s.label}: <strong style={{ fontSize:14 }}>{s.count}</strong>
           </span>
         ))}
       </div>
 
-      {/* Pending list */}
-      {pendingLeaves.length > 0 && (
-        <div className="card" style={{ marginBottom:20, borderLeft:'4px solid #e3a008' }}>
-          <div className="card-header" style={{ background:'#fffbeb' }}>
-            <h3>⏳ Pending Applications ({pendingLeaves.length})</h3>
+      {/* Pending applications — shown in a popup grid (only the ones assigned to me) */}
+      {showPending && (
+        <div className="modal-overlay" onClick={() => setShowPending(false)}>
+          <div className="modal" style={{ width:"min(1150px, 96vw)", maxWidth:"96vw" }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>⏳ Pending Applications ({pendingLeaves.length})</h2>
+              <button className="modal-close" onClick={() => setShowPending(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <DataGrid columns={columns} data={pendingLeaves} defaultPageSize={10}
+                showSearch={true} searchPlaceholder={t("Search")+"..."} compact={true} />
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setShowPending(false)}>{t("Close")}</button>
+            </div>
           </div>
-          {pendingLeaves.map(l => {
-            const amReco     = isRecommenderFor(l.employeeId);
-            const amApprover = isApproverFor(l.employeeId) && canShowApprove(l.employeeId);
-            const canApprove = canApproveLeave(l);
-            const alreadyReco = !!l.recommendedBy;
-
-            return (
-              <div key={l.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                padding:'12px 18px', borderBottom:'1px solid #f9fafb', flexWrap:'wrap', gap:10 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  {getEmployeeById(l.employeeId)?.profilePhoto ? (
-                    <div style={{ width:38, height:38, borderRadius:'50%', overflow:'hidden', flexShrink:0, background:'#fdf3d0' }}>
-                      <img src={getEmployeeById(l.employeeId).profilePhoto} alt=""
-                        style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
-                    </div>
-                  ) : (
-                    <div style={{ width:38, height:38, borderRadius:'50%', background:'#fdf3d0',
-                      color:'#e3a008', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>
-                      {getEmployeeName(l.employeeId)[0]}
-                    </div>
-                  )}
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:'#111827' }}>{getEmployeeName(l.employeeId)}</div>
-                    <div style={{ fontSize:12, color:'#374151' }}>{getLeaveTypeName(l.leaveTypeCode)} · {l.fromDate} – {l.toDate} ({l.days} days)</div>
-                    {l.reason && <div style={{ fontSize:11, color:'#6b7280' }}>{l.reason}</div>}
-                    {/* Recommendation status — only meaningful when someone
-                        is actually configured to give one; with none
-                        configured there's nothing to wait for. */}
-                    {isRecoCompulsory && hasRecommenderFor(l.employeeId) && (
-                      <div style={{ marginTop:3 }}>
-                        {alreadyReco
-                          ? <RecoTag name={getEmployeeName(l.recommendedBy)} />
-                          : <span style={{ fontSize:11, color:'#92400e', background:'#fef3c7', padding:'1px 8px', borderRadius:6 }}>
-                              ⏳ Awaiting Recommendation
-                            </span>
-                        }
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                  {amReco && !alreadyReco && (
-                    <button className="btn btn-sm" style={{ background:'#059669', color:'white', border:'none', cursor:'pointer', fontSize:12, padding:'5px 12px', borderRadius:6 }}
-                      onClick={() => { setActionModal({ id:l.id, type:'recommend', leave:l }); setComment(''); }}>
-                      👍 Recommend
-                    </button>
-                  )}
-                  {amApprover && (
-                    <button className="btn btn-sm btn-success"
-                      disabled={!canApprove}
-                      style={{ opacity: canApprove ? 1 : 0.4, cursor: canApprove ? 'pointer' : 'not-allowed' }}
-                      title={canApprove ? '' : 'Recommendation required before approval'}
-                      onClick={() => { if (canApprove) { setActionModal({ id:l.id, type:'approve', leave:l }); setComment(''); } }}>
-                      ✓ {t('Approve')}
-                    </button>
-                  )}
-                  {isApproverFor(l.employeeId) && (
-                    <button className="btn btn-sm btn-danger"
-                      onClick={() => { setActionModal({ id:l.id, type:'reject', leave:l }); setComment(''); }}>
-                      ✗ {t('Reject')}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
       )}
 
       {/* Full grid */}
-      <DataGrid columns={columns} data={allLeaves} defaultPageSize={10}
+      <DataGrid columns={columns} data={embedded ? pendingLeaves : allLeaves} defaultPageSize={10}
         showSearch={true} searchPlaceholder={t('Search')+'...'} title={t('Leave Applications')} compact={true}
         onRowClick={row => setSelectedReason(row.reason)} />
 

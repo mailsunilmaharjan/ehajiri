@@ -160,7 +160,7 @@ const MyMonthlyCalendar = ({ employeeId, onViewFull }) => {
       </div>
 
       {/* Day-of-week header */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,minmax(0,1fr))', background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
         {DOW.map((d, i) => (
           <div key={d} style={{ padding: '8px 4px', textAlign: 'center', fontSize: 13, fontWeight: 700,
             color: i === 0 ? '#dc2626' : i === 6 ? '#d97706' : '#6b7280' }}>{d}</div>
@@ -168,7 +168,7 @@ const MyMonthlyCalendar = ({ employeeId, onViewFull }) => {
       </div>
 
       {/* Calendar grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', flex: 1 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,minmax(0,1fr))', flex: 1 }}>
         {cells.map((d, idx) => {
           if (d === null) return (
             <div key={`e-${idx}`} style={{ minHeight: 82, background: '#fafafa',
@@ -209,8 +209,8 @@ const MyMonthlyCalendar = ({ employeeId, onViewFull }) => {
                 )}
               </div>
               {label && (
-                <span style={{ fontSize: 11, fontWeight: 700, color: st.color, overflow: 'hidden',
-                  textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                <span title={label} style={{ fontSize: 11, fontWeight: 700, color: st.color, lineHeight: 1.3, overflow: 'hidden',
+                  display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflowWrap: 'anywhere' }}>{label}</span>
               )}
               {flags.length > 0 && (
                 <span style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>

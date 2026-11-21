@@ -149,7 +149,7 @@ const PayrollTaxSlab = () => {
   }, [canManageSystem, fd]);
 
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => navigate('/payroll/dashboard')} title="Back to Payroll"

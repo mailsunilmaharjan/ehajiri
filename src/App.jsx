@@ -36,6 +36,7 @@ const StaffAnalyticsReport   = lazy(() => import('./components/Staff/StaffAnalyt
 const TaskList               = lazy(() => import('./components/Staff/TaskList.jsx'));
 const TaskLookupPage         = lazy(() => import('./components/Staff/TaskLookupPage.jsx'));
 const TaskDashboard          = lazy(() => import('./components/Staff/TaskDashboard.jsx'));
+const AccountsApp            = lazy(() => import('./components/Accounts/AccountsApp.jsx'));
 const PayrollDashboard       = lazy(() => import('./components/Payroll/PayrollDashboard.jsx'));
 const PayrollItems           = lazy(() => import('./components/Payroll/PayrollItems.jsx'));
 const PayrollTaxSlab         = lazy(() => import('./components/Payroll/PayrollTaxSlab.jsx'));
@@ -56,6 +57,8 @@ const MobilePayslips         = lazy(() => import('./mobile/MobilePayslips.jsx'))
 import AppUpdate from './components/Common/AppUpdate.jsx';
 const MobileDevices = lazy(() => import('./mobile/MobileAdmin.jsx'));
 const MobileRoster           = lazy(() => import('./mobile/MobileRoster.jsx'));
+const MobileStaff            = lazy(() => import('./mobile/MobileStaff.jsx'));
+const MobileHolidays         = lazy(() => import('./mobile/MobileHolidays.jsx'));
 const MobileApprovals        = lazy(() => import('./mobile/MobileApprovals.jsx'));
 const MobileTasks            = lazy(() => import('./mobile/MobileTasks.jsx'));
 const MobileProfile          = lazy(() => import('./mobile/MobileProfile.jsx'));
@@ -238,6 +241,8 @@ const App = () => {
       <Route path="/m/leave" element={<MobileOnly><Protected><MobileLeave /></Protected></MobileOnly>} />
       <Route path="/m/devices" element={<MobileOnly><Protected><MobileDevices /></Protected></MobileOnly>} />
       <Route path="/m/roster" element={<MobileOnly><Protected><MobileRoster /></Protected></MobileOnly>} />
+      <Route path="/m/staff" element={<MobileOnly><Protected><MobileStaff /></Protected></MobileOnly>} />
+      <Route path="/m/holidays" element={<MobileOnly><Protected><MobileHolidays /></Protected></MobileOnly>} />
       <Route path="/m/approvals" element={<MobileOnly><Protected><MobileApprovals /></Protected></MobileOnly>} />
       <Route path="/m/inbox" element={<MobileOnly><Protected><MobileInbox /></Protected></MobileOnly>} />
       <Route path="/m/more" element={<MobileOnly><Protected><MobileMore /></Protected></MobileOnly>} />
@@ -409,6 +414,9 @@ const App = () => {
       } />
       <Route path="/staff/task/priorities" element={
         <Protected pageKey="task" moduleKey="task"><TaskLookupPage title="Task Priority" endpoint="taskPriorities" withColor /></Protected>
+      } />
+      <Route path="/accounts/*" element={
+        <Protected pageKey="accounts" moduleKey="accounting"><AccountsApp /></Protected>
       } />
       <Route path="/payroll/dashboard" element={
         <Protected pageKey="payroll"><PayrollDashboard /></Protected>

@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import api from '../../api/client.js';
 import { useOnlineAttendanceApply } from '../../context/OnlineAttendanceApplyContext.jsx';
 import useDateFormat from '../../hooks/useDateFormat.js';
+import { useAuth } from '../../context/AuthContext.jsx';
+import { useData } from '../../context/DataContext.jsx';
+import useRecoApproval from '../../hooks/useRecoApproval.js';
 
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-US', {
   hour: '2-digit', minute: '2-digit',
@@ -43,6 +46,17 @@ const OnlineAttendanceApplyModal = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  // Who the check-out goes to: only the recommender / approver chosen here are notified and may act.
+  const { currentUser } = useAuth();
+  const { getEmployeeName } = useData();
+  const { getRecoIds, getApprovalIds, refresh: refreshReco } = useRecoApproval();
+  const recoIds = getRecoIds(currentUser?.id);
+  const apprIds = getApprovalIds(currentUser?.id);
+  const [reco, setReco] = useState('');
+  const [appr, setAppr] = useState('');
+  const recoValue = recoIds.length === 1 ? recoIds[0] : (recoIds.includes(reco) ? reco : '');
+  const apprValue = apprIds.length === 1 ? apprIds[0] : (apprIds.includes(appr) ? appr : '');
+
   // Location is acquired proactively the moment the modal opens — the
   // Check In/Out button stays disabled until this resolves, instead of only
   // discovering a denied/failed permission after the user has already
@@ -79,14 +93,18 @@ const OnlineAttendanceApplyModal = () => {
   };
 
   useEffect(() => {
-    if (isOpen) { load(); acquireLocation(); }
+    if (isOpen) { load(); acquireLocation(); refreshReco(); }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClose = () => { close(); setError(''); };
 
   const submit = async (kind) => {
-    setBusy(true);
     setError('');
+    if (kind === 'check-out') {
+      if (recoIds.length > 1 && !recoValue) { setError('Select a Recommendator'); return; }
+      if (apprIds.length > 1 && !apprValue) { setError('Select an Approval Authority'); return; }
+    }
+    setBusy(true);
     try {
       // Re-acquire fresh coordinates at submit time (the modal may have sat
       // open a while since the initial check) rather than reusing the
@@ -95,6 +113,7 @@ const OnlineAttendanceApplyModal = () => {
       const c = await getLocation();
       const saved = await api.post(`/online-attendance/${kind}`, {
         lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, deviceInfo: deviceInfo(),
+        ...(kind === 'check-out' ? { reco: recoValue || null, approval: apprValue || null } : {}),
       });
       setRecord(saved);
     } catch (err) {
@@ -190,6 +209,19 @@ const OnlineAttendanceApplyModal = () => {
                   <div style={{ fontSize: 12.5, color: '#991b1b' }}>
                     Your current location and device will be recorded with this check-out.
                   </div>
+                  {[
+                    { label: 'Recommendator', ids: recoIds, value: recoValue, set: setReco },
+                    { label: 'Approval Authority', ids: apprIds, value: apprValue, set: setAppr },
+                  ].filter(p => p.ids.length > 0).map(p => (
+                    <label key={p.label} style={{ display: 'flex', flexDirection: 'column', gap: 4, textAlign: 'left', fontSize: 12, fontWeight: 700, color: '#374151' }}>
+                      {p.label}{p.ids.length > 1 && <span style={{ color: '#dc2626' }}> *</span>}
+                      <select value={p.value} disabled={p.ids.length === 1} onChange={e => p.set(e.target.value)}
+                        style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 13, background: '#fff' }}>
+                        {p.ids.length > 1 && <option value="">— Select —</option>}
+                        {p.ids.map(id => <option key={id} value={id}>{getEmployeeName(id)}</option>)}
+                      </select>
+                    </label>
+                  ))}
                   <button onClick={() => submit('check-out')} disabled={busy || !locationReady}
                     title={!locationReady ? 'Waiting for location access' : undefined}
                     style={{ padding: '14px 0', borderRadius: 12, border: 'none', background: '#dc2626', color: '#fff',

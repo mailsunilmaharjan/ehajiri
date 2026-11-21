@@ -61,7 +61,7 @@ function RunList() {
 
   if (loading) return <div style={{ padding: 48, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>;
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <PageHeader title="🧾 Payroll Runs"><PrimaryBtn onClick={() => openNew(-1)}>+ New payroll run</PrimaryBtn></PageHeader>
       <DataGrid columns={cols} data={runs} defaultPageSize={20} compact showFilterButton={false} onRowDoubleClick={(r) => navigate(`/payroll/run/${r.id}`)}
         contextMenu={[{ label: 'Open', icon: '📂', onClick: (r) => navigate(`/payroll/run/${r.id}`) }]} />
@@ -149,7 +149,7 @@ function RunDetail({ runId }) {
   const draft = run.status === 'draft';
   const warnCount = data.slips.filter(s => s.warnings?.length).length;
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <PageHeader title={`🧾 ${run.label}`} back="/payroll/run">
         <StatusPill status={run.status} />
         {draft && <GhostBtn disabled={busy} onClick={() => act('rebuild', 'Recalculate every payslip from the latest attendance and salary data? Your manual corrections are kept.')}>🔄 Recalculate all</GhostBtn>}

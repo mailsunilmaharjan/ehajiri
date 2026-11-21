@@ -194,9 +194,90 @@ const FormPanel = ({ children }) => (
 /* ═══════════════════════════════════════════════════════════
    Device Control Modal — 3-group accordion layout
 ═══════════════════════════════════════════════════════════ */
+/* ── Excel (one row per punch: employee ID + date-time) → attlog lines ── */
+const _p2 = n => String(n).padStart(2,'0');
+const _fmtDT = (y,mo,d,h,mi,s) => `${y}-${_p2(mo)}-${_p2(d)} ${_p2(h)}:${_p2(mi)}:${_p2(s)}`;
+function _timeParts(v) {
+  if (v instanceof Date) return [v.getHours(), v.getMinutes(), v.getSeconds()];
+  if (typeof v === 'number') { const t = Math.round((v % 1) * 86400); return [Math.floor(t/3600), Math.floor(t%3600/60), t%60]; }
+  const m = String(v ?? '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!m) return null;
+  let h = +m[1]; const ap = (m[4]||'').toUpperCase();
+  if (ap==='PM' && h<12) h+=12; if (ap==='AM' && h===12) h=0;
+  return [h, +m[2], +(m[3]||0)];
+}
+function _parseDT(v, timeV, fmt, XLSX) {
+  const hasT = timeV != null && timeV !== '';
+  if (v instanceof Date) {
+    const t = new Date(Math.round(v.getTime()/1000)*1000);
+    const tp = hasT ? _timeParts(timeV) : null;
+    return _fmtDT(t.getFullYear(), t.getMonth()+1, t.getDate(), tp?tp[0]:t.getHours(), tp?tp[1]:t.getMinutes(), tp?tp[2]:t.getSeconds());
+  }
+  if (typeof v === 'number') {
+    const p = XLSX.SSF.parse_date_code(v); if (!p) return null;
+    const tp = hasT ? _timeParts(timeV) : [p.H, p.M, Math.round(p.S)];
+    return tp ? _fmtDT(p.y, p.m, p.d, tp[0], tp[1], tp[2]) : null;
+  }
+  const m = String(v ?? '').trim().match(/^(\d{1,4})[\/\-.](\d{1,2})[\/\-.](\d{1,4})(?:[ T]+(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?))?$/i);
+  if (!m) return null;
+  let y, mo, d;
+  if (m[1].length === 4) { y=+m[1]; mo=+m[2]; d=+m[3]; }
+  else { y=+m[3]; if (y<100) y+=2000; if (fmt==='MDY') { mo=+m[1]; d=+m[2]; } else { d=+m[1]; mo=+m[2]; } }
+  if (mo<1 || mo>12 || d<1 || d>31) return null;
+  const tp = _timeParts(m[4] || timeV) || [0,0,0];
+  return _fmtDT(y, mo, d, tp[0], tp[1], tp[2]);
+}
+function _convertSheet(x, fmt) {
+  const lines = [], bad = []; let minD = null, maxD = null;
+  x.data.forEach((r, i) => {
+    const pin = String(r[x.idCol] ?? '').trim();
+    if (!pin && !String(r[x.dtCol] ?? '').trim()) return;
+    const dt = _parseDT(r[x.dtCol], x.tmCol>=0 ? r[x.tmCol] : null, fmt, x.XLSX);
+    if (!pin || !dt) { bad.push(i+1); return; }
+    lines.push(`${pin}\t${dt}\t0\t0`);
+    if (!minD || dt<minD) minD = dt; if (!maxD || dt>maxD) maxD = dt;
+  });
+  return { lines, bad, minD, maxD };
+}
+
 const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSwitchTab, initialGroup='device-info', initialItem=null }) => {
   const { language } = useLanguage();
+  const { isSuperAdmin } = useAuth();
   const L = (np,en) => language==='np' ? np : en;
+  // Excel attendance import (Super Admin only)
+  const [xlsx,       setXlsx]       = useState(null);   // { name, data, idCol, dtCol, tmCol, XLSX }
+  const [xlsxFmt,    setXlsxFmt]    = useState('DMY');
+  const [xlsxResult, setXlsxResult] = useState(null);
+  const xlsxInputRef = useRef(null);
+  const xlsxConv = useMemo(() => xlsx ? _convertSheet(xlsx, xlsxFmt) : null, [xlsx, xlsxFmt]);
+  const loadXlsx = async (f) => {
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.read(await f.arrayBuffer(), { type:'array', cellDates:true });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:'' });
+      if (!rows.length) { showToast('Excel file is empty','danger'); return; }
+      const head = rows[0].map(c => String(c).trim().toLowerCase());
+      const hasHead = head.some(h => /[a-z]/.test(h)) && !rows[0].some(c => c instanceof Date);
+      let idCol = 0, dtCol = 1, tmCol = -1;
+      if (hasHead) {
+        const iId = head.findIndex(h => /(^id$|emp|pin|user|code|device)/.test(h));
+        const iDt = head.findIndex(h => /(date|punch|check)/.test(h));
+        const iTm = head.findIndex(h => /^time$/.test(h));
+        if (iId >= 0) idCol = iId;
+        if (iDt >= 0) dtCol = iDt;
+        if (iTm >= 0 && iTm !== dtCol) tmCol = iTm;
+      }
+      const data = hasHead ? rows.slice(1) : rows;
+      let dmy = 0, mdy = 0;
+      for (const r of data) {
+        const m = typeof r[dtCol]==='string' && r[dtCol].match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.]\d{2,4}/);
+        if (m) { if (+m[1]>12) dmy++; if (+m[2]>12) mdy++; }
+      }
+      setXlsxFmt(mdy > dmy ? 'MDY' : 'DMY');
+      setXlsxResult(null);
+      setXlsx({ name:f.name, data, idCol, dtCol, tmCol, XLSX });
+    } catch (err) { showToast('Could not read Excel: ' + err.message, 'danger'); }
+  };
 
   const [busy,         setBusy]         = useState({});
   const [openGroup,    setOpenGroup]    = useState(initialGroup); // active horizontal tab
@@ -461,6 +542,11 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
             <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="usb-upload" icon="💾" label="USB Upload"
               desc="Import attlog.dat / user.dat exported from device USB"
               onClick={()=>setActiveItem(activeItem==='usb-upload'?null:'usb-upload')} />
+            {isSuperAdmin && (
+              <Item activeItem={activeItem} busy={busy} isOffline={false} iKey="excel-upload" icon="📊" label="Excel Attendance Upload"
+                desc="Super Admin only — import punches from .xlsx (Employee ID + Date-Time) as device logs"
+                onClick={()=>setActiveItem(activeItem==='excel-upload'?null:'excel-upload')} />
+            )}
             {/* Export stored users + FP templates as JSON for migration */}
             <Item activeItem={activeItem} busy={busy} isOffline={isOffline} iKey="export-users" icon="⬇️" label="Export Users (JSON)"
               desc="Download all users + FP templates stored in DB for this device as a JSON file"
@@ -622,6 +708,62 @@ const DeviceControlModal = ({ device, onClose, showToast, onRefreshDevices, onSw
                     {usbResult && (
                       <div style={{ marginTop:8,background:'#d1fae5',border:'1px solid #6ee7b7',borderRadius:6,padding:'8px 12px',fontSize:12,color:'#065f46' }}>
                         ✅ {usbResult.attInserted} att records · {usbResult.usersUpserted} users · {usbResult.skipped} skipped
+                      </div>
+                    )}
+                  </div>
+                )}
+              </FormPanel>
+            )}
+            {isSuperAdmin && activeItem==='excel-upload' && (
+              <FormPanel>
+                <input ref={xlsxInputRef} type="file" accept=".xlsx,.xls" style={{ display:'none' }}
+                  onChange={e=>{ const f=e.target.files?.[0]; if(f) loadXlsx(f); e.target.value=''; }} />
+                {!xlsx ? (
+                  <button onClick={()=>xlsxInputRef.current?.click()}
+                    style={{ width:'100%',padding:'10px',background:'white',border:'2px dashed #93c5fd',
+                      borderRadius:8,color:'#0369a1',fontSize:13,fontWeight:600,cursor:'pointer' }}>
+                    📊 Choose Excel file (Employee ID + Date-Time per row)
+                  </button>
+                ) : (
+                  <div>
+                    <div style={{ background:'#1f2937',borderRadius:6,padding:'8px 12px',marginBottom:8,fontSize:12,color:'#d1fae5' }}>
+                      📊 {xlsx.name} — {xlsx.data.length} rows · ID col {xlsx.idCol+1}, Date-Time col {xlsx.dtCol+1}{xlsx.tmCol>=0?`, Time col ${xlsx.tmCol+1}`:''}
+                    </div>
+                    <label style={{ fontSize:12,fontWeight:600 }}>Text date format (e.g. 09/03/2021)&nbsp;
+                      <select value={xlsxFmt} onChange={e=>setXlsxFmt(e.target.value)}>
+                        <option value="DMY">DD/MM/YYYY (9 March 2021)</option>
+                        <option value="MDY">MM/DD/YYYY (3 September 2021)</option>
+                      </select>
+                    </label>
+                    <div style={{ fontSize:12,margin:'8px 0' }}>
+                      <b>{xlsxConv.lines.length}</b> valid punches
+                      {xlsxConv.lines.length>0 && <> · {xlsxConv.minD.slice(0,10)} → {xlsxConv.maxD.slice(0,10)}<br/>Sample: <code>{xlsxConv.lines[0].replace(/\t/g,' | ')}</code></>}
+                      {xlsxConv.bad.length>0 && <div style={{ color:'#b91c1c' }}>{xlsxConv.bad.length} unreadable rows skipped (e.g. row {xlsxConv.bad.slice(0,5).join(', ')})</div>}
+                    </div>
+                    <div style={{ display:'flex',gap:6 }}>
+                      <button className="btn btn-primary btn-sm" disabled={!!busy['excel-upload'] || !xlsxConv.lines.length}
+                        onClick={async()=>{
+                          setBusy(p=>({...p,'excel-upload':true}));
+                          let inserted=0, done=0;
+                          try{
+                            const CH=3000, ls=xlsxConv.lines;
+                            for (let i=0;i<ls.length;i+=CH) {
+                              const r=await api.post(`/zkteco/devices/${id}/excel-upload`,{ content: ls.slice(i,i+CH).join('\n') });
+                              inserted += r.attInserted||0; done += Math.min(CH, ls.length-i);
+                            }
+                            setXlsxResult({ inserted, total: ls.length });
+                            showToast(`✅ Excel Import: ${inserted} new logs`,'success');
+                          }catch(err){showToast(`Failed after ${done} rows: ${err.message}`,'danger');}
+                          finally{setBusy(p=>({...p,'excel-upload':false}));}
+                        }}>
+                        {busy['excel-upload']?'⏳':'📤'} Import
+                      </button>
+                      <button className="btn btn-outline btn-sm" onClick={()=>xlsxInputRef.current?.click()}>📁 Change</button>
+                      <button className="btn btn-outline btn-sm" onClick={()=>{setActiveItem(null);setXlsx(null);setXlsxResult(null);}}>Close</button>
+                    </div>
+                    {xlsxResult && (
+                      <div style={{ marginTop:8,background:'#d1fae5',border:'1px solid #6ee7b7',borderRadius:6,padding:'8px 12px',fontSize:12,color:'#065f46' }}>
+                        ✅ {xlsxResult.inserted} new records · {xlsxResult.total-xlsxResult.inserted} duplicates/rejected
                       </div>
                     )}
                   </div>
@@ -1960,6 +2102,7 @@ const ZKTecoDeviceSettings = () => {
             { label:'Download Logs',              icon:'📋', onClick: row => runDeviceCmd(row, 'Download Logs', () => api.post(`/zkteco/devices/${row.id}/sync`,{})) },
             { label:'Download All Users',         icon:'👥', onClick: row => runDeviceCmd(row, 'Download All Users', () => api.post(`/zkteco/devices/${row.id}/get-users`,{})) },
             { label:'USB Upload',                 icon:'💾', onClick: row => openControlAt(row, 'data-ops', 'usb-upload') },
+            ...(isSuperAdmin ? [{ label:'Excel Attendance Upload', icon:'📊', onClick: row => openControlAt(row, 'data-ops', 'excel-upload') }] : []),
             { label:'Set Timezone Nepal (+5:45)', icon:'🌐', onClick: row => runDeviceCmd(row, 'Set Timezone', () => api.post(`/zkteco/devices/${row.id}/set-timezone`,{})) },
             { label:'Sync Area',                  icon:'🗺️', onClick: row => runDeviceCmd(row, 'Sync Area', () => api.post(`/zkteco/devices/${row.id}/sync-area`,{})) },
             { label:'Clear Admin',                icon:'🚫', onClick: row => runDeviceCmd(row, 'Clear Admin', () => api.post(`/zkteco/devices/${row.id}/clear-admin`,{})) },
@@ -1975,6 +2118,7 @@ const ZKTecoDeviceSettings = () => {
                 )) return;
                 runDeviceCmd(row, 'Restart Device', () => api.post(`/zkteco/devices/${row.id}/reboot`,{}));
               } },
+            { label:'Delete Device',              icon:'🗑️', className:'danger', onClick: row => setDelConfirm(row.id) },
           ]}
           toolbar={(() => {
             // Resolve the selected device object

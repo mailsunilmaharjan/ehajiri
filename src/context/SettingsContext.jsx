@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+﻿import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import api from '../api/client.js';
 import { useAuth } from './AuthContext.jsx';
 import { useLanguage } from './LanguageContext.jsx';
@@ -255,9 +255,20 @@ export const SettingsProvider = ({ children }) => {
     if (apiOk) applyTenantDefault(settings.defaultLanguage);
   }, [apiOk, settings.defaultLanguage, applyTenantDefault]);
 
+  // Fiscal years are exposed newest-first (descending by start date) so the Settings -> Fiscal Year
+  // grid and every Fiscal Year dropdown/filter list the latest year on top. Ties/missing dates
+  // fall back to name descending.
+  const exposed = useMemo(() => {
+    const fys = settings.fiscalYears;
+    if (!Array.isArray(fys) || fys.length < 2) return settings;
+    const key = f => String(f.startDate || '');
+    return { ...settings, fiscalYears: [...fys].sort((a, b) =>
+      key(a) === key(b) ? String(b.name || '').localeCompare(String(a.name || '')) : (key(a) < key(b) ? 1 : -1)) };
+  }, [settings]);
+
   return (
     <SettingsContext.Provider value={{
-      settings, updateSettings, addWeekendHistory, updateWeekendHistory, deleteWeekendHistory,
+      settings: exposed, updateSettings, addWeekendHistory, updateWeekendHistory, deleteWeekendHistory,
       updateSetupList, resetSettings, getCompanyName, apiOk, refreshSettings,
     }}>
       {children}

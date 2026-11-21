@@ -447,8 +447,10 @@ const Login = () => {
     const saved = localStorage.getItem('ehajiri_remember');
     if (saved) {
       try {
-        const { username: u, password: p } = JSON.parse(saved);
-        setUsername(u); setPassword(p); setRememberMe(true);
+        // SECURITY: only the username is remembered — a password is never kept in browser storage.
+        const { username: u } = JSON.parse(saved);
+        setUsername(u); setRememberMe(true);
+        localStorage.setItem('ehajiri_remember', JSON.stringify({ username: u }));   // purge any password saved by older versions
       } catch { localStorage.removeItem('ehajiri_remember'); }
     }
   }, []);
@@ -495,7 +497,7 @@ const Login = () => {
     setLoading(false);
     if (ok) {
       if (rememberMe) {
-        localStorage.setItem('ehajiri_remember', JSON.stringify({ username, password }));
+        localStorage.setItem('ehajiri_remember', JSON.stringify({ username }));
       } else {
         localStorage.removeItem('ehajiri_remember');
       }
@@ -609,7 +611,7 @@ const Login = () => {
                 <img src={settings.companyLogo} alt="Company Logo" className="login-logo-img" />
               </div>
             ) : (
-              <div className="login-logo">EH</div>
+              <img src="/icons/ehajiri-logo.png?v=2" alt="eHajiri" className="login-logo-brand" />
             )}
 
             <h1 className="login-title">{companyName}</h1>
@@ -618,8 +620,7 @@ const Login = () => {
             )}
 
             <div className="login-app-badge">
-              <span className="badge-name">eHajiri</span>
-              <span className="badge-tms">TMS</span>
+              <img src="/icons/ehajiri-logo.png?v=2" alt="eHajiri" className="badge-logo" />
               <span className="badge-sep">·</span>
               <span className="badge-sub">
                 {language === 'np' ? 'हाजिरी व्यवस्थापन' : 'Time Management'}

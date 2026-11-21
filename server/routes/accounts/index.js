@@ -16,9 +16,10 @@ import approvals from './approvals.js';
 import cheques from './cheques.js';
 import quotes from './quotes.js';
 import profitReports from './profitReports.js';
+import vatReports from './vatReports.js';
 
 const router = Router();
-for (const r of [company, accounts, vouchers, reports, parties, items, docs, stockReports, alerts, approvals, cheques, quotes, profitReports]) router.use(r);
+for (const r of [company, accounts, vouchers, reports, parties, items, docs, stockReports, alerts, approvals, cheques, quotes, profitReports, vatReports]) router.use(r);
 
 // Unknown path under /api/accounts -> JSON 404 (never fall through to the SPA)
 router.use((_req, res) => res.status(404).json({ error: 'Not found.' }));

@@ -672,7 +672,7 @@ const LeaveReports = () => {
                   </thead>
                   <tbody>
                     {balanceRowsSpanned.map((r, ri) => (
-                      <tr key={`${r.empId}-${r.ltShortName}-${ri}`} style={{ background: ri % 2 === 0 ? 'white' : '#f9fafb' }}>
+                      <tr key={`${r.empId}-${r.ltShortName}-${ri}`} style={{ background: ri % 2 === 0 ? 'white' : '#f7f8fa' }}>
                         <td style={{ ...tdS, color: '#374151', fontWeight: 600 }}>{(balPage - 1) * balPageSize + ri + 1}</td>
                         {r._empSpan > 0 && (
                           <td rowSpan={r._empSpan} style={{ ...tdS, verticalAlign: 'top', cursor: 'pointer' }}

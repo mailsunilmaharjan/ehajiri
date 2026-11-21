@@ -84,6 +84,12 @@ const MATRIX_GROUPS = [
       { key: 'payroll', label: 'Payroll', icon: '💰' },
     ],
   },
+  {
+    group: 'Accounts',
+    pages: [
+      { key: 'accounts', label: 'Accounts & Inventory', icon: '📒' },
+    ],
+  },
 ];
 
 const ALL_MATRIX_PAGES = MATRIX_GROUPS.flatMap(g => g.pages);
@@ -162,6 +168,14 @@ const OVERRIDE_GROUPS = [
     desc: 'Payroll module access',
     pages: [
       { key: 'payroll', label: 'Payroll', icon: '💰' },
+    ],
+  },
+  {
+    group: 'Accounts',
+    color: '#0f766e', bg: '#ccfbf1',
+    desc: 'Accounting & inventory access (the module must also be enabled below by a Super Admin)',
+    pages: [
+      { key: 'accounts', label: 'Accounts & Inventory', icon: '📒' },
     ],
   },
 ];
@@ -817,7 +831,7 @@ const RoleManagement = () => {
      the same admin/superAdmin rule as its own in-page toggle (Settings →
      StandAlone Device), duplicated here so it can be turned on before that
      page is even reachable (its tab is hidden until this flag is enabled). */
-  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false, guestRegistrationEnabled: false, onlineAttendanceEnabled: false, dutyRosterEnabled: false, chatEnabled: false, taskEnabled: false, smsGatewayEnabled: false, supportHelpEnabled: true });
+  const [moduleFlags, setModuleFlags] = useState({ attendanceDeviceEnabled: false, standaloneDeviceEnabled: false, emailSetupEnabled: false, guestRegistrationEnabled: false, onlineAttendanceEnabled: false, dutyRosterEnabled: false, chatEnabled: false, taskEnabled: false, smsGatewayEnabled: false, accountingEnabled: false, supportHelpEnabled: false, fieldVisitTrackingEnabled: false });
   const [moduleFlagsLoading, setModuleFlagsLoading] = useState(true);
 
   useEffect(() => {
@@ -837,13 +851,15 @@ const RoleManagement = () => {
     module_chat_enabled:                'chatEnabled',
     module_task_enabled:                'taskEnabled',
     module_sms_gateway_enabled:         'smsGatewayEnabled',
+    module_accounting_enabled:          'accountingEnabled',
     module_support_help_enabled:        'supportHelpEnabled',
+    module_field_visit_tracking_enabled: 'fieldVisitTrackingEnabled',
   };
 
   const toggleModuleFlag = async (flagKey) => {
     const field = MODULE_FLAG_FIELD[flagKey];
-    // Help defaults ON: a missing value counts as enabled.
-    const cur = field === 'supportHelpEnabled' ? moduleFlags[field] !== false : !!moduleFlags[field];
+    // every module (Help and Field Visit tracking included) defaults OFF: a missing value counts as disabled.
+    const cur = !!moduleFlags[field];
     const next = !cur;
     try {
       await api.put('/settings', { [flagKey]: next });
@@ -1250,8 +1266,8 @@ const RoleManagement = () => {
                   )}
                 </div>
 
-                {/* Help assistant — Super Admin only. Defaults ON. */}
-                {(() => { const on = moduleFlags.supportHelpEnabled !== false; return (
+                {/* Help assistant — Super Admin only. Defaults OFF. */}
+                {(() => { const on = moduleFlags.supportHelpEnabled === true; return (
                 <div style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
                   background: on ? '#f0fdf4' : '#fff7ed',
@@ -1267,6 +1283,31 @@ const RoleManagement = () => {
                   {isSuperAdmin ? (
                     <button className={`btn btn-sm ${on ? 'btn-outline' : 'btn-primary'}`}
                       onClick={() => toggleModuleFlag('module_support_help_enabled')}>
+                      {on ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+                ); })()}
+
+                {/* Field Visit tracking — Super Admin only. Defaults OFF. */}
+                {(() => { const on = moduleFlags.fieldVisitTrackingEnabled === true; return (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: on ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${on ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>📡 Field Visit Tracking</div>
+                    <div style={{ fontSize: 12, color: on ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {on ? '✅ Enabled — location is recorded while a field visit trip is open' : '⛔ Disabled — no route tracking and no "Tracking field visit" chip'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${on ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_field_visit_tracking_enabled')}>
                       {on ? 'Disable' : 'Enable'}
                     </button>
                   ) : (
@@ -1315,6 +1356,28 @@ const RoleManagement = () => {
                     <button className={`btn btn-sm ${moduleFlags.smsGatewayEnabled ? 'btn-outline' : 'btn-primary'}`}
                       onClick={() => toggleModuleFlag('module_sms_gateway_enabled')}>
                       {moduleFlags.smsGatewayEnabled ? 'Disable' : 'Enable'}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>
+                  )}
+                </div>
+                {/* Accounts & Inventory — Super Admin only. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  background: moduleFlags.accountingEnabled ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${moduleFlags.accountingEnabled ? '#bbf7d0' : '#fed7aa'}`,
+                  borderRadius: 8, padding: '12px 16px',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: 13 }}>📒 Accounts & Inventory</div>
+                    <div style={{ fontSize: 12, color: moduleFlags.accountingEnabled ? '#065f46' : '#9a3412', marginTop: 2 }}>
+                      {moduleFlags.accountingEnabled ? '✅ Enabled' : '⛔ Disabled — hidden from every role, including Super Admin'}
+                    </div>
+                  </div>
+                  {isSuperAdmin ? (
+                    <button className={`btn btn-sm ${moduleFlags.accountingEnabled ? 'btn-outline' : 'btn-primary'}`}
+                      onClick={() => toggleModuleFlag('module_accounting_enabled')}>
+                      {moduleFlags.accountingEnabled ? 'Disable' : 'Enable'}
                     </button>
                   ) : (
                     <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Super Admin only</span>

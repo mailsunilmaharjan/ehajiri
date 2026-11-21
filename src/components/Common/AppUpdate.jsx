@@ -14,6 +14,9 @@ export default function AppUpdate() {
 
   useEffect(() => {
     if (!isNative()) return undefined;
+    // Google Play build (user-agent tagged in capacitor.config.json): Play updates the app itself, and Play policy forbids
+    // an app installing/downloading APKs, so skip the APK update check entirely.
+    if (/eHajiriPlay/i.test(navigator.userAgent)) return undefined;
     let alive = true;
     const App = nativePlugin('App');
     const say = (m) => { setMsg(m); setTimeout(() => alive && setMsg(''), 3500); };

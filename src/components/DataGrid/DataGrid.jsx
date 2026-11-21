@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import './DataGrid.css';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
@@ -29,7 +29,7 @@ const DataGrid = ({
   showFilterButton = true,    // set false to hide the column-filter toggle button
   filterButtonLabel = null,   // override label; null = default "Filter" / "फिल्टर"
   selectionActions = null,    // extra buttons rendered in the selection bar
-  contextMenu = null,         // [{ label: string|(row)=>string, icon, onClick(row), className? }] — shown on right-click
+  contextMenu = null,         // [{ label: string|(row)=>string, icon, onClick(row), className?, visible?(row), disabled?(row), title? }] — shown on right-click
   searchOnlyExtraFields = false, // true = global search looks ONLY at extraSearchFields, not the columns
   extraSearchFields = [],     // extra row fields to include in global search (not shown as columns)
   className = '',             // extra class on the outer container, for scoping one-off style overrides
@@ -39,6 +39,10 @@ const DataGrid = ({
   groupOrder = null,          // [groupKey, ...] display order for sections; a key with no matching rows still renders its header. Defaults to first-seen order when omitted
   groupLabel = null,          // (groupKey, rowCount) => ReactNode — section header content; defaults to the raw key
   footerLeft = null,          // extra content on the footer's left side (e.g. a selected-row preview strip) — pushes the Total/pagination info to the right instead of leaving it alone on the left
+  fillToBottom,               // undefined (default) = automatic: a full-page grid sizes itself to the screen — it gets exactly the height left under it, scrolls its body inside (sticky header), shows blank ruled rows when there are few records, and keeps the paging bar visible. true = always, false = never (the grid ends after its last row)
+  remarks = null,             // (row) => node — with fillToBottom: a details/remarks strip pinned at the bottom of the grid showing the focused (or first) row; its height takes whatever space is left under the blank rows, so it adapts to any screen
+  remarksMin = 62,            // px — the strip never gets smaller than this (or than its own text)
+  fillGap = 4,                // px kept free under a fillToBottom grid — just a hair, so the grid's bottom border sits right at the edge of the screen
   toolbarRightInset = 0,      // px — shifts the search/filter/toolbar block left so a fixed-position side panel (e.g. a detail drawer) doesn't cover it
 }) => {
   const { language } = useLanguage();
@@ -56,6 +60,12 @@ const DataGrid = ({
   const [focusedRowIdx, setFocusedRowIdx] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, row }
   const scrollRef = useRef(null);
+  const rootRef = useRef(null);
+  const [autoFill, setAutoFill] = useState(false);   // automatic fit-to-screen decided on mount (see below)
+  const restRef = useRef(0);
+  const [boxH, setBoxH] = useState(null);             // px height given to the whole grid in fit-to-screen mode
+  const [blankRows, setBlankRows] = useState(0);
+  const [restH, setRestH] = useState(0);              // px left over under the last whole blank row (< 1 row): given to the remarks strip / footer so blank rows keep the SAME height as data rows
   const searchRef = useRef(null);
   const ctxRef = useRef(null);
 
@@ -259,8 +269,85 @@ const DataGrid = ({
     </tr>
   );
 
+  /* ── Fit to the screen ─────────────────────────────────────────────────────────────────────────────
+     The grid is given exactly the height that is left between its top edge and the bottom of the window
+     (minus anything that sits under it on the page, e.g. a legend), so it adapts to any monitor resolution:
+       • few records  → blank ruled rows fill the space (same look as Staff Detail / the Accounts lists)
+       • many records → the body scrolls inside the grid (sticky header) and the paging bar stays on screen.
+     Automatic for full-page grids; grids in dialogs / side panels, several grids on one page, grouped grids
+     and phones keep the old natural-height behaviour. Pass fillToBottom={true|false} to force either way. */
+  useLayoutEffect(() => {
+    if (fillToBottom !== undefined) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const inPopup = root.closest('.modal, .modal-overlay, .modal-drawer, [role="dialog"], .dg-fixed-height, .acc-app, .zk-biometric-grid');
+    const page = root.closest('.page-container') || root.closest('main');
+    const grids = page ? page.querySelectorAll('.dg-container').length : 0;
+    const top = root.getBoundingClientRect().top;
+    setAutoFill(!inPopup && !!page && grids === 1 && !isGrouped && window.innerWidth >= 768 && top < window.innerHeight * 0.7);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const fill = fillToBottom === undefined ? autoFill : !!fillToBottom;
+
+  // (a) the height of the whole grid
+  useLayoutEffect(() => {
+    if (!fill) { setBoxH(null); setBlankRows(0); setRestH(0); return undefined; }
+    const calcBox = () => {
+      const root = rootRef.current;
+      if (!root) return;
+      const top = root.getBoundingClientRect().top + window.scrollY;
+      let below = 0;                                   // everything that sits under the grid on the page must stay visible
+      for (let el = root; el && el !== document.body && el.tagName !== 'MAIN' && !el.classList?.contains('page-container'); el = el.parentElement) {
+        for (let sib = el.nextElementSibling; sib; sib = sib.nextElementSibling) {
+          const cs = getComputedStyle(sib);
+          if (cs.position === 'fixed' || cs.position === 'absolute' || cs.display === 'none') continue;
+          below += sib.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+        }
+        const ecs = getComputedStyle(el);
+        below += parseFloat(ecs.marginBottom) || 0;
+        if (el !== root) below += (parseFloat(ecs.paddingBottom) || 0) + (parseFloat(ecs.borderBottomWidth) || 0);   // a card around the grid has its own bottom padding / border
+      }
+      setBoxH(Math.round(Math.max(300, window.innerHeight - fillGap - top - below)));
+    };
+    calcBox();
+    window.addEventListener('resize', calcBox);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(calcBox) : null;
+    ro?.observe(document.body);                         // a toolbar that wraps / a banner that appears above moves the grid's top
+    return () => { window.removeEventListener('resize', calcBox); ro?.disconnect(); };
+  }, [fill, fillGap, pageData.length === 0]);          // eslint-disable-line react-hooks/exhaustive-deps
+
+  // (b) how many blank rows fit inside it (measured from real heights — exact at any resolution)
+  useLayoutEffect(() => {
+    if (!fill || boxH === null) return undefined;
+    const wrap = scrollRef.current;
+    if (!wrap) return undefined;
+    const calcBlanks = () => {
+      const body = wrap.querySelector('tbody');
+      const head = wrap.querySelector('thead');
+      if (!body) return;
+      const others = [...body.rows].filter((r) => !r.classList.contains('dg-blank-row'));
+      const used = (head?.offsetHeight || 0) + others.reduce((a2, r) => a2 + r.offsetHeight, 0);
+      // real (sub-pixel) height of one blank filler row — they are no longer stretched, so measuring them is stable; before the first blank row exists use a data row
+      const rowH = body.querySelector('tr.dg-blank-row')?.getBoundingClientRect().height || body.querySelector('tr.dg-row')?.getBoundingClientRect().height || 30;
+      // clientHeight already shrank by the extra (restH) the strip/footer took last time — add it back so the result is stable, not oscillating
+      const free = wrap.clientHeight + restRef.current - used;
+      if (loading || pageData.length === 0 || free <= 0) { restRef.current = 0; setBlankRows(0); setRestH(0); return; }
+      const n = Math.min(300, Math.floor(free / rowH));
+      const rest = Math.max(0, Math.floor(free - n * rowH));
+      restRef.current = rest;
+      setBlankRows(n);
+      setRestH(rest);
+    };
+    calcBlanks();
+    let raf = 0;
+    const again = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(calcBlanks); };
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(again) : null;
+    ro?.observe(wrap);                                  // the remarks strip / toolbar / footer growing shrinks the body area
+    return () => { ro?.disconnect(); cancelAnimationFrame(raf); };
+  }, [fill, boxH, pageData.length, loading, !!remarks, pageSize, currentPage]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className={`dg-container${className ? ' ' + className : ''}`}>
+    <div ref={rootRef} className={`dg-container${fill ? ' dg-fill' : ''}${fill && restH > 0 ? ' dg-has-rest' : ''}${className ? ' ' + className : ''}`}
+      style={fill && boxH ? { height: boxH } : undefined}>
       {/* Toolbar */}
       {hasToolbar && (
       <div className="dg-toolbar">
@@ -435,9 +522,25 @@ const DataGrid = ({
             ) : (
               pageData.map((row, ri) => renderRow(row, ri, startIdx + ri + 1))
             )}
+            {fill && !loading && !isGrouped && pageData.length > 0 && Array.from({ length: blankRows }, (_, i) => (
+              <tr key={`dg-blank-${i}`} className="dg-blank-row" aria-hidden="true">
+                {Array.from({ length: totalCols }, (__, c) => <td key={c} className={`dg-td dg-blank-td${c < (showCheckbox ? 1 : 0) + 1 ? ' dg-blank-lead' : ''}`}>&nbsp;</td>)}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+
+      {fill && restH > 0 && <div className="dg-fill-rest" style={{ height: restH }} aria-hidden="true" />}
+
+      {fill && remarks && (() => {
+        const cur = pageData[Math.max(0, focusedRowIdx)] || pageData[0];
+        return (
+          <div className="dg-remarks-strip" style={{ minHeight: remarksMin }}>
+            <div className="dg-remarks-inner">{cur ? remarks(cur) : null}</div>
+          </div>
+        );
+      })()}
 
       {/* Bulk Delete Confirmation */}
       {bulkDeleteConfirm && (
@@ -476,13 +579,19 @@ const DataGrid = ({
           className="dg-ctx-menu"
           style={{ top: ctxMenu.y, left: ctxMenu.x }}
         >
-          {contextMenu.map((item, i) => (
+          {contextMenu
+            // an item may carry visible(row) / disabled(row); dividers left stranded at the ends or doubled up are dropped
+            .filter((item) => item === 'divider' || !item.visible || item.visible(ctxMenu.row))
+            .filter((item, i, arr) => item !== 'divider' || (i > 0 && i < arr.length - 1 && arr[i - 1] !== 'divider'))
+            .map((item, i) => (
             item === 'divider'
               ? <div key={i} className="dg-ctx-divider" />
               : (
                 <button
                   key={i}
                   className={`dg-ctx-item ${item.className || ''}`}
+                  disabled={!!(item.disabled && item.disabled(ctxMenu.row))}
+                  title={item.title ? (typeof item.title === 'function' ? item.title(ctxMenu.row) : item.title) : undefined}
                   onClick={() => { setCtxMenu(null); item.onClick(ctxMenu.row); }}
                 >
                   {item.icon && <span className="dg-ctx-icon">{item.icon}</span>}
@@ -502,11 +611,11 @@ const DataGrid = ({
         const infoBlock = (
           <div className="dg-info">
             {processedData.length > 0 ? (
-              <span>
-                {isGrouped
-                  ? <>{L('कुल', 'Total')} {processedData.length}</>
-                  : <>{startIdx + 1}–{Math.min(startIdx + pageSize, processedData.length)} / {L('कुल', 'Total')} {processedData.length}</>
-                }
+              <span style={{ color:'#000', fontWeight:700, fontSize:11, display:'inline-flex', alignItems:'center', gap:10 }}>
+                <span style={{ background:'#fef08a', border:'1px solid #facc15', borderRadius:5, padding:'1px 8px' }}>
+                  {L('कुल डाटा', 'Total Data')} : {processedData.length}
+                </span>
+                {!isGrouped && <span>{L('कुल पृष्ठ', 'Total Page')} {startIdx + 1}–{Math.min(startIdx + pageSize, processedData.length)}</span>}
                 {data.length !== processedData.length && ` (${L('फिल्टर', 'Filter')}: ${data.length} ${L('मध्ये', 'of')})`}
               </span>
             ) : <span>{L('कुनै रेकर्ड छैन', 'No records found')}</span>}

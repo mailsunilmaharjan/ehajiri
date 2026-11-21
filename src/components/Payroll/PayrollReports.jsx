@@ -63,7 +63,7 @@ export default function PayrollReports() {
   ], []);
 
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <PageHeader title="📊 Payroll Reports" />
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
         <Field label="Payroll run" style={{ minWidth: 280 }}>

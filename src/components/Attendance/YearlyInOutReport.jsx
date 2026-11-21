@@ -12,6 +12,7 @@ import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, getNepalNow, g
 import { buildPrintDoc, openPrintWindow } from '../../utils/printHelper.js';
 import { presentSymbol, leaveShort } from '../../utils/inOutStatus.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
+import FitScroll from '../Common/FitScroll.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -415,7 +416,7 @@ const YearlyInOutReport = () => {
           {/* Own scroll box (both axes) + sticky <thead> so the header freezes
               while scrolling down — with only overflowX set, the page scrolled
               instead and the header scrolled away with it. */}
-          <div style={{ maxHeight:'calc(100vh - 150px)',overflow:'auto',borderRadius:8,border:'1px solid #dedede',boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
+          <FitScroll style={{ borderRadius:8,border:'1px solid #dedede',boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
             <table style={{ borderCollapse:'collapse',width:'100%' }}>
               <thead style={{ position:'sticky',top:0,zIndex:5 }}>
                 <tr>
@@ -513,7 +514,7 @@ const YearlyInOutReport = () => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </FitScroll>
 
           {/* Legend */}
           <div style={{ marginTop:10,display:'flex',gap:14,flexWrap:'wrap',fontSize:11,

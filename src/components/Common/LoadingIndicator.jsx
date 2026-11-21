@@ -9,18 +9,7 @@ const LoadingIndicator = ({ label = 'Loading data…' }) => (
   <div style={{ textAlign: 'center', padding: '70px 20px' }}>
     <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10,
-          background: 'linear-gradient(135deg, #1a56db, #7e3af2)',
-          color: 'white', fontSize: 14, fontWeight: 800,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 2px 8px rgba(26,86,219,.35)',
-          animation: 'ehLoadPulse 1.4s ease-in-out infinite',
-        }}>EH</div>
-        <span style={{ fontSize: 16, fontWeight: 700 }}>
-          <span style={{ color: '#111827' }}>eHajiri</span>{' '}
-          <span style={{ color: '#1a56db' }}>TMS</span>
-        </span>
+        <img src="/icons/ehajiri-logo.png?v=2" alt="eHajiri" style={{ height: 36, width: 'auto', display: 'block', animation: 'ehLoadPulse 1.4s ease-in-out infinite' }} />
       </div>
       <div style={{ width: 220, height: 5, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}>
         <div style={{

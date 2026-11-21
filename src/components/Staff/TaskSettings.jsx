@@ -15,7 +15,7 @@ export default function TaskSettings() {
   const navigate = useNavigate();
 
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
         <h1 className="page-title">⚙️ Task Setting</h1>
       </div>

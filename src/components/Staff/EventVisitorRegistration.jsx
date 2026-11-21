@@ -3356,7 +3356,7 @@ const EventVisitorRegistration = () => {
         </button>
       </div>
 
-      <div style={{ paddingBottom:24 }}>
+      <div style={{ paddingBottom:4 }}>
         {loading ? (
           <div style={{ padding:40, textAlign:'center', color:'#9ca3af', fontSize:14 }}>Loading events…</div>
         ) : events.length === 0 ? (

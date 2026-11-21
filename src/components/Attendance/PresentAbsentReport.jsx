@@ -13,6 +13,7 @@ import Avatar from '../Common/Avatar.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
 import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
+import FitScroll from '../Common/FitScroll.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN = ['January','February','March','April','May','June',
@@ -115,7 +116,7 @@ const StatusCell = ({ st, language, code, tip }) => {
   return (
     <span style={{ color:s.color, fontSize:12, fontWeight:700,
       display:'block', textAlign:'center', cursor:'default', whiteSpace:'nowrap' }}
-      title={statusTitle(st, language)}>
+      title={tip || statusTitle(st, language)}>
       {disp.main}{disp.sup && <sup style={{ fontSize:8, fontWeight:800 }}>{disp.sup}</sup>}
     </span>
   );
@@ -186,15 +187,8 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
   const depts    = [...new Set(employees.filter(e=>(e.active!==false)===activeFlag).map(e=>e.department).filter(Boolean))].sort().map(d=>({value:d,label:d}));
   const posts    = [...new Set(employees.filter(e=>(e.active!==false)===activeFlag).map(e=>e.position).filter(Boolean))].sort().map(p=>({value:p,label:p}));
 
-  const Lbl = ({ text }) => (
-    <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:6 }}>{text}</div>
-  );
-  const Field = ({ label, children }) => (
-    <div style={{ position:'relative', overflow:'visible' }}>
-      <Lbl text={label} />
-      {children}
-    </div>
-  );
+  // Lbl moved to module level (a component defined in render remounts its children, closing open dropdowns)
+  // Field moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   return (
     <div className="modal-overlay">
@@ -879,7 +873,7 @@ const PresentAbsentReport = () => {
 
       {/* ── Matrix Table ── */}
       {!loading && data && (
-        <div style={{ overflowX:'auto', borderRadius:8, border:'1px solid #dedede',
+        <FitScroll style={{ borderRadius:8, border:'1px solid #dedede',
           boxShadow:'0 1px 3px rgba(0,0,0,.07)' }}>
           <table style={{ borderCollapse:'collapse', width:'100%', minWidth:600 }}>
             <thead>
@@ -926,9 +920,9 @@ const PresentAbsentReport = () => {
 
               {employees.map((emp, idx) => (
                 <tr key={emp.id}
-                  style={{ background: idx%2===0 ? 'white' : '#f3f4f6' }}
+                  style={{ background: idx%2===0 ? 'white' : '#f7f8fa' }}
                   onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
-                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f3f4f6'}>
+                  onMouseLeave={e=>e.currentTarget.style.background=idx%2===0?'white':'#f7f8fa'}>
 
                   <td style={{ ...tdBase, fontWeight:600, color:'#6b7280',
                     position:'sticky', left:0, background:'#efefef', zIndex:1,
@@ -1025,7 +1019,7 @@ const PresentAbsentReport = () => {
 
             </tbody>
           </table>
-        </div>
+        </FitScroll>
       )}
 
       {/* ── Legend ── */}
@@ -1039,8 +1033,6 @@ const PresentAbsentReport = () => {
             {[
               { st:'P',  desc:L('उपस्थित','Present')                   },
               { st:'P1', desc:L('एकल पन्च','Single Punch')              },
-              { st:'PL', desc:L('उपस्थित + बिदा (बिदा कोड)','Present + Leave (leave short name, e.g. P.SL)') },
-              { st:'POV',desc:L('उपस्थित + कार्यालय भ्रमण','Present + Office Visit') },
               { st:'AB', desc:L('अनुपस्थित','Absent')                  },
               { st:'H',  desc:L('सप्ताहन्त (स)','Weekend (W)')   },
               { st:'DO', desc:L('डे अफ','Day Off')                     },
@@ -1048,6 +1040,8 @@ const PresentAbsentReport = () => {
               { st:'L',  desc:L('बिदा','Leave')                        },
               { st:'LH', desc:L('आधा दिन बिदा','Half-day Leave')       },
               { st:'PLH',desc:L('उपस्थित + आधा दिन बिदा','Present + Half-day Leave') },
+              { st:'PL', desc:L('उपस्थित + बिदा (बिदा कोड)','Present + Leave (leave short name, e.g. P.SL)') },
+              { st:'POV',desc:L('उपस्थित + कार्यालय भ्रमण','Present + Office Visit') },
               { st:'OV', desc:L('कार्यालय भ्रमण','Office Visit')       },
               { st:'PH', desc:L('सार्वजनिक बिदा','Public Holiday')     },
               { st:'PP', desc:L('सार्वजनिक बिदामा उपस्थित (H.P)','Present on Public Holiday (H.P)') },
@@ -1088,3 +1082,14 @@ const PresentAbsentReport = () => {
 };
 
 export default PresentAbsentReport;
+
+const Lbl = ({ text }) => (
+  <div style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:6 }}>{text}</div>
+);
+
+const Field = ({ label, children }) => (
+  <div style={{ position:'relative', overflow:'visible' }}>
+    <Lbl text={label} />
+    {children}
+  </div>
+);

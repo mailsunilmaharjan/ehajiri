@@ -100,7 +100,7 @@ export default function ResetPassword() {
     <div style={wrap}>
       <div style={card}>
         <div style={{ marginBottom: 24 }}>
-          <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>eHajiri TMS</div>
+          <img src="/icons/ehajiri-logo.png?v=2" alt="eHajiri" style={{ height: 34, width: 'auto', display: 'block', marginBottom: 8 }} />
           <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#111827' }}>Set New Password</h2>
           <p style={{ margin: '6px 0 0', fontSize: 13, color: '#6b7280' }}>
             Choose a strong password for your account.

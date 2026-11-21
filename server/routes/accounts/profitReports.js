@@ -19,6 +19,9 @@ import { ah, bad, money } from '../../services/accounts/common.js';
 import { valuate } from '../../services/accounts/stock.js';
 import { adToBs, bsToAd, addDays, isIsoDate, BS_MONTHS } from '../../services/accounts/nepaliDate.js';
 
+// expense ledgers that are a damage / loss (shown in their own column, not in ordinary expenses)
+const DAMAGE_RE = /damage|loss|write[s-]?off|wastage|shortage|breakage|expired/i;
+
 const router = Router();
 const POSTED = "v.status = 'posted'";
 
@@ -164,15 +167,19 @@ router.get('/reports/monthly-profit', ah(async (req, res) => {
     const ledgers = await plLedgers(m.from, m.to);
     const fig = plFigures(ledgers, stockValueAt(moves, addDays(m.from, -1)), stockValueAt(moves, m.to));
     const byGroup = {};
+    let damage = 0;
     for (const r of ledgers.filter((x) => x.section === 'exp' && x.net)) {
+      if (DAMAGE_RE.test(r.name)) { damage += r.net; continue; }
       byGroup[r.group_code] = money((byGroup[r.group_code] || 0) + r.net);
       expenseGroups.set(r.group_code, r.group_name);
     }
-    out.push({ ...m, ...fig, expense_by_group: byGroup });
+    damage = money(damage);
+    // ordinary expenses exclude damage / loss; net profit is unchanged (both are taken off)
+    out.push({ ...m, ...fig, expenses: money(fig.expenses - damage), damage, expense_by_group: byGroup });
   }
   const sumK = (k) => money(out.reduce((a, r) => a + r[k], 0));
   const totals = { sales: sumK('sales'), purchases: sumK('purchases'), cogs: sumK('cogs'), gross_profit: sumK('gross_profit'),
-    other_income: sumK('other_income'), expenses: sumK('expenses'), net_profit: sumK('net_profit'), expense_by_group: {} };
+    other_income: sumK('other_income'), expenses: sumK('expenses'), damage: sumK('damage'), net_profit: sumK('net_profit'), expense_by_group: {} };
   for (const code of expenseGroups.keys()) totals.expense_by_group[code] = money(out.reduce((a, r) => a + (r.expense_by_group[code] || 0), 0));
   res.json({ months: out, totals, expense_groups: [...expenseGroups.entries()].sort().map(([code, name]) => ({ code, name })) });
 }));

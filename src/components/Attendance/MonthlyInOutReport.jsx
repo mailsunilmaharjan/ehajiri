@@ -15,6 +15,7 @@ import SearchableCheckSelect from '../Common/SearchableCheckSelect.jsx';
 import Avatar from '../Common/Avatar.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
+import FitScroll from '../Common/FitScroll.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 // BS day-of-month for an AD ISO date: headers must show the real BS day, not a 1..N counter (a custom range may start mid-month)
 const bsDay = (iso) => adToBS(iso)?.day ?? 0;
@@ -64,8 +65,8 @@ const AdvanceSearchModal = ({ filters, onApply, onClose, L, settings, employees,
   const depts    = [...new Set(activeEmps.map(e=>e.department).filter(Boolean))].sort().map(d=>({value:d,label:d}));
   const posts    = [...new Set(activeEmps.map(e=>e.position).filter(Boolean))].sort().map(p=>({value:p,label:p}));
 
-  const Lbl   = ({ text }) => <div style={{ fontSize:13,fontWeight:600,color:'#111827',marginBottom:6 }}>{text}</div>;
-  const Field = ({ label, children }) => <div style={{ position:'relative',overflow:'visible' }}><Lbl text={label}/>{children}</div>;
+  // Lbl moved to module level (see Field)
+  // Field moved to module level (a component defined in render remounts its children, closing open dropdowns)
 
   return (
     <div className="modal-overlay">
@@ -271,8 +272,8 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
   }
 
   let value = null;
-  if (rowKey === 'in')  value = fmtTime(day?.timeIn);
-  if (rowKey === 'out') value = fmtTime(day?.timeOut);
+  if (rowKey === 'in')  value = day?.duties ? day.duties.map(d => d.timeIn ? fmtTime(d.timeIn) : '—').join('\n') : fmtTime(day?.timeIn);
+  if (rowKey === 'out') value = day?.duties ? day.duties.map(d => d.timeOut ? fmtTime(d.timeOut) : '—').join('\n') : fmtTime(day?.timeOut);
   if (rowKey === 'wh')  value = day?.workedHrs;
   if (rowKey === 'ot')  value = day?.otHrs;
 
@@ -293,7 +294,7 @@ const DayCell = ({ rowKey, day, isWeekend, isHoliday, holidayName, isLast, langu
         ? <div style={{ display:'flex', flexDirection:'column', alignItems:'center', lineHeight:1.15 }}>
             {topSym && <span title={topSym.title} style={{ fontSize:9, fontWeight:800, color:topSym.color, marginBottom:1, cursor:'help' }}>{topSym.text}</span>}
             <span style={{
-              fontSize:13,
+              fontSize:13, whiteSpace:'pre-line',
               fontWeight: (rowKey==='in' || rowKey==='wh') ? 700 : 400,
               color: isSinglePunch ? '#d97706' : (isWH ? '#374151' : color),
             }} title={isSinglePunch ? LL('एकल पन्च मात्र','Single punch only') : ''}>
@@ -509,9 +510,9 @@ const MonthlyInOutReport = () => {
           let value = '';
           // IN row carries the same status short names as the screen
           // (leave code, PH, OV, DO/NO, W) when there's no punch.
-          if (rowDef.key === 'in')  value = inRowPrintHtml(fmtTime(day?.timeIn), day,
+          if (rowDef.key === 'in')  value = inRowPrintHtml((day?.duties ? day.duties.map(d => d.timeIn ? fmtTime(d.timeIn) : '—').join('<br>') : fmtTime(day?.timeIn)), day,
             day?.isWeekend ?? d.isWeekend, day?.isHoliday ?? d.isHoliday, L);
-          if (rowDef.key === 'out') value = fmtTime(day?.timeOut) || '';
+          if (rowDef.key === 'out') value = (day?.duties ? day.duties.map(d => d.timeOut ? fmtTime(d.timeOut) : '—').join('<br>') : fmtTime(day?.timeOut)) || '';
           if (rowDef.key === 'wh')  value = day?.workedHrs || '';
           if (rowDef.key === 'ot')  value = day?.otHrs || '';
           const bold = rowDef.key === 'wh' ? 'font-weight:700;' : '';
@@ -621,9 +622,9 @@ const MonthlyInOutReport = () => {
           rIdx === 0 ? i + 1 : '', rIdx === 0 ? staffCell : '', rowDef.label,
           ...dates.map(d => {
             const day = e.days[d.date];
-            if (rowDef.key === 'in')  return inRowExcelText(fmtTime(day?.timeIn), day,
+            if (rowDef.key === 'in')  return inRowExcelText((day?.duties ? day.duties.map(d => d.timeIn ? fmtTime(d.timeIn) : '—').join(' / ') : fmtTime(day?.timeIn)), day,
               day?.isWeekend ?? d.isWeekend, day?.isHoliday ?? d.isHoliday, L);
-            if (rowDef.key === 'out') return fmtTime(day?.timeOut) || '';
+            if (rowDef.key === 'out') return (day?.duties ? day.duties.map(d => d.timeOut ? fmtTime(d.timeOut) : '—').join(' / ') : fmtTime(day?.timeOut)) || '';
             if (rowDef.key === 'wh')  return day?.workedHrs || '';
             if (rowDef.key === 'ot')  return day?.otHrs || '';
             return '';
@@ -789,7 +790,7 @@ const MonthlyInOutReport = () => {
         // Own scroll box (both axes) + sticky <thead> so both header rows
         // freeze while scrolling down — with only overflowX set, the page
         // scrolled instead and the header scrolled away with it.
-        <div style={{ maxHeight:'calc(100vh - 150px)', overflow:'auto', borderRadius:8,
+        <FitScroll style={{ borderRadius:8,
           border:'1px solid #dedede', boxShadow:'0 1px 3px rgba(0,0,0,.07)' }}>
           <table style={{ borderCollapse:'collapse', width:'100%' }}>
             <thead style={{ position:'sticky', top:0, zIndex:5 }}>
@@ -902,7 +903,7 @@ const MonthlyInOutReport = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </FitScroll>
       )}
 
       {/* Legend */}
@@ -945,3 +946,7 @@ const MonthlyInOutReport = () => {
 };
 
 export default MonthlyInOutReport;
+
+const Field = ({ label, children }) => <div style={{ position:'relative',overflow:'visible' }}><Lbl text={label}/>{children}</div>;
+
+const Lbl = ({ text }) => <div style={{ fontSize:13,fontWeight:600,color:'#111827',marginBottom:6 }}>{text}</div>;

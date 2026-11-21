@@ -707,5 +707,14 @@ html { -webkit-text-size-adjust: 100%; }
 .m-pill.ok { background: #d1fae5; color: #065f46; }
 
 /* page-level "loading / processing" mark = the eHajiri logo, pulsing */
-.m-brandspin { height: 34px; width: auto; display: block; margin: 0 auto; animation: m-brandpulse 1.3s ease-in-out infinite; }
+.m-brandspin { height: 24px; width: auto; display: block; margin: 0 auto; animation: m-brandpulse 1.3s ease-in-out infinite; }
 @keyframes m-brandpulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(1.07); } }
+
+/* today's company summary (Admin / Branch Manager / Dept Head) — compact 3-column tiles, tap for the list */
+.m-sumgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.m-sumcard { border: 1px solid; border-radius: 10px; padding: 6px 8px; display: flex; flex-direction: column; gap: 0; position: relative; min-width: 0; text-align: left; font: inherit; color: inherit; }
+.m-sumcard:active { transform: scale(.97); }
+.m-sumcard b { font-size: 16px; line-height: 1.2; }
+.m-sum-ic { position: absolute; right: 6px; top: 5px; font-size: 13px; }
+.m-sum-l { font-size: 10.5px; font-weight: 700; color: var(--m-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-sum-mf { font-size: 9.5px; color: var(--m-sub); white-space: nowrap; }

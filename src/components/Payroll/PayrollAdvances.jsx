@@ -95,7 +95,7 @@ export default function PayrollAdvances() {
 
   if (loading) return <div style={{ padding: 48, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>;
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <PageHeader title="💳 Advances">
         {tab === 'advances' && <PrimaryBtn onClick={() => { setError(''); setForm({ userId: '', policyId: policies.find(p => p.active)?.id || '', amount: '', installments: '3', startDate: todayISO(), reason: '' }); }}>+ New advance</PrimaryBtn>}
         {tab === 'policies' && <PrimaryBtn onClick={() => { setError(''); setPol({ ...blankPolicy }); }}>+ New policy</PrimaryBtn>}

@@ -416,9 +416,12 @@ export function AttendanceNotificationProvider({ children }) {
               if (isRecipient) {
                 add(data);
                 setMsgCount(c => c + 1);
+                try { window.dispatchEvent(new Event('ehajiri:messages-changed')); } catch { /* ignore */ }
               }
             }
           } else if (data.type === 'task') {
+            // any task event: let an open Task grid reload itself
+            try { window.dispatchEvent(new CustomEvent('ehajiri:task-event', { detail: data })); } catch { /* ignore */ }
             const uid = currentUser?.id;
             const isRecipient = uid && Array.isArray(data.recipientIds) && data.recipientIds.includes(uid);
             if (isRecipient && taskNotificationsEnabledRef.current) {

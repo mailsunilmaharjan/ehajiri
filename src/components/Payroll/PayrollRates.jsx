@@ -58,7 +58,7 @@ export default function PayrollRates() {
 
   if (loading) return <div style={{ padding: 48, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>;
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <PageHeader title="⚙️ Rates & Limits" />
       <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', borderRadius: 10, padding: '10px 14px', fontSize: 12.5, marginBottom: 16, lineHeight: 1.5 }}>
         Nothing here is fixed in the program. When the government or your policy changes a rate, add a new row <b>effective from the new date</b> — payroll runs always use the row in force for their period, and older rows are kept as history.

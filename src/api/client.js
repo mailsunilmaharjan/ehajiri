@@ -5,6 +5,7 @@
 //  tenant routing — see utils/tenantPath.js.
 // ══════════════════════════════════════════════
 import { getTenantPrefix } from '../utils/tenantPath.js';
+import { showUploadWarning } from '../utils/uploadGuard.js';
 
 const BASE = `${getTenantPrefix()}/api`;
 
@@ -77,6 +78,8 @@ async function request(method, path, body) {
     try { data = await res.json(); msg = data.error || msg; } catch {}
     if (res.status === 401 && data.authError && onUnauthorized) onUnauthorized();
     const err = new Error(msg);
+    // The server's malware / hacking-tool scan refused an uploaded image or document: warn clearly.
+    if (data && data.code === 'UPLOAD_BLOCKED') showUploadWarning(Array.isArray(data.blocked) ? data.blocked : [{ name: 'File', reasons: [msg] }]);
     err.data = data;   // attach full response so callers can read licenseError etc.
     err.status = res.status;
     throw err;

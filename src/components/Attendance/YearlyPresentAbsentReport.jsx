@@ -12,6 +12,7 @@ import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, 
 import { staffRankCompare } from '../../utils/branchUtils.js';
 import ExcelJS from 'exceljs';
 import { downloadBlob } from '../../utils/printHelper.js';
+import FitScroll from '../Common/FitScroll.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
 
 const MONTHS_EN_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -912,7 +913,7 @@ ${footerHtml}
               </React.Fragment>
             ))}
           </div>
-          <div style={{ overflowX:'auto', borderRadius:8,
+          <FitScroll style={{ borderRadius:8,
             border:'1px solid #dedede', boxShadow:'0 1px 3px rgba(0,0,0,.06)' }}>
             <table style={{ borderCollapse:'collapse', width:'100%' }}>
               <thead>
@@ -936,9 +937,9 @@ ${footerHtml}
               <tbody>
                 {matrix.map((row, ri) => (
                   <tr key={ri}
-                    style={{ background: ri%2===0?'white':'#f3f4f6' }}
+                    style={{ background: ri%2===0?'white':'#f7f8fa' }}
                     onMouseEnter={e=>e.currentTarget.style.background='#eff6ff'}
-                    onMouseLeave={e=>e.currentTarget.style.background=ri%2===0?'white':'#f3f4f6'}>
+                    onMouseLeave={e=>e.currentTarget.style.background=ri%2===0?'white':'#f7f8fa'}>
                     {/* SN */}
                     <td style={{ ...TD, background:'#efefef', fontWeight:700, color:'#6b7280',
                       position:'sticky', left:0, zIndex:1, borderRight:'1px solid #dedede', width:36 }}>
@@ -972,7 +973,7 @@ ${footerHtml}
                 ))}
               </tbody>
             </table>
-          </div>
+          </FitScroll>
 
           {/* ── Leave Balance ── */}
           {leaveData && leaveData.types.length > 0 && (() => {

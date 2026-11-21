@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import api from '../api/client.js';
 import { useOnlineAttendanceApply } from '../context/OnlineAttendanceApplyContext.jsx';
 import useDateFormat from '../hooks/useDateFormat.js';
+import { useAuth } from '../context/AuthContext.jsx';
+import { useData } from '../context/DataContext.jsx';
+import useRecoApproval from '../hooks/useRecoApproval.js';
 import { Icon, Sheet, Spinner, StatusChip, useMT } from './kit.jsx';
+import { PersonPick } from './fields.jsx';
 
 /* Phone version of the Online Attendance check-in / check-out screen: shows WHERE you are (place name, address line, a small
    map) before you tap, and the place for each punch afterwards. Same server rules as the website's popup. */
@@ -50,6 +54,21 @@ export default function MobileCheckIn() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // Who the check-out goes to: only the recommender / approver chosen here are notified and may act.
+  const { currentUser } = useAuth();
+  const { employees } = useData();
+  const { getRecoIds, getApprovalIds, assignments, refresh } = useRecoApproval();
+  const [reco, setReco] = useState('');
+  const [appr, setAppr] = useState('');
+  const recoIds = getRecoIds(currentUser?.id).map(String);
+  const apprIds = getApprovalIds(currentUser?.id).map(String);
+  useEffect(() => { if (isOpen) refresh?.(); }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setReco(r => (recoIds.length === 1 ? recoIds[0] : recoIds.includes(r) ? r : ''));
+    setAppr(a => (apprIds.length === 1 ? apprIds[0] : apprIds.includes(a) ? a : ''));
+  }, [assignments]); // eslint-disable-line react-hooks/exhaustive-deps
+  const getEmp = useCallback((id) => (employees || []).find(e => String(e.id) === String(id)), [employees]);
+
   const locate = useCallback(async () => {
     setLoc({ status: 'checking' });
     try {
@@ -71,10 +90,18 @@ export default function MobileCheckIn() {
   if (!isOpen) return null;
 
   const punch = async (kind) => {
-    setBusy(true); setErr('');
+    setErr('');
+    if (kind === 'check-out') {
+      if (recoIds.length > 1 && !reco) { setErr(mt('Please choose a Recommendator')); return; }
+      if (apprIds.length > 1 && !appr) { setErr(mt('Please choose an Approval Authority')); return; }
+    }
+    setBusy(true);
     try {
       const c = await getLocation();     // fresh fix at the moment of the tap
-      const saved = await api.post(`/online-attendance/${kind}`, { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, deviceInfo: `${navigator.userAgent} | ${navigator.platform || ''}`.trim() });
+      const saved = await api.post(`/online-attendance/${kind}`, {
+        lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, deviceInfo: `${navigator.userAgent} | ${navigator.platform || ''}`.trim(),
+        ...(kind === 'check-out' ? { reco: reco || null, approval: appr || null } : {}),
+      });
       setRec(saved);
     } catch (e) { setErr(e.message || 'Failed'); } finally { setBusy(false); }
   };
@@ -107,6 +134,11 @@ export default function MobileCheckIn() {
         )}
 
         {err && <div className="m-err">{err}</div>}
+
+        {kind === 'check-out' && (recoIds.length > 0 || apprIds.length > 0) && (<>
+          {recoIds.length > 0 && <PersonPick label={mt('Recommendator')} ids={recoIds} getEmp={getEmp} value={reco} onChange={setReco} required={recoIds.length > 1} />}
+          {apprIds.length > 0 && <PersonPick label={mt('Approval Authority')} ids={apprIds} getEmp={getEmp} value={appr} onChange={setAppr} required={apprIds.length > 1} />}
+        </>)}
 
         {kind && (
           <button className={`m-punch ${kind === 'check-in' ? 'in' : 'out'}`} disabled={busy || !ready} onClick={() => punch(kind)}>

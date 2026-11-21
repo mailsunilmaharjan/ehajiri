@@ -101,11 +101,15 @@ const OnlineAttendanceApproval = () => {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const isRecommenderFor = (empId) => {
+  const isRecommenderFor = (empId, rec) => {
+    // the applicant picked one recommender: only that person (admins excepted)
+    if (rec?.recoId && String(rec.recoId) !== String(currentUser.id)) return false;
     const r = recoConfig[String(empId)]?.reco;
     return (Array.isArray(r) ? r : (r ? [r] : [])).map(String).includes(String(currentUser.id));
   };
-  const isApproverFor = (empId) => {
+  const isApproverFor = (empId, rec) => {
+    // the applicant picked one approver: only that person (admins excepted)
+    if (rec?.approvalId && String(rec.approvalId) !== String(currentUser.id)) return false;
     const a = recoConfig[String(empId)]?.approval;
     return (Array.isArray(a) ? a : (a ? [a] : [])).map(String).includes(String(currentUser.id));
   };
@@ -120,7 +124,7 @@ const OnlineAttendanceApproval = () => {
     const n = (v) => (Array.isArray(v) ? v : v ? [v] : []).length;
     return !c || (n(c.reco) === 0 && n(c.approval) === 0);
   };
-  const isMine = (r) => isAdmin || (!isSelf(r) && (isRecommenderFor(r.employeeId) || isApproverFor(r.employeeId))) || (isAdmin && hasNoApprover(r.employeeId));
+  const isMine = (r) => isAdmin || (!isSelf(r) && (isRecommenderFor(r.employeeId, r) || isApproverFor(r.employeeId, r))) || (isAdmin && hasNoApprover(r.employeeId));
   const myRecords = records.filter(isMine);
   const pendingRecords = myRecords.filter(r => r.status === 'pending');
 
@@ -194,9 +198,9 @@ const OnlineAttendanceApproval = () => {
     {
       field: 'actions', header: 'Actions', width: 180, filterable: false, sortable: false,
       render: (_, row) => {
-        const amReco = isRecommenderFor(row.employeeId);
+        const amReco = isRecommenderFor(row.employeeId, row);
         const adminOverride = isAdmin && hasNoApprover(row.employeeId);   // nobody configured: admin decides
-        const amApprover = isApproverFor(row.employeeId) || adminOverride;
+        const amApprover = isApproverFor(row.employeeId, row) || adminOverride;
         const canApprove = adminOverride || canApproveRecord(row);
         const alreadyReco = !!row.recommendedBy;
 

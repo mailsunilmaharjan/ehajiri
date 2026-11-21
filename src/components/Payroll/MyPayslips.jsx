@@ -14,7 +14,7 @@ export default function MyPayslips() {
   const open = (id) => api.get(`/payroll/my-payslips/${id}`).then(setSlip).catch(e => toast(e.message, 'error'));
 
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 820 }}>
+    <div style={{ padding: '8px 14px 12px', maxWidth: 820 }}>
       <PageHeader title="🧾 My Payslips" back="/dashboard" />
       {list === null ? <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>Loading…</div>
         : list.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>No payslips yet. They appear here once payroll for a month is finalised.</div>

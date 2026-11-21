@@ -25,7 +25,7 @@ const TABS = [
   { key: 'visit',      path: '/staff/field-visit', icon: 'pin', label: 'Field Visit' },
   { key: 'more',       path: '/m/more',       icon: 'more',  label: 'More' },
 ];
-const TITLES = { '/m/inbox': 'Notices', '/m/roster': 'Duty Roster', '/m/devices': 'Device Management', '/m/approvals': 'Approvals', '/payroll/my': 'My Payslips', '/payroll/dashboard': 'Payroll', '/profile': 'Profile', '/staff/message': 'Messages', '/leave/apply': 'Apply Leave', '/office-visit/apply': 'Office Visit', '/staff/task': 'Tasks', '/staff/field-visit': 'Field Visit' };
+const TITLES = { '/m/inbox': 'Notices', '/m/roster': 'Duty Roster', '/m/staff': 'Staff', '/m/holidays': 'Public Holidays', '/m/devices': 'Device Management', '/m/approvals': 'Approvals', '/payroll/my': 'My Payslips', '/payroll/dashboard': 'Payroll', '/profile': 'Profile', '/staff/message': 'Messages', '/leave/apply': 'Apply Leave', '/office-visit/apply': 'Office Visit', '/staff/task': 'Tasks', '/staff/field-visit': 'Field Visit' };
 
 export default function MobileFrame({ children }) {
   const { pathname } = useLocation();
@@ -109,7 +109,7 @@ export default function MobileFrame({ children }) {
       <div className="m-header">
         {tab ? (
           <>
-            <div className="m-logo" role="link" style={{ cursor: 'pointer' }} onClick={() => navigate('/m/home')}>{logo ? <img src={logo} alt="" /> : 'EH'}</div>
+            <div className="m-logo" role="link" style={{ cursor: 'pointer' }} onClick={() => navigate('/m/home')}>{logo ? <img src={logo} alt="" /> : <img src="/icons/icon-192.png" alt="eHajiri" />}</div>
             <div className="m-title" role="link" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => navigate('/m/home')} onKeyDown={(e) => { if (e.key === 'Enter') navigate('/m/home'); }}><div className="m-ell">{company}</div><div className="m-sub m-ell">{[first, currentUser?.position || currentUser?.department].filter(Boolean).join(' · ')}</div></div>
             <button className="m-icon-btn" aria-label="Inbox" onClick={() => navigate('/m/inbox')}>
               <span className={unread > 0 ? 'm-bell-on' : ''} style={{ display: 'inline-flex' }}><Icon name="bell" size={22} /></span>{unread > 0 && <span className="m-dot">{unread > 9 ? '9+' : unread}</span>}

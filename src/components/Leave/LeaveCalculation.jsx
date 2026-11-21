@@ -5,6 +5,7 @@ import { useLanguage } from '../../context/LanguageContext.jsx';
 import { useData }     from '../../context/DataContext.jsx';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import { useAuth }     from '../../context/AuthContext.jsx';
+import PrevOpeningBulkImportModal from './PrevOpeningBulkImportModal.jsx';
 import useDateFormat   from '../../hooks/useDateFormat.js';
 import DataGrid        from '../DataGrid/DataGrid.jsx';
 import StaffDropdown   from '../Common/StaffDropdown.jsx';
@@ -260,6 +261,7 @@ export const LeaveAdvancedFilter = ({
   tempF, setTF,
   branchOpts, deptOpts, postOpts, gradeOpts, modeOpts, statusOpts, staffOpts, leaveTypeOpts,
   showFY = true, showAccum = true, showLeave = true, L,
+  leaveLabel = null,         // optional [np, en] replacing the "Leave" field label (Previous Year Opening → "Accumulate Leave")
   // Opt-in extras for the read-only Reports pages (LeaveReports/OfficeVisitReports) —
   // every existing caller leaves these at their defaults and renders exactly as before.
   showWorkingStatus = false, // replaces the employeeStatuses Status field with an
@@ -412,8 +414,8 @@ export const LeaveAdvancedFilter = ({
             </div>
             {showLeave && (
               <div className="form-group" style={{ marginBottom:0 }}>
-                <label className="form-label">{L('बिदा','Leave')}</label>
-                <MultiSelectDropdown tabIndex={9} options={leaveTypeOpts} value={tempF.leaveTypes} onChange={v => setTF('leaveTypes', v)} placeholder={L('सबै बिदा','All Leaves')} maxHeight={210} />
+                <label className="form-label">{leaveLabel ? L(leaveLabel[0], leaveLabel[1]) : L('बिदा','Leave')}</label>
+                <MultiSelectDropdown tabIndex={9} options={leaveTypeOpts} value={tempF.leaveTypes} onChange={v => setTF('leaveTypes', v)} placeholder={leaveLabel ? L('सबै संचित बिदा','All Accumulate Leaves') : L('सबै बिदा','All Leaves')} maxHeight={210} />
               </div>
             )}
           </div>
@@ -722,12 +724,12 @@ const LeaveOpeningTab = ({ employees, settings, L, opening, setOpening, openingL
   return (
     <div>
       {/* Toolbar */}
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:14, flexWrap:'wrap' }}>
+      <div className="lc-toolbar" style={{ display:'flex', alignItems:'center', gap:12, marginBottom:14, flexWrap:'wrap' }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <label style={{ fontSize:13, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>
             {L('आर्थिक वर्ष','Fiscal Year')}:
           </label>
-          <select className="form-control" style={{ width:200, fontSize:13 }}
+          <select className="form-control lc-fy"
             value={fyId} onChange={e => setFyId(e.target.value)}>
             {(settings.fiscalYears||[]).map(fy => (
               <option key={fy.id} value={fy.id}>{fy.name}</option>
@@ -977,13 +979,20 @@ const DEFAULT_TRANSFER_FILTERS = {
   statuses: [], modes: [], staffIds: [], leaveTypes: [], leaveAccum: 'all',
 };
 
+/* A leave belongs to the fiscal year its From Date falls in (no FY selected = no restriction). */
+const inFiscalYear = (l, fy) => {
+  if (!fy) return true;
+  const d = String(l.fromDate || '').slice(0, 10);
+  return d >= String(fy.startDate).slice(0, 10) && d <= String(fy.endDate).slice(0, 10);
+};
+
 const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpening }) => {
-  const { canEdit } = useAuth();
+  const { canEdit, isSuperAdmin } = useAuth();
   const canEditTransfer = canEdit('leaveCalculation');
+  const [bulkOpen, setBulkOpen] = useState(false);
   const ltConfigs  = useMemo(() => settings.leaveTypeConfigs || [], [settings.leaveTypeConfigs]);
   const defaultFY  = (settings.fiscalYears||[]).find(f => f.isDefault) || (settings.fiscalYears||[])[0];
   const [fyId,        setFyId]       = useState(defaultFY?.id || '');
-  const [search,      setSearch]     = useState('');
   const [editMode,    setEditMode]   = useState(false);
   const [editVals,    setEditVals]   = useState({});
   const [focusedCol,  setFocusedCol] = useState(null); // shortName of the leave-type column currently being edited — highlights every cell in that column
@@ -992,8 +1001,6 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   const [tFilterOpen, setTFilterOpen] = useState(false);
   const [tAdvFilters, setTAdvFilters] = useState({ ...DEFAULT_TRANSFER_FILTERS });
   const [tTempF,      setTTempF]     = useState({ ...DEFAULT_TRANSFER_FILTERS });
-  const [page,        setPage]       = useState(1);
-  const [pageSize,    setPageSize]   = useState(25);
 
   const showToast = (msg, type='success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 2500); };
 
@@ -1039,7 +1046,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   const resetTFilter = useCallback(() => setTTempF({ ...DEFAULT_TRANSFER_FILTERS }), []);
   const setTTF = useCallback((key, val) => setTTempF(p => ({ ...p, [key]: val })), []);
 
-  /* compute rows — Prev Year = prevFY opening, Curr Year = currentFY opening */
+  /* compute rows — Pre.Year = carry-forward opening for this FY */
   const allRows = useMemo(() => {
     return [...(employees||[])].filter(e => e.active)
       .sort((a, b) => staffRankCompare(a, b, settings))
@@ -1061,11 +1068,10 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
       };
       ltConfigs.forEach(lt => {
         row[`${lt.shortName}_prev`] = Number(opening[prevOpeningKey]?.[emp.id]?.[lt.shortName] ?? 0);
-        row[`${lt.shortName}_curr`] = Number(opening[fyId]?.[emp.id]?.[lt.shortName]          ?? 0);
       });
       return row;
     });
-  }, [employees, ltConfigs, opening, fyId, prevOpeningKey, settings]);
+  }, [employees, ltConfigs, opening, prevOpeningKey, settings]);
 
   /* edit helpers */
   const startEdit = useCallback(() => {
@@ -1075,7 +1081,6 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
         const rawPrev = row[`${lt.shortName}_prev`];
         const maxAccum = lt.carryForward && lt.maxAccumulateDays != null ? Number(lt.maxAccumulateDays) : Infinity;
         vals[`${row.id}_${lt.shortName}_prev`] = isFinite(maxAccum) ? Math.min(rawPrev, maxAccum) : rawPrev;
-        vals[`${row.id}_${lt.shortName}_curr`] = row[`${lt.shortName}_curr`];
       });
     });
     setEditVals(vals);
@@ -1084,21 +1089,39 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
 
   const cancelEdit = useCallback(() => { setEditMode(false); setEditVals({}); setFocusedCol(null); }, []);
 
+  /* Bulk import (Super Admin only): writes ONLY the pasted staff × leave cells
+     into this FY's Prev Year slot (prevOpeningKey); saveOpening diffs against
+     the server state, so nothing else is touched. Throws if the server rejects
+     (saveOpening has already rolled the grid back by then). */
+  const handleBulkImport = async (items) => {
+    const next = JSON.parse(JSON.stringify(opening));
+    if (!next[prevOpeningKey]) next[prevOpeningKey] = {};
+    const hasCurr = items.some(it => it.curr != null);
+    if (hasCurr && !next[fyId]) next[fyId] = {};
+    items.forEach(it => {
+      if (it.days != null) {
+        if (!next[prevOpeningKey][it.empId]) next[prevOpeningKey][it.empId] = {};
+        next[prevOpeningKey][it.empId][it.short] = it.days;
+      }
+      // Current Year column → this FY's Current Year Leave Opening slot
+      if (it.curr != null) {
+        if (!next[fyId][it.empId]) next[fyId][it.empId] = {};
+        next[fyId][it.empId][it.short] = it.curr;
+      }
+    });
+    await setOpening(next, hasCurr ? [prevOpeningKey, fyId] : [prevOpeningKey]);
+    return { added: items.length, skipped: 0 };
+  };
+
   const saveEdit = useCallback(() => {
     /* Prev Year = accumulate carry-forward; validate only carryForward leave types against maxAccumulateDays.
-       Curr Year = annual allocation; validate against daysPerYear. */
+       (Current Year allocation is edited on the Current Year Leave Opening tab, not here.) */
     for (const lt of ltConfigs) {
-      const maxCurr  = Number(lt.daysPerYear);
       const maxAccum = lt.carryForward && lt.maxAccumulateDays != null ? Number(lt.maxAccumulateDays) : Infinity;
       for (const row of allRows) {
         const pKey = `${row.id}_${lt.shortName}_prev`;
-        const cKey = `${row.id}_${lt.shortName}_curr`;
         if (lt.carryForward && pKey in editVals && isFinite(maxAccum) && Number(editVals[pKey]) > maxAccum) {
           setPrevAlert({ ltName: lt.name, maxDays: maxAccum, kind: 'accumulate' });
-          return;
-        }
-        if (cKey in editVals && maxCurr > 0 && Number(editVals[cKey]) > maxCurr) {
-          setPrevAlert({ ltName: lt.name, maxDays: maxCurr, kind: 'perYear' });
           return;
         }
       }
@@ -1114,21 +1137,12 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
         if (k in editVals) next[prevOpeningKey][row.id][lt.shortName] = Number(editVals[k]) || 0;
       });
     });
-    // save curr year values → currentFY opening (syncs to Current Year Leave Opening tab)
-    if (!next[fyId]) next[fyId] = {};
-    allRows.forEach(row => {
-      if (!next[fyId][row.id]) next[fyId][row.id] = {};
-      ltConfigs.forEach(lt => {
-        const k = `${row.id}_${lt.shortName}_curr`;
-        if (k in editVals) next[fyId][row.id][lt.shortName] = Number(editVals[k]) || 0;
-      });
-    });
-    setOpening(next, [prevOpeningKey, fyId]);
+    setOpening(next, [prevOpeningKey]);
     setEditMode(false);
     setEditVals({});
     setFocusedCol(null);
     showToast(L('बिदा सुरक्षित भयो', 'Saved successfully'));
-  }, [opening, allRows, ltConfigs, editVals, fyId, prevOpeningKey]);
+  }, [opening, allRows, ltConfigs, editVals, prevOpeningKey]);
 
   /* company header for print/export */
   const companyHtml = `
@@ -1143,16 +1157,16 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     // Built from filteredRows directly (not the on-screen DOM) so Print
     // always covers every filtered row, not just whatever page is visible.
     const ltHeaderRow = visibleLtConfigs.map(lt =>
-      `<th colspan="2">${lt.name} <span style="font-weight:400">(${lt.shortName})</span></th>`).join('');
+      `<th>${lt.name} <span style="font-weight:400">(${lt.shortName})</span></th>`).join('');
     const ltSubRow = visibleLtConfigs.map(() =>
-      `<th>${L('अघिल्लो वर्ष','Prev Year')}</th><th>${L('चालु वर्ष','Curr Year')}</th>`).join('');
+      `<th style="font-size:9px">${L('अघि.वर्ष','Pre.Year')}</th>`).join('');
     const bodyRows = filteredRows.map((r, i) => `<tr>
       <td>${i + 1}</td>
       <td class="left">${r.fullName}</td>
       <td>${r.postShort}</td>
       <td>${r.deptShort}</td>
       <td>${r.branchShort}</td>
-      ${visibleLtConfigs.map(lt => `<td>${r[`${lt.shortName}_prev`] ?? 0}</td><td>${r[`${lt.shortName}_curr`] ?? 0}</td>`).join('')}
+      ${visibleLtConfigs.map(lt => `<td>${r[`${lt.shortName}_prev`] ?? 0}</td>`).join('')}
     </tr>`).join('');
     const content = `<table>
       <thead>
@@ -1170,13 +1184,12 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   };
 
   const handleExport = () => {
-    const currentFYName = currentFY?.name || '';
     const prevFYName    = prevFY?.name    || 'Prev';
     const hdr = ['SN','Staff','Post','Dept','Branch',
-      ...ltConfigs.flatMap(lt => [`${lt.name} (${prevFYName})`, `${lt.name} (${currentFYName})`])];
+      ...visibleLtConfigs.map(lt => `${lt.name} (${prevFYName})`)];
     const csvRows = filteredRows.map((r, i) => [
       i+1, r.fullName, r.postShort, r.deptShort, r.branchShort,
-      ...ltConfigs.flatMap(lt => [r[`${lt.shortName}_prev`], r[`${lt.shortName}_curr`]]),
+      ...visibleLtConfigs.map(lt => r[`${lt.shortName}_prev`]),
     ]);
     const csv = [hdr,...csvRows].map(row => row.map(v=>`"${v}"`).join(',')).join('\n');
     downloadBlob(new Blob([csv],{type:'text/csv'}), `leave_transfer_${fyId}_${getNepalTodayISO()}.csv`);
@@ -1185,15 +1198,6 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
   /* apply search + advanced filters */
   const filteredRows = useMemo(() => {
     let r = allRows;
-    if (search) {
-      const s = search.toLowerCase();
-      r = r.filter(row =>
-        row.fullName.toLowerCase().includes(s)   ||
-        row.postShort.toLowerCase().includes(s)  ||
-        row.deptShort.toLowerCase().includes(s)  ||
-        row.branchShort.toLowerCase().includes(s)
-      );
-    }
     const f = tAdvFilters;
     if (f.branches.length)    r = r.filter(row => f.branches.includes(row.branch));
     if (f.departments.length) r = r.filter(row => f.departments.includes(row.department));
@@ -1204,12 +1208,8 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     if (f.staffIds.length)    r = r.filter(row => f.staffIds.includes(String(row.id)));
     if (f.leaveTypes.length)  r = r; // leaveTypes filters columns, not rows — handled in display
     return r;
-  }, [allRows, search, tAdvFilters]);
+  }, [allRows, tAdvFilters]);
 
-  useEffect(() => { setPage(1); }, [search, tAdvFilters, fyId]);
-  const pagedRows = useMemo(() =>
-    filteredRows.slice((page - 1) * pageSize, page * pageSize),
-  [filteredRows, page, pageSize]);
 
   /* which leave type columns to show — Previous Year Opening is carry-forward
      by definition, so only Accumulate (carryForward) leave types appear here;
@@ -1236,14 +1236,58 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
     }
   }, []);
 
+
+  /* The same shared DataGrid Staff Detail uses (sticky #efefef header, SN column,
+     sortable headers, built-in search, auto-fit to screen, paging bar). Pre.Year
+     cells turn into number inputs in edit mode. */
+  const gridColumns = [
+    { field:'employeeId', header:L('स्टाफ आईडी','Staff ID'), width:90,
+      render: v => <span style={{ fontFamily:'monospace', background:'#f3f4f6', padding:'2px 6px', borderRadius:4 }}>{v || '—'}</span> },
+    { field:'fullName', header:L('कर्मचारी','Staff'), width:200,
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937', fontWeight:600 }}>
+          <Avatar photo={row.profilePhoto} name={v} size={22} />{v}
+        </span>) },
+    { field:'postShort',   header:L('पद','Post'),     width:90,  align:'center' },
+    { field:'deptShort',   header:L('विभाग','Dept'),   width:100, align:'center' },
+    { field:'branchShort', header:L('शाखा','Branch'),  width:90,  align:'center' },
+    ...visibleLtConfigs.map(lt => ({
+      field: `${lt.shortName}_prev`,
+      header: <span>{lt.name} <span style={{ fontSize:11, color:'#6b7280', fontWeight:400 }}>({lt.shortName})</span></span>,
+      width: 150, align:'center',
+      render: (v, row) => {
+        const prevKey = `${row.id}_${lt.shortName}_prev`;
+        if (!editMode) return <span style={{ color:'#92400e', fontWeight:600 }}>{v ?? 0}</span>;
+        return (
+          <input type="text" inputMode="numeric" pattern="[0-9.]*" value={editVals[prevKey] ?? 0}
+            data-transfer-input
+            onKeyDown={handleEnterTab}
+            onFocus={e => { e.target.select(); setFocusedCol(lt.shortName); }}
+            onBlur={() => setFocusedCol(null)}
+            onChange={e => {
+              const val = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+              const maxAccum = lt.maxAccumulateDays != null ? Number(lt.maxAccumulateDays) : null;
+              if (val !== '' && maxAccum != null && Number(val) > maxAccum) {
+                setPrevAlert({ ltName: lt.name, maxDays: maxAccum, kind: 'accumulate' });
+                return;
+              }
+              setEditVals(p => ({ ...p, [prevKey]: val }));
+            }}
+            style={{ ...numCellStyle, background:'#fffbeb', color:'#92400e', border:'1px solid #f59e0b' }}
+          />
+        );
+      },
+    })),
+  ];
+
   return (
     <div>
       {/* ── Top toolbar ── */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, flexWrap:'wrap' }}>
+      <div className="lc-toolbar" style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, flexWrap:'wrap' }}>
         {/* FY */}
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <label style={{ fontSize:13, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>{L('आर्थिक वर्ष','Fiscal Year')}:</label>
-          <select className="form-control" style={{ width:190, fontSize:13 }} value={fyId} onChange={e => { setFyId(e.target.value); setEditMode(false); setEditVals({}); }}>
+          <select className="form-control lc-fy" value={fyId} onChange={e => { setFyId(e.target.value); setEditMode(false); setEditVals({}); }}>
             {(settings.fiscalYears||[]).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
           </select>
         </div>
@@ -1271,6 +1315,12 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
             </>
         }
 
+        {isSuperAdmin && !editMode && fyId && (
+          <button className="btn btn-outline" onClick={() => setBulkOpen(true)}>
+            📋 {L('बल्क आयात','Bulk Import')}
+          </button>
+        )}
+
         {/* print + export */}
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button className="btn btn-outline" onClick={handlePrint} style={{ display:'flex', alignItems:'center', gap:6 }}>
@@ -1284,139 +1334,37 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
         </div>
       </div>
 
-      {/* ── DataGrid container ── */}
-      <div className="dg-container">
-        {/* search toolbar */}
-        <div className="dg-toolbar">
-          <div className="dg-searchbox" style={{ minWidth:220 }}>
-            <svg className="dg-search-icon" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/></svg>
-            <input className="dg-search-input" placeholder={L('नाम / विभाग खोज्नुस...','Search...')} value={search} onChange={e => setSearch(e.target.value)} />
-            {search && <button className="dg-search-clear" onClick={() => setSearch('')}>✕</button>}
-          </div>
-          <span style={{ fontSize:12, color:'#6b7280', marginLeft:'auto' }}>
-            {filteredRows.length} / {allRows.length} {L('कर्मचारी','staff')}
+      {/* ── Same DataGrid as Staff Detail ── */}
+      <DataGrid
+        columns={gridColumns}
+        data={filteredRows}
+        rowKey="id"
+        defaultPageSize={25}
+        showSearch={true}
+        showFilterButton={false}
+        showCheckbox={false}
+        compact={true}
+        searchPlaceholder={L('नाम / विभाग खोज्नुस...','Search...')}
+        toolbarLeft={
+          <span style={{ display:'inline-flex', alignItems:'center', gap:6, background:'#fffbeb', border:'1px solid #fde68a', color:'#92400e', borderRadius:6, padding:'3px 10px', fontSize:12, fontWeight:600, whiteSpace:'nowrap' }}>
+            {L('अघि.वर्ष','Pre.Year')}: {prevFY ? prevFY.name : ''}{currentFY ? ` → ${currentFY.name}` : ''}
           </span>
-        </div>
+        }
+      />
 
-        {/* scrollable table */}
-        <div className="dg-scroll-wrapper">
-          <div>
-            <table className="dg-table compact">
-              <thead>
-                {/* Label row — plain #efefef/#374151 dg-th styling, matching the
-                    Staff Detail grid exactly instead of the ad-hoc blue tint this
-                    used to carry (see the CLAUDE.md DataGrid standard: never a
-                    colored header). Tints itself only when the column is being
-                    actively edited (focusedCol), same as the Leave Opening tab. */}
-                <tr className="dg-header-row">
-                  <th className="dg-th dg-sn-col" style={{ width:40 }}>SN</th>
-                  <th className="dg-th" style={{ width:80 }}>{L('स्टाफ आईडी','Staff ID')}</th>
-                  <th className="dg-th" style={{ minWidth:160, textAlign:'left' }}>{L('कर्मचारी','Staff')}</th>
-                  <th className="dg-th" style={{ width:80 }}>{L('पद','Post')}</th>
-                  <th className="dg-th" style={{ width:80 }}>{L('विभाग','Dept')}</th>
-                  <th className="dg-th" style={{ width:80 }}>{L('शाखा','Branch')}</th>
-                  {visibleLtConfigs.map(lt => {
-                    const active = focusedCol === lt.shortName;
-                    return (
-                      <th key={lt.shortName} colSpan={2} className="dg-th" style={{
-                        textAlign:'center',
-                        background: active ? '#e0e7f0' : undefined,
-                        color:      active ? '#1a56db' : undefined,
-                      }}>
-                        {lt.name} <span style={{ fontSize:11, color: active ? '#1a56db' : '#6b7280', fontWeight:400 }}>({lt.shortName})</span>
-                      </th>
-                    );
-                  })}
-                </tr>
-                {/* Sub-header row — same dg-filter-row/dg-filter-cell classes the
-                    Leave Opening tab and DataGrid's own column filters use. */}
-                <tr className="dg-filter-row">
-                  <th className="dg-filter-cell" colSpan={6} style={{ textAlign:'left', paddingLeft:12, fontWeight:600, color:'#374151' }}>
-                    {prevFY ? prevFY.name : ''} {currentFY ? `→ ${currentFY.name}` : ''}
-                  </th>
-                  {visibleLtConfigs.map(lt => {
-                    const active = focusedCol === lt.shortName;
-                    return (
-                      <React.Fragment key={lt.shortName}>
-                        <th className="dg-filter-cell" style={{ width:82, fontWeight:600, color:'#374151', background: active ? '#e0e7f0' : undefined }}>{L('अघिल्लो वर्ष','Prev Year')}</th>
-                        <th className="dg-filter-cell" style={{ width:82, fontWeight:600, color:'#374151', background: active ? '#e0e7f0' : undefined }}>{L('चालु वर्ष','Curr Year')}</th>
-                      </React.Fragment>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {pagedRows.map((row, ri) => (
-                  <tr key={row.id} className="dg-row">
-                    <td className="dg-sn-col">{(page - 1) * pageSize + ri + 1}</td>
-                    <td className="dg-td" style={{ padding:'3px 8px' }}>
-                      <span style={{ color:'#1f2937' }}>{row.employeeId || '—'}</span>
-                    </td>
-                    <td className="dg-td dg-first-col" style={{ fontWeight:600 }}>
-                      <span style={{ display:'flex', alignItems:'center', gap:6 }}>
-                        <Avatar photo={row.profilePhoto} name={row.fullName} size={22} />
-                        {row.fullName}
-                      </span>
-                    </td>
-                    <td className="dg-td" style={{ textAlign:'center' }}>
-                      <span style={{ color:'#1f2937' }}>{row.postShort}</span>
-                    </td>
-                    <td className="dg-td" style={{ textAlign:'center' }}>
-                      <span style={{ color:'#1f2937' }}>{row.deptShort}</span>
-                    </td>
-                    <td className="dg-td" style={{ textAlign:'center' }}>
-                      <span style={{ color:'#1f2937' }}>{row.branchShort}</span>
-                    </td>
-                    {visibleLtConfigs.map(lt => {
-                      const prevKey = `${row.id}_${lt.shortName}_prev`;
-                      const currKey = `${row.id}_${lt.shortName}_curr`;
-                      const prevVal = editMode ? (editVals[prevKey] ?? 0) : (row[`${lt.shortName}_prev`] ?? 0);
-                      const currVal = editMode ? (editVals[currKey] ?? 0) : (row[`${lt.shortName}_curr`] ?? 0);
-                      const active  = focusedCol === lt.shortName;
-                      return (
-                        <React.Fragment key={lt.shortName}>
-                          <td className="dg-td" style={{ background: active ? '#e0e7f0' : '#fffbeb', textAlign:'center', padding:'4px 6px' }}>
-                            {editMode
-                              ? <input type="text" inputMode="numeric" pattern="[0-9.]*" value={prevVal}
-                                  data-transfer-input
-                                  onKeyDown={handleEnterTab}
-                                  onFocus={e => { e.target.select(); setFocusedCol(lt.shortName); }}
-                                  onBlur={() => setFocusedCol(null)}
-                                  onChange={e => {
-                                    const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
-                                    const maxAccum = lt.maxAccumulateDays != null ? Number(lt.maxAccumulateDays) : null;
-                                    if (v !== '' && maxAccum != null && Number(v) > maxAccum) {
-                                      setPrevAlert({ ltName: lt.name, maxDays: maxAccum, kind: 'accumulate' });
-                                      return;
-                                    }
-                                    setEditVals(p => ({ ...p, [prevKey]: v }));
-                                  }}
-                                  style={{ ...numCellStyle, background:'#fffbeb', color:'#92400e', border:'1px solid #f59e0b' }}
-                                />
-                              : <span style={{ color:'#92400e', fontWeight:600 }}>{prevVal}</span>}
-                          </td>
-                          <td className="dg-td" style={{ background: active ? '#e0e7f0' : '#f3f4f6', textAlign:'center', padding:'4px 6px' }}>
-                            <span style={{ color:'#6b7280', fontWeight:600 }}>{currVal}</span>
-                          </td>
-                        </React.Fragment>
-                      );
-                    })}
-                  </tr>
-                ))}
-                {filteredRows.length === 0 && (
-                  <tr><td colSpan={5 + visibleLtConfigs.length * 2} className="dg-empty">
-                    <div className="dg-empty-content"><div className="dg-empty-icon">📭</div>
-                    <div className="dg-empty-text">{L('कुनै कर्मचारी फेला परेन','No staff found')}</div></div>
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <GridPager page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
-          total={filteredRows.length} L={L} itemLabel={L('कर्मचारी','staff')} />
-      </div>
+      {isSuperAdmin && (
+        <PrevOpeningBulkImportModal
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          employees={employees}
+          leaveTypes={ltConfigs}
+          posts={settings.posts}
+          current={opening[prevOpeningKey]}
+          currentOpening={opening[fyId]}
+          fyName={currentFY?.name}
+          onImport={handleBulkImport}
+        />
+      )}
 
       {/* validation alert popup */}
       {prevAlert && (
@@ -1472,6 +1420,7 @@ const LeaveTransferTab = ({ employees, settings, leaves, L, fd, opening, setOpen
         gradeOpts={tGradeOpts}   modeOpts={tModeOpts}  statusOpts={tStatusOpts}
         staffOpts={tStaffOpts}   leaveTypeOpts={tLeaveTypeOpts}
         showFY={true} showAccum={false} L={L}
+        leaveLabel={['संचित बिदा','Accumulate Leave']}
       />
     </div>
   );
@@ -1613,7 +1562,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         const prevYear = Number(opening[prevOpeningKey]?.[emp.id]?.[lt.shortName] ?? 0);
         const currYear = Number(opening[fyId]?.[emp.id]?.[lt.shortName] ?? 0);
         const used     = (leaves||[])
-          .filter(l => String(l.employeeId) === String(emp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved')
+          .filter(l => String(l.employeeId) === String(emp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved' && inFiscalYear(l, currentFY))
           .reduce((s, l) => s + Number(l.days), 0);
         const balance  = prevYear + currYear + getCredited(emp.id, lt.shortName) - used;
         /* cap at maxAccumulateDays; if not set, transfer the full balance */
@@ -1626,7 +1575,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
     setOpening(next, [nextPrevKey]);
     setTransferDone(true);
     setTimeout(() => setTransferDone(false), 3000);
-  }, [opening, allEmpRows, ltConfigs, prevOpeningKey, fyId, nextFY, leaves]);
+  }, [opening, allEmpRows, ltConfigs, prevOpeningKey, fyId, nextFY, leaves, currentFY]);
 
   const flatRows = useMemo(() => {
     const rows = [];
@@ -1636,7 +1585,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         const prevYear = Number(opening[prevOpeningKey]?.[emp.id]?.[lt.shortName] ?? 0);
         const currYear = Number(opening[fyId]?.[emp.id]?.[lt.shortName]        ?? 0);
         const used     = (leaves||[])
-          .filter(l => String(l.employeeId) === String(emp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved')
+          .filter(l => String(l.employeeId) === String(emp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved' && inFiscalYear(l, currentFY))
           .reduce((s, l) => s + Number(l.days), 0);
         const credited = getCredited(emp.id, lt.shortName);
         const total   = prevYear + currYear + credited;
@@ -1644,6 +1593,7 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         if (prevYear === 0 && currYear === 0 && credited === 0 && used === 0 && balance === 0) return;
         sn++;
         rows.push({
+          rid:         `${emp.id}_${lt.shortName}`,
           sn,
           empId:       emp.id,
           employeeId:  emp.employeeId,
@@ -1661,12 +1611,13 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
           ltName:      lt.name,
           ltShortName: lt.shortName,
           ltType:      lt.carryForward ? L('संचित','Accumulated') : L('गैर-संचित','Non Accumulated'),
+          isAcc: !!lt.carryForward,
           prevYear, currYear, total, used, balance,
         });
       });
     });
     return rows;
-  }, [allEmpRows, visibleLTConfigs, opening, fyId, prevOpeningKey, leaves]);
+  }, [allEmpRows, visibleLTConfigs, opening, fyId, prevOpeningKey, leaves, currentFY]);
 
   /* apply search + row filters */
   const balanceRows = useMemo(() => {
@@ -1692,36 +1643,38 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
     return r;
   }, [flatRows, search, bAdvFilters]);
 
-  useEffect(() => { setPage(1); }, [search, bAdvFilters, fyId]);
-  const pagedRows = useMemo(() =>
-    balanceRows.slice((page - 1) * pageSize, page * pageSize),
-  [balanceRows, page, pageSize]);
-
-  /* mark rowSpan for the Leave Type cell — merges consecutive rows of the
-     same employee + same type (Accumulated/Non Accumulated) into one cell —
-     and for the Staff ID/Name cell, which merges across ALL of that
-     employee's rows regardless of leave type. Computed from pagedRows (not
-     the full balanceRows) so a merge never visually spans across a page
-     boundary. */
-  const balanceRowsSpanned = useMemo(() => pagedRows.map((r, i) => {
-    const prevEmp = pagedRows[i - 1];
-    let empSpan = 0;
-    if (!prevEmp || prevEmp.empId !== r.empId) {
-      empSpan = 1;
-      for (let j = i + 1; j < pagedRows.length; j++) {
-        if (pagedRows[j].empId === r.empId) empSpan++;
-        else break;
-      }
-    }
-    const prev = pagedRows[i - 1];
-    if (prev && prev.empId === r.empId && prev.ltType === r.ltType) return { ...r, _ltTypeSpan: 0, _empSpan: empSpan };
-    let span = 1;
-    for (let j = i + 1; j < pagedRows.length; j++) {
-      if (pagedRows[j].empId === r.empId && pagedRows[j].ltType === r.ltType) span++;
-      else break;
-    }
-    return { ...r, _ltTypeSpan: span, _empSpan: empSpan };
-  }), [pagedRows]);
+  /* DataGrid columns — flat rows (staff repeated per leave) so there are no merged
+     blank cells; Leave Type is plain coloured text, not a pill. */
+  const balanceColumns = [
+    { field:'employeeId', header:L('स्टाफ आईडी','Staff ID'), width:90,
+      render: v => <span style={{ fontFamily:'monospace', background:'#f3f4f6', padding:'2px 6px', borderRadius:4 }}>{v || '—'}</span> },
+    { field:'fullName', header:L('कर्मचारी','Staff'), width:220,
+      render: (v, row) => (
+        <span style={{ display:'flex', alignItems:'center', gap:6, color:'#1f2937', fontWeight:600 }}>
+          <Avatar photo={row.profilePhoto} name={v} size={22} />{v}
+        </span>) },
+    { field:'postShort',   header:L('पद','Post'),    width:90,  align:'center' },
+    { field:'deptShort',   header:L('विभाग','Dept'),  width:100, align:'center' },
+    { field:'branchShort', header:L('शाखा','Branch'), width:90,  align:'center' },
+    { field:'ltType', header:L('बिदा प्रकार','Leave Type'), width:130, align:'center',
+      render: (v, row) => <span style={{ fontWeight:700, color: row.isAcc ? '#047857' : '#c2410c' }}>{v}</span> },
+    { field:'ltName', header:L('बिदा','Leave'), width:150,
+      render: v => <span style={{ fontWeight:600, color:'#1f2937' }}>{v}</span> },
+    { field:'prevYear', header:L('अघिल्लो वर्ष','Prev. Year'), width:95, align:'center',
+      render: v => <span style={{ color:'#92400e', fontWeight:600 }}>{v}</span> },
+    { field:'currYear', header:L('चालु वर्ष','Curr. Year'), width:95, align:'center',
+      render: v => <span style={{ color:'#065f46', fontWeight:600 }}>{v}</span> },
+    { field:'total', header:L('जम्मा','Total'), width:80, align:'center',
+      render: v => <span style={{ fontWeight:700 }}>{v}</span> },
+    { field:'used', header:L('लिएको','Used'), width:80, align:'center',
+      render: (v, row) => v > 0
+        ? <button onClick={() => setUsedPopup({ empId:row.empId, ltShortName:row.ltShortName, ltName:row.ltName, empName:row.fullName })}
+            style={{ background:'none', border:'none', cursor:'pointer', color:'#be123c', fontWeight:700, fontSize:12.5, textDecoration:'underline', padding:0 }}
+            title="Click to view used leave details">{v}</button>
+        : <span style={{ color:'#9ca3af' }}>—</span> },
+    { field:'balance', header:L('बाँकी','Balance'), width:80, align:'center',
+      render: v => <span style={{ fontWeight:700, color: v > 0 ? '#065f46' : v < 0 ? '#be123c' : '#9ca3af' }}>{v}</span> },
+  ];
 
   /* unique employee count */
   const uniqueEmpCount = useMemo(() => new Set(balanceRows.map(r => r.empId)).size, [balanceRows]);
@@ -1819,11 +1772,11 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
   return (
     <div>
       {/* Toolbar */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+      <div className="lc-toolbar" style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
         {/* FY */}
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <label style={{ fontSize:13, fontWeight:600, color:'#374151', whiteSpace:'nowrap' }}>{L('आर्थिक वर्ष','Fiscal Year')}:</label>
-          <select className="form-control" style={{ width:190, fontSize:13 }} value={fyId} onChange={e => setFyId(e.target.value)}>
+          <select className="form-control lc-fy" value={fyId} onChange={e => setFyId(e.target.value)}>
             {(settings.fiscalYears||[]).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
           </select>
         </div>
@@ -1835,19 +1788,12 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
           {bActiveCount > 0 && <span style={{ position:'absolute', top:-7, right:-7, background:'#1a56db', color:'white', fontSize:10, fontWeight:800, width:17, height:17, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 1px 3px rgba(0,0,0,.25)' }}>{bActiveCount}</span>}
         </button>
 
-        {/* search */}
-        <div className="dg-searchbox" style={{ minWidth:240 }}>
-          <svg className="dg-search-icon" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/></svg>
-          <input className="dg-search-input" placeholder={L('नाम / बिदा / विभाग...','Search...')} value={search} onChange={e => setSearch(e.target.value)} />
-          {search && <button className="dg-search-clear" onClick={() => setSearch('')}>✕</button>}
-        </div>
-
         <span style={{ fontSize:12, color:'#6b7280' }}>{uniqueEmpCount} {L('कर्मचारी','staff')} · {balanceRows.length} {L('पङ्क्ति','rows')}</span>
 
         <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
           {/* Transfer Accumulated Leave button */}
           {nextFY && canEditBalance && (
-            <button onClick={handleTransferAccLeave}
+            <button onClick={handleTransferAccLeave} className="lc-tb-btn"
               style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px',
                 background: transferDone ? '#059669' : 'linear-gradient(135deg,#7e3af2,#6d28d9)',
                 color:'#fff', border:'none', borderRadius:6, fontSize:13, fontWeight:700,
@@ -1866,102 +1812,26 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
         </div>
       </div>
 
-      {/* Table */}
-      <div style={{ overflowX:'auto', border:'1px solid #d1d5db', borderRadius:'8px 8px 0 0', borderBottom:'none' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5 }}>
-          <thead>
-            <tr>
-              <th style={{ ...thS, width:40 }}>SN</th>
-              <th style={{ ...thS, width:85 }}>{L('स्टाफ आईडी','Staff ID')}</th>
-              <th style={{ ...thS, textAlign:'left', minWidth:200, paddingLeft:12 }}>{L('कर्मचारी','Staff')}</th>
-              <th style={{ ...thS, width:110, background:'#f5f3ff', color:'#6d28d9' }}>{L('बिदा प्रकार','Leave Type')}</th>
-              <th style={{ ...thS, minWidth:130, background:'#eff6ff', color:'#1a56db' }}>{L('बिदा','Leave')}</th>
-              <th style={{ ...thS, width:90, background:'#fef3c7', color:'#92400e' }}>{L('अघिल्लो वर्ष','Prev. Year')}</th>
-              <th style={{ ...thS, width:90, background:'#d1fae5', color:'#065f46' }}>{L('चालु वर्ष','Curr. Year')}</th>
-              <th style={{ ...thS, width:70, background:'#f1f5f9' }}>{L('जम्मा','Total')}</th>
-              <th style={{ ...thS, width:70, background:'#fff1f2', color:'#be123c' }}>{L('लिएको','Used')}</th>
-              <th style={{ ...thS, width:70, background:'#f0fdf4', color:'#065f46', borderRight:'none' }}>{L('बाँकी','Balance')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {balanceRowsSpanned.map((r, ri) => (
-              <tr key={`${r.empId}-${r.ltName}-${ri}`} style={{ background: ri % 2 === 0 ? 'white' : '#f3f4f6' }}>
-                <td style={{ ...tdS, color:'#9ca3af' }}>{(page - 1) * pageSize + ri + 1}</td>
-                {r._empSpan > 0 && (
-                  <td rowSpan={r._empSpan} style={{ ...tdS, verticalAlign:'top' }}>
-                    <span style={{ color:'#1f2937' }}>{r.employeeId || '—'}</span>
-                  </td>
-                )}
-                {r._empSpan > 0 && (
-                  <td rowSpan={r._empSpan} className="left" style={{ ...tdS, textAlign:'left', paddingLeft:12, verticalAlign:'top' }}>
-                    <div style={{ display:'flex', alignItems:'flex-start', gap:6 }}>
-                      <Avatar photo={r.profilePhoto} name={r.fullName} size={26} />
-                      <div>
-                        <div style={{ fontWeight:700, color:'#1f2937' }}>{r.fullName}</div>
-                        <div style={{ fontSize:11, color:'#6b7280', marginTop:2 }}>
-                          {[r.postShort, r.deptShort ? `Dept: ${r.deptShort}` : ''].filter(Boolean).join('  |  ')}
-                        </div>
-                        {r.branchShort && (
-                          <div style={{ fontSize:11, color:'#6b7280' }}>Branch: {r.branchShort}</div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                )}
-                {r._ltTypeSpan > 0 && (
-                  <td rowSpan={r._ltTypeSpan} style={{ ...tdS, textAlign:'center' }}>
-                    <span style={{
-                      fontSize:12.5, fontWeight:600, padding:'2px 8px', borderRadius:10,
-                      background: r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#f3f4f6' : '#f0fdf4',
-                      color:      r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#6b7280'  : '#065f46',
-                      border: `1px solid ${r.ltType.includes('Non') || r.ltType.includes('गैर') ? '#e5e7eb' : '#86efac'}`,
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {r.ltType}
-                    </span>
-                  </td>
-                )}
-                <td className="left" style={{ ...tdS, textAlign:'left', paddingLeft:10, fontWeight:600, color:'#1f2937' }}>
-                  {r.ltName}
-                </td>
-                <td style={{ ...tdS, background:'#fffbeb', color:'#92400e', fontWeight:600 }}>{r.prevYear}</td>
-                <td style={{ ...tdS, background:'#f0fdf4', color:'#065f46', fontWeight:600 }}>{r.currYear}</td>
-                <td style={{ ...tdS, fontWeight:700 }}>{r.total}</td>
-                <td style={{ ...tdS, color: r.used > 0 ? '#be123c' : '#9ca3af', fontWeight: r.used > 0 ? 700 : 400 }}>
-                  {r.used > 0
-                    ? <button onClick={() => setUsedPopup({ empId:r.empId, ltShortName:r.ltShortName, ltName:r.ltName, empName:r.fullName })}
-                        style={{ background:'none', border:'none', cursor:'pointer', color:'#be123c', fontWeight:700,
-                          fontSize:12.5, textDecoration:'underline', padding:0 }}
-                        title="Click to view used leave details">
-                        {r.used}
-                      </button>
-                    : '—'
-                  }
-                </td>
-                <td style={{ ...tdS, borderRight:'none' }}>
-                  <span style={{ fontWeight:700, color: r.balance > 0 ? '#065f46' : r.balance < 0 ? '#be123c' : '#9ca3af' }}>{r.balance}</span>
-                </td>
-              </tr>
-            ))}
-            {balanceRows.length === 0 && (
-              <tr><td colSpan={10} style={{ padding:32, textAlign:'center', color:'#9ca3af' }}>
-                {L('कुनै रेकर्ड फेला परेन','No records found')}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ border:'1px solid #d1d5db', borderTop:'none', borderRadius:'0 0 8px 8px' }}>
-        <GridPager page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
-          total={balanceRows.length} L={L} itemLabel={L('पङ्क्ति','rows')} />
-      </div>
+      {/* Same DataGrid as Staff Detail (sticky #efefef header, SN column, sortable, search, paging) */}
+      <DataGrid
+        columns={balanceColumns}
+        data={balanceRows}
+        rowKey="rid"
+        defaultPageSize={25}
+        showSearch={true}
+        showFilterButton={false}
+        showCheckbox={false}
+        compact={true}
+        searchPlaceholder={L('नाम / बिदा / विभाग...','Search...')}
+      />
 
       {/* ── Used Leave Details Popup ── */}
       {usedPopup && (() => {
         const usedLeaves = (leaves||[]).filter(l =>
           String(l.employeeId) === String(usedPopup.empId) &&
           l.leaveTypeCode === usedPopup.ltShortName &&
-          l.status === 'approved'
+          l.status === 'approved' &&
+          inFiscalYear(l, currentFY)
         );
         const totalDays = usedLeaves.reduce((s,l) => s + Number(l.days||0), 0);
         const empName = (id) =>
@@ -2015,95 +1885,44 @@ const LeaveBalanceTab = ({ employees, leaveTypes, leaveBalances, leaves, setting
                 </button>
               </div>
 
-              {/* ── Table — Staff Detail style ── */}
-              <div style={{ overflowX:'auto', overflowY:'auto', flex:1 }}>
+              {/* ── Same DataGrid as Staff Detail — columns auto-fit to their content ── */}
+              <div style={{ overflow:'auto', flex:1, minHeight:0, padding:'0 12px' }}>
                 {usedLeaves.length === 0 ? (
                   <div style={{ textAlign:'center', color:'#9ca3af', padding:48, fontSize:14 }}>
                     <div style={{ fontSize:32, marginBottom:10 }}>📭</div>
                     {L('कुनै स्वीकृत बिदा फेला परेन','No approved leaves found')}
                   </div>
                 ) : (
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12.5 }}>
-                    <thead>
-                      <tr>
-                        <th style={{ ...thS, width:50, textAlign:'center' }}>SN</th>
-                        <th style={{ ...thS, width:130 }}>{L('मिति देखि','From Date')}</th>
-                        <th style={{ ...thS, width:130 }}>{L('मिति सम्म','To Date')}</th>
-                        <th style={{ ...thS, width:70, textAlign:'center' }}>{L('दिन','Days')}</th>
-                        <th style={{ ...thS, minWidth:140 }}>{L('कारण','Reason')}</th>
-                        <th style={{ ...thS, width:180 }}>{L('सिफारिसकर्ता','Recommended By')}</th>
-                        <th style={{ ...thS, width:130 }}>{L('सिफारिस मिति','Reco. Date')}</th>
-                        <th style={{ ...thS, width:180 }}>{L('स्वीकृतकर्ता','Approved By')}</th>
-                        <th style={{ ...thS, width:130, borderRight:'none' }}>{L('स्वीकृत मिति','Appr. Date')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usedLeaves.map((l, i) => {
-                        const recoName = empName(l.recommendedBy);
-                        const apprName = empName(l.approvedBy);
-                        return (
-                          <tr key={l.id} style={{ background: i%2===0 ? 'white' : '#f3f4f6' }}>
-                            <td style={{ ...tdS, textAlign:'center', color:'#9ca3af', width:50 }}>{i+1}</td>
-                            <td style={{ ...tdS, fontWeight:600, color:'#111827' }}>{fd(l.fromDate)}</td>
-                            <td style={{ ...tdS }}>{fd(l.toDate)}</td>
-                            <td style={{ ...tdS, textAlign:'center' }}>
-                              <span style={{ display:'inline-block', background:'#dbeafe', color:'#1e40af',
-                                borderRadius:8, padding:'2px 12px', fontWeight:800, fontSize:14 }}>
-                                {l.days}
-                              </span>
-                            </td>
-                            <td style={{ ...tdS, color:'#374151' }}>{l.reason || dash}</td>
-                            <td style={{ ...tdS }}>
-                              {recoName
-                                ? <span style={{ fontWeight:600, color:'#059669', display:'flex', alignItems:'center', gap:6 }}>
-                                    <span style={{ width:24, height:24, borderRadius:'50%', background:'#d1fae5',
-                                      color:'#059669', display:'inline-flex', alignItems:'center', justifyContent:'center',
-                                      fontSize:11, fontWeight:800, flexShrink:0 }}>
-                                      {recoName[0]}
-                                    </span>
-                                    {recoName}
-                                  </span>
-                                : dash}
-                            </td>
-                            <td style={{ ...tdS, color:'#6b7280', fontSize:12 }}>
-                              {l.recommendedDate ? fd(l.recommendedDate) : dash}
-                            </td>
-                            <td style={{ ...tdS }}>
-                              {apprName
-                                ? <span style={{ fontWeight:600, color:'#7c3aed', display:'flex', alignItems:'center', gap:6 }}>
-                                    <span style={{ width:24, height:24, borderRadius:'50%', background:'#ede9fe',
-                                      color:'#7c3aed', display:'inline-flex', alignItems:'center', justifyContent:'center',
-                                      fontSize:11, fontWeight:800, flexShrink:0 }}>
-                                      {apprName[0]}
-                                    </span>
-                                    {apprName}
-                                  </span>
-                                : dash}
-                            </td>
-                            <td style={{ ...tdS, color:'#6b7280', fontSize:12, borderRight:'none' }}>
-                              {l.approvedDate ? fd(l.approvedDate) : dash}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    {/* ── Summary footer row ── */}
-                    <tfoot>
-                      <tr style={{ background:'#f1f5f9' }}>
-                        <td colSpan={3} style={{ padding:'10px 14px', fontWeight:700, fontSize:12.5, color:'#374151',
-                          borderTop:'2px solid #d1d5db' }}>
-                          {L('जम्मा','Total')}
-                        </td>
-                        <td style={{ padding:'10px 14px', textAlign:'center', borderTop:'2px solid #d1d5db' }}>
-                          <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:8,
-                            padding:'2px 12px', fontWeight:800, fontSize:14 }}>
-                            {totalDays}
-                          </span>
-                        </td>
-                        <td colSpan={5} style={{ borderTop:'2px solid #d1d5db' }}></td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                  <DataGrid
+                    columns={[
+                      { field:'fromDate', header:L('मिति देखि','From Date'),
+                        render: v => <span style={{ fontWeight:600, color:'#111827', whiteSpace:'nowrap' }}>{fd(v)}</span> },
+                      { field:'toDate', header:L('मिति सम्म','To Date'),
+                        render: v => <span style={{ whiteSpace:'nowrap' }}>{fd(v)}</span> },
+                      { field:'days', header:L('दिन','Days'), align:'center',
+                        render: v => <span style={{ background:'#dbeafe', color:'#1e40af', borderRadius:8, padding:'1px 10px', fontWeight:800 }}>{v}</span> },
+                      { field:'reason', header:L('कारण','Reason'),
+                        render: v => v || dash },
+                      { field:'recommendedBy', header:L('सिफारिसकर्ता','Recommended By'),
+                        render: v => { const n = empName(v); return n ? <span style={{ fontWeight:600, color:'#059669', display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}><span style={{ width:22, height:22, borderRadius:'50%', background:'#d1fae5', color:'#059669', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800, flexShrink:0 }}>{n[0]}</span>{n}</span> : dash; } },
+                      { field:'recommendedDate', header:L('सिफारिस मिति','Reco. Date'),
+                        render: v => v ? <span style={{ whiteSpace:'nowrap', color:'#6b7280' }}>{fd(v)}</span> : dash },
+                      { field:'approvedBy', header:L('स्वीकृतकर्ता','Approved By'),
+                        render: v => { const n = empName(v); return n ? <span style={{ fontWeight:600, color:'#7c3aed', display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}><span style={{ width:22, height:22, borderRadius:'50%', background:'#ede9fe', color:'#7c3aed', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800, flexShrink:0 }}>{n[0]}</span>{n}</span> : dash; } },
+                      { field:'approvedDate', header:L('स्वीकृत मिति','Appr. Date'),
+                        render: v => v ? <span style={{ whiteSpace:'nowrap', color:'#6b7280' }}>{fd(v)}</span> : dash },
+                    ]}
+                    data={usedLeaves}
+                    rowKey="id"
+                    autoWidth={true}
+                    fillToBottom={false}
+                    defaultPageSize={100}
+                    showSearch={false}
+                    showFilterButton={false}
+                    showCheckbox={false}
+                    compact={true}
+                    footerLeft={<strong style={{ color:'#374151' }}>{L('जम्मा दिन','Total days')}: {totalDays}</strong>}
+                  />
                 )}
               </div>
 
@@ -2206,7 +2025,7 @@ export const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, l
       const prevYear = Number(opening[prevFYKey]?.[selectedEmp.id]?.[lt.shortName] ?? 0);
       const currYear = Number(opening[fyId]?.[selectedEmp.id]?.[lt.shortName]      ?? 0);
       const used     = (leaves||[])
-        .filter(l => String(l.employeeId) === String(selectedEmp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved')
+        .filter(l => String(l.employeeId) === String(selectedEmp.id) && l.leaveTypeCode === lt.shortName && l.status === 'approved' && inFiscalYear(l, currentFY))
         .reduce((s, l) => s + Number(l.days), 0);
       // Server-side credits (e.g. OT-to-leave grants from the Overtime
       // Approval page) live in leave_balances, separate from this opening/used math.
@@ -2215,7 +2034,7 @@ export const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, l
       const balance = total - used;
       return { ltName: lt.name, ltShortName: lt.shortName, prevYear, currYear, total, used, balance };
     }).filter(r => !(r.prevYear === 0 && r.currYear === 0 && r.used === 0 && r.balance === 0));
-  }, [selectedEmp, visibleLTConfigs, opening, fyId, prevFYKey, leaves]);
+  }, [selectedEmp, visibleLTConfigs, opening, fyId, prevFYKey, leaves, currentFY]);
 
   const summaryRows = useMemo(() => (
     leaveTypeFilter.length === 0 ? summaryRowsAll : summaryRowsAll.filter(r => leaveTypeFilter.includes(r.ltShortName))
@@ -2342,12 +2161,12 @@ export const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, l
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {/* Filter toolbar */}
-      <div style={{ display:'flex', alignItems:'flex-end', gap:14, flexWrap:'wrap' }}>
+      <div className="lc-toolbar" style={{ display:'flex', alignItems:'flex-end', gap:14, flexWrap:'wrap' }}>
         <div>
           <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
             {L('आर्थिक वर्ष','Fiscal Year')}
           </label>
-          <select className="form-control" style={{ width:160, fontSize:13, height:36 }} value={fyId} onChange={e => setFyId(e.target.value)}>
+          <select className="form-control lc-fy" value={fyId} onChange={e => setFyId(e.target.value)}>
             {(settings.fiscalYears||[]).map(fy => <option key={fy.id} value={fy.id}>{fy.name}</option>)}
           </select>
         </div>
@@ -2375,7 +2194,7 @@ export const LeaveReportsTab = ({ employees, leaves, L, fd, settings, opening, l
           <label style={{ fontSize:12, fontWeight:700, color:'#374151', display:'block', marginBottom:4 }}>
             {L('संचित / गैर-संचित','Leave Accumulate')}
           </label>
-          <select className="form-control" style={{ width:170, fontSize:13, height:36 }}
+          <select className="form-control" style={{ width:170 }}
             value={leaveAccum} onChange={e => setLeaveAccum(e.target.value)}>
             <option value="all">{L('सबै','All')}</option>
             <option value="accumulate">{L('संचित','Accumulate')}</option>

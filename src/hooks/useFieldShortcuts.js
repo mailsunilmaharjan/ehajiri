@@ -19,6 +19,8 @@ export default function useFieldShortcuts(active, keyMap, fieldRefs) {
       el.focus?.();
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    // lets the top menu's Alt+letter shortcuts step aside while this form owns the Alt keys
+    window.__ehFieldAlt = (window.__ehFieldAlt || 0) + 1;
+    return () => { window.removeEventListener('keydown', onKeyDown); window.__ehFieldAlt = Math.max(0, (window.__ehFieldAlt || 1) - 1); };
   }, [active, keyMap, fieldRefs]);
 }

@@ -60,7 +60,13 @@ export const branchRankOf = (branchName, settings) =>
  * branches/staff (0, null, undefined) always sort last.
  */
 export const staffRankCompare = (a, b, settings) => {
-  const br = (branchName) => { const r = branchRankOf(branchName, settings); return r > 0 ? r : Infinity; };
+  // Head Office (HQ) isn't a Settings → Branch entry, so it has no rank of its own:
+  // it is always rank 0 (first), then ranked branches 1, 2, 3…, unranked last.
+  const br = (branchName) => {
+    const r = branchRankOf(branchName, settings);
+    if (r > 0) return r;
+    return isHQBranch(branchName, settings) ? 0 : Infinity;
+  };
   const sr = (rankingOrder) => (rankingOrder > 0 ? rankingOrder : Infinity);
   const brA = br(a.branch), brB = br(b.branch);
   if (brA !== brB) return brA - brB;
@@ -71,7 +77,8 @@ export const staffRankCompare = (a, b, settings) => {
 
 /** Composite "branchRank.staffRank" display label, e.g. "1.1". "—" for either half that's unset. */
 export const staffRankLabel = (emp, settings) => {
-  const br = branchRankOf(emp.branch, settings);
+  let br = branchRankOf(emp.branch, settings);
+  if (!(br > 0) && isHQBranch(emp.branch, settings)) br = 0;
   if (br == null && !(emp.rankingOrder > 0)) return '—';
   return `${br ?? '—'}.${emp.rankingOrder > 0 ? emp.rankingOrder : '—'}`;
 };

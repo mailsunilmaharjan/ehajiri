@@ -12,6 +12,7 @@ import StaffDropdown    from '../Common/StaffDropdown.jsx';
 import MultiCheckSelect from '../Common/MultiCheckSelect.jsx';
 import Avatar           from '../Common/Avatar.jsx';
 import { CATEGORIES, categorize, fmtPunchTime, dutyRosterRange, presentFlags } from '../../utils/attendanceCalendar.js';
+import FitScroll from '../Common/FitScroll.jsx';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -269,7 +270,7 @@ const DeptWeekView = ({ rosters, department, weekStart, weekEnd, settings }) => 
   }
 
   return (
-    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'auto' }}>
+    <FitScroll style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
         <thead>
           <tr style={{ background: '#efefef', borderBottom: '2px solid #dedede' }}>
@@ -303,7 +304,7 @@ const DeptWeekView = ({ rosters, department, weekStart, weekEnd, settings }) => 
         <tbody>
           {staffList.map((s, si) => (
             <tr key={s.id} style={{ borderBottom: '1px solid #f3f4f6',
-              background: si % 2 === 0 ? '#fff' : '#f3f4f6' }}>
+              background: si % 2 === 0 ? '#fff' : '#f7f8fa' }}>
               <td style={{ padding: '3px 8px', textAlign: 'center', fontSize: 12.5,
                 fontWeight: 600, color: HDR_COLOR, borderRight: '1px solid #dedede',
                 background: '#efefef' }}>
@@ -351,7 +352,7 @@ const DeptWeekView = ({ rosters, department, weekStart, weekEnd, settings }) => 
           ))}
         </tbody>
       </table>
-    </div>
+    </FitScroll>
   );
 };
 
@@ -468,7 +469,7 @@ const DeptShiftGrid = ({ rosters, department, shiftNames, weekStart, weekEnd, se
   }
 
   return (
-    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'auto' }}>
+    <FitScroll style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
         <thead>
           <tr style={{ background: '#efefef', borderBottom: '2px solid #dedede' }}>
@@ -512,7 +513,7 @@ const DeptShiftGrid = ({ rosters, department, shiftNames, weekStart, weekEnd, se
               </tr>
               {staffList.map((s, ri) => (
                 <tr key={s.id} style={{ borderBottom: '1px solid #f3f4f6',
-                  background: ri % 2 === 0 ? '#fff' : '#f3f4f6' }}>
+                  background: ri % 2 === 0 ? '#fff' : '#f7f8fa' }}>
                   <td style={{ padding: '3px 8px', textAlign: 'center', fontSize: 12.5,
                     fontWeight: 600, color: HDR_COLOR, borderRight: '1px solid #dedede',
                     background: '#efefef' }}>
@@ -562,7 +563,7 @@ const DeptShiftGrid = ({ rosters, department, shiftNames, weekStart, weekEnd, se
           ))}
         </tbody>
       </table>
-    </div>
+    </FitScroll>
   );
 };
 

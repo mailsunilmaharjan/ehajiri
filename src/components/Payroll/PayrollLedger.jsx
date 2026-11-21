@@ -77,7 +77,7 @@ export default function PayrollLedger() {
   });
 
   return (
-    <div style={{ padding: '20px 24px' }}>
+    <div style={{ padding: '8px 14px 12px' }}>
       <PageHeader title="📒 Fund Ledger">
         <GhostBtn onClick={exportSummary} disabled={!summary.length}>📥 Excel</GhostBtn>
         <PrimaryBtn onClick={() => { setError(''); setEntry({ userId: '', entryType: 'opening', periodEnd: todayISO(), employeeAmt: '', employerAmt: '', note: '' }); }}>+ Manual entry</PrimaryBtn>

@@ -13,6 +13,7 @@ const COLUMNS = [
   { key: 'branch',       label: 'Branch',         required: false },
   { key: 'department',   label: 'Department',     required: false },
   { key: 'position',     label: 'Position',       required: false },
+  { key: 'status',       label: 'Status',         required: false, note: 'Must match Settings → Status (e.g. Active, Resigned). Blank = Active' },
 ];
 
 /* ── Flexible header → field key mapping ── */
@@ -67,8 +68,8 @@ function parseSheet(ws) {
 /* ── Download template ── */
 function downloadTemplate() {
   const headers = COLUMNS.map(c => c.label);
-  const sample1 = ['1001','EMP001','Ram Bahadur Shrestha','9800000001','ram@example.com','male','PIPL','Admin','CEO'];
-  const sample2 = ['1002','EMP002','Sita Kumari Karki','9800000002','sita@example.com','female','PIPL','Finance','Finance Director'];
+  const sample1 = ['1001','EMP001','Ram Bahadur Shrestha','9800000001','ram@example.com','male','PIPL','Admin','CEO','Active'];
+  const sample2 = ['1002','EMP002','Sita Kumari Karki','9800000002','sita@example.com','female','PIPL','Finance','Finance Director','Active'];
 
   const ws = XLSX.utils.aoa_to_sheet([headers, sample1, sample2]);
 
@@ -301,7 +302,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
                         borderBottom:'2px solid #dedede', borderRight:'1px solid #dedede', textAlign:'center', whiteSpace:'nowrap' }}>
                         #
                       </th>
-                      {['Attendance Device Id','Employee ID','Full Name','Phone','Email','Gender','Branch','Department','Position'].map(h => (
+                      {['Attendance Device Id','Employee ID','Full Name','Phone','Email','Gender','Branch','Department','Position','Emp. Status'].map(h => (
                         <th key={h} style={{ padding:'7px 10px', fontWeight:700, color:'#374151', fontSize:12,
                           borderBottom:'2px solid #dedede', borderRight:'1px solid #dedede', whiteSpace:'nowrap' }}>
                           {h}
@@ -322,7 +323,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
                             borderRight:'1px solid #f0f0f0', textAlign:'center' }}>{i + 1}</td>
                           {[
                             row.deviceId, row.employeeId, row.fullName, row.phone,
-                            row.email, row.gender, row.branch, row.department, row.position,
+                            row.email, row.gender, row.branch, row.department, row.position, row.status,
                           ].map((val, ci) => (
                             <td key={ci} style={{ padding:'5px 10px', color:'#1f2937', borderBottom:'1px solid #f0f0f0',
                               borderRight:'1px solid #f0f0f0', whiteSpace:'nowrap', maxWidth:140,

@@ -144,7 +144,7 @@ export default function MobileLogin() {
 
         {imgs.length === 0 && (
           <div className="m-login-top">
-            <div className="m-login-logo">{logo ? <img src={logo} alt="" /> : 'EH'}</div>
+            <div className={`m-login-logo${logo ? '' : ' m-login-logo-brand'}`}>{logo ? <img src={logo} alt="" /> : <img src="/icons/ehajiri-logo.png?v=2" alt="eHajiri" />}</div>
             <h1>{company || 'eHajiri'}</h1>
             <p className="m-tag">{mt('Your office, in your pocket')}</p>
           </div>
@@ -178,9 +178,9 @@ export default function MobileLogin() {
             {bioMsg && <div className="m-err">{bioMsg}</div>}
 
             <div className="m-field m-lf"><label htmlFor="mu">{mt('Username or email')}</label>
-              <input id="mu" className="m-input" placeholder={mt('Enter username or email')} type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} /></div>
+              <input id="mu" className="m-input" placeholder={mt('Enter username or email')} type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" autoComplete="off" name="eh-login-id" data-lpignore="true" value={username} onChange={e => setUsername(e.target.value)} /></div>
             <div className="m-field m-lf"><label htmlFor="mp">{mt('Password')}</label>
-              <div className="m-pw"><input id="mp" className="m-input" placeholder={mt('Enter password')} type={show ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} style={{ paddingRight: 70 }} />
+              <div className="m-pw"><input id="mp" className="m-input" placeholder={mt('Enter password')} type={show ? 'text' : 'password'} autoComplete="off" name="eh-login-pw" data-lpignore="true" value={password} onChange={e => setPassword(e.target.value)} style={{ paddingRight: 70 }} />
                 <button type="button" onClick={() => setShow(s => !s)}>{show ? mt('Hide') : mt('Show')}</button></div></div>
             <div className="m-actions">
               <button className="m-btn m-block m-signin" type="submit" disabled={busy || !username.trim() || !password}>{busy ? <span className="m-spin" /> : mt('Sign in')}</button>

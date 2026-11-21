@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect, forwardRef, useImp
 import { createPortal } from 'react-dom';
 import { useSettings } from '../../context/SettingsContext.jsx';
 import {
-  adToBS, bsToAD, getBSDays, BS_MONTHS_NP, toNepaliDigits, formatDate, getNepalTodayISO,
+  adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, formatDate, getNepalTodayISO,
 } from '../../utils/dateUtils.js';
 
 const NP_DAYS = ['आइत','सोम','मंगल','बुध','बिही','शुक्र','शनि'];
@@ -45,7 +45,7 @@ const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false,
 
   // The trigger input is readOnly (typing does nothing), so "focus" for a
   // keyboard-shortcut jump means actually opening the calendar popup.
-  useImperativeHandle(ref, () => ({ focus: () => { inputRef.current?.focus(); setIsOpen(true); } }));
+  useImperativeHandle(ref, () => ({ focus: () => { inputRef.current?.focus(); inputRef.current?.select?.(); } }));
 
   useEffect(() => {
     if (value !== lastAD.current) {
@@ -151,14 +151,82 @@ const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false,
     setIsOpen(false);
   };
 
-  /* display text using the app's date format setting */
-  const displayText = value
-    ? formatDate(value, {
-        calendar:    settings.defaultCalendar   || 'np',
-        format:      settings.defaultDateFormat || 'dd-MMM-yyyy',
-        nepaliDigits: settings.nepaliDigits     || false,
-      })
-    : '';
+  /* ── Typed entry (same behaviour as the Accounts BsDateInput) ──
+     Day [2 digits] · Month [type "ka" → Kartik / pick from list / 1-12] · Year [4 digits].
+     Valid, in-range dates are committed as soon as they're complete; the 📅 icon opens the calendar. */
+  const MONTHS = settings.nepaliDigits ? BS_MONTHS_NP : BS_MONTHS_EN;
+  const toLatin = (s) => String(s).replace(/[०-९]/g, c => '०१२३४५६७८९'.indexOf(c));
+  const [dd, setDd] = useState('');
+  const [mm, setMm] = useState(0);          // 1-12, 0 = none
+  const [yy, setYy] = useState('');
+  const [monText, setMonText] = useState(null); // text while the user types a month
+  const [monOpen, setMonOpen] = useState(false);
+  const [monHi, setMonHi] = useState(0);
+  const [monRect, setMonRect] = useState(null);
+  const monRef = useRef(); const yearRef = useRef();
+
+  useEffect(() => {
+    setDd(selected ? String(selected.day).padStart(2, '0') : '');
+    setMm(selected ? selected.month : 0);
+    setYy(selected ? String(selected.year) : '');
+    setMonText(null);
+  }, [selected]);
+
+  const todayISO = getNepalTodayISO();
+  const blockedISO = (iso) =>
+    (maxToday && iso > todayISO) || (minToday && iso < todayISO) ||
+    (minDate && iso < String(minDate).slice(0, 10)) || (maxDate && iso > String(maxDate).slice(0, 10));
+
+  const commitTyped = (dStr, m, yStr) => {
+    const d = Number(dStr), y = Number(yStr);
+    if (!(d >= 1) || !(m >= 1 && m <= 12) || String(yStr).length !== 4 || y < 2000 || y > 2090) return false;
+    const dd2 = Math.min(d, getBSDays(y, m) || 30);
+    const ad = bsToAD(y, m, dd2);
+    if (!ad || isNaN(ad)) return false;
+    const iso = adToISO(ad);
+    if (blockedISO(iso)) return false;
+    setSelected({ year: y, month: m, day: dd2 });
+    setViewYear(y); setViewMonth(m);
+    lastAD.current = iso;
+    if (iso !== value) onChange(iso);
+    return true;
+  };
+  const revert = () => {
+    setDd(selected ? String(selected.day).padStart(2, '0') : '');
+    setMm(selected ? selected.month : 0);
+    setYy(selected ? String(selected.year) : '');
+    setMonText(null);
+  };
+
+  const matchMonths = (text) => {
+    const t = String(toLatin(text || '')).trim().toLowerCase();
+    const raw = String(text || '').trim();
+    if (!t) return MONTHS.map((_, i) => i + 1);
+    if (/^\d{1,2}$/.test(t)) { const n = Number(t); return n >= 1 && n <= 12 ? [n] : []; }
+    const all = (names) => names.map((m, i) => [m, i + 1]);
+    const starts = [...all(BS_MONTHS_EN), ...all(BS_MONTHS_NP)]
+      .filter(([m]) => m.toLowerCase().startsWith(t) || m.startsWith(raw)).map(([, i]) => i);
+    if (starts.length) return [...new Set(starts)];
+    return [...new Set([...all(BS_MONTHS_EN), ...all(BS_MONTHS_NP)].filter(([m]) => m.toLowerCase().includes(t)).map(([, i]) => i))];
+  };
+  const monMatches = monOpen ? matchMonths(monText) : [];
+  const pickMonth = (m, advance) => {
+    setMm(m); setMonText(null); setMonOpen(false);
+    const d = dd || (selected ? String(selected.day) : '1');
+    if (!dd) setDd(String(d).padStart(2, '0'));
+    commitTyped(d, m, yy);
+    if (advance) setTimeout(() => { yearRef.current?.focus(); yearRef.current?.select(); }, 0);
+  };
+  const openMonthList = () => {
+    if (monRef.current) { const r = monRef.current.getBoundingClientRect(); setMonRect({ left: r.left, top: r.bottom + 2 }); }
+    setMonOpen(true); setMonHi(Math.max(0, mm - 1));
+  };
+
+  const seg = {
+    border:'none', outline:'none', background:'transparent', padding:0, margin:0,
+    fontSize:13, fontFamily:'inherit', color:'inherit', textAlign:'center', minWidth:0,
+  };
+  const sepStyle = { color:'#9ca3af', padding:'0 3px' };
 
   const navBtn = {
     background:'none', border:'1px solid #e5e7eb', borderRadius:6,
@@ -168,17 +236,78 @@ const NepaliDatePicker = forwardRef(({ value, onChange, error, maxToday = false,
   return (
     <div ref={containerRef} style={{ position:'relative' }}>
       {/* Trigger input */}
-      <input
-        ref={inputRef}
-        type="text"
-        readOnly
+      <div
         className={`form-control ${error ? 'error' : ''}`}
-        style={{ fontSize:13, cursor:'pointer', caretColor:'transparent' }}
-        placeholder="मिति छान्नुस् (BS)"
-        value={displayText}
-        onClick={() => setIsOpen(p => !p)}
-        onKeyDown={e => { if (e.key === 'Tab' || e.key === 'Enter') setIsOpen(false); }}
-      />
+        style={{ fontSize:13, display:'flex', alignItems:'center', whiteSpace:'nowrap', overflow:'hidden' }}
+      >
+        <span role="button" aria-label="Open calendar" title="Open calendar"
+          onClick={() => setIsOpen(p => !p)}
+          style={{ fontSize:14, cursor:'pointer', marginRight:6 }}>📅</span>
+        <input ref={inputRef} aria-label="Day" inputMode="numeric" maxLength={2} placeholder="DD"
+          style={{ ...seg, width:'2.2ch' }}
+          value={fmt(dd)}
+          onFocus={e => e.target.select()}
+          onChange={e => {
+            const v = toLatin(e.target.value).replace(/\D/g, '').slice(0, 2);
+            setDd(v);
+            if (v.length === 2 && Number(v) >= 1 && mm && yy.length === 4) {
+              commitTyped(v, mm, yy);
+            }
+            if (v.length === 2) { monRef.current?.focus(); }
+          }}
+          onBlur={() => {
+            if (!dd && !selected) return;
+            if (Number(dd) >= 1 && mm && yy.length === 4) {
+              if (!commitTyped(dd, mm, yy)) revert();
+            } else if (selected) revert();
+          }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); monRef.current?.focus(); } if (e.key === 'Escape') setIsOpen(false); }} />
+        <span style={sepStyle}>-</span>
+        <input ref={monRef} aria-label="Month" placeholder="Month" autoComplete="off"
+          style={{ ...seg, width:`calc(${Math.max(String(monText ?? (mm ? MONTHS[mm-1] : '')).length, 5)}ch + 4px)` }}
+          value={monText ?? (mm ? MONTHS[mm-1] : '')}
+          onFocus={e => { e.target.select(); openMonthList(); }}
+          onChange={e => { setMonText(e.target.value); setMonOpen(true); setMonHi(0); }}
+          onKeyDown={e => {
+            const list = matchMonths(monText);
+            if (e.key === 'ArrowDown') { e.preventDefault(); setMonOpen(true); setMonHi(h => Math.min(h + 1, list.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setMonHi(h => Math.max(h - 1, 0)); }
+            else if (e.key === 'Enter' || e.key === 'Tab') {
+              const pick = list[monHi] ?? list[0];
+              if (pick) { if (e.key === 'Enter') e.preventDefault(); pickMonth(pick, e.key === 'Enter'); }
+            }
+            else if (e.key === 'Escape' && monOpen) { e.preventDefault(); setMonOpen(false); setMonText(null); }
+          }}
+          onBlur={() => setTimeout(() => { setMonOpen(false); setMonText(null); }, 150)} />
+        <span style={sepStyle}>-</span>
+        <input ref={yearRef} aria-label="Year" inputMode="numeric" maxLength={4} placeholder="YYYY"
+          style={{ ...seg, width:'4.4ch' }}
+          value={fmt(yy)}
+          onFocus={e => e.target.select()}
+          onChange={e => {
+            const v = toLatin(e.target.value).replace(/\D/g, '').slice(0, 4);
+            setYy(v);
+            if (v.length === 4 && dd && mm) commitTyped(dd, mm, v);
+          }}
+          onBlur={() => {
+            if (Number(dd) >= 1 && mm && yy.length === 4) { if (!commitTyped(dd, mm, yy)) revert(); }
+            else if (selected) revert();
+          }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (Number(dd) >= 1 && mm && yy.length === 4) commitTyped(dd, mm, yy); setIsOpen(false); } }} />
+      </div>
+
+      {monOpen && monRect && monMatches.length > 0 && (
+        <ul style={{ position:'fixed', left:monRect.left, top:monRect.top, zIndex:1000000, margin:0, padding:0, listStyle:'none',
+          background:'#fff', border:'1px solid #d1d5db', borderRadius:8, boxShadow:'0 8px 24px rgba(0,0,0,.14)',
+          maxHeight:220, overflowY:'auto', minWidth:150, fontSize:13 }}>
+          {monMatches.map((m, i) => (
+            <li key={m} onMouseDown={e => { e.preventDefault(); pickMonth(m, true); }}
+              style={{ padding:'5px 10px', cursor:'pointer', background: i === monHi ? '#eff6ff' : 'transparent', borderLeft: m === mm ? '3px solid #1a56db' : '3px solid transparent' }}>
+              <span style={{ color:'#9ca3af', marginRight:8 }}>{String(m).padStart(2,'0')}</span>{MONTHS[m-1]}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {/* Calendar popup */}
       {isOpen && rect && createPortal(

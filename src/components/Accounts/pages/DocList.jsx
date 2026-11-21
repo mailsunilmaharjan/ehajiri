@@ -120,7 +120,7 @@ export default function DocList() {
   return (
     <>
       <header className="page-head">
-        <h1>{meta.name}</h1><span className="muted">{meta.np}</span>
+        <h1>{meta.name}</h1>
         <span className="spacer" />
         {isQuote && <Link className="btn ghost" to="/quote-templates">🎨 Templates</Link>}
         <Link className="btn edit-only" data-new title="F1 / Alt+N" to={`/docs/${type}/new`}>+ New {meta.name.toLowerCase()} <kbd className="kbd">F1</kbd></Link>
