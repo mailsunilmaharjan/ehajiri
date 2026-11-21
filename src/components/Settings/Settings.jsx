@@ -863,16 +863,20 @@ const ShiftInlineSection = () => {
       {/* ══ ADD/EDIT MODAL ══ */}
       {modal && (
         <div className="modal-overlay">
-          <div className="modal modal-lg" style={{ maxHeight:'92vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
+          <div className="modal modal-lg glm-form glm-shift" style={{ maxHeight:'92vh', overflowY:'auto' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
-              <h2>{editId ? `✏️ ${L('सिफ्ट सम्पादन','Edit Shift')}` : `+ ${L('नयाँ सिफ्ट','New Shift')}`}</h2>
+              <div className="glm-head-ic">{editId ? '✏️' : '＋'}</div>
+              <div className="glm-head-txt">
+                <h2>{editId ? L('सिफ्ट सम्पादन','Edit Shift') : L('नयाँ सिफ्ट','New Shift')}</h2>
+                <p>{editId ? L('सिफ्टको विवरण अद्यावधिक गर्नुहोस्','Update shift timing and rules') : L('नयाँ सिफ्ट सेटअप गर्नुहोस्','Set up a new shift')}</p>
+              </div>
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
 
               {/* Basic Info */}
-              <div style={{ background:'#f9fafb', borderRadius:8, padding:'14px 16px', marginBottom:14 }}>
-                <div style={{ fontSize:11, fontWeight:700, color:'#9ca3af', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:12 }}>📋 {L('आधारभूत जानकारी','Basic Information')}</div>
+              <div className="glm-card">
+                <div className="glm-step"><i>1</i>{L('आधारभूत जानकारी','Basic Information')}</div>
                 <div className="form-row">
                   <div className="form-group">
                     <label className="form-label">नेपाली नाम *</label>
@@ -890,8 +894,8 @@ const ShiftInlineSection = () => {
               </div>
 
               {/* Time Settings */}
-              <div style={{ background:'#f9fafb', borderRadius:8, padding:'14px 16px', marginBottom:14 }}>
-                <div style={{ fontSize:11, fontWeight:700, color:'#9ca3af', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:12 }}>⏰ {L('समय सेटिङ','Time Settings')}</div>
+              <div className="glm-card">
+                <div className="glm-step"><i>2</i>{L('समय सेटिङ','Time Settings')}</div>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
                   <div className="form-group">
                     <label className="form-label">{L('सुरु समय','Start Time')} *</label>
@@ -947,7 +951,7 @@ const ShiftInlineSection = () => {
               </div>
 
               {/* Exceptional Day */}
-              <div style={{ border:`2px solid ${form.exceptionalDayEnabled?'#f59e0b':'#e5e7eb'}`, borderRadius:8, padding:'12px 16px', marginBottom:14, transition:'border-color .2s' }}>
+              <div style={{ background:'#fff', border:`1.5px solid ${form.exceptionalDayEnabled?'#f59e0b':'#e5e7eb'}`, borderRadius:12, padding:'12px 16px', marginBottom:14, transition:'border-color .2s' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: form.exceptionalDayEnabled ? 14 : 0 }}>
                   <div>
                     <div style={{ fontSize:14, fontWeight:600, color:form.exceptionalDayEnabled?'#92400e':'#374151' }}>📅 {L('असाधारण दिन सक्षम','Enable Exceptional Day')}</div>
@@ -998,7 +1002,7 @@ const ShiftInlineSection = () => {
               </div>
 
               {/* Winter Policy */}
-              <div style={{ border:`2px solid ${form.winterPolicyEnabled?'#0ea5e9':'#e5e7eb'}`, borderRadius:8, padding:'12px 16px', marginBottom:14, transition:'border-color .2s' }}>
+              <div style={{ background:'#fff', border:`1.5px solid ${form.winterPolicyEnabled?'#0ea5e9':'#e5e7eb'}`, borderRadius:12, padding:'12px 16px', marginBottom:14, transition:'border-color .2s' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <div>
                     <div style={{ fontSize:14, fontWeight:600, color:form.winterPolicyEnabled?'#0369a1':'#374151' }}>❄️ {L('शीतकालीन सुविधा नीति','Winter Facilities Policy')}</div>

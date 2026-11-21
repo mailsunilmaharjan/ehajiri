@@ -279,3 +279,13 @@ body .acc-app .doc-form .bsd input, body .acc-app .entry-card .bsd input { heigh
 .glm-form .glm-card { padding: 18px 20px; border-radius: 16px; }
 .glm-form .modal-footer { padding: 14px 22px; }
 .glm-form .modal-close { width: 34px; height: 34px; border-radius: 10px; }
+
+/* Shift form: wider card modal with tighter spacing between sections */
+.modal.glm-form.glm-shift { max-width: 720px; overflow-y: auto; }
+.glm-shift .modal-body { padding: 12px 18px; }
+.glm-shift .modal-body > div { margin-bottom: 8px !important; }
+.glm-shift .glm-card { padding: 12px 16px; border-radius: 12px; }
+.glm-shift .glm-step { margin-bottom: 8px; }
+.glm-shift .form-group { margin-bottom: 0; }
+.glm-shift .form-row { gap: 12px; }
+.glm-shift .modal-footer { background: #fff; }
