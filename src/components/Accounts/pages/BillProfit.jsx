@@ -37,7 +37,11 @@ export default function BillProfit() {
 
   return (
     <>
-      <header className="page-head"><h1>Bill-wise Profit &amp; Loss</h1><span className="muted">sales value excl. VAT · cost at weighted average</span></header>
+      <div className="acc-reportcard">
+      <header className="acc-formhead no-print">
+        <span className="acc-head-ic">🧾</span>
+        <span className="acc-head-txt"><h1>Bill-wise Profit &amp; Loss</h1><small>Profit on every sales bill · sales value excl. VAT · cost at weighted average</small></span>
+      </header>
       <PeriodBar from={from} to={to} fy={fy} onChange={(f, t) => { setFrom(f); setTo(t); }}>
         <select value={show} onChange={(e) => setShow(e.target.value)}>
           <option value="all">All bills</option><option value="profit">Profit only</option><option value="loss">Loss only</option>
@@ -89,6 +93,7 @@ export default function BillProfit() {
           </table>
         </section>
       )}
+      </div>
     </>
   );
 }

@@ -32,7 +32,11 @@ export default function ProfitLoss() {
 
   return (
     <>
-      <header className="page-head"><h1>Profit &amp; Loss Account</h1><span className="muted">trading format · stock at weighted average cost</span></header>
+      <div className="acc-reportcard">
+      <header className="acc-formhead no-print">
+        <span className="acc-head-ic">📊</span>
+        <span className="acc-head-txt"><h1>Profit &amp; Loss Account</h1><small>Sales − cost of goods = gross profit; + other income − expenses = net profit · stock at weighted average cost</small></span>
+      </header>
       <PeriodBar from={from} to={to} fy={fy} onChange={(f, t) => { setFrom(f); setTo(t); }}>
         <label className="check"><input type="checkbox" checked={detail} onChange={(e) => setDetail(e.target.checked)} /> Show ledgers</label>
         <span className="spacer" />
@@ -80,6 +84,7 @@ export default function ProfitLoss() {
           </table>
         </section>
       )}
+      </div>
     </>
   );
 }

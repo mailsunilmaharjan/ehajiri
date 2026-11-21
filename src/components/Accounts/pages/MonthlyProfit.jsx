@@ -24,7 +24,11 @@ export default function MonthlyProfit() {
 
   return (
     <>
-      <header className="page-head"><h1>Monthly Expenses &amp; Profit</h1><span className="muted">by Nepali month · stock at weighted average cost</span></header>
+      <div className="acc-reportcard">
+      <header className="acc-formhead no-print">
+        <span className="acc-head-ic">📅</span>
+        <span className="acc-head-txt"><h1>Monthly Expenses &amp; Profit</h1><small>Income, expenses and profit for each Nepali month · stock at weighted average cost</small></span>
+      </header>
       <PeriodBar from={from} to={to} fy={fy} onChange={(f, t) => { setFrom(f); setTo(t); }}>
         <label className="check"><input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} /> Split expenses by group</label>
         <span className="spacer" />
@@ -80,6 +84,7 @@ export default function MonthlyProfit() {
           </p>
         </section>
       )}
+      </div>
     </>
   );
 }
