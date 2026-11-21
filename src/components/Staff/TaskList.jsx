@@ -2304,26 +2304,28 @@ const TaskList = ({ fieldVisitOnly = false }) => {
                 </div>
               )}
 
-              {field('Assign Task', false, null,
-                <EmpMultiSelect
-                  value={form.assignedTo}
-                  onChange={v => setForm(p => ({ ...p, assignedTo: v }))}
-                  employees={employees}
-                  placeholder="Search by name, post, department, branch..."
-                  formatLabel={e => `${e.fullName} — ${abbrev(e.position)} · ${abbrev(e.department)} · ${abbrev(e.branch)}`}
-                  showNamesWhenMultiple
-                  showAvatars
-                />
-              )}
-
-              {field('Field Visit', false, null,
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={form.isFieldVisit}
-                    onChange={e => setForm(p => ({ ...p, isFieldVisit: e.target.checked }))}
-                    style={{ width: 16, height: 16, accentColor: '#1a56db', cursor: 'pointer' }} />
-                  <span style={{ fontSize: 12.5, color: '#374151' }}>🚗 This is a Field Visit task</span>
-                </label>
-              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 12, alignItems: 'end' }}>
+                {field('Assign Task', false, null,
+                  <EmpMultiSelect
+                    value={form.assignedTo}
+                    onChange={v => setForm(p => ({ ...p, assignedTo: v }))}
+                    employees={employees}
+                    placeholder="Search by name, post, department, branch..."
+                    formatLabel={e => `${e.fullName} — ${abbrev(e.position)} · ${abbrev(e.department)} · ${abbrev(e.branch)}`}
+                    showNamesWhenMultiple
+                    showAvatars
+                  />
+                )}
+                {field('Field Visit Task', false, null,
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', minHeight: 42, boxSizing: 'border-box',
+                    padding: '0 14px', border: '1px solid #dbe3ee', borderRadius: 8, background: form.isFieldVisit ? '#eff6ff' : '#fff', whiteSpace: 'nowrap' }}>
+                    <input type="checkbox" checked={form.isFieldVisit}
+                      onChange={e => setForm(p => ({ ...p, isFieldVisit: e.target.checked }))}
+                      style={{ width: 16, height: 16, accentColor: '#1a56db', cursor: 'pointer' }} />
+                    <span style={{ fontSize: 13, color: '#374151' }}>🚗 Field Visit</span>
+                  </label>
+                )}
+              </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {field('Task Date', false, null,

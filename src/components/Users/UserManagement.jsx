@@ -105,7 +105,7 @@ const ROW_BG = [
 /* ── Panel card ── */
 const Panel = ({ title, children }) => (
   <div style={{ border:'1px solid #e8edf5', borderRadius:12, overflow:'hidden', background:'#fff', boxShadow:'0 1px 2px rgba(15,23,42,.04)' }}>
-    <div style={{ padding:'10px 14px', borderBottom:'1px solid #eef2f7', background:'#fff', fontSize:12.5, fontWeight:700, color:'#0f172a' }}>
+    <div className="glm-panel-head" style={{ padding:'10px 14px', borderBottom:'1px solid #eef2f7', background:'#fff', fontSize:12.5, fontWeight:700, color:'#0f172a' }}>
       {title}
     </div>
     <div>{children}</div>
@@ -124,7 +124,7 @@ const Fg = ({ children, idx = 0 }) => (
    purely visual, the actual Alt+key handling lives in useFieldShortcuts. */
 const Fl = ({ children, required, onQA, shortcut }) => (
   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-    <span style={{ fontSize:12, fontWeight:500, color:'#374151' }}>
+    <span style={{ fontSize:11.5, fontWeight:600, color:'#64748b' }}>
       {children}{required && <span style={{ color:'#f05252', marginLeft:2 }}>*</span>}
       {shortcut && (
         <span style={{ fontSize:9.5, color:'#9ca3af', marginLeft:6, fontWeight:600, letterSpacing:'.3px' }}>
@@ -2650,12 +2650,13 @@ const UserManagement = () => {
 
             {/* Header */}
             <div className="modal-header" style={{ flexShrink:0 }}>
-              <h2>{quickDeviceView ? `📲 ${t('Device Connectivity')}` : editId ? `✏️ ${t('Edit Staff')}` : `+ ${t('Add Staff Management')}`}</h2>
+              {!quickDeviceView && <div className="glm-head-ic">{editId ? '✏️' : '＋'}</div>}
+              {quickDeviceView ? <h2>{`📲 ${t('Device Connectivity')}`}</h2> : <div className="glm-head-txt"><h2>{editId ? t('Edit Staff') : t('Add Staff Management')}</h2><p>{editId ? 'Update the staff details' : 'Add a new staff member'}</p></div>}
               <button className="modal-close" onClick={() => setModal(false)}>✕</button>
             </div>
 
             {/* Tab bar — hidden in quick device view (row click), shown for full Edit */}
-            {!quickDeviceView && <div style={{ display:'flex', flexShrink:0, borderBottom:'1px solid var(--border)', padding:'0 20px', background:'#fafbfc' }}>
+            {!quickDeviceView && <div style={{ display:'flex', flexShrink:0, borderBottom:'1px solid #e2e8f0', padding:'0 20px', background:'#fff' }}>
               {MODAL_TABS.map(tab => (
                 <button key={tab} className={`tab-btn ${activeTab===tab?'active':''}`} onClick={() => setActiveTab(tab)}>
                   {tab}
