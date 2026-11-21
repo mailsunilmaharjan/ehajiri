@@ -31,8 +31,12 @@ export default function CompanySetup() {
 
   return (
     <>
-      <header className="page-head"><h1>Company Setup</h1>{!isAdmin && <span className="tag">read-only — admin only</span>}</header>
       <form className="card form acc-cardform acc-pageform" onSubmit={save}>
+        <header className="acc-formhead">
+          <span className="acc-head-ic">🏢</span>
+          <span className="acc-head-txt"><h1>Company Setup</h1><small>Company details, alerts and how bills are sent</small></span>
+          {!isAdmin && <span className="tag">read-only — admin only</span>}
+        </header>
         <div className="acc-card">
           <div className="acc-step"><i>1</i>Company</div>
           <label>Company name<input value={f.name || ''} onChange={set('name')} required /></label>
