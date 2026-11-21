@@ -43,7 +43,7 @@ export function QuoteTop({ f, setF, templates, docId, party }) {
 
   return (
     <>
-      <div className="section-label">QUOTATION DETAILS</div>
+      <div className="acc-step acc-step-out"><i>2</i>Quotation details</div>
       <div className="doc-form qt-top">
         <label className="qt-subject">Subject / Title *
           <input value={f.qt_subject} maxLength={160} placeholder="e.g. Attendance Device with Software"
@@ -97,7 +97,7 @@ export function QuoteTerms({ f, setF, templates }) {
   return (
     <div className="qt-terms-wrap">
       <div className="pf-contacts-head">
-        <span className="section-label">TERMS &amp; CONDITIONS <span className="muted small">— printed on the quotation's terms page</span></span>
+        <span className="acc-step"><i>4</i>Terms &amp; conditions <span className="muted small" style={{ fontWeight: 400 }}>— printed on the quotation's terms page</span></span>
         <span className="spacer" />
         {tpl && <button type="button" className="ghost btn-sm" tabIndex={-1} title={`Replace with the terms of “${tpl.name}”`}
           onClick={() => { if (confirm(`Replace these terms with the “${tpl.name}” template terms?`)) setF((x) => ({ ...x, qt_terms: tpl.terms_list.map((r) => [...r]), qt_notes: tpl.notes || x.qt_notes, qt_terms_touched: false })); }}>

@@ -420,3 +420,8 @@ body .acc-app .card.entry-card .acsel-list li.hi { background: #dbeafe !importan
 /* the entry card must not clip open drop-down lists; round the footer bar instead */
 body .acc-app .card.entry-card { overflow: visible !important; }
 body .acc-app .card.entry-card > .actions { border-radius: 0 0 16px 16px !important; }
+
+/* Sales Quotation: terms & conditions block as a white card like the other sections */
+body .acc-app .card.entry-card > .qt-terms-wrap { background: #fff; border: 1px solid #e8edf5; border-radius: 14px; padding: 14px 18px; margin: 0 0 12px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+body .acc-app .qt-terms-wrap .acc-step { margin: 0; }
+body .acc-app .qt-terms-wrap table.grid { border-radius: 10px; }

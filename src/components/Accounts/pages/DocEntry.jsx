@@ -367,7 +367,7 @@ export default function DocEntry() {
       </header>
       <section className="card entry-card">
         <div className={`doc-form bill-top ${type === 'SI' ? 'si' : isSale || type === 'PB' ? '' : 'two'}`}>
-          <div className="acc-step"><i>1</i>{isQuote ? 'Quotation details' : `${partyWord} & bill details`}</div>
+          <div className="acc-step"><i>1</i>{isQuote ? `${partyWord} & date` : `${partyWord} & bill details`}</div>
           <label>{partyWord} Name *
             <span className="inline">
               {isQuote && !f.party_id ? (
@@ -515,7 +515,7 @@ export default function DocEntry() {
           )}
         </div>}
 
-        <div className="acc-step acc-step-out"><i>{isQuote ? 2 : 3}</i>{isSale ? 'Product details' : 'Items'}</div>
+        <div className="acc-step acc-step-out"><i>3</i>{isSale ? 'Product details' : 'Items'}</div>
         <table className="grid entry bill-grid">
           <thead><tr>
             <th className="sn">SN</th><th style={{ minWidth: 280 }}>PRODUCT NAME</th><th style={{ width: 90 }}>HS CODE</th>
