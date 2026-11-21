@@ -4010,9 +4010,11 @@ const Settings = () => {
                 {activeSetup === 'department' && (
                   <SetupSection
                     title={L('विभाग','Department')}
+                    formCols={2}
+                    formStep={L('विभाग विवरण','Department details')}
                     data={settings.departments || []}
                     fields={[
-                      { key:'name',         header:L('विभागको नाम','Department Name'), required:true },
+                      { key:'name',         header:L('विभागको नाम','Department Name'), required:true, full:true },
                       { key:'shortName',    header:L('संक्षिप्त नाम','Short Name') },
                       { key:'rankingOrder', header:L('क्रम','Ranking Order'), type:'number', placeholder:'1' },
                       { key:'isDefault',    header:L('डिफल्ट','Default'), type:'boolean' },
