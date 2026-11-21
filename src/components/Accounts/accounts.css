@@ -884,7 +884,7 @@
 .acc-app .vtype-date { display: inline-flex; align-items: center; gap: 10px; margin-left: 10px; padding-left: 18px; border-left: 1px solid #dbe5f7; }
 .acc-app .vtype-date .bsd { height: 38px; background: #fff; }
 .acc-app .acsel-list li.cur > span { font-weight: 700; }
-.acc-app .acsel-list li.cur > span::after { content: ' âœ“'; color: var(--primary); }
+.acc-app .acsel-list li.cur > span::after { content: ' \2713'; color: var(--primary); }
 @media (max-width: 900px) { .acc-app .vtype-bar { flex-wrap: wrap; } .acc-app .vtype-date { margin-left: 0; padding-left: 0; border-left: none; } }
 
 

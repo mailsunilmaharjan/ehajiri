@@ -887,7 +887,7 @@ table.totals tr.grand td { background: #dcfce7 !important; color: #166534; font-
 .vtype-date { display: inline-flex; align-items: center; gap: 10px; margin-left: 10px; padding-left: 18px; border-left: 1px solid #dbe5f7; }
 .vtype-date .bsd { height: 38px; background: #fff; }
 .acsel-list li.cur > span { font-weight: 700; }
-.acsel-list li.cur > span::after { content: ' âœ“'; color: var(--primary); }
+.acsel-list li.cur > span::after { content: ' \2713'; color: var(--primary); }
 @media (max-width: 900px) { .vtype-bar { flex-wrap: wrap; } .vtype-date { margin-left: 0; padding-left: 0; border-left: none; } }
 
 
