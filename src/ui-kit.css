@@ -323,3 +323,72 @@ body .acc-app .doc-form .bsd input, body .acc-app .entry-card .bsd input { heigh
 /* Staff modal tabs (Staff Identity / Officially Changes / Device Connectivity): same rounded white cards */
 .glm-form .dg-container { border-radius: 14px; border-color: #e8edf5; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
 .glm-form .empty-state { background: #fff; border: 1px solid #e8edf5; border-radius: 14px; }
+
+/* ═══════════════════════════ Accounts forms — card style (same look as the Staff / Settings forms) ═══════════════════════════
+   New Customer / Supplier / Product, Ledger & group dialogs, Company Setup, Quotation Template, and the bill / voucher entry
+   screens (Purchase Order, Purchase, Purchase Return, Sales Quotation, Sales Order, Sales Invoice, Sales Return, Journal …).
+   Pure CSS on the module's own classes, so no screen needs markup changes. */
+body .acc-app .card.form, body .acc-app .card.party-full, body .acc-app .modal > .card.qt-form, body .acc-app .card.entry-card {
+  font-family: 'Inter','Noto Sans Devanagari','Segoe UI',system-ui,sans-serif;
+  border-radius: 16px !important; border: 1px solid #e8edf5 !important; border-top-width: 1px !important; box-shadow: 0 8px 30px rgba(15,23,42,.08);
+  overflow: hidden !important;
+}
+body .acc-app .modal > .card.form, body .acc-app .modal > .card.party-full { border: none !important; padding: 0 !important; background: #f8fafc; box-shadow: 0 30px 80px rgba(15,23,42,.35); }
+body .acc-app .modal > .card.form { overflow: visible !important; }
+body .acc-app .modal > .card.party-full { overflow: hidden !important; }
+
+/* header bar: grey, thin underline, plain dark title (no animated gradient) */
+body .acc-app .modal > .card.form > h2:first-child, body .acc-app .party-full .pf-title, body .acc-app .qt-form .pf-title {
+  margin: 0 !important; padding: 14px 20px !important; background: #f8fafc !important; background-image: none !important; animation: none !important;
+  border-bottom: 1px solid #e2e8f0 !important; border-radius: 0 !important;
+  font-size: 16px !important; font-weight: 700 !important; color: #0f2a3d !important; letter-spacing: -.1px;
+}
+body .acc-app .party-full .pf-title h2, body .acc-app .qt-form .pf-title h2 { font-size: 16px !important; font-weight: 700 !important; color: #0f2a3d !important; }
+
+/* form sections become white rounded cards on the grey form */
+body .acc-app .party-full .doc-form, body .acc-app .qt-form .doc-form {
+  background: #fff; border: 1px solid #e8edf5; border-radius: 14px; padding: 16px 18px; margin: 12px 18px 0; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+body .acc-app .party-full > .pf-title + .doc-form { margin-top: 14px; }
+body .acc-app .party-full > .section-label, body .acc-app .party-full .pf-contacts-head, body .acc-app .qt-form > .section-label { margin-left: 22px; margin-right: 22px; }
+body .acc-app .party-full .pf-contacts, body .acc-app .party-full table { margin-left: 0; }
+/* plain .form dialogs (Ledger, group, category, Company Setup): fields live straight in the card */
+body .acc-app .card.form { background: #fff; }
+body .acc-app .modal > .card.form > :not(h2):not(.actions) { margin-left: 20px; margin-right: 20px; }
+body .acc-app .modal > .card.form > h2 + * { margin-top: 16px; }
+
+/* footer bar */
+body .acc-app .card.form .actions, body .acc-app .party-full .pf-actions, body .acc-app .qt-form .pf-actions, body .acc-app .card.entry-card > .actions {
+  margin: 16px 0 0 !important; padding: 12px 20px !important; background: #f8fafc !important; border-top: 1px solid #e2e8f0 !important; border-radius: 0 !important;
+}
+body .acc-app .card.form:not(.modal > .card) { padding-bottom: 0; }
+body .acc-app .card.entry-card > .actions { margin: 18px -20px -20px !important; }
+body .acc-app .modal > .card.form { padding-bottom: 0 !important; }
+
+/* fields: same size / radius / focus ring as the other forms */
+body .acc-app .card.form :is(input, select):not([type=checkbox]):not([type=radio]):not([type=file]):not(table input):not(table select):not(.bsd input),
+body .acc-app .party-full :is(input, select):not([type=checkbox]):not([type=radio]):not([type=file]):not(table input):not(table select):not(.bsd input),
+body .acc-app .card.entry-card .doc-form :is(input, select):not([type=checkbox]):not([type=radio]):not([type=file]):not(table input):not(table select):not(.bsd input) {
+  height: 42px !important; border-radius: 8px; border-color: #dbe3ee; font-size: 14.5px !important;
+}
+body .acc-app .card.form :is(input, select, textarea):focus:not(table input), body .acc-app .party-full :is(input, select, textarea):focus:not(table input),
+body .acc-app .card.entry-card :is(input, select, textarea):focus:not(table input):not(table select) { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+body .acc-app .card.form label:not(.check), body .acc-app .party-full label:not(.check), body .acc-app .card.entry-card .doc-form > label { font-size: 11.5px !important; font-weight: 600 !important; color: #64748b !important; }
+
+/* buttons in the footer bar: compact, primary = gradient */
+body .acc-app .card.form .actions button, body .acc-app .party-full .pf-actions button, body .acc-app .qt-form .pf-actions button, body .acc-app .card.entry-card > .actions button {
+  height: auto !important; min-height: 32px; padding: 6px 14px !important; border-radius: 8px !important; font-size: 12.5px !important; font-weight: 600 !important;
+}
+body .acc-app .card.form .actions button:not(.ghost):not(.link):not(.danger),
+body .acc-app .party-full .pf-actions button:not(.ghost):not(.link):not(.danger),
+body .acc-app .qt-form .pf-actions button:not(.ghost):not(.link):not(.danger),
+body .acc-app .card.entry-card > .actions button:not(.ghost):not(.link):not(.danger) {
+  background: linear-gradient(135deg,#2563eb,#4f46e5) !important; border-color: transparent !important; color: #fff !important; box-shadow: 0 4px 12px rgba(37,99,235,.3);
+}
+body .acc-app .card.form .actions button.ghost, body .acc-app .party-full .pf-actions button.ghost, body .acc-app .qt-form .pf-actions button.ghost, body .acc-app .card.entry-card > .actions button.ghost {
+  background: #fff !important; border: 1px solid #dbe3ee !important; color: #334155 !important;
+}
+
+/* bill / voucher entry screens: grey page behind one white rounded card, no coloured top bar */
+body .acc-app .card.entry-card { background: #fff; padding: 20px; border-top: 1px solid #e8edf5 !important; }
+body .acc-app .card.entry-card .section-label { margin-top: 6px; }
