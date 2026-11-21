@@ -441,7 +441,7 @@ export default function ChartOfAccounts() {
       {newGroup && (
         <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setNewGroup(null)}>
           <form className="card form" onSubmit={saveGroup}>
-            <h2>{newGroup.id ? (groupIsBank ? `🏦 ${newGroup.name}` : 'Edit group') : `New ${groupIsBank ? 'bank sub ledger' : 'sub ledger group'} under “${groups.find((g) => g.id === newGroup.parent_id)?.name}”`}</h2>
+            <h2 className="acc-head"><span className="acc-head-ic">{groupIsBank ? '🏦' : newGroup.id ? '✏️' : '＋'}</span><span className="acc-head-txt">{newGroup.id ? (groupIsBank ? newGroup.name : 'Edit Group') : `New ${groupIsBank ? 'Bank Sub Ledger' : 'Sub Ledger Group'}`}<small>{newGroup.id ? 'Update this group' : `Under “${groups.find((g) => g.id === newGroup.parent_id)?.name}”`}</small></span></h2>
             <label>{groupIsBank ? 'Bank name' : 'Name'}<input autoFocus value={newGroup.name} onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })} required placeholder={groupIsBank ? 'e.g. Kumari Bank' : ''} /></label>
             <label>Name in Nepali<input value={newGroup.name_np} onChange={(e) => setNewGroup({ ...newGroup, name_np: e.target.value })} /></label>
             {groupIsBank && (

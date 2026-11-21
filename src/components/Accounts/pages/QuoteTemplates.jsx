@@ -157,7 +157,8 @@ function TemplateForm({ value, onClose, onSaved, busy, setBusy }) {
     <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="card party-full qt-form" autoComplete="off" onSubmit={(e) => { e.preventDefault(); save(true); }}>
         <div className="pf-title">
-          <h2>{f.id ? `✏️ ${f.name}` : '➕ New Quotation Template'}</h2>
+          <span className="acc-head-ic">{f.id ? '✏️' : '＋'}</span>
+          <span className="acc-head-txt"><h2>{f.id ? f.name : 'New Quotation Template'}</h2><small>{f.id ? 'Update this quotation template' : 'Cover, profile pages, terms and signatories for quotations'}</small></span>
           {f.is_default && <span className="tag st-posted">default</span>}
           <span className="spacer" />
           {f.id && <a className="btn ghost btn-sm" href={`/api/accounts/quote-templates/${f.id}/preview`} target="_blank" rel="noopener" tabIndex={-1}

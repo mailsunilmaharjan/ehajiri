@@ -286,8 +286,8 @@ const SearchableSelect = forwardRef(({
         <div ref={dropRef} style={{
           position: 'fixed', zIndex: 99999,
           top: rect.top, left: rect.left, width: rect.width,
-          background: '#fff', border: '1.5px solid #1a56db', borderRadius: 8,
-          boxShadow: '0 8px 28px rgba(0,0,0,.18)',
+          background: '#fff', border: '1.5px solid var(--ui-dd-border, #1a56db)', borderRadius: 'var(--ui-dd-radius, 8px)',
+          boxShadow: 'var(--ui-dd-shadow, 0 8px 28px rgba(0,0,0,.18))',
           maxHeight: 280, display: 'flex', flexDirection: 'column',
         }}>
           {/* search */}
@@ -312,19 +312,19 @@ const SearchableSelect = forwardRef(({
               : filtered.map((opt, i) => {
                   const active      = isSelected(opt.value);
                   const highlighted = i === activeIndex;
-                  const stripeBg    = i % 2 === 0 ? '#fff' : '#fafafa';
+                  const stripeBg    = i % 2 === 0 ? '#fff' : 'var(--ui-dd-stripe, #fafafa)';
                   return (
                     <div key={opt.value}
                       ref={el => itemRefs.current[i] = el}
                       onMouseEnter={() => setActiveIndex(i)}
                       onMouseDown={e => { e.preventDefault(); handleSelect(opt.value); }}
                       style={{
-                        padding: '6px 10px', fontSize:13, cursor:'pointer',
+                        padding: 'var(--ui-dd-row-pad, 6px 10px)', fontSize: 'var(--ui-dd-font, 13px)', cursor:'pointer',
                         display:'flex', alignItems:'center', gap:8,
-                        background: highlighted ? '#eff6ff' : (active ? '#f8fafc' : stripeBg),
-                        color:      active ? '#1a56db' : '#1f2937',
-                        borderLeft: active ? '3px solid #1a56db' : (highlighted ? '3px solid #93c5fd' : '3px solid transparent'),
-                        borderBottom: '1px solid #eef0f3',
+                        background: highlighted ? 'var(--ui-dd-hover-bg, #eff6ff)' : (active ? 'var(--ui-dd-current-bg, #f8fafc)' : stripeBg),
+                        color:      active ? 'var(--ui-dd-current-text, #1a56db)' : '#1f2937',
+                        borderLeft: active ? '3px solid var(--ui-dd-current-bar, #1a56db)' : (highlighted ? '3px solid var(--ui-dd-hover-bar, #93c5fd)' : '3px solid transparent'),
+                        borderBottom: '1px solid var(--ui-dd-line, #eef0f3)',
                       }}>
                       {/* checkbox for multiple mode */}
                       {multiple && (

@@ -400,7 +400,7 @@ export default function Products() {
       {catEdit && (
         <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setCatEdit(null)}>
           <form className="card form narrow" onSubmit={(e) => { e.preventDefault(); saveCat(); }}>
-            <h2>{catEdit.id ? 'Edit' : 'Add'} {catEdit.parent_id ? 'sub category' : 'category'}</h2>
+            <h2 className="acc-head"><span className="acc-head-ic">{catEdit.id ? '✏️' : '＋'}</span><span className="acc-head-txt">{catEdit.id ? 'Edit' : 'Add'} {catEdit.parent_id ? 'Sub Category' : 'Category'}<small>{catEdit.parent_id ? 'A sub category groups products inside a category' : 'Categories group products and set their dealer rates'}</small></span></h2>
             {catEdit.parent_id && !catEdit.id && (
               <label className="full">Category<select value={catEdit.parent_id} onChange={(e) => setCatEdit({ ...catEdit, parent_id: e.target.value })}>
                 {mains.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>

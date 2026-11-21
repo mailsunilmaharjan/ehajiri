@@ -29,7 +29,7 @@
   --ui-field-bg: #ffffff;
   --ui-field-text: #111827;
   --ui-field-focus: #1a56db;
-  --ui-field-ring: 0 0 0 3px rgba(26, 86, 219, .1);
+  --ui-field-ring: 0 0 0 2px rgba(26, 86, 219, .1);
   --ui-field-disabled-bg: #f3f4f6;
   --ui-field-disabled-text: #6b7280;
   --ui-placeholder: #9ca3af;
@@ -49,6 +49,12 @@
   --ui-dd-current-weight: 600;
   --ui-dd-line: #eef0f3;
   --ui-dd-font: 13px;
+  --ui-dd-shadow: 0 8px 28px rgba(0,0,0,.18);
+  --ui-dd-stripe: #fafafa;     /* every second row */
+  --ui-dd-current-text: #1a56db;
+  --ui-dd-row-pad: 6px 10px;
+  --ui-dd-sub-font: 10.5px;    /* second line under the name (code · post) */
+  --ui-dd-sub-text: #9ca3af;
 
   /* dialogs / forms */
   --ui-modal-radius: 12px;
@@ -464,3 +470,40 @@ body .acc-app .party-full > .last-saved { margin-left: 22px; margin-right: 22px;
 body .acc-app .prod-full > label.pf-features { display: block; margin: 10px 18px 0; background: #fff; border: 1px solid #e8edf5; border-radius: 14px; padding: 14px 16px; }
 body .acc-app .prod-full > table.spec-grid { margin: 10px 18px 0; width: calc(100% - 36px); background: #fff; border: 1px solid #e8edf5; border-radius: 12px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
 body .acc-app .prod-full > .spec-add { margin: 10px 18px 0; }
+
+/* Company Setup page: grey form, numbered white section cards, grey save bar */
+body .acc-app .card.form.acc-pageform { background: #f8fafc !important; padding: 16px 0 0 !important; gap: 12px 0; max-width: 1000px; }
+body .acc-app .card.form.acc-pageform > .acc-card { margin: 0 16px !important; }
+body .acc-app .card.form.acc-pageform > .last-saved { grid-column: 1 / -1; margin: 0 20px; }
+body .acc-app .card.form.acc-pageform .acc-card .check { align-self: end; padding-bottom: 10px; }
+
+/* ── ONE master drop-down look: the Attendance Staff picker (SearchableSelect). It reads the --ui-dd-* variables at the
+   top of this file; the Accounts customer / supplier / product / ledger pickers below read the very same variables. ── */
+body .acc-app .acsel-list { box-shadow: var(--ui-dd-shadow) !important; padding: 0 !important; }
+body .acc-app .acsel-list li { padding: var(--ui-dd-row-pad) !important; min-height: 0; }
+body .acc-app .acsel-list li:nth-child(even):not(.hi):not(:hover):not(.cur) { background: var(--ui-dd-stripe); }
+body .acc-app .acsel-list li.cur { color: var(--ui-dd-current-text); }
+body .acc-app .acsel-list li small { font-size: var(--ui-dd-sub-font); color: var(--ui-dd-sub-text) !important; font-weight: 400; }
+
+/* ── Accounts: ONE form header for every pop-up (same as the Settings / Fiscal Year form header) ──────────────────
+   grey bar, 42px white icon tile, 17px title + 12.5px subtitle, white rounded ✕ on the right. */
+body .acc-app .modal > .card > h2:first-child, body .acc-app .modal > .card > .pf-title {
+  display: flex !important; align-items: center; gap: 14px; min-height: 74px; box-sizing: border-box;
+  margin: 0 0 0 !important; padding: 16px 70px 16px 22px !important;
+  background: #f8fafc !important; background-image: none !important; animation: none !important;
+  border-bottom: 1px solid #e2e8f0 !important; border-radius: 0 !important;
+  font-size: 17px !important; font-weight: 700 !important; color: #0f2a3d !important; letter-spacing: -.1px;
+}
+body .acc-app .modal > .card:not(.form):not(.party-full) > h2:first-child { margin: -20px -20px 16px !important; }
+body .acc-app .modal > .card .pf-title h2, body .acc-app .acc-head-txt h2 {
+  margin: 0 !important; font-size: 17px !important; font-weight: 700 !important; color: #0f2a3d !important;
+}
+body .acc-app .acc-head-ic { width: 42px !important; height: 42px !important; border-radius: 12px !important; font-size: 20px !important; }
+body .acc-app .acc-head-txt { font-size: 17px !important; }
+body .acc-app .acc-head-txt small { font-size: 12.5px !important; color: #4b6477 !important; font-weight: 400; margin-top: 2px; }
+body .acc-app .modal > .card > .x-close {
+  top: 20px !important; right: 22px !important; width: 34px !important; height: 34px !important; border-radius: 10px !important;
+  background: #fff !important; border: 0 !important; color: #0f2a3d !important; font-size: 14px !important;
+  box-shadow: 0 1px 3px rgba(15,23,42,.12) !important;
+}
+body .acc-app .modal > .card > .x-close:hover { background: #e2e8f0 !important; color: #0f2a3d !important; }

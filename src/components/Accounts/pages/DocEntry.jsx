@@ -80,7 +80,7 @@ function QuickParty({ type, name, onSaved, onClose, asContact = false }) {
   return (
     <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="card form" onSubmit={save}>
-        <h2>➕ New {asContact ? 'contact' : type}</h2>
+        <h2 className="acc-head"><span className="acc-head-ic">＋</span><span className="acc-head-txt">New {asContact ? 'Contact' : type === 'customer' ? 'Customer' : 'Supplier'}<small>Quick add — full details can be filled in later</small></span></h2>
         <label>Name *<input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></label>
         {!asContact && <label>PAN / VAT No.<input value={f.pan} maxLength={9} onChange={(e) => setF({ ...f, pan: e.target.value })} /></label>}
         <label>Mobile<input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
