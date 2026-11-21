@@ -452,3 +452,12 @@ body .acc-app .card.form.acc-cardform > .acc-card {
 body .acc-app .card.form.acc-cardform > .acc-card .full { grid-column: 1 / -1; }
 body .acc-app .card.form.acc-cardform > h2 + .acc-card { margin-top: 14px !important; }
 body .acc-app .card.form.acc-cardform > :is(label.check, p, .last-saved) { grid-column: 1 / -1; margin-left: 22px; margin-right: 22px; }
+
+/* New / Edit Customer & Supplier: icon header, numbered sections, contacts table as a white card */
+body .acc-app .party-full .pf-title { display: flex !important; align-items: center; gap: 12px; }
+body .acc-app .party-full .pf-title .acc-head-txt h2 { margin: 0; }
+body .acc-app .party-full > .acc-step-out { margin: 18px 22px 0; }
+body .acc-app .party-full > .pf-contacts-head { margin-top: 18px; }
+body .acc-app .party-full > .pf-contacts-head .acc-step { margin: 0; }
+body .acc-app .party-full > table.pf-contacts { margin: 10px 18px 0; width: calc(100% - 36px); background: #fff; border: 1px solid #e8edf5 !important; border-radius: 12px; border-collapse: separate; border-spacing: 0; }
+body .acc-app .party-full > .last-saved { margin-left: 22px; margin-right: 22px; }

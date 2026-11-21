@@ -173,12 +173,14 @@ export default function Parties({ type }) {
         <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setEdit(null)}>
           <form className="card party-full" onSubmit={save} autoComplete="off">
             <div className="pf-title">
-              <h2>{edit.id ? `✏️ Edit ${word}` : `➕ New ${word}`}</h2>
+              <span className="acc-head-ic">{edit.id ? '✏️' : '＋'}</span>
+              <span className="acc-head-txt"><h2>{edit.id ? `Edit ${word}` : `New ${word}`}</h2><small>{edit.id ? `Update this ${word.toLowerCase()}'s details` : `Add a new ${word.toLowerCase()} with contacts and opening balance`}</small></span>
               {edit.id && <span className="dt-no">{edit.code}</span>}
               {edit.id && !edit.active && <span className="tag">inactive</span>}
             </div>
 
             <div className="doc-form pf-top">
+              <div className="acc-step"><i>1</i>{word} details</div>
               <label>{word} / Company Name *<input autoFocus name="name" autoComplete="nope" value={edit.name} onChange={set('name')} required /></label>
               <label>PAN / VAT No.<input name="pan" autoComplete="nope" value={edit.pan || ''} onChange={(e) => setEdit({ ...edit, pan: e.target.value.replace(/\D/g, '') })} maxLength={9} inputMode="numeric" placeholder="9 digits" /></label>
               {isCus ? (
@@ -202,6 +204,7 @@ export default function Parties({ type }) {
             </div>
 
             <div className="doc-form pay-row pf-acc">
+              <div className="acc-step"><i>2</i>Opening balance &amp; credit</div>
               <label>Opening Balance
                 <select value={edit.side} onChange={(e) => setEdit({ ...edit, side: e.target.value })}>
                   <option value="take">Need to take payment from them (Dr)</option>
@@ -214,7 +217,7 @@ export default function Parties({ type }) {
               {edit.id && <label className="check"><input type="checkbox" checked={edit.active} onChange={set('active')} /> Active</label>}
             </div>
 
-            <div className="section-label">🚚 RECOMMENDED TRANSPORT</div>
+            <div className="acc-step acc-step-out"><i>3</i>Recommended transport</div>
             <div className="doc-form pf-trans">
               <label>Transport Name<input name="transport_name" autoComplete="nope" value={edit.transport_name || ''} onChange={set('transport_name')} placeholder="e.g. Sajha Yatayat Cargo" /></label>
               <label>Phone<input name="transport_phone" autoComplete="nope" inputMode="tel" value={edit.transport_phone || ''} onChange={setPhone('transport_phone')} placeholder="Transport office phone" /></label>
@@ -222,7 +225,7 @@ export default function Parties({ type }) {
             </div>
 
             <div className="pf-contacts-head">
-              <span className="section-label">CONTACT PERSONS <span className="tag">{edit.contacts.filter((c) => c.name).length}</span></span>
+              <span className="acc-step"><i>4</i>Contact persons <span className="tag">{edit.contacts.filter((c) => c.name).length}</span></span>
               <span className="spacer" />
               {picked.size > 0 && <button type="button" className="ghost btn-sm" onClick={() => { setEdit({ ...edit, contacts: edit.contacts.filter((_, i) => !picked.has(i)) }); setPicked(new Set()); }}>Remove selected ({picked.size})</button>}
               <button type="button" className="ghost add-line" tabIndex={-1} onClick={() => setEdit({ ...edit, contacts: [...edit.contacts, blankContact()] })}>＋ Add Contact</button>
