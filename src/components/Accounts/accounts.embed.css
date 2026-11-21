@@ -38,24 +38,18 @@
 .acc-app .products-page .page-head select { height: 28px; font-size: 12px; padding: 0 6px; width: auto; min-width: 0; max-width: 170px; border: 1px solid #dedede; border-radius: 6px; }
 .acc-app .products-page .page-head button { height: 28px; font-size: 12px; padding: 0 12px; }
 
-/* Menu hub pages (Master / Posting / Reports): quick buttons + columns of cards */
-.acc-app .hub-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-.acc-app .hub-actions .hub-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #0f7b5f; color: #fff; border-radius: 6px; font-size: 14px; font-weight: 600; text-decoration: none; }
-.acc-app .hub-actions .hub-btn:hover { background: #0b624c; }
-.acc-app .hub-cols { column-width: 300px; column-gap: 16px; }
-.acc-app .hub-col { break-inside: avoid; background: #e8eef7; border: 1px solid #cbd7e8; border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
-.acc-app .hub-col > h2 { display: flex; align-items: center; gap: 10px; margin: 0; padding: 16px 20px; font-size: 17px; font-weight: 600; color: #0f2a3d; background: #dbe5f3; border-bottom: 1px solid #cbd7e8; }
-.acc-app .hub-list { padding: 8px 0 12px; }
-.acc-app .hub-item { display: flex; align-items: center; gap: 12px; padding: 9px 20px; color: #1f2937; font-size: 15px; text-decoration: none; }
-.acc-app .hub-item:hover { background: #d3e0f2; color: #1a56db; }
-.acc-app .hub-item kbd { margin-left: auto; font-size: 10px; color: #9ca3af; }
+/* Menu hub pages (Master / Posting / Reports): same cards as the Chart of Accounts statement view (coa-st-* below) */
+.acc-app .hub-st { align-items: start; }
+.acc-app .hub-st .coa-st-list { max-height: none; }
+.acc-app .hub-st a.coa-st-led { color: #1f2937; text-decoration: none; padding-top: 8px; padding-bottom: 8px; font-size: 13.5px; }
+.acc-app .hub-st a.coa-st-led:hover { color: #1a56db; }
+.acc-app .hub-st a.coa-st-led kbd { font-size: 10px; color: #9ca3af; }
+.acc-app .hub-st-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* Default (solid) buttons in Accounts: blue with white text, like the Staff list "Working" toggle (sizes: ui-kit.css, body .acc-app).
    Same specificity as the base rule in accounts.css and loaded after it, so .ghost / .danger / .link / tab buttons keep their own look. */
 .acc-app button, .acc-app a.btn { background: var(--acc-btn-bg, #1a56db); border-color: var(--acc-btn-bg, #1a56db); color: #fff; }
 .acc-app button:hover:not(:disabled), .acc-app a.btn:hover { background: var(--acc-btn-bg-hover, #1245b0); border-color: var(--acc-btn-bg-hover, #1245b0); color: #fff; }
-.acc-app .hub-actions .hub-btn { height: 30px; padding: 0 11px; font-size: 12px; font-weight: 600; border-radius: 6px; background: var(--acc-btn-bg, #1a56db); }
-.acc-app .hub-actions .hub-btn:hover { background: var(--acc-btn-bg-hover, #1245b0); }
 
 /* Balance Sheet */
 .acc-app .bs-table td.indent3 { padding-left: 58px; font-size: 12.5px; }

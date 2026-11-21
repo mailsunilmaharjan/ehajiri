@@ -37,7 +37,7 @@
   /* labels above fields */
   --ui-label-font: 12px;
   --ui-label-weight: 500;
-  --ui-label-color: #374151;
+  --ui-label-color: #000000;   /* form labels: black everywhere */
 
   /* open drop-down list (Staff's SearchableSelect): hovered row, CURRENT selection row */
   --ui-dd-border: #1a56db;
@@ -279,7 +279,7 @@ body .acc-app .doc-form .bsd input, body .acc-app .entry-card .bsd input { heigh
 .glm-form .modal-body { background: #f8fafc; padding: 14px 18px; overflow-y: auto; flex: 1; }
 .glm-form .glm-card { background: #fff; border: 1px solid #e8edf5; border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
 .glm-form .glm-card .form-group:last-child { margin-bottom: 0 !important; }
-.glm-form .form-label { font-size: 11.5px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+.glm-form .form-label { font-size: 11.5px; font-weight: 600; color: var(--ui-label-color); margin-bottom: 4px; }
 .glm-form .form-control { border-radius: 8px; border: 1px solid #dbe3ee; padding: 10px 12px; min-height: 42px; font-size: 14.5px; background: #fff; }
 .glm-form .form-control:focus { border-color: var(--ui-field-focus); box-shadow: var(--ui-field-ring); outline: 0; }
 .glm-form .modal-footer { background: #fff; border-top: 1px solid #e2e8f0; padding: 11px 18px; gap: 8px; }
@@ -325,7 +325,7 @@ body .acc-app .doc-form .bsd input, body .acc-app .entry-card .bsd input { heigh
 .glm-page .card-header h3 { font-size: 16px; font-weight: 700; color: #0f2a3d; margin: 0; }
 .glm-page .card-body { padding: 14px 18px; background: #f8fafc; }
 .glm-page .glm-card { background: #fff; border: 1px solid #e8edf5; border-radius: 14px; padding: 16px 18px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
-.glm-page .form-label { font-size: 11.5px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+.glm-page .form-label { font-size: 11.5px; font-weight: 600; color: var(--ui-label-color); margin-bottom: 4px; }
 .glm-page .form-control { border-radius: 8px; border: 1px solid #dbe3ee; padding: 10px 12px; min-height: 42px; font-size: 14.5px; background: #fff; }
 .glm-page textarea.form-control { min-height: 64px; }
 .glm-page .form-control:focus { border-color: var(--ui-field-focus); box-shadow: var(--ui-field-ring); outline: 0; }
@@ -391,7 +391,7 @@ body .acc-app .card.entry-card .doc-form :is(input, select):not([type=checkbox])
 }
 body .acc-app .card.form :is(input, select, textarea):focus:not(table input), body .acc-app .party-full :is(input, select, textarea):focus:not(table input),
 body .acc-app .card.entry-card :is(input, select, textarea):focus:not(table input):not(table select) { border-color: var(--ui-field-focus); box-shadow: var(--ui-field-ring); }
-body .acc-app .card.form label:not(.check), body .acc-app .party-full label:not(.check), body .acc-app .card.entry-card .doc-form > label { font-size: 11.5px !important; font-weight: 600 !important; color: #64748b !important; }
+body .acc-app .card.form label:not(.check), body .acc-app .party-full label:not(.check), body .acc-app .card.entry-card .doc-form > label { font-size: 11.5px !important; font-weight: 600 !important; color: var(--ui-label-color) !important; }
 
 /* buttons in the footer bar: compact, primary = gradient */
 body .acc-app .card.form .actions button, body .acc-app .party-full .pf-actions button, body .acc-app .qt-form .pf-actions button, body .acc-app .card.entry-card > .actions button {
@@ -604,7 +604,7 @@ body .acc-app .acc-reportcard > .notice, body .acc-app .acc-reportcard > .muted 
 .modal-overlay > .modal:not(.modal-drawer) > .modal-footer .btn-outline { border: 1px solid #dbe3ee; color: #334155; background: #fff; }
 .modal-overlay > .modal:not(.modal-drawer) > .modal-footer .btn-primary { background: var(--ui-btn-primary-bg); border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(37,99,235,.3); }
 .modal-overlay > .modal:not(.modal-drawer) > .modal-footer .btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
-.modal-overlay > .modal:not(.modal-drawer) .form-label { font-size: 11.5px; font-weight: 600; color: #64748b; }
+.modal-overlay > .modal:not(.modal-drawer) .form-label { font-size: 11.5px; font-weight: 600; color: var(--ui-label-color); }
 .modal-overlay > .modal:not(.modal-drawer) .form-control { border-radius: 8px; border-color: #dbe3ee; }
 
 /* Accounts: every report / list page gets the same header-card automatically (no per-page markup needed) */

@@ -1,6 +1,6 @@
 import AuthImg from '../components/AuthImg';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useSearchParams } from '../lib/router';
 import { useApp } from '../context';
 import ContextMenu from '../components/ContextMenu';
 import { DeleteDialog } from '../components/Guards';
@@ -48,6 +48,19 @@ export default function ChartOfAccounts() {
     }
   };
   useEffect(() => { load(); }, []);
+  // ?new=bank | cash | ledger (from the Master page) opens that New form as soon as the chart has loaded
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => {
+    const n = sp.get('new');
+    if (!n || !groups.length) return;
+    const cg = groups.find((g) => g.code === '1203');
+    if (canEdit) {
+      if (n === 'bank' && cg) openLedger(null, cg.id, 'bank', 'bank');
+      else if (n === 'cash' && cg) openLedger(null, cg.id, 'cash', 'cash');
+      else if (n === 'ledger') openLedger(null, null);
+    }
+    setSp({}, { replace: true });
+  }, [sp, groups]);
 
   const byParent = useMemo(() => {
     const m = {};

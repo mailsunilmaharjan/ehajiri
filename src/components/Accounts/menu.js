@@ -27,22 +27,33 @@ export const ACCOUNTS_MENU = [
 ];
 
 // Landing pages ("Master", "Posting", "Reports") — the Accounts dropdown lists only these; each page shows every menu & sub-menu
-// as columns of cards. Item = [path, label, icon, hint?]. Rendered by pages/MenuHub.jsx at /accounts/master, /posting, /reports.
-// `actions` = quick buttons on top: [path, label].
+// as cards in the Chart of Accounts look. Item = [path, label, icon, key-hint?]; an item whose label starts with "+" is shown
+// as a blue button under that card's list. Rendered by pages/MenuHub.jsx at /accounts/master, /posting, /reports.
+// `actions` = blue buttons on the right of the page header: [path, label].
 export const ACCOUNTS_HUBS = {
-  master: { title: 'Master', icon: 'database', actions: [['/customers', 'Customers'], ['/suppliers', 'Suppliers'], ['/products', 'Products']], groups: [
-    { title: 'Parties', icon: 'users', cards: [['/customers', 'Customers (Debtors)', 'users'], ['/suppliers', 'Suppliers (Creditors)', 'truck']] },
+  master: { title: 'Master', icon: 'database', actions: [['/accounts?new=ledger', 'New Ledger'], ['/customers?new=1', 'New Customer'], ['/suppliers?new=1', 'New Supplier']], groups: [
+    { title: 'Parties', icon: 'users', cards: [
+      ['/customers', 'Customers (Debtors)', 'users'], ['/suppliers', 'Suppliers (Creditors)', 'truck'],
+      ['/customers?new=1', '+ Customer Sub Ledger', 'userPlus'], ['/suppliers?new=1', '+ Supplier Sub Ledger', 'userPlus'],
+    ] },
+    { title: 'Accounts Setup', icon: 'list', cards: [
+      ['/accounts', 'Chart of Accounts', 'list'], ['/accounts?new=ledger', '+ New Ledger', 'edit3'],
+      ['/accounts?new=bank', '+ Bank Account', 'briefcase'], ['/accounts?new=cash', '+ Cash Account', 'calculator'],
+      ['/company', 'Company Setup', 'sliders'],
+    ] },
     { title: 'Inventory Setup', icon: 'grid', cards: [['/products', 'Products & Categories', 'grid']] },
-    { title: 'Accounts Setup', icon: 'list', cards: [['/accounts', 'Chart of Accounts', 'list'], ['/company', 'Company Setup', 'sliders']] },
     { title: 'Templates', icon: 'edit3', cards: [['/quote-templates', 'Quotation Templates', 'edit3']] },
   ] },
   posting: { title: 'Posting', icon: 'edit3', actions: [['/docs/SI/new', 'Sales Invoice'], ['/docs/PB/new', 'Purchase Invoice'], ['/entry/journal', 'Journal Voucher']], groups: [
-    { title: 'Purchase Posting', icon: 'truck', cards: [['/docs/PB', 'Purchase Invoice', 'fileText'], ['/docs/PO', 'Purchase Order', 'clipboard'], ['/docs/PR', 'Purchase Return', 'logOut']] },
-    { title: 'Sales Posting', icon: 'trendingUp', cards: [['/docs/QT', 'Sales Quotation', 'mail'], ['/docs/SO', 'Sales Order', 'clipboard'], ['/docs/SI', 'Sales Invoice', 'fileText'], ['/docs/SR', 'Sales Return', 'logOut']] },
+    { title: 'Purchase Posting', icon: 'truck', cards: [['/docs/PB', 'Purchase Invoice', 'fileText'], ['/docs/PO', 'Purchase Order', 'clipboard'], ['/docs/PR', 'Purchase Return', 'logOut'],
+      ['/docs/PB/new', '+ New Purchase Invoice', 'fileText']] },
+    { title: 'Sales Posting', icon: 'trendingUp', cards: [['/docs/QT', 'Sales Quotation', 'mail'], ['/docs/SO', 'Sales Order', 'clipboard'], ['/docs/SI', 'Sales Invoice', 'fileText'], ['/docs/SR', 'Sales Return', 'logOut'],
+      ['/docs/SI/new', '+ New Sales Invoice', 'fileText'], ['/docs/QT/new', '+ New Quotation', 'mail']] },
     { title: 'Vouchers', icon: 'edit3', cards: [
       ['/entry/expense', 'Expenses Voucher', 'fileText'], ['/journals', 'Journal Voucher', 'edit3'], ['/entry/supplier_payment', 'Supplier Payment', 'fileText'],
       ['/entry/receipt', 'Payment Received', 'fileText'], ['/entry/transfer', 'Cash / Bank Transfer', 'fileText'], ['/entry/capital_loan', 'Capital / Loan Received', 'fileText'],
       ['/entry/staff_advance', 'Staff Advance / Loan', 'users'], ['/entry/asset_purchase', 'Asset Purchase', 'fileText'], ['/entry/asset_sale', 'Asset Sale', 'fileText'],
+      ['/entry/journal', '+ New Journal Voucher', 'edit3'],
     ] },
   ] },
   reports: { title: 'Reports', icon: 'barChart', groups: [
