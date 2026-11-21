@@ -358,14 +358,22 @@ export default function DocEntry() {
 
   return (
     <>
-      <header className="page-head">
-        <h1>{editId ? `✏️ Edit ${meta.name} ${orig?.doc_no || ''}` : `New ${meta.name}`}</h1>
-        {ref && <span className="tag">{meta.role === 'return' ? 'against' : ref.doc_type === 'QT' ? 'from quotation' : 'from order'} {ref.doc_no}</span>}
-        {orig?.edit_count > 0 && <span className="tag">edited {orig.edit_count}×</span>}
-        <span className="spacer" />
-        <span className="muted small">Enter = next · Ctrl+S = save · Esc = back</span>
-      </header>
       <section className="card entry-card">
+        {/* form header — same as every other form: icon tile, title, subtitle */}
+        <header className="acc-formhead">
+          <span className="acc-head-ic">{editId ? '✏️' : meta.side === 'sales' ? '🧾' : '📦'}</span>
+          <span className="acc-head-txt">
+            <h1>{editId ? `Edit ${meta.name} ${orig?.doc_no || ''}` : `New ${meta.name}`}</h1>
+            <small>{isQuote ? 'Prepare a quotation for a customer or contact'
+              : meta.role === 'order' ? `Record a ${meta.side === 'sales' ? 'customer' : 'supplier'} order`
+              : meta.role === 'return' ? `Return goods ${meta.side === 'sales' ? 'from a customer' : 'to a supplier'}`
+              : `Bill ${meta.side === 'sales' ? 'a customer' : 'from a supplier'} — stock and ledgers update on save`}</small>
+          </span>
+          {ref && <span className="tag">{meta.role === 'return' ? 'against' : ref.doc_type === 'QT' ? 'from quotation' : 'from order'} {ref.doc_no}</span>}
+          {orig?.edit_count > 0 && <span className="tag">edited {orig.edit_count}×</span>}
+          <span className="spacer" />
+          <span className="muted small acc-keys">Enter = next · Ctrl+S = save · Esc = back</span>
+        </header>
         <div className={`doc-form bill-top ${type === 'SI' ? 'si' : isSale || type === 'PB' ? '' : 'two'}`}>
           <div className="acc-step"><i>1</i>{isQuote ? `${partyWord} & date` : `${partyWord} & bill details`}</div>
           <label>{partyWord} Name *

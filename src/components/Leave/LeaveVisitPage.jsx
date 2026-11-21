@@ -1666,9 +1666,6 @@ const LeavePanel = () => {
                 <button className="modal-close" tabIndex={-1} onClick={() => setShowManual(false)}>✕</button>
               </div>
               <div className="modal-body">
-                <div style={{ background:'#fef3c7', border:'1px solid #fde68a', borderRadius:8, padding:'8px 12px', marginBottom:14, fontSize:12, color:'#92400e' }}>
-                  ⚠️ Manual posting bypasses the normal workflow. Use for correcting records or back-dated entries.
-                </div>
                 <form ref={manualFormRef} onSubmit={handleManualSubmit}>
 
                   {/* Staff */}
@@ -1692,17 +1689,8 @@ const LeavePanel = () => {
                     <Err msg={manualErrors.leaveTypeCode} />
                   </div>
 
-                  {/* Half Day */}
-                  <div style={{ marginBottom:14 }}>
-                    <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none' }}>
-                      <input type="checkbox" checked={manualForm.halfDay} onChange={e => setMF('halfDay', e.target.checked)}
-                        style={{ width:15, height:15, accentColor:'#7c3aed' }} />
-                      <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>Half Day (0.5)</span>
-                    </label>
-                  </div>
-
-                  {/* From / To Date */}
-                  <div className="form-row">
+                  {/* From / To Date + Half Day (right) */}
+                  <div style={{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr) auto', gap:12, alignItems:'start' }}>
                     <div className="form-group">
                       <Lbl required>From Date</Lbl>
                       <LeaveDateInput value={manualForm.fromDate} error={!!manualErrors.fromDate}
@@ -1714,6 +1702,16 @@ const LeavePanel = () => {
                       <LeaveDateInput value={manualForm.toDate} error={!!manualErrors.toDate}
                         minDate={manualForm.fromDate} settings={settings} allowPast={isAdmin} onChange={v => setMF('toDate', v)} />
                       <Err msg={manualErrors.toDate} />
+                    </div>
+                    <div className="form-group">
+                      <Lbl>Half Day</Lbl>
+                      <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none', minHeight:42, boxSizing:'border-box',
+                        padding:'0 14px', border:'1px solid #dbe3ee', borderRadius:8, whiteSpace:'nowrap',
+                        background: manualForm.halfDay ? '#f5f3ff' : '#fff' }}>
+                        <input type="checkbox" checked={manualForm.halfDay} onChange={e => setMF('halfDay', e.target.checked)}
+                          style={{ width:15, height:15, accentColor:'#7c3aed' }} />
+                        <span style={{ fontSize:13, color:'#374151' }}>Half Day (0.5)</span>
+                      </label>
                     </div>
                   </div>
 
