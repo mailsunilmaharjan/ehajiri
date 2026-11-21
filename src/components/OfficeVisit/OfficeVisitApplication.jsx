@@ -278,7 +278,7 @@ const OfficeVisitApplication = () => {
         </div>
       </div>
 
-      <div style={{ maxWidth: 720 }}>
+      <div className="glm-page" style={{ maxWidth: 720 }}>
         <div className="card">
           <div className="card-header">
             <h3>{t('Office Visit Application')}</h3>
@@ -313,7 +313,7 @@ const OfficeVisitApplication = () => {
               </div>
             </div>
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} className="glm-card">
 
               {/* ── Official Visit — searchable dropdown from settings ── */}
               <div className="form-group">

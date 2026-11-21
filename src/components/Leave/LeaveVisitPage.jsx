@@ -1657,10 +1657,11 @@ const LeavePanel = () => {
                 </div>
               </div>
             )}
-            <div className="modal modal-lg" style={{ maxWidth:700, maxHeight:'90vh', overflowY:'auto' }}
+            <div className="modal modal-lg glm-form glm-plain" style={{ maxWidth:700, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()} onKeyDown={cycleManualTab}>
               <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
-                <h2>✍️ Manual Leave Posting</h2>
+                <div className="glm-head-ic">✍️</div>
+                <div className="glm-head-txt"><h2>Manual Leave Posting</h2><p>Record a leave directly for a staff member</p></div>
                 {/* out of the Tab cycle — Esc / Cancel still close */}
                 <button className="modal-close" tabIndex={-1} onClick={() => setShowManual(false)}>✕</button>
               </div>
@@ -2997,10 +2998,11 @@ const VisitPanel = () => {
 
         return (
           <div className="modal-overlay">
-            <div className="modal modal-lg" style={{ maxWidth:660, maxHeight:'90vh', overflowY:'auto' }}
+            <div className="modal modal-lg glm-form glm-plain" style={{ maxWidth:660, maxHeight:'90vh', overflowY:'auto' }}
               onClick={e => e.stopPropagation()}>
               <div className="modal-header" style={{ position:'sticky', top:0, zIndex:10 }}>
-                <h2>✍️ Manual Office Visit Posting</h2>
+                <div className="glm-head-ic">✍️</div>
+                <div className="glm-head-txt"><h2>Manual Office Visit Posting</h2><p>Record an office visit directly for a staff member</p></div>
                 <button className="modal-close" onClick={() => setShowManualV(false)}>✕</button>
               </div>
               <div className="modal-body">
