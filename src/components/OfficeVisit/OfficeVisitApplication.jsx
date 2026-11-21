@@ -291,7 +291,7 @@ const OfficeVisitApplication = () => {
             )}
 
             {/* ── Staff Information ── */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 10,
               padding: '12px 16px', marginBottom: 20 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase',
                 letterSpacing: '.5px', marginBottom: 10 }}>

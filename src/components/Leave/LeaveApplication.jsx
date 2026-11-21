@@ -114,7 +114,7 @@ const LeaveApplication = () => {
 
             <form onSubmit={handleSubmit}>
               {/* Employee info */}
-              <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: 14, marginBottom: 20 }}>
+              <div style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 14, marginBottom: 20 }}>
                 <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>{t('Staff Information')}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                   {[[t('Name'), currentUser.fullName], [t('Staff ID'), currentUser.employeeId], [t('Department'), currentUser.department]].map(([l, v], i) => (

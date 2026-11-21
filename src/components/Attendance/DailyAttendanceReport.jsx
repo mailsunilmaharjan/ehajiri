@@ -960,18 +960,6 @@ const DailyAttendanceReport = () => {
         }
       />
 
-      {/* ══ Legend ══ */}
-      <div style={{ marginTop:10, display:'flex', gap:16, flexWrap:'wrap', fontSize:11, color:'#6b7280',
-        padding:'7px 12px', background:'#f9fafb', borderRadius:8, border:'1px solid #e5e7eb' }}>
-        <strong style={{ color:'#374151' }}>{L('व्याख्या','Legend')}:</strong>
-        <span><strong style={{ color:'#dc2626' }}>Late: HH:mm</strong> — {L('ढिलो (ग्रेस पछि)','Late (after grace)')}</span>
-        <span><strong style={{ color:'#d97706' }}>Early: HH:mm</strong> — {L('चाँडो गएको','Left early')}</span>
-        <span style={{ marginLeft:'auto', color:'#9ca3af' }}>
-          {L('पद/विभाग/शाखामा Short Name देखाइन्छ — hover गर्नुस पूरा नाम हेर्न',
-            'Post/Dept/Branch show short names — hover for full name')}
-        </span>
-      </div>
-
       {/* ══ Advance Search Modal ══ */}
       {searchModal && (
         <AdvanceSearchModal

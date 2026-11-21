@@ -378,12 +378,16 @@ const LeavePanel = () => {
     }));
   }, [showManual, manualForm.employeeId, recoConfig]); // eslint-disable-line react-hooks/exhaustive-deps
   const isRecoCompulsoryLeave = settings.recoApprovalCompulsory || false;
-  const isApproverForLeave    = (empId) => {
+  const isApproverForLeave    = (empId, rec) => {
+    // applicant picked one approver → only that person
+    if (rec?.approvalId && String(rec.approvalId) !== String(currentUser.id)) return false;
     const a = recoConfig[String(empId)]?.approval;
     const ids = Array.isArray(a) ? a : (a ? [a] : []);
     return ids.map(String).includes(String(currentUser.id));
   };
-  const isRecommenderForLeave = (empId) => {
+  const isRecommenderForLeave = (empId, rec) => {
+    // applicant picked one recommender → only that person
+    if (rec?.recoId && String(rec.recoId) !== String(currentUser.id)) return false;
     const r = recoConfig[String(empId)]?.reco;
     const ids = Array.isArray(r) ? r : (r ? [r] : []);
     return ids.map(String).includes(String(currentUser.id));
@@ -399,8 +403,8 @@ const LeavePanel = () => {
   // Shared permission computation for one row — used by both the row-level
   // action buttons and the view/action popup, so the two never disagree.
   const getLeaveRowPerms = (row) => {
-    const amApprover     = isApproverForLeave(row.employeeId);
-    const amRecommender  = isRecommenderForLeave(row.employeeId);
+    const amApprover     = isApproverForLeave(row.employeeId, row);
+    const amRecommender  = isRecommenderForLeave(row.employeeId, row);
     const recoConfigured = hasRecommenderForLeave(row.employeeId);
     // Separation of duties: while Recommendation Compulsory is on AND a
     // recommender is actually configured, the configured recommender can
@@ -462,7 +466,7 @@ const LeavePanel = () => {
   });
   const pendingForApprovalCountLeave = leaves.filter(l =>
     l.status === 'pending' && String(l.employeeId) !== String(currentUser.id) &&
-    (isRecommenderForLeave(l.employeeId) || isApproverForLeave(l.employeeId))
+    (isRecommenderForLeave(l.employeeId, l) || isApproverForLeave(l.employeeId, l))
   ).length;
 
   /* ── Apply form state ── */
@@ -657,17 +661,17 @@ const LeavePanel = () => {
   const displayLeaves = (showForApprovalLeave ? allLeaves : leaves).filter(l => {
     if (showForApprovalLeave) {
       if (String(l.employeeId) === String(currentUser.id)) return false;
-      if (!isRecommenderForLeave(l.employeeId) && !isApproverForLeave(l.employeeId)) return false;
+      if (!isRecommenderForLeave(l.employeeId, l) && !isApproverForLeave(l.employeeId, l)) return false;
     } else if (!isManager && String(l.employeeId) !== String(currentUser.id)) {
       return false;
-    }
-    if (filterStatus.length > 0 && !filterStatus.includes(l.status)) return false;
-    if (filterTypes.length > 0 && !filterTypes.includes(l.leaveTypeCode)) return false;
-    if (effFYs.length > 0) {
     } else if (!isAdmin && String(l.employeeId) !== String(currentUser.id)
       && !isRecommenderForLeave(l.employeeId, l) && !isApproverForLeave(l.employeeId, l)
       && String(l.recommendedBy) !== String(currentUser.id) && String(l.approvedBy) !== String(currentUser.id)) {
       return false;   // someone else's application (any status) I am not the recommender/approver of — not listed
+    }
+    if (filterStatus.length > 0 && !filterStatus.includes(l.status)) return false;
+    if (filterTypes.length > 0 && !filterTypes.includes(l.leaveTypeCode)) return false;
+    if (effFYs.length > 0) {
       // A leave belongs to the fiscal year its From Date falls in.
       const d = String(l.fromDate || '').slice(0, 10);
       const inFY = effFYs.some(id => {
@@ -702,7 +706,7 @@ const LeavePanel = () => {
   const countByStatus = s => (showForApprovalLeave ? allLeaves : leaves).filter(l => {
     if (showForApprovalLeave) {
       return String(l.employeeId) !== String(currentUser.id)
-        && (isRecommenderForLeave(l.employeeId) || isApproverForLeave(l.employeeId))
+        && (isRecommenderForLeave(l.employeeId, l) || isApproverForLeave(l.employeeId, l))
         && (s === 'all' || l.status === s);
     }
     const own = String(l.employeeId) === String(currentUser.id);
@@ -1079,8 +1083,7 @@ const LeavePanel = () => {
                     // assignment gets that fuller oversight view (stats,
                     // org-wide list, etc.) as a full-width popup here instead
                     // of navigating away to its own page.
-                    if (hasAnyRecoAssignmentLeave) setShowForApprovalLeave(v => !v);
-                    else setShowLeaveApprovalModal(true);
+                    setShowLeaveApprovalModal(true);   // popup grid: only the applications this login must recommend/approve
                   }}>
                   ✅ {hasAnyRecoAssignmentLeave
                     ? `Pending for Approvals${pendingForApprovalCountLeave ? ` (${pendingForApprovalCountLeave})` : ''}`
@@ -1825,7 +1828,7 @@ const LeavePanel = () => {
                 )}
 
                 {/* ── Staff Information ── */}
-                <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 16px', marginBottom:18 }}>
+                <div style={{ background:'#ffffff', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 16px', marginBottom:18 }}>
                   <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.5px', marginBottom:10 }}>
                     👤 Staff Information
                   </div>
@@ -2076,7 +2079,7 @@ const LeavePanel = () => {
           the Contact page, so the grid never shrinks/scrolls for it. */}
       {viewLeave && (() => {
         const perms = getLeaveRowPerms(viewLeave);
-        const amReco = isRecommenderForLeave(viewLeave.employeeId);
+        const amReco = isRecommenderForLeave(viewLeave.employeeId, viewLeave);
         const alreadyReco = !!viewLeave.recommendedBy;
         const isOwnPendingUntouched = String(viewLeave.employeeId) === String(currentUser.id)
           && viewLeave.status === 'pending' && !viewLeave.recommendedBy;
@@ -2361,7 +2364,7 @@ const LeavePanel = () => {
         <div className="modal-overlay" onClick={() => setShowLeaveApprovalModal(false)}>
           <div className="modal" style={{ width:'95vw', maxWidth:1400, maxHeight:'92vh' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>✅ {t('Leave Approval')}</h2>
+              <h2>✅ Pending for Approvals{pendingForApprovalCountLeave ? ` (${pendingForApprovalCountLeave})` : ''}</h2>
               <button className="modal-close" onClick={() => setShowLeaveApprovalModal(false)}>✕</button>
             </div>
             <div className="modal-body">
@@ -2535,12 +2538,16 @@ const VisitPanel = () => {
     }));
   }, [showManualV, manualVForm.employeeId, visitRecoConfig]); // eslint-disable-line react-hooks/exhaustive-deps
   const isRecoCompulsoryVisit = settings.recoApprovalCompulsory || false;
-  const isApproverForVisit    = (empId) => {
+  const isApproverForVisit    = (empId, rec) => {
+    // applicant picked one approver → only that person
+    if (rec?.approvalId && String(rec.approvalId) !== String(currentUser.id)) return false;
     const a = visitRecoConfig[String(empId)]?.approval;
     const ids = Array.isArray(a) ? a : (a ? [a] : []);
     return ids.map(String).includes(String(currentUser.id));
   };
-  const isRecommenderForVisit = (empId) => {
+  const isRecommenderForVisit = (empId, rec) => {
+    // applicant picked one recommender → only that person
+    if (rec?.recoId && String(rec.recoId) !== String(currentUser.id)) return false;
     const r = visitRecoConfig[String(empId)]?.reco;
     const ids = Array.isArray(r) ? r : (r ? [r] : []);
     return ids.map(String).includes(String(currentUser.id));
@@ -2556,8 +2563,8 @@ const VisitPanel = () => {
   // Shared permission computation for one row — see getLeaveRowPerms's
   // identical comment above.
   const getVisitRowPerms = (row) => {
-    const amApprover     = isApproverForVisit(row.employeeId);
-    const amRecommender  = isRecommenderForVisit(row.employeeId);
+    const amApprover     = isApproverForVisit(row.employeeId, row);
+    const amRecommender  = isRecommenderForVisit(row.employeeId, row);
     const recoConfigured = hasRecommenderForVisit(row.employeeId);
     const dualRoleBlocked = isRecoCompulsoryVisit && recoConfigured && amRecommender;
     // Server (authorizeRecoAction) never lets a non-admin act on their own application.
@@ -2592,7 +2599,7 @@ const VisitPanel = () => {
   });
   const pendingForApprovalCountVisit = officeVisits.filter(v =>
     v.status === 'pending' && String(v.employeeId) !== String(currentUser.id) &&
-    (isRecommenderForVisit(v.employeeId) || isApproverForVisit(v.employeeId))
+    (isRecommenderForVisit(v.employeeId, v) || isApproverForVisit(v.employeeId, v))
   ).length;
 
   const today = getNepalTodayISO();
@@ -2614,9 +2621,13 @@ const VisitPanel = () => {
   const displayVisits = (showForApprovalVisit ? allVisits : officeVisits).filter(v => {
     if (showForApprovalVisit) {
       if (String(v.employeeId) === String(currentUser.id)) return false;
-      if (!isRecommenderForVisit(v.employeeId) && !isApproverForVisit(v.employeeId)) return false;
+      if (!isRecommenderForVisit(v.employeeId, v) && !isApproverForVisit(v.employeeId, v)) return false;
     } else if (!isManager && String(v.employeeId) !== String(currentUser.id)) {
       return false;
+    } else if (!isAdmin && String(v.employeeId) !== String(currentUser.id)
+      && !isRecommenderForVisit(v.employeeId, v) && !isApproverForVisit(v.employeeId, v)
+      && String(v.recommendedBy) !== String(currentUser.id) && String(v.approvedBy) !== String(currentUser.id)) {
+      return false;   // someone else's application (any status) I am not the recommender/approver of — not listed
     }
     if (filterStatus.length > 0 && !filterStatus.includes(v.status)) return false;
     if (ovEffFYs.length > 0) {
@@ -2624,10 +2635,6 @@ const VisitPanel = () => {
       if (!ovEffFYs.some(id => {
         const fy = ovFyList.find(f => String(f.id) === String(id));
         return fy && d >= String(fy.startDate).slice(0, 10) && d <= String(fy.endDate).slice(0, 10);
-    } else if (!isAdmin && String(v.employeeId) !== String(currentUser.id)
-      && !isRecommenderForVisit(v.employeeId, v) && !isApproverForVisit(v.employeeId, v)
-      && String(v.recommendedBy) !== String(currentUser.id) && String(v.approvedBy) !== String(currentUser.id)) {
-      return false;   // someone else's application (any status) I am not the recommender/approver of — not listed
       }) && !(ovFYs === null && inNoFY(d, ovFyList))) return false;
     }
     if (ovTypes.length > 0 && !ovTypes.includes(v.visitType || 'National')) return false;
@@ -2651,7 +2658,7 @@ const VisitPanel = () => {
   const countByStatus = s => (showForApprovalVisit ? allVisits : officeVisits).filter(v => {
     if (showForApprovalVisit) {
       return String(v.employeeId) !== String(currentUser.id)
-        && (isRecommenderForVisit(v.employeeId) || isApproverForVisit(v.employeeId))
+        && (isRecommenderForVisit(v.employeeId, v) || isApproverForVisit(v.employeeId, v))
         && (s === 'all' || v.status === s);
     }
     const own = String(v.employeeId) === String(currentUser.id);
@@ -2739,8 +2746,7 @@ const VisitPanel = () => {
                 // recommender/approver gets the inline toggle, everyone else
                 // gets the fuller oversight view as a full-width popup
                 // instead of navigating to its own page.
-                if (hasAnyRecoAssignmentVisit) setShowForApprovalVisit(v => !v);
-                else setShowVisitApprovalModal(true);
+                setShowVisitApprovalModal(true);   // popup grid: only the applications this login must recommend/approve
               }}>
               ✅ {hasAnyRecoAssignmentVisit
                 ? `Pending for Approvals${pendingForApprovalCountVisit ? ` (${pendingForApprovalCountVisit})` : ''}`
@@ -3168,7 +3174,7 @@ const VisitPanel = () => {
           the Contact page, so the grid never shrinks/scrolls for it. */}
       {viewVisit && (() => {
         const perms = getVisitRowPerms(viewVisit);
-        const amReco = isRecommenderForVisit(viewVisit.employeeId);
+        const amReco = isRecommenderForVisit(viewVisit.employeeId, viewVisit);
         const alreadyReco = !!viewVisit.recommendedBy;
         const isOwnPendingUntouched = String(viewVisit.employeeId) === String(currentUser.id)
           && viewVisit.status === 'pending' && !viewVisit.recommendedBy;
@@ -3511,7 +3517,7 @@ const VisitPanel = () => {
         <div className="modal-overlay" onClick={() => setShowVisitApprovalModal(false)}>
           <div className="modal" style={{ width:'95vw', maxWidth:1400, maxHeight:'92vh' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>✅ {t('Visit Approval')}</h2>
+              <h2>✅ Pending for Approvals{pendingForApprovalCountVisit ? ` (${pendingForApprovalCountVisit})` : ''}</h2>
               <button className="modal-close" onClick={() => setShowVisitApprovalModal(false)}>✕</button>
             </div>
             <div className="modal-body">
@@ -3600,13 +3606,22 @@ const TabBarBulkButton = ({ onClick, language }) => (
 
 const LeaveVisitPage = ({ defaultTab = 'leave' }) => {
   const { t } = useLanguage();
-  const { stats } = useData();
-  const { isManager } = useAuth();
+  const { stats, leaves: rawLeaves, officeVisits: rawVisits } = useData();
+  const { isManager, currentUser } = useAuth();
+  const { assignments: tabReco } = useRecoApproval();
+  // tab badges = only the pending applications THIS login must recommend/approve
+  const mineCount = (arr) => (arr || []).filter(x => {
+    if (x.status !== 'pending' || String(x.employeeId) === String(currentUser?.id)) return false;
+    const me = String(currentUser?.id), c = tabReco[String(x.employeeId)] || {};
+    const ids = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(String);
+    return (ids(c.reco).includes(me) && (!x.recoId || String(x.recoId) === me))
+        || (ids(c.approval).includes(me) && (!x.approvalId || String(x.approvalId) === me));
+  }).length;
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   const tabs = [
-    { key:'leave', icon:'📅', label:t('Leave Management'), badge: isManager ? stats.pendingLeaves : 0, color:'#1a56db', bg:'#eff6ff', border:'#1a56db' },
-    { key:'visit', icon:'🏢', label:t('Office Visit'),     badge: isManager ? stats.pendingVisits : 0, color:'#059669', bg:'#ecfdf5', border:'#059669' },
+    { key:'leave', icon:'📅', label:t('Leave Management'), badge: mineCount(rawLeaves), color:'#1a56db', bg:'#eff6ff', border:'#1a56db' },
+    { key:'visit', icon:'🏢', label:t('Office Visit'),     badge: mineCount(rawVisits), color:'#059669', bg:'#ecfdf5', border:'#059669' },
   ];
 
   return (

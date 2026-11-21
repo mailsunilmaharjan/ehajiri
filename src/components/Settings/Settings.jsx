@@ -3990,13 +3990,15 @@ const Settings = () => {
                 {activeSetup === 'branch' && (
                   <SetupSection
                     title={L('शाखा','Branch')}
+                    formCols={2}
+                    formStep={L('शाखा विवरण','Branch details')}
                     data={[...(settings.branches || [])].sort((a,b)=>(a.rankingOrder??9999)-(b.rankingOrder??9999))}
                     fields={[
-                      { key:'name',         header:L('शाखाको नाम','Branch Name'), required:true },
+                      { key:'name',         header:L('शाखाको नाम','Branch Name'), required:true, full:true },
                       { key:'shortName',    header:L('संक्षिप्त नाम','Short Name') },
                       { key:'rankingOrder', header:L('क्रम','Ranking Order'), type:'number', placeholder:'1' },
-                      { key:'address',      header:L('ठेगाना','Address') },
-                      { key:'phone',        header:L('फोन','Phone') },
+                      { key:'address',      header:L('ठेगाना','Address'), full:true },
+                      { key:'phone',        header:L('फोन','Phone'), full:true },
                     ]}
                     sortKey="rankingOrder"
                     onSave={(id,form) => handleSetupSave('branches', id, form)}
