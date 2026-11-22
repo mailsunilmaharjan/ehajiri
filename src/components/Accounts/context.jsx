@@ -52,7 +52,7 @@ export function AppProvider({ children }) {
   }
   return (
     <Ctx.Provider value={{ ...info, fy: info.current_fy, accounts, reload, notify, logout: () => {},
-      role, isAdmin: role === 'admin', canEdit: role !== 'viewer' }}>
+      role, isAdmin: role === 'admin', isSuper: !!info?.user?.is_super, canEdit: role !== 'viewer' }}>
       <div className={cls}>{children}{toastEl}</div>
     </Ctx.Provider>
   );

@@ -12,9 +12,33 @@ import SearchableSelect from '../../Common/SearchableSelect.jsx';
 const LEVELS = [['mrp', 'Retail (MRP)'], ['dealer', 'Dealer'], ['partner', 'Partner']];
 const blankContact = () => ({ name: '', post: '', dept: '', mobile1: '', mobile2: '', email: '', remarks: '' });
 
+const HDR = { sn: 'sn', sno: 'sn', ledger: 'name', name: 'name', customer: 'name', customername: 'name', pan: 'pan', panno: 'pan', vat: 'pan', address: 'address', city: 'city',
+  suppliersname: 'name', suppliername: 'name', supplier: 'name', suppliers: 'name', homephone: 'home_phone', resphone: 'home_phone',
+  officephone: 'office_phone', phone: 'office_phone', email: 'email', mobile: 'phone', mobileno: 'phone', customergroup: 'group', group: 'group', contactperson: 'contact' };
+// no header row pasted -> assume the sheet's standard column order
+const POS_CUS = ['sn', 'name', 'pan', 'address', 'city', 'office_phone', 'email', 'phone', 'group', 'contact'];
+const POS_SUP = ['name', 'pan', 'address', 'city', 'office_phone', 'home_phone', 'email', 'phone'];
+/** Tab-separated text pasted from Excel -> [{ name, pan, address, city, office_phone, email, phone, group, contact }] */
+function parsePasted(text, isCus) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim());
+  if (!lines.length) return [];
+  let map = isCus ? POS_CUS : POS_SUP, start = 0;
+  const head = lines[0].split('\t').map((h) => HDR[h.toLowerCase().replace(/[^a-z]/g, '')] || null);
+  if (head.includes('name')) { map = head; start = 1; }
+  const out = [];
+  for (const line of lines.slice(start)) {
+    const cells = line.split('\t'), r = {};
+    map.forEach((f, i) => { if (f && f !== 'sn') r[f] = (cells[i] || '').replace(/^"|"$/g, '').trim(); });
+    if (!r.phone && r.home_phone) r.phone = r.home_phone;   // no mobile -> use the home phone
+    delete r.home_phone;
+    if (r.name) out.push({ pan: '', address: '', city: '', office_phone: '', email: '', phone: '', group: '', contact: '', ...r });
+  }
+  return out;
+}
+
 /** Customers = Sundry Debtors, Suppliers = Sundry Creditors. Same grid and full-width form as the Sales Invoice screens. */
 export default function Parties({ type }) {
-  const { reload, notify, fy, today, canEdit } = useApp();
+  const { reload, notify, fy, today, canEdit, isSuper } = useApp();
   const nav = useNavigate();
   const isCus = type === 'customer';
   const word = isCus ? 'Customer' : 'Supplier';
@@ -48,6 +72,24 @@ export default function Parties({ type }) {
     } catch (err) { notify(err.message, 'err'); }
   };
   useShortcuts({ save: () => saveSub(), close: () => setSub(null) }, !!sub);
+
+  // ── Bulk import (Super Admin only): paste rows copied from Excel, preview, import ──
+  // Columns: SN, Ledger, PAN, Address, City, Office Phone, Email, Mobile, Customer Group, Contact Person
+  // (a header row, if pasted, is matched by name instead). Existing names are skipped by the server.
+  const [bulk, setBulk] = useState(null);   // { text, busy, result }
+  const bulkRows = useMemo(() => (bulk ? parsePasted(bulk.text, isCus) : []), [bulk?.text, isCus]);
+  const existing = useMemo(() => new Set(rows.map((r) => r.name.trim().toLowerCase())), [rows]);
+  const bulkNew = bulkRows.filter((r, i) => !existing.has(r.name.toLowerCase()) && bulkRows.findIndex((x) => x.name.toLowerCase() === r.name.toLowerCase()) === i);
+  const runBulk = async () => {
+    setBulk({ ...bulk, busy: true });
+    try {
+      const res = await api.post('/parties/bulk-import', { party_type: type, rows: bulkNew });
+      await load(); await reload();
+      setBulk({ ...bulk, busy: false, result: res });
+      notify(`Imported ${res.added} ${word.toLowerCase()}(s)${res.skipped ? `, ${res.skipped} skipped` : ''}`, res.added ? 'ok' : 'err');
+    } catch (err) { setBulk({ ...bulk, busy: false }); notify(err.message, 'err'); }
+  };
+  useShortcuts({ close: () => setBulk(null) }, !!bulk);
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -128,6 +170,7 @@ export default function Parties({ type }) {
         <h1>{isCus ? 'Customers' : 'Suppliers'}</h1>
         <span className="muted">{isCus ? 'Sundry Debtors' : 'Sundry Creditors'}</span>
         <span className="spacer" />
+        {isSuper && <button className="ghost" title="Super Admin only — paste from Excel" onClick={() => setBulk({ text: '', busy: false, result: null })}>📋 Bulk import</button>}
         <button className="ghost edit-only" onClick={() => openSub()}>＋ Sub ledger</button>
         <button className="edit-only" data-new title="F1 / Alt+N" onClick={() => open(null)}>＋ New {word.toLowerCase()} <kbd className="kbd">F1</kbd></button>
       </header>
@@ -145,7 +188,7 @@ export default function Parties({ type }) {
             <th className="sel"><input type="checkbox" title="Select all" checked={shown.length > 0 && shown.every((r) => sel.has(r.id))}
               onChange={(e) => setSel(e.target.checked ? new Set(shown.map((r) => r.id)) : new Set())} /></th>
             <th className="sn">SN</th><th>Name</th><th>PAN</th><th>Office Phone</th><th>WhatsApp</th><th>Contact Person</th><th>Address</th>
-            {isCus && <th>Type</th>}<th className="num">Credit</th><th className="nowrap">Last Txn</th><th className="num">Balance</th><th className="nowrap">Updated By</th>
+            {isCus && <th className="nowrap">Type</th>}<th className="num nowrap">Credit</th><th className="nowrap">Last Txn</th><th className="num">Balance</th><th className="nowrap">Updated By</th>
           </tr></thead>
           <tbody>
             {shown.length === 0 && <tr><td colSpan={colCount} className="muted">No {isCus ? 'customers' : 'suppliers'} found.{canEdit && <> Press <kbd className="kbd">F1</kbd> to add a new {word.toLowerCase()} (or right-click).</>}</td></tr>}
@@ -162,8 +205,8 @@ export default function Parties({ type }) {
                   <td className="nowrap">{(r.whatsapp || r.phone) && <a href={waLink(r.whatsapp || r.phone, `Namaste ${r.name},`)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{r.whatsapp || r.phone}</a>}</td>
                   <td>{r.main_contact}{r.contact_count > 1 && <span className="tag">+{r.contact_count - 1}</span>}</td>
                   <td>{r.address}</td>
-                  {isCus && <td>{LEVELS.find((l) => l[0] === r.price_level)?.[1]}</td>}
-                  <td className="num">{r.credit_days ? `${r.credit_days} d` : ''}{r.credit_limit ? ` · ${fmtMoney(r.credit_limit)}` : ''}</td>
+                  {isCus && <td className="nowrap">{LEVELS.find((l) => l[0] === r.price_level)?.[1]}</td>}
+                  <td className="num nowrap">{r.credit_days ? `${r.credit_days} d` : ''}{r.credit_limit ? ` · ${fmtMoney(r.credit_limit)}` : ''}</td>
                   <td className="nowrap">{r.last_date ? fmtDateShort(r.last_date) : ''}</td>
                   <td className={`num b ${over ? 'neg' : ''}`}>{fmtBal(r.balance)}{over && <span className="tag">over limit</span>}</td>
                   <td className="nowrap">{r.saved_by_name || r.updated_by || r.created_by}</td>
@@ -223,6 +266,44 @@ export default function Parties({ type }) {
               <button data-save disabled={!sub.parent_id || !sub.name.trim()}>Save <Kbd>Ctrl+S</Kbd></button>
             </div>
           </form>
+        </div>
+      )}
+
+      {bulk && (
+        <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setBulk(null)}>
+          <div className="card form acc-cardform" style={{ width: 'min(1000px, 96vw)' }}>
+            <h2 className="acc-head"><span className="acc-head-ic">📋</span><span className="acc-head-txt">Bulk Import {word}s
+              <small>Paste rows copied from Excel: {isCus ? 'SN, Ledger, PAN, Address, City, Office Phone, Email, Mobile, Customer Group, Contact Person' : 'Suppliers Name, PAN, Address, City, Office Phone, Home Phone, Email, Mobile'} (header row optional)</small></span></h2>
+            <div className="acc-card">
+              {!bulk.result && <>
+                <textarea autoFocus rows={6} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} value={bulk.text}
+                  onChange={(e) => setBulk({ ...bulk, text: e.target.value })} placeholder="Paste here (Ctrl+V) — header row optional" />
+                <div className="muted small" style={{ margin: '8px 0' }}>
+                  {bulkRows.length ? `${bulkRows.length} found — ${bulkNew.length} new, ${bulkRows.length - bulkNew.length} already exist / duplicate (skipped)` : 'Retail (MRP) → Retail price level, Dealer → Dealer, Partner → Partner. Existing names are never changed.'}
+                </div>
+                {bulkRows.length > 0 && (
+                  <div style={{ maxHeight: 280, overflow: 'auto' }}>
+                    <table className="grid"><thead><tr><th>#</th><th>Ledger</th><th>PAN</th><th>Address</th><th>City</th><th>Office</th><th>Email</th><th>Mobile</th><th>Group</th><th>Contact</th><th></th></tr></thead>
+                      <tbody>{bulkRows.slice(0, 300).map((r, i) => { const dup = !bulkNew.includes(r); return (
+                        <tr key={i} style={dup ? { opacity: 0.45 } : undefined}><td>{i + 1}</td><td>{r.name}</td><td>{r.pan}</td><td>{r.address}</td><td>{r.city}</td><td>{r.office_phone}</td><td>{r.email}</td><td>{r.phone}</td><td>{r.group}</td><td>{r.contact}</td><td>{dup ? 'skip' : 'new'}</td></tr>); })}</tbody></table>
+                    {bulkRows.length > 300 && <div className="muted small">Showing first 300 rows…</div>}
+                  </div>)}
+              </>}
+              {bulk.result && (
+                <div>
+                  <b>{bulk.result.added} added, {bulk.result.skipped} skipped.</b>
+                  <div style={{ maxHeight: 280, overflow: 'auto', marginTop: 8, fontSize: 12 }}>
+                    {bulk.result.results.filter((x) => x.status === 'skipped' || x.warnings?.length).map((x) => (
+                      <div key={x.row}>#{x.row} {x.name}: {x.status === 'skipped' ? x.reason : x.warnings.join('; ')}</div>))}
+                  </div>
+                </div>)}
+            </div>
+            <div className="actions">
+              <span className="spacer" />
+              <button type="button" className="ghost" onClick={() => setBulk(null)}>Close <Kbd>Esc</Kbd></button>
+              {!bulk.result && <button type="button" disabled={!bulkNew.length || bulk.busy} onClick={runBulk}>{bulk.busy ? 'Importing…' : `Import ${bulkNew.length}`}</button>}
+            </div>
+          </div>
         </div>
       )}
 

@@ -221,6 +221,54 @@ router.post('/parties/from-contact', ah(async (req, res) => {
   res.json(row);
 }));
 
+/** Bulk import (Super Admin only) of customers / suppliers pasted from a ledger sheet. Body: { party_type, rows: [{ name, pan,
+ *  address, city, office_phone, email, phone, group, contact }] }. Lenient by design: a bad PAN / phone / email is dropped with a
+ *  warning instead of failing the row; a name that already exists (any ledger) is skipped. Each row is its own transaction. */
+const BULK_MAX = 2000;
+router.post('/parties/bulk-import', ah(async (req, res) => {
+  if (req.accUser?.role !== 'superAdmin') bad('Only the Super Admin can bulk import.', 403);
+  const b = req.body || {};
+  if (!GROUP_OF[b.party_type]) bad('Choose Customer or Supplier.');
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) bad('Nothing to import.');
+  if (rows.length > BULK_MAX) bad(`At most ${BULK_MAX} rows per import.`);
+  const user = userOf(req);
+  const out = [];
+  let added = 0, skipped = 0;
+  const s = (v, n) => String(v ?? '').trim().slice(0, n);
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || {};
+    const name = s(r.name, 200), warn = [];
+    const skip = (reason) => { skipped++; out.push({ row: i + 1, name, status: 'skipped', reason }); };
+    if (!name) { skip('Name is empty'); continue; }
+    try {
+      if (await one('SELECT id FROM acc_ledgers WHERE LOWER(name) = LOWER(%s)', [name])) { skip('A ledger with this name already exists'); continue; }
+      let pan = s(r.pan, 20);
+      if (pan && !/^d{9}$/.test(pan)) { warn.push(`PAN "${pan}" is not 9 digits — left blank`); pan = ''; }
+      if (pan && await one('SELECT id FROM acc_ledgers WHERE pan = %s AND party_type = %s', [pan, b.party_type])) { warn.push(`PAN ${pan} already used by another ${b.party_type} — left blank`); pan = ''; }
+      const ph = (v, label) => { const x = s(v, 25).split(/[,;]/)[0].trim(); if (x && !PHONE_RE.test(x)) { warn.push(`${label} "${x}" invalid — left blank`); return null; } return x || null; };
+      const phoneNo = ph(r.phone, 'Mobile'), office = ph(r.office_phone, 'Office phone');
+      let mail = s(r.email, 150); if (mail && !EMAIL_RE.test(mail)) { warn.push(`Email "${mail}" invalid — left blank`); mail = ''; }
+      const g = String(r.group || '').toLowerCase();
+      const level = g.startsWith('dealer') ? 'dealer' : g.startsWith('partner') ? 'partner' : 'mrp';
+      const address = [s(r.address, 300), s(r.city, 100)].filter(Boolean).join(', ') || null;
+      const contact = s(r.contact, 150) || null;
+      await tx(async (t) => {
+        const grp = await t.one('SELECT * FROM acc_groups WHERE code = %s', [GROUP_OF[b.party_type]]);
+        const row = await t.one(
+          'INSERT INTO acc_ledgers (code, name, group_id, kind, party_type, opening_balance, pan, phone, office_phone, email, address, contact_person,'
+          + ' credit_limit, credit_days, price_level, active, created_by, updated_by, updated_at)'
+          + " VALUES (%s,%s,%s,'party',%s,0,%s,%s,%s,%s,%s,%s,0,0,%s,1,%s,%s,NOW()) RETURNING id",
+          [await nextCode(t, grp), name, grp.id, b.party_type, pan || null, phoneNo, office, mail || null, address, contact, level, user, user]);
+        if (contact) await saveContacts(t, row.id, [{ name: contact, post: null, dept: null, mobile1: null, mobile2: null, email: null, remarks: null }]);
+        await audit(t, user, 'create', b.party_type, row.id, { name, bulk_import: true });
+      });
+      added++; out.push({ row: i + 1, name, status: 'added', warnings: warn });
+    } catch (e) { skip(e.message || 'Failed'); }
+  }
+  res.json({ ok: true, added, skipped, results: out });
+}));
+
 router.put('/parties/:pid', ah(async (req, res) => {
   const pid = +req.params.pid, b = req.body || {};
   const cur = await one('SELECT * FROM acc_ledgers WHERE id = %s AND party_type IS NOT NULL', [pid]) || bad('Party not found.', 404);

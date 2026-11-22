@@ -29,7 +29,7 @@ async function companyPayload(req) {
   const fy = await ensureFiscalYear(today);
   return {
     company: pub(c, req, { ...c, email_ready: await notify.emailReady().catch(() => false) }),
-    user: { id: req.accUser.id, username: req.accUser.username, full_name: req.accUser.fullName, role: accRole(req.accUser), must_change: false },
+    user: { id: req.accUser.id, username: req.accUser.username, full_name: req.accUser.fullName, role: accRole(req.accUser), is_super: req.accUser.role === 'superAdmin', must_change: false },
     today, today_bs: bsStr(today), current_fy: fy,
   };
 }

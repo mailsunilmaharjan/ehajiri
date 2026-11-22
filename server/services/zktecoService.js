@@ -603,7 +603,7 @@ export async function saveFingerprintRecord(deviceSn, kv) {
   const pin      = kv['PIN'] ?? kv['FP PIN'];
   const fingerId = parseInt(kv.FID)  || 0;
   const size     = parseInt(kv.Size) || 0;
-  const valid    = parseInt(kv.Valid) ?? 1;
+  const valid    = Number.isNaN(parseInt(kv.Valid)) ? 1 : parseInt(kv.Valid);   // parseInt gives NaN (not null) when absent -> smallint error
   const tmpData  = kv.TMP || null;
 
   if (!pin) return;
@@ -657,7 +657,7 @@ export async function saveFaceTemplateRecord(deviceSn, kv) {
   const pin     = kv.PIN;
   const faceId  = parseInt(kv.FID)  || 0;
   const size    = parseInt(kv.Size) || 0;
-  const valid   = parseInt(kv.Valid) ?? 1;
+  const valid   = Number.isNaN(parseInt(kv.Valid)) ? 1 : parseInt(kv.Valid);   // parseInt gives NaN (not null) when absent -> smallint error
   const tmpData = kv.TMP || null;
 
   if (!pin) return;
