@@ -14,11 +14,14 @@ const SYM = { USD: '$', EUR: '€', CNY: '¥', INR: '₹', GBP: '£', NPR: 'Rs.'
 const CUR_WORD = { USD: 'Dollars', EUR: 'Euros', CNY: 'Yuan', INR: 'Indian Rupees', GBP: 'Pounds', NPR: 'Rupees' };
 const PAY_MODES = [['TT', 'TT (Telegraphic Transfer)'], ['LC', 'LC (Letter of Credit)'], ['Advance', 'Advance'], ['Credit', 'Credit'], ['Other', 'Other']];
 const PAY_STATUS = ['Pending', 'TT Completed', 'Partly Paid', 'Paid', 'Cancelled'];
-const EXPENSE_TYPES = ['Bank Expenses', 'Customs Expenses', 'Logistic Expenses', 'Agent Expenses', 'Transportation Expenses', 'Labour Expenses'];
+const EXP_CATS = [['Bank Expenses', '🏦', 'Bank charges, TT / LC commission, SWIFT, forex margin'], ['Customs Expenses', '🛃', 'Customs duty, VAT paid at customs, clearing fees'],
+  ['Logistic Expenses', '🚢', 'Freight, insurance, port / handling, demurrage'], ['Agent Expenses', '🤝', 'Clearing & forwarding agent, commission'],
+  ['Transportation & Others', '🚚', 'Local transport, labour, loading / unloading, other costs']];
+const expCat = (t) => (EXP_CATS.some((c) => c[0] === t) ? t : t === 'Transportation Expenses' || t === 'Labour Expenses' ? 'Transportation & Others' : 'Bank Expenses');
 const COUNTRIES = ['China', 'India', 'Hong Kong', 'Taiwan', 'Japan', 'South Korea', 'Singapore', 'Malaysia', 'Thailand', 'Vietnam', 'Indonesia', 'Bangladesh', 'Sri Lanka', 'Pakistan',
   'United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Turkey', 'Germany', 'France', 'Italy', 'Spain', 'Netherlands', 'United Kingdom', 'Switzerland', 'Sweden', 'Poland',
   'Russia', 'United States', 'Canada', 'Brazil', 'Australia', 'New Zealand', 'South Africa', 'Egypt', 'Nepal'];
-const TABS = [['detail', 'Purchase Detail'], ['docs', 'Payment & Documents'], ['cost', 'Costing & Goods Arrived']];
+const TABS = [['detail', 'Purchase Detail'], ['docs', 'Payment & Documents'], ['exp', 'Import Expenses'], ['cost', 'Costing & Goods Arrived']];
 const rs = (n) => `Rs.${fmtMoney(n).replace(/\.00$/, '')}`;
 const fc = (cur, n) => `${SYM[cur] || cur}${Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 const blankRow = () => ({ _k: Math.random(), item_id: '', product_name: '', hs_code: '', rate: '', qty: '', remarks: '' });
@@ -113,7 +116,7 @@ export default function Imports() {
   const [rows, setRows] = useState(null);
   const [win, setWin] = useState(null);             // { id|null, tab }  — the Staff-style window
   const [form, setForm] = useState(null);           // Purchase Detail tab (new / edit)
-  const [exp, setExp] = useState(null);             // expenses window { id, pi_no, list }
+  const [ex, setEx] = useState(null);               // Import Expenses tab draft: [{ _k, expense_type, title, amount }]
   const [arr, setArr] = useState(null);             // goods-arrived dialog
   const [suppliers, setSuppliers] = useState([]);
   const [items, setItems] = useState([]);
@@ -193,15 +196,20 @@ export default function Imports() {
   /* ───── expenses ───── */
   const openExp = (r) => {
     if (r.arrived) { notify('Goods already arrived — expenses are locked.', 'err'); return; }
-    setExp({ id: r.id, pi_no: r.pi_no, list: r.expenses.length ? r.expenses.map((e) => ({ _k: e.id, expense_type: e.expense_type, title: e.title, amount: String(e.amount) })) : [{ _k: Math.random(), expense_type: 'Bank Expenses', title: '', amount: '' }] });
+    openWin(r, 'exp');
   };
+  const expFrom = (r) => (r ? r.expenses.map((e) => ({ _k: e.id, expense_type: expCat(e.expense_type), title: e.title, amount: String(Number(e.amount)) })) : []);
+  useEffect(() => { if (win?.tab === 'exp' && win.id) setEx(expFrom((rows || []).find((x) => x.id === win.id))); }, [win?.tab, win?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const exSet = (k, patch) => setEx((l) => l.map((x) => (x._k === k ? { ...x, ...patch } : x)));
+  const exAdd = (cat) => setEx((l) => [...l, { _k: Math.random(), expense_type: cat, title: '', amount: '' }]);
+  const exTotal = (cat) => (ex || []).filter((x) => !cat || x.expense_type === cat).reduce((s, x) => s + (Number(x.amount) || 0), 0);
   const saveExp = async () => {
-    if (!exp || busy) return;
+    if (!ex || !imp || busy || locked) return;
     setBusy(true);
     try {
-      const r = await api.put(`/imports/${exp.id}/expenses`, { expenses: exp.list });
+      const r = await api.put(`/imports/${imp.id}/expenses`, { expenses: ex });
       setRows((a) => a.map((x) => (x.id === r.id ? r : x)));
-      setExp(null); notify('Expenses saved');
+      setEx(expFrom(r)); notify('Expenses saved');
     } catch (err) { notify(err.message, 'err'); }
     setBusy(false);
   };
@@ -265,10 +273,9 @@ export default function Imports() {
     try { await api.del(`/imports/${r.id}`); await load(); notify('Deleted'); } catch (e) { notify(e.message, 'err'); }
   };
 
-  const onWin = !!win && !exp && !arr && !bp;
-  useShortcuts({ save: () => { if (win?.tab === 'detail') saveForm(); }, close: closeWin }, onWin);
+  const onWin = !!win && !arr && !bp;
+  useShortcuts({ save: () => { if (win?.tab === 'detail') saveForm(); else if (win?.tab === 'exp') saveExp(); }, close: closeWin }, onWin);
   useShortcuts({ save: () => saveBankPay(), close: () => setBp(null) }, !!bp);
-  useShortcuts({ save: () => saveExp(), close: () => setExp(null) }, !!exp);
   useShortcuts({ save: () => arrive(), close: () => setArr(null) }, !!arr);
 
   /* ───── the grid (same component and behaviour as Staff Detail) ───── */
@@ -482,6 +489,42 @@ export default function Imports() {
                 </>
               )}
 
+              {win.tab === 'exp' && imp && ex && (
+                <fieldset disabled={locked || !canEdit} className="imp-fs">
+                  <div className="imp-exp-note">Amounts in Rs. They raise the landed cost per unit of each product; they are not posted again as expenses.</div>
+                  <div className="imp-exp-grid">
+                    {EXP_CATS.map(([cat, ic, hint]) => {
+                      const list = ex.filter((x) => x.expense_type === cat);
+                      return (
+                        <Panel key={cat} title={`${ic} ${cat}`} right={<b className="green">{rs(exTotal(cat))}</b>}>
+                          <div className="imp-hint" style={{ padding: '8px 18px 0' }}>{hint}</div>
+                          <table className="imp-t imp-docs">
+                            <tbody>
+                              {list.length === 0 && <tr><td className="muted" colSpan={3}>No {cat.toLowerCase()} added.</td></tr>}
+                              {list.map((x) => (
+                                <tr key={x._k}>
+                                  <td><input className="imp-cell-in" value={x.title} placeholder="Title / description" onChange={(e) => exSet(x._k, { title: e.target.value })} /></td>
+                                  <td style={{ width: 150 }}><Amount className="imp-cell-in r" value={x.amount} placeholder="0.00" onChange={(e) => exSet(x._k, { amount: e.target.value })} /></td>
+                                  <td className="c" style={{ width: 34 }}><button type="button" className="link del-x" tabIndex={-1} title="Remove" onClick={() => setEx((l) => l.filter((y) => y._k !== x._k))}>✕</button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <div style={{ padding: '4px 18px 14px' }}><button type="button" className="ghost imp-add" onClick={() => exAdd(cat)}>＋ Add {cat === 'Transportation & Others' ? 'Expense' : cat.replace(' Expenses', '') + ' Expense'}</button></div>
+                        </Panel>
+                      );
+                    })}
+                  </div>
+                  <div className="imp-pn imp-exp-total">
+                    <div className="imp-exp-sum">
+                      {EXP_CATS.map(([cat]) => <div key={cat}><span>{cat}</span><b>{rs(exTotal(cat))}</b></div>)}
+                      <div className="grand"><span>Total Import Expenses</span><b>{rs(exTotal())}</b></div>
+                    </div>
+                    <div className="muted small" style={{ padding: '0 18px 14px' }}>In Words: {amountInWords(Math.round(exTotal()))}</div>
+                  </div>
+                </fieldset>
+              )}
+
               {win.tab === 'cost' && imp && (() => {
                 const c = imp.costing;
                 return (
@@ -498,10 +541,10 @@ export default function Imports() {
                           <div className="green" style={{ fontSize: 15 }}><b>Total Landed Cost: {rs(c.landed_total)}</b></div>
                         </div>
                       </Panel>
-                      <Panel title="Expenses Details" right={!locked && canEdit ? <button type="button" className="ghost imp-add" onClick={() => openExp(imp)}>💰 View / Add</button> : null}>
-                        <div className="imp-tw"><table className="imp-t"><thead><tr><th style={{ width: 40 }}>SN</th><th>Type</th><th>Title</th><th className="num">Amount (Rs.)</th></tr></thead>
-                          <tbody>{imp.expenses.length === 0 && <tr><td colSpan={4} className="muted">No expenses yet.</td></tr>}
-                            {imp.expenses.map((e, i) => <tr key={e.id}><td className="c">{i + 1}</td><td>{e.expense_type}</td><td>{e.title}</td><td className="num">{rs(e.amount)}</td></tr>)}</tbody></table></div>
+                      <Panel title="Expenses by category" right={!locked && canEdit ? <button type="button" className="ghost imp-add" onClick={() => openExp(imp)}>💰 Edit Expenses</button> : null}>
+                        <div className="imp-tw"><table className="imp-t"><thead><tr><th>Category</th><th className="num">Amount (Rs.)</th></tr></thead>
+                          <tbody>{EXP_CATS.map(([cat]) => <tr key={cat}><td>{cat}</td><td className="num">{rs(imp.expenses.filter((e) => expCat(e.expense_type) === cat).reduce((s, e) => s + Number(e.amount), 0))}</td></tr>)}
+                            <tr><td><b>Total expenses</b></td><td className="num"><b>{rs(imp.costing.expenses_npr)}</b></td></tr></tbody></table></div>
                       </Panel>
                     </div>
                     <div className="imp-stack">
@@ -538,43 +581,10 @@ export default function Imports() {
               <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
                 <button type="button" className="btn btn-outline" onClick={closeWin}>{win.tab === 'detail' ? 'Cancel' : 'Close'} <Kbd>Esc</Kbd></button>
                 {win.tab === 'detail' && canEdit && !locked && <button type="button" className="btn btn-primary" disabled={busy} onClick={saveForm}>💾 Save <Kbd>Ctrl+S</Kbd></button>}
+                {win.tab === 'exp' && canEdit && !locked && <button type="button" className="btn btn-primary" disabled={busy} onClick={saveExp}>💾 Save Expenses <Kbd>Ctrl+S</Kbd></button>}
                 {win.id && imp && !imp.arrived && canEdit && win.tab !== 'cost' && <button type="button" className="imp-go imp-go-sm" disabled={imp.missing.length > 0} title={imp.missing.length ? 'Complete the documents first' : ''} onClick={() => openArrive(imp)}>📦 Goods Arrived in Godown</button>}
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ───── expenses ───── */}
-      {exp && (
-        <div className="imp-ov imp-ov2">
-          <div className="imp-win imp-win-sm">
-            <div className="imp-win-h"><div className="imp-win-ic">💰</div>
-              <div className="imp-win-t"><h2>Add Expenses — {exp.pi_no}</h2><p>Amounts in Rs. They raise the landed cost per unit; they are not posted again as expenses.</p></div>
-              <button type="button" className="imp-x" onClick={() => setExp(null)}>✕</button></div>
-            <div className="imp-win-b">
-              <Panel title="Expenses">
-                <div className="imp-tw"><table className="imp-t">
-                  <thead><tr><th style={{ width: 40 }}>SN</th><th style={{ width: 220 }}>Expense Type</th><th>Expense Title</th><th style={{ width: 150 }} className="num">Amount (Rs.)</th><th style={{ width: 34 }} /></tr></thead>
-                  <tbody>{exp.list.map((e, i) => (
-                    <tr key={e._k}>
-                      <td className="c">{i + 1}</td>
-                      <td><select className="imp-in" value={e.expense_type} onChange={(ev) => setExp({ ...exp, list: exp.list.map((x) => (x._k === e._k ? { ...x, expense_type: ev.target.value } : x)) })}>{EXPENSE_TYPES.map((t) => <option key={t}>{t}</option>)}</select></td>
-                      <td><input className="imp-in" value={e.title} onChange={(ev) => setExp({ ...exp, list: exp.list.map((x) => (x._k === e._k ? { ...x, title: ev.target.value } : x)) })} /></td>
-                      <td><Amount className="imp-in r" value={e.amount} onChange={(ev) => setExp({ ...exp, list: exp.list.map((x) => (x._k === e._k ? { ...x, amount: ev.target.value } : x)) })} /></td>
-                      <td className="c"><button type="button" className="link del-x" onClick={() => setExp({ ...exp, list: exp.list.filter((x) => x._k !== e._k) })}>✕</button></td>
-                    </tr>))}</tbody></table></div>
-                <div className="imp-prod-foot">
-                  <button type="button" className="ghost imp-add" onClick={() => setExp({ ...exp, list: [...exp.list, { _k: Math.random(), expense_type: 'Bank Expenses', title: '', amount: '' }] })}>＋ Add Expense</button>
-                  <span className="spacer" />
-                  <span className="muted small">In Words: {amountInWords(Math.round(exp.list.reduce((s, e) => s + (Number(e.amount) || 0), 0)))}</span>
-                  <b className="green" style={{ marginLeft: 16 }}>Grand Total: {rs(exp.list.reduce((s, e) => s + (Number(e.amount) || 0), 0))}</b>
-                </div>
-              </Panel>
-            </div>
-            <div className="imp-win-f"><span /><div style={{ display: 'flex', gap: 10 }}>
-              <button type="button" className="btn btn-outline" onClick={() => setExp(null)}>Cancel <Kbd>Esc</Kbd></button>
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={saveExp}>💾 Save <Kbd>Ctrl+S</Kbd></button></div></div>
           </div>
         </div>
       )}

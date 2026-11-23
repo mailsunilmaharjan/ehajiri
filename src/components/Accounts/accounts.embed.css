@@ -262,6 +262,15 @@ body .acc-app .imp-win .btn.btn-outline:hover { background: #f3f4f6 !important; 
 .acc-app .imp-cell-in { width: 100%; height: 36px; padding: 0 10px; font-size: 13px; border: 1.5px solid #d1d5db; border-radius: 7px; background: #fff; box-sizing: border-box; font-family: inherit; }
 .acc-app .imp-cell-in:focus { border-color: #1a56db; outline: none; }
 .acc-app .imp-cell-in:disabled { background: #f3f4f6; color: #6b7280; }
+.acc-app .imp-exp-note { font-size: 12.5px; color: #475569; margin-bottom: 14px; }
+.acc-app .imp-exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.acc-app .imp-exp-total { margin-top: 16px; }
+.acc-app .imp-exp-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 26px; padding: 16px 18px 10px; }
+.acc-app .imp-exp-sum > div { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: #475569; }
+.acc-app .imp-exp-sum > div b { color: #0f172a; }
+.acc-app .imp-exp-sum .grand { grid-column: 1 / -1; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 16px; font-weight: 700; color: #0f172a; }
+.acc-app .imp-exp-sum .grand b { color: #059669; }
+@media (max-width: 1000px) { .acc-app .imp-exp-grid { grid-template-columns: 1fr; } .acc-app .imp-exp-sum { grid-template-columns: 1fr; } }
 .acc-app .imp-files-c .imp-files-h { margin-bottom: 6px; }
 .acc-app .imp-files-c .imp-file a { max-width: 420px; }
 .acc-app .imp-pi-up { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; min-width: 0; }

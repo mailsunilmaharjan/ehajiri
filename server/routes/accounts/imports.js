@@ -16,7 +16,8 @@ import { postDoc, getDoc } from './docs.js';
 
 const router = Router();
 
-export const EXPENSE_TYPES = ['Bank Expenses', 'Customs Expenses', 'Logistic Expenses', 'Agent Expenses', 'Transportation Expenses', 'Labour Expenses'];
+// 'Transportation Expenses' / 'Labour Expenses' are the older names — still accepted, shown under Transportation & Others
+export const EXPENSE_TYPES = ['Bank Expenses', 'Customs Expenses', 'Logistic Expenses', 'Agent Expenses', 'Transportation & Others', 'Transportation Expenses', 'Labour Expenses'];
 const CURRENCIES = ['USD', 'EUR', 'CNY', 'INR', 'GBP', 'NPR'];
 const PAY_MODES = ['TT', 'LC', 'Advance', 'Credit', 'Other'];
 const PAY_STATUS = ['Pending', 'TT Completed', 'Partly Paid', 'Paid', 'Cancelled'];
