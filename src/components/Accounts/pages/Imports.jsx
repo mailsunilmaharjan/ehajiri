@@ -46,7 +46,7 @@ const Fg = ({ label, required, children, hint }) => (
 );
 
 /** One document slot (PI, payment proof, CI, packing list …): list of uploaded files + Add File. */
-function FileBox({ imp, slot, label, canEdit, reload, notify, required }) {
+function FileBox({ imp, slot, label, canEdit, reload, notify, required, compact }) {
   const ref = useRef(null);
   const files = imp.files[slot] || [];
   const pick = (f) => {
@@ -64,13 +64,13 @@ function FileBox({ imp, slot, label, canEdit, reload, notify, required }) {
     try { await api.del(`/imports/${imp.id}/files/${slot}/${file}`); await reload(imp.id); } catch (e) { notify(e.message, 'err'); }
   };
   return (
-    <div className="imp-files">
+    <div className={`imp-files${compact ? ' imp-files-c' : ''}`}>
       <div className="imp-files-h">
-        <span>{label}{required && <b className="req"> *</b>}</span>
-        {canEdit && <button type="button" className="ghost imp-add" onClick={() => ref.current?.click()}>📎 Add File</button>}
+        {!compact && <span>{label}{required && <b className="req"> *</b>}</span>}
+        {canEdit && <button type="button" className="ghost imp-add" onClick={() => ref.current?.click()}>📎 {compact && files.length ? 'Add more' : 'Add File'}</button>}
         <input ref={ref} type="file" hidden accept="image/png,image/jpeg,image/webp,application/pdf" onChange={(e) => { pick(e.target.files[0]); e.target.value = ''; }} />
       </div>
-      {files.length === 0 ? <div className="muted small">No files uploaded yet</div>
+      {files.length === 0 ? <div className="muted small">{compact ? (required ? 'Required — no file yet' : 'No file') : 'No files uploaded yet'}</div>
         : files.map((f) => (
           <div key={f.file} className="imp-file">
             <a href={`/api/accounts/imports/file/${f.file}`} target="_blank" rel="noopener">📄 {f.name}</a>
@@ -82,27 +82,29 @@ function FileBox({ imp, slot, label, canEdit, reload, notify, required }) {
 }
 
 /** Text / date field of the documents tab — saves itself when you leave it. */
-function PanelField({ imp, name, label, type = 'text', canEdit, save, required, locked }) {
+function PanelField({ imp, name, label, type = 'text', canEdit, save, required, locked, row, cell }) {
   const [v, setV] = useState(imp[name] || '');
   useEffect(() => { setV(imp[name] || ''); }, [imp.id, imp[name]]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <Fg label={label} required={required}>
-      <input className="imp-in" type={type} data-nocap value={v} disabled={!canEdit || locked}
-        onChange={(e) => setV(e.target.value)} onBlur={() => { if ((v || '') !== (imp[name] || '')) save({ [name]: v }); }} />
-    </Fg>
+  const input = (
+    <input className={cell ? 'imp-cell-in' : row ? '' : 'imp-in'} type={type} data-nocap value={v} disabled={!canEdit || locked}
+      onChange={(e) => setV(e.target.value)} onBlur={() => { if ((v || '') !== (imp[name] || '')) save({ [name]: v }); }} />
   );
+  if (cell) return input;
+  if (row) return <label>{label}{required && <b className="req"> *</b>}{input}</label>;
+  return <Fg label={label} required={required}>{input}</Fg>;
 }
 
 /** Bank exchange rate — optional when the PI is made; entered here once the bank gives it. Saves itself when you leave the box. */
-function RateField({ imp, canEdit, save }) {
+function RateField({ imp, canEdit, save, row }) {
   const [v, setV] = useState(imp.exchange_rate > 0 ? String(Number(imp.exchange_rate)) : '');
   useEffect(() => { setV(imp.exchange_rate > 0 ? String(Number(imp.exchange_rate)) : ''); }, [imp.id, imp.exchange_rate]);
-  return (
-    <Fg label={`Bank Exchange Rate (${SYM[imp.currency] || imp.currency}1 = Rs.)`} hint="Needed before the goods can be received">
-      <Amount className="imp-in" decimals={4} value={v} disabled={!canEdit} onChange={(e) => setV(e.target.value)}
-        onBlur={() => { if ((Number(v) || 0) !== (Number(imp.exchange_rate) || 0)) save({ exchange_rate: v }); }} />
-    </Fg>
+  const box = (
+    <Amount className={row ? '' : 'imp-in'} decimals={4} value={v} disabled={!canEdit} onChange={(e) => setV(e.target.value)}
+      onBlur={() => { if ((Number(v) || 0) !== (Number(imp.exchange_rate) || 0)) save({ exchange_rate: v }); }} />
   );
+  const lab = `Bank Exchange Rate (${SYM[imp.currency] || imp.currency}1 = Rs.)`;
+  if (row) return <label>{lab}{box}<small>Needed before goods can be received</small></label>;
+  return <Fg label={lab} hint="Needed before the goods can be received">{box}</Fg>;
 }
 
 export default function Imports() {
@@ -420,43 +422,64 @@ export default function Imports() {
               )}
 
               {win.tab === 'docs' && imp && (
-                <div className="imp-cols">
-                  <div className="imp-stack">
-                    <Panel title="Proforma Invoice">
-                      <div className="imp-pad"><FileBox imp={imp} slot="pi" label="View PI Upload" canEdit={canEdit} reload={reloadOne} notify={notify} /></div>
-                    </Panel>
-                    <Panel title="Payment" right={canEdit && imp.supplier_id ? <button type="button" className="ghost imp-add" onClick={() => openBankPay(imp)}>🏦 Bank Payment</button> : null}>
-                      <Fg label="Payment Mode"><div className="imp-big" style={{ fontSize: 14 }}>{imp.payment_mode}{imp.payment_condition ? ` — ${imp.payment_condition}` : ''}</div></Fg>
-                      <Fg label="Payment Status"><select className="imp-in" disabled={!canEdit} value={imp.payment_status} onChange={(e) => savePanel({ payment_status: e.target.value })}>{PAY_STATUS.map((s) => <option key={s}>{s}</option>)}</select></Fg>
-                      <PanelField imp={imp} name="payment_completed_date" label="Date TT / Payment Date" type="date" canEdit={canEdit} save={savePanel} />
-                      {imp.currency !== 'NPR' && <RateField imp={imp} canEdit={canEdit && !locked} save={savePanel} />}
-                      <Fg label="Total TT in Nrs."><div className="imp-big blue">{imp.costing.rate > 0 ? rs(imp.total_tt_npr) : <span className="muted">— enter the rate —</span>}</div></Fg>
-                      <PanelField imp={imp} name="est_ready_date" label="Estimate Goods Ready Date" type="date" canEdit={canEdit} save={savePanel} />
-                      <div className="imp-pad"><FileBox imp={imp} slot="payment_proof" label="Upload Payment Proof Document" canEdit={canEdit} reload={reloadOne} notify={notify} /></div>
-                    </Panel>
-                  </div>
-                  <div className="imp-stack">
-                    <Panel title="Commercial Invoice (required)">
-                      <PanelField imp={imp} name="ci_no" label="Commercial Invoice (CI) No." canEdit={canEdit} save={savePanel} required locked={false} />
-                      <PanelField imp={imp} name="ci_date" label="CI Date" type="date" canEdit={canEdit} save={savePanel} />
-                      <div className="imp-pad"><FileBox imp={imp} slot="commercial_invoice" label="Upload Commercial Invoice" canEdit={canEdit} reload={reloadOne} notify={notify} required /></div>
-                    </Panel>
-                    <Panel title="Packing List (required)">
-                      <PanelField imp={imp} name="packing_list_no" label="Packing List No." canEdit={canEdit} save={savePanel} required />
-                      <div className="imp-pad"><FileBox imp={imp} slot="packing_list" label="Upload Packing List" canEdit={canEdit} reload={reloadOne} notify={notify} required /></div>
-                    </Panel>
-                  </div>
-                  <div className="imp-stack">
-                    <Panel title="Customs Document (required)">
-                      <PanelField imp={imp} name="customs_doc_no" label="Customs Document No." canEdit={canEdit} save={savePanel} required />
-                      <PanelField imp={imp} name="customs_doc_date" label="Customs Date" type="date" canEdit={canEdit} save={savePanel} />
-                      <div className="imp-pad"><FileBox imp={imp} slot="customs" label="Customs document (optional file)" canEdit={canEdit} reload={reloadOne} notify={notify} /></div>
-                    </Panel>
-                    <Panel title="Bank">
-                      <div className="imp-pad"><FileBox imp={imp} slot="bank_docs" label="Upload Bank Bipini Documents" canEdit={canEdit} reload={reloadOne} notify={notify} /></div>
-                    </Panel>
-                  </div>
-                </div>
+                <>
+                  <Panel title="Payment" right={canEdit && imp.supplier_id ? <button type="button" className="ghost imp-add" onClick={() => openBankPay(imp)}>🏦 Bank Payment</button> : null}>
+                    <div className="doc-form imp-pay" style={{ margin: 0, padding: '16px 18px' }}>
+                      <label>Payment Mode<span className="imp-static">{imp.payment_mode}{imp.payment_condition ? ` — ${imp.payment_condition}` : ''}</span></label>
+                      <label>Payment Status<select disabled={!canEdit} value={imp.payment_status} onChange={(e) => savePanel({ payment_status: e.target.value })}>{PAY_STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
+                      <PanelField row imp={imp} name="payment_completed_date" label="Date TT / Payment Date" type="date" canEdit={canEdit} save={savePanel} />
+                      {imp.currency !== 'NPR' ? <RateField row imp={imp} canEdit={canEdit && !locked} save={savePanel} /> : <label>Exchange Rate<span className="imp-static">Rs. (no conversion)</span></label>}
+                      <label>Total TT in Nrs.<span className="imp-static blue">{imp.costing.rate > 0 ? rs(imp.total_tt_npr) : '— enter the rate —'}</span></label>
+                      <PanelField row imp={imp} name="est_ready_date" label="Estimate Goods Ready Date" type="date" canEdit={canEdit} save={savePanel} />
+                    </div>
+                  </Panel>
+                  <Panel title="Documents" style={{ marginTop: 16 }}>
+                    <div className="imp-tw">
+                      <table className="imp-t imp-docs">
+                        <thead><tr><th style={{ width: 210 }}>Document</th><th style={{ width: 200 }}>Number</th><th style={{ width: 160 }}>Date</th><th>Files</th></tr></thead>
+                        <tbody>
+                        <tr>
+                          <td><b>Proforma Invoice (PI)</b></td>
+                          <td><span className="muted">—</span></td>
+                          <td><span className="muted">—</span></td>
+                          <td><FileBox compact imp={imp} slot="pi" label="Proforma Invoice (PI)" canEdit={canEdit} reload={reloadOne} notify={notify} /></td>
+                        </tr>
+                        <tr>
+                          <td><b>Payment Proof</b></td>
+                          <td><span className="muted">—</span></td>
+                          <td><span className="muted">—</span></td>
+                          <td><FileBox compact imp={imp} slot="payment_proof" label="Payment Proof" canEdit={canEdit} reload={reloadOne} notify={notify} /></td>
+                        </tr>
+                        <tr>
+                          <td><b>Commercial Invoice (CI)</b> <b className="req">*</b></td>
+                          <td><PanelField cell imp={imp} name="ci_no" canEdit={canEdit} save={savePanel} /></td>
+                          <td><PanelField cell imp={imp} name="ci_date" type="date" canEdit={canEdit} save={savePanel} /></td>
+                          <td><FileBox compact imp={imp} slot="commercial_invoice" label="Commercial Invoice (CI)" canEdit={canEdit} reload={reloadOne} notify={notify} required /></td>
+                        </tr>
+                        <tr>
+                          <td><b>Packing List</b> <b className="req">*</b></td>
+                          <td><PanelField cell imp={imp} name="packing_list_no" canEdit={canEdit} save={savePanel} /></td>
+                          <td><span className="muted">—</span></td>
+                          <td><FileBox compact imp={imp} slot="packing_list" label="Packing List" canEdit={canEdit} reload={reloadOne} notify={notify} required /></td>
+                        </tr>
+                        <tr>
+                          <td><b>Customs Document</b> <b className="req">*</b></td>
+                          <td><PanelField cell imp={imp} name="customs_doc_no" canEdit={canEdit} save={savePanel} /></td>
+                          <td><PanelField cell imp={imp} name="customs_doc_date" type="date" canEdit={canEdit} save={savePanel} /></td>
+                          <td><FileBox compact imp={imp} slot="customs" label="Customs Document" canEdit={canEdit} reload={reloadOne} notify={notify} /></td>
+                        </tr>
+                        <tr>
+                          <td><b>Bank (Bipini) Documents</b></td>
+                          <td><span className="muted">—</span></td>
+                          <td><span className="muted">—</span></td>
+                          <td><FileBox compact imp={imp} slot="bank_docs" label="Bank (Bipini) Documents" canEdit={canEdit} reload={reloadOne} notify={notify} /></td>
+                        </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="imp-hint" style={{ padding: '0 18px 14px' }}>* The Commercial Invoice and Packing List files, and the CI, Packing List and Customs numbers, are needed before goods can be received.</div>
+                  </Panel>
+                </>
               )}
 
               {win.tab === 'cost' && imp && (() => {
