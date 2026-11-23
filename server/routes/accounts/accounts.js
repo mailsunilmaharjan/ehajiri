@@ -178,6 +178,31 @@ router.get('/accounts', ah(async (req, res) => {
   res.json((await q(`${sql} ORDER BY a.code`)).rows);
 }));
 
+/** Bank accounts a customer can pay into (name, account no., branch + whether it has a QR) — shared with a bill on WhatsApp. */
+export async function bankAccounts() {
+  const groups = (await q('SELECT * FROM acc_groups WHERE is_system = 0 ORDER BY code')).rows;
+  const ledgers = (await q("SELECT id, name, bank_account_name, bank_account_no, bank_branch, qr_image, bank_group_id FROM acc_ledgers WHERE kind = 'bank' AND active = 1 ORDER BY code")).rows;
+  const out = [];
+  for (const g of groups) {
+    if (!(await isBankParent(g.parent_id))) continue;
+    if (!g.bank_account_no && !g.qr_image) continue;
+    out.push({ name: g.name, account_name: g.bank_account_name, account_no: g.bank_account_no, branch: g.bank_branch, qr: g.qr_image ? `/api/accounts/groups/${g.id}/qr` : null, qr_image: g.qr_image,
+      ledger_ids: ledgers.filter((l) => l.bank_group_id === g.id).map((l) => l.id) });
+  }
+  for (const l of ledgers) {
+    if (l.bank_group_id || (!l.bank_account_no && !l.qr_image)) continue;
+    out.push({ name: l.name, account_name: l.bank_account_name, account_no: l.bank_account_no, branch: l.bank_branch, qr: l.qr_image ? `/api/accounts/accounts/${l.id}/qr` : null, qr_image: l.qr_image, ledger_ids: [l.id] });
+  }
+  return out;
+}
+/** Bank accounts a customer can pay into: the one this bill was received in, else every bank with an account no. / QR. */
+export async function bankAccountsFor(cashAccountId) {
+  const list = await bankAccounts();
+  const mine = cashAccountId ? list.filter((b) => b.ledger_ids.includes(+cashAccountId)) : [];
+  return mine.length ? mine : list;
+}
+router.get('/bank-share', ah(async (_req, res) => res.json((await bankAccounts()).map(({ qr_image, ...b }) => b))));
+
 async function validateLedger(b, excludeId = 0) {
   if (!nz(b.name)) bad('Ledger name is required.');
   b.kind = b.kind || 'general';

@@ -58,6 +58,9 @@ export default function Parties({ type }) {
   // ?new=1 (from Chart of Accounts → Parties) opens a blank customer / supplier form straight away
   useEffect(() => { if (sp.get('new') && canEdit) { open(null); setSp({}, { replace: true }); } }, [sp, type]);
 
+  // ?open=<ledger id> (from a bill list: click the company name) opens that customer / supplier's details
+  useEffect(() => { const o = Number(sp.get('open')); if (o) { open({ id: o }).catch(() => {}); setSp({}, { replace: true }); } }, [sp, type]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Sub ledger: a sub-company under a main customer / supplier (own name, PAN, address, phone; same contact person) ──
   const [sub, setSub] = useState(null);       // { parent_id, name, pan, address, phone }
   const openSub = (parentId = '') => setSub({ parent_id: parentId ? String(parentId) : '', name: '', pan: '', address: '', phone: '' });

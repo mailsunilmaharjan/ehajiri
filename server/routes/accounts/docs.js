@@ -65,7 +65,7 @@ const withoutNull = (set) => [...set].filter((x) => x !== null && x !== undefine
 export async function getDoc(did, run = dbRun) {
   const d = await run.one(
     'SELECT d.*, f.name AS fy, r.doc_no AS ref_doc_no, r.doc_type AS ref_doc_type, ca.name AS cash_account,'
-    + ' v.voucher_no, p.email AS party_email, COALESCE(p.whatsapp, p.phone) AS party_phone, p.credit_days AS party_credit_days,'
+    + ' v.voucher_no, p.email AS party_email, COALESCE(p.whatsapp, p.phone) AS party_phone, p.phone AS party_mobile, p.whatsapp AS party_whatsapp, p.contact_person AS party_contact, p.credit_days AS party_credit_days,'
     + ' pv.voucher_no AS pay_voucher_no, pv.status AS pay_voucher_status'
     + ' FROM acc_docs d JOIN acc_fiscal_years f ON f.id = d.fy_id'
     + ' LEFT JOIN acc_docs r ON r.id = d.ref_doc_id LEFT JOIN acc_ledgers ca ON ca.id = d.cash_account_id'
@@ -135,7 +135,7 @@ router.get('/docs', ah(async (req, res) => {
     + ' (SELECT c.status FROM acc_cheques c WHERE c.doc_id = d.id ORDER BY c.id DESC LIMIT 1) AS cheque_status,'
     + " (SELECT COALESCE(array_agg(DISTINCT rr.assigned_to), '{}') FROM acc_reminders rr LEFT JOIN tasks tk ON tk.id = rr.task_id"
     + "   WHERE rr.doc_id = d.id AND rr.kind = 'followup' AND rr.status = 'open' AND rr.assigned_to IS NOT NULL AND COALESCE(tk.status, 'pending') NOT IN ('completed','cancelled')) AS task_users,"
-    + ' pa.transport_name AS party_transport_name, pa.transport_phone AS party_transport_phone, pa.transport_address AS party_transport_address'
+    + ' pa.phone AS party_mobile, pa.whatsapp AS party_whatsapp, pa.contact_person AS party_contact, pa.transport_name AS party_transport_name, pa.transport_phone AS party_transport_phone, pa.transport_address AS party_transport_address'
     + ' FROM acc_docs d LEFT JOIN acc_docs r ON r.id = d.ref_doc_id LEFT JOIN acc_ledgers pa ON pa.id = d.party_id'
     + ' LEFT JOIN acc_ledgers ca ON ca.id = d.cash_account_id LEFT JOIN acc_vouchers pv ON pv.id = d.pay_voucher_id'
     + ' LEFT JOIN users u ON u.username = COALESCE(d.updated_by, d.created_by)'
@@ -156,7 +156,17 @@ export function pdfName(d) {
 export async function docPdfBytes(d, user) {
   const company = await one('SELECT * FROM acc_company WHERE id = 1');
   if (d.doc_type === 'QT') return (await import('./quotes.js')).buildQuotationPdf(d, company);
-  return (await import('../../services/accounts/pdf.js')).docPdf(company, d, user);
+  let banks = [];
+  if (['SO', 'SI'].includes(d.doc_type)) {
+    const { bankAccountsFor } = await import('./accounts.js');
+    const { getFile } = await import('../../services/accounts/files.js');
+    banks = (await bankAccountsFor(d.cash_account_id)).slice(0, 3);
+    for (const b of banks) {
+      const f = b.qr_image ? await getFile('bank-qr', b.qr_image).catch(() => null) : null;
+      b.qr_data = f && /png|jpe?g/i.test(f.mime || '') ? f.data : null;     // pdfkit draws PNG / JPG only
+    }
+  }
+  return (await import('../../services/accounts/pdf.js')).docPdf(company, d, user, banks);
 }
 
 router.get('/docs/:did/pdf', ah(async (req, res) => {

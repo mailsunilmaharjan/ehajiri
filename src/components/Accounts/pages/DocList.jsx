@@ -60,7 +60,7 @@ export default function DocList() {
   const transportOk = ['PB', 'SI', 'PR', 'SR'].includes(type);
   const [trans, setTrans] = useState(null);
   const footSpan = 7 + (type === 'PB' ? 1 : 0) + (type === 'SI' ? 2 : 0);
-  const colCount = footSpan + 4;         // + Taxable, VAT, Total, Status/Updated By
+  const colCount = footSpan + 3;         // + Taxable, VAT, Total   (Updated By + mobile now sit in the remarks box)
   // standard grid: current row, ticks, ↑ / ↓ / Enter, blank rows + remarks box down to the screen bottom
   const g = useGrid({ rows, onOpen: (r) => view(r.id) });
   const { gridRef, cur, setCur, curRow, sel, setSel, remH } = g;
@@ -145,7 +145,7 @@ export default function DocList() {
             {type === 'PB' && <th className="nowrap">Supplier Bill No.</th>}<th>No.</th>
             {type === 'SI' && <><th className="nowrap">Challan</th><th className="nowrap">VAT Bill</th></>}
             <th>{meta.side === 'sales' ? 'Customer' : 'Supplier'}</th><th>PAN</th><th>{isQuote ? 'Subject' : 'Payment'}</th>
-            <th className="num">Taxable</th><th className="num">VAT</th><th className="num">Total</th>{byUser ? <th className="nowrap">Updated By</th> : <th>Status</th>}</tr></thead>
+            <th className="num">Taxable</th><th className="num">VAT</th><th className="num">Total</th></tr></thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={colCount} className="muted">Nothing in this period. Right-click to add.</td></tr>}
             {rows.map((r, idx) => (
@@ -159,7 +159,7 @@ export default function DocList() {
                   {r.status !== 'posted' && <span className={`tag st-${r.status}`}>{statusLabel(r.status, type)}</span>}
                   {r.transport_name || r.transport_bill_no ? <span className="tr-mark" title={`Via ${r.transport_name || 'transport'}${r.transport_bill_no ? ` · bill ${r.transport_bill_no}` : ''}`}>🚚</span> : null}</td>
                 {type === 'SI' && <><td className="nowrap">{r.challan_no}</td><td className="nowrap">{r.vat_bill_no}</td></>}
-                <td>{r.party_name}
+                <td>{r.party_id ? <a className="dl-party" title={`Open ${r.party_name} details`} onClick={(e) => { e.stopPropagation(); nav(`/${meta.side === 'sales' ? 'customers' : 'suppliers'}?open=${r.party_id}`); }}>{r.party_name}</a> : r.party_name}
                   {(r.task_users || []).length > 0 && <span className="muted" style={{ marginLeft: 10, fontSize: 11.5 }}>Task assigned to</span>}
                   {(r.task_users || []).slice(0, 3).map((u) => {
                     const p = cards[u];
@@ -181,16 +181,13 @@ export default function DocList() {
                 </td><td>{r.party_pan}</td>
                 <td>{isQuote ? r.qt_subject : payLabel(r.payment_mode)}</td>
                 <td className="num">{fmtMoney(r.taxable + r.exempt)}</td><td className="num">{fmtMoney(r.vat)}</td>
-                <td className="num">{fmtMoney(r.total)}</td>
-                {byUser
-                  ? <td className="nowrap" title={savedTip(r)}>{r.saved_by_name}</td>
-                  : <td><span className={`tag st-${r.status}`}>{r.status === 'open' ? 'pending' : r.status}</span></td>}
+                <td className="num" title={savedTip(r)}>{fmtMoney(r.total)}</td>
               </tr>
             ))}
             {g.blankRows(colCount)}
             <tr className="remarks-row"><td colSpan={colCount} style={{ height: remH }}>
               {curRow ? (
-                <div className="rm-grid">
+                <div className="rm-split"><div className="rm-grid">
                   <div><b>Remarks — {shortDocNo(curRow.doc_no)}:</b> {curRow.narration || <span className="muted">no remarks on this bill</span>}</div>
                   {isQuote
                     ? <div className="rm-pay"><b>Quotation:</b> {[curRow.qt_subject, curRow.qt_attn && `Attn ${curRow.qt_attn}`, curRow.qt_validity && `valid ${curRow.qt_validity}`,
@@ -203,13 +200,18 @@ export default function DocList() {
                     </div>
                   )}
                 </div>
+                <div className="rm-right" title={savedTip(curRow)}>
+                  <div><b>Updated by:</b> {curRow.saved_by_name || '—'}</div>
+                  {(curRow.party_whatsapp || curRow.party_mobile) && <div><b>{curRow.party_whatsapp ? 'WhatsApp' : 'Mobile'}:</b> {curRow.party_whatsapp || curRow.party_mobile}</div>}
+                  {curRow.party_contact && <div><b>Contact:</b> {curRow.party_contact}</div>}
+                </div></div>
               ) : <span className="muted">Click a bill to see its remarks and payment details.</span>}
             </td></tr>
           </tbody>
           <tfoot>
             <tr><th colSpan={footSpan} className="num">Total ({live.length})</th>
               <th className="num">{fmtMoney(total(live, 'taxable') + total(live, 'exempt'))}</th><th className="num">{fmtMoney(total(live, 'vat'))}</th>
-              <th className="num">{fmtMoney(total(live, 'total'))}</th><th /></tr>
+              <th className="num">{fmtMoney(total(live, 'total'))}</th></tr>
           </tfoot>
         </table>
       </section>

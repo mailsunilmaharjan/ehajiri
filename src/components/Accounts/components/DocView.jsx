@@ -15,6 +15,12 @@ import TaskPopup from './TaskPopup';
 
 const NAMES = { QT: 'Quotation', PO: 'Purchase Order', PB: 'Purchase Bill', PR: 'Debit Note', SO: 'Sales Order', SI: 'Tax Invoice', SR: 'Credit Note' };
 
+/** "Mobile: 98…  WhatsApp: 98…" (WhatsApp shown only when it differs from the mobile) */
+const partyPhones = (d) => {
+  const m = d.party_mobile, w = d.party_whatsapp;
+  return [m && `Mobile: ${m}`, w && w !== m && `WhatsApp: ${w}`].filter(Boolean).join(' · ');
+};
+
 /** Printable invoice / order / note in IRD layout: Print (counts copies), Email, WhatsApp, Cancel. */
 import { loadXlsx, styleGrid, styleTitle } from '../lib/xlsxStyled';
 import { IcoCancel, IcoClose, IcoDelete, IcoEdit, IcoExport, IcoMail, IcoNext, IcoPrint, IcoReturn, IcoSms, IcoWhatsApp } from './ToolIcons';
@@ -49,8 +55,8 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
   /** Quotation PDF as a file (for the share sheet / download). */
   const quoteFile = async () => {
     const res = await authFetch(pdfUrl);
-    if (!res.ok) throw new Error('Could not make the quotation PDF.');
-    const name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'Quotation.pdf';
+    if (!res.ok) throw new Error('Could not make the PDF.');
+    const name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || `${d.doc_no.replace(/\//g, '-')}.pdf`;
     return new File([await res.blob()], name, { type: 'application/pdf' });
   };
   // opened from a list's right-click "Print": print straight away
@@ -88,22 +94,36 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
     'Thank you.',
   ].filter(Boolean).join('\n');
 
+  /** Bank accounts to pay into: the one this bill was paid to, else every bank with an account no. / QR. */
+  const bankShare = async () => {
+    const list = await api.get('/bank-share');
+    const mine = d.cash_account_id ? list.filter((b) => b.ledger_ids.includes(d.cash_account_id)) : [];
+    return mine.length ? mine : list;
+  };
+  const bankText = (list) => (list.length ? ['*Pay to our bank account:*', ...list.map((b) => [`🏦 ${b.name}`, b.account_name && `A/c Name: ${b.account_name}`, b.account_no && `A/c No.: ${b.account_no}`, b.branch && `Branch: ${b.branch}`, b.qr && '(QR code on the bill)'].filter(Boolean).join('\n'))].join('\n') : '');
+
   const [expOpen, setExpOpen] = useState(false);
   const canSend = canEdit && !!d.party_id && d.status !== 'cancelled';
   /** WhatsApp: sent by the server when WhatsApp is set up, otherwise opens WhatsApp with the message ready. */
   const whatsapp = async () => {
-    if (isQuote) {
+    if (isSale) {
       // the quotation PDF itself: Windows / Android share sheet → WhatsApp; otherwise download it + open the chat
       setSending('whatsapp');
       try {
-        const file = await quoteFile();
-        if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: file.name, text: shareText });
+        // the bill as PDF + the bank account(s) to pay into: details in the message, QR image(s) as files
+        const banks = isQuote || meta.role === 'return' ? [] : await bankShare();
+        const text = [shareText, bankText(banks)].filter(Boolean).join('\n\n');
+        const files = [await quoteFile()];      // the bill PDF — bank account + QR code are printed on it
+        if (navigator.canShare?.({ files })) await navigator.share({ files, title: files[0].name, text });
         else {
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(file); a.download = file.name; a.click();
-          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-          window.open(waLink(d.party_phone, `${shareText}\n(PDF attached)`), '_blank', 'noopener');
-          notify('Quotation PDF downloaded — attach it in the WhatsApp chat that just opened.');
+          for (const file of files) {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+          }
+          const what = isQuote ? 'Quotation PDF' : 'Bill PDF';
+          window.open(waLink(d.party_phone, `${text}\n(${what} attached)`), '_blank', 'noopener');
+          notify(`${what} downloaded — attach it in the WhatsApp chat that just opened.`);
         }
       } catch (e) { if (e.name !== 'AbortError') notify(e.message, 'err'); }
       setSending('');
@@ -231,6 +251,7 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
               <label>{isSale ? 'Customer Name' : 'Supplier Name'}</label>
               <div className="dv-v"><b>{d.party_name}</b></div>
               <small>PAN {d.party_pan || '—'}{d.party_address ? ` · ${d.party_address}` : ''}</small>
+              {(d.party_contact || d.party_mobile || d.party_whatsapp) && <small>{d.party_contact ? `Contact: ${d.party_contact}` : ''}{d.party_contact && (d.party_mobile || d.party_whatsapp) ? ' · ' : ''}{partyPhones(d)}</small>}
             </div>
             {isSale
               ? <div className="dv-f"><label>Type</label><div className="dv-v">{LEVEL_NAMES[d.price_level] || 'Retail (MRP)'}</div></div>
@@ -372,6 +393,8 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
             <div className="iv-cap no-print">{isSale ? 'Bill to' : 'Supplier'}</div>
             <div className="iv-pname"><span className="print-inline">{partyLabel}: </span><b>{d.party_name}</b></div>
             {d.party_address && <div className="iv-line"><span className="print-inline">Address: </span>{d.party_address}</div>}
+            {d.party_contact && <div className="iv-line">Contact person: <b>{d.party_contact}</b></div>}
+            {partyPhones(d) && <div className="iv-line">{partyPhones(d)}</div>}
             <div className="iv-line">{partyLabel}'s PAN: <b>{d.party_pan || '—'}</b></div>
             {d.supplier_bill_no && <div className="iv-line">Supplier bill no: <b>{d.supplier_bill_no}</b>{d.supplier_bill_date && ` (${fmtBs(d.supplier_bill_date)})`}</div>}
           </div>

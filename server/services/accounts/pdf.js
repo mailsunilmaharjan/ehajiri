@@ -137,7 +137,7 @@ const DOC_TITLES = { PO: 'PURCHASE ORDER', PB: 'PURCHASE ENTRY', PR: 'DEBIT NOTE
 const PAY = { credit: 'Credit', cash: 'Cash', cheque: 'Cheque', bank: 'QR / Bank Transfer' };
 
 /** Bill / order / note as an A4 PDF (same layout as the printed bill). */
-export async function docPdf(company, d, user) {
+export async function docPdf(company, d, user, banks = []) {
   const k = await createDoc(stamp(user));
   const { doc, M, CW, font, cell, txt, bottom } = k;
   const sale = ['SO', 'SI', 'SR'].includes(d.doc_type);
@@ -151,6 +151,9 @@ export async function docPdf(company, d, user) {
   const left = [`${who}: ${d.party_name}`];
   if (d.party_address) left.push(`Address: ${d.party_address}`);
   left.push(`${who}'s PAN: ${d.party_pan || '-'}`);
+  if (d.party_contact) left.push(`Contact person: ${d.party_contact}`);
+  const phones = [d.party_mobile && `Mobile: ${d.party_mobile}`, d.party_whatsapp && d.party_whatsapp !== d.party_mobile && `WhatsApp: ${d.party_whatsapp}`].filter(Boolean);
+  if (phones.length) left.push(phones.join(' · '));
   if (d.supplier_bill_no) left.push(`Supplier bill no: ${d.supplier_bill_no}`);
   const nos = [d.challan_no && `Challan No: ${d.challan_no}`, d.vat_bill_no && `VAT Bill No: ${d.vat_bill_no}`].filter(Boolean);
   if (nos.length) left.push(nos.join(' · '));
@@ -204,6 +207,33 @@ export async function docPdf(company, d, user) {
     ry += 18;
   }
   let sy = Math.max(ry, yl) + 46;
+  // ── Pay to our bank account: one box per bank (max 3 side by side), QR on the left of its details ──
+  if (banks.length) {
+    let by = Math.max(ry, yl) + 14;
+    const boxH = 96;
+    if (by + boxH + 60 > bottom()) { doc.addPage(); by = 36; }
+    font(true, 9).fillColor('#0f2a3d').text('Pay to our bank account', M, by, { width: CW, lineBreak: false });
+    by += 13;
+    const bw = (CW - (banks.length - 1) * 8) / banks.length;
+    banks.forEach((b, i) => {
+      const x = M + i * (bw + 8);
+      doc.save().lineWidth(0.6).strokeColor('#9ca3af').roundedRect(x, by, bw, boxH, 4).stroke().restore();
+      let tx = x + 8;
+      if (b.qr_data) {
+        try { doc.image(b.qr_data, x + 6, by + 6, { fit: [84, 84], align: 'center', valign: 'center' }); tx = x + 96; } catch { /* unreadable image: details only */ }
+      }
+      const tw = x + bw - tx - 6;
+      let ly = by + 10;
+      font(true, 9).fillColor('#000').text(txt(b.name), tx, ly, { width: tw, lineBreak: false, ellipsis: true }); ly += 14;
+      for (const [k, v] of [['A/c Name', b.account_name], ['A/c No.', b.account_no], ['Branch', b.branch]]) {
+        if (!v) continue;
+        font(false, 7.5).fillColor('#555').text(k, tx, ly, { width: tw, lineBreak: false }); ly += 9;
+        font(true, 8.5).fillColor('#000').text(txt(v), tx, ly, { width: tw, lineBreak: false, ellipsis: true }); ly += 13;
+      }
+      if (b.qr_data) font(false, 7).fillColor('#555').text('Scan to pay', x + 6, by + boxH - 10, { width: 84, align: 'center', lineBreak: false });
+    });
+    sy = by + boxH + 40;
+  }
   if (sy > bottom()) { doc.addPage(); sy = 80; }
   [[M, `Prepared by: ${d.created_by}`], [M + 190, 'Received by'], [M + 380, 'Authorised signature']].forEach(([x, s]) => {
     doc.save().lineWidth(0.5).strokeColor('#000').moveTo(x, sy).lineTo(x + 130, sy).stroke().restore();
