@@ -23,7 +23,8 @@ function parsePasted(text, isCus) {
   const lines = String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim());
   if (!lines.length) return [];
   let map = isCus ? POS_CUS : POS_SUP, start = 0;
-  const head = lines[0].split('\t').map((h) => HDR[h.toLowerCase().replace(/[^a-z]/g, '')] || null);
+  // header names vary ("PAN", "PAN / VAT No.", "VAT No" …) — anything mentioning PAN or VAT is the PAN column
+  const head = lines[0].split('\t').map((h) => { const t = h.toLowerCase().replace(/[^a-z]/g, ''); return HDR[t] || (/pan|vat/.test(t) ? 'pan' : /mobile/.test(t) ? 'phone' : null); });
   if (head.includes('name')) { map = head; start = 1; }
   const out = [];
   for (const line of lines.slice(start)) {
