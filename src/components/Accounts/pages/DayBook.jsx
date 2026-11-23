@@ -32,7 +32,7 @@ function Accs({ list }) {
 }
 
 /** Day Book. With `fixedType` (e.g. 'JV') it is the list of just that voucher type — used by the Journal Voucher Entries page. */
-export default function DayBook({ fixedType = '', title = 'Day Book', sub = '', newTo = '' }) {
+export default function DayBook({ fixedType = '', fixedKind = '', title = 'Day Book', sub = '', newTo = '', newLabel = 'journal voucher' }) {
   const { fy, today } = useApp();
   const [from, setFrom] = useState(fy.start_date);
   const [to, setTo] = useState(today);
@@ -44,15 +44,15 @@ export default function DayBook({ fixedType = '', title = 'Day Book', sub = '', 
   const g = useGrid({ rows, onOpen: setOpen });
   const curV = g.curRow;
 
-  const load = () => api.get('/reports/day-book', { date_from: from, date_to: to, ...(vtype ? { vtype } : {}) }).then(setRows);
-  useEffect(() => { load(); }, [from, to, vtype]);
+  const load = () => api.get('/reports/day-book', { date_from: from, date_to: to, ...(vtype ? { vtype } : {}), ...(fixedKind ? { kind: fixedKind } : {}) }).then(setRows);
+  useEffect(() => { load(); }, [from, to, vtype, fixedKind]);
 
   const posted = rows.filter((v) => v.status === 'posted');
   return (
     <>
-      <header className="page-head"><h1>{title}</h1>{sub && <span className="muted">{sub}</span>}{newTo && <><span className="spacer" /><Link className="btn edit-only" data-new title="F1 / Alt+N" to={newTo}>+ New journal voucher <kbd className="kbd">F1</kbd></Link></>}</header>
+      <header className="page-head"><h1>{title}</h1>{sub && <span className="muted">{sub}</span>}{newTo && <><span className="spacer" /><Link className="btn edit-only" data-new title="F1 / Alt+N" to={newTo}>+ New {newLabel} <kbd className="kbd">F1</kbd></Link></>}</header>
       <PeriodBar from={from} to={to} fy={fy} onChange={(f, t) => { setFrom(f); setTo(t); }}>
-        {!fixedType && <select value={vtype} onChange={(e) => setVtype(e.target.value)}>
+        {!fixedType && !fixedKind && <select value={vtype} onChange={(e) => setVtype(e.target.value)}>
           <option value="">All vouchers</option>
           <option value="PB">Purchase</option><option value="PR">Purchase Return</option>
           <option value="SI">Sales</option><option value="SR">Sales Return</option>

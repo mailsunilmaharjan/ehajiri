@@ -28,6 +28,7 @@ import JournalHub from './pages/JournalHub';
 import QuoteTemplates from './pages/QuoteTemplates';
 import MenuHub from './pages/MenuHub';
 import Imports from './pages/Imports';
+import VoucherList from './pages/VoucherList';
 import BalanceSheet from './pages/BalanceSheet';
 import '../DataGrid/DataGrid.css';   // the grid look (variables + Accounts grid rules) lives in ONE place
 import './accounts.css';
@@ -82,6 +83,7 @@ function Shell() {
           <Route path="/docs/:type/new" element={<DocEntry />} />
           <Route path="/docs/:type/:id/edit" element={<DocEntry />} />
           <Route path="/voucher/:vtype/:id/edit" element={<VoucherEntry />} />
+          <Route path="/vouchers/:kind" element={<VoucherList />} />
           <Route path="/entry/:kind" element={<SimpleVoucher />} />
           <Route path="/entry/:kind/:id/edit" element={<SimpleVoucher />} />
           <Route path="/stock-summary" element={<StockSummary />} />

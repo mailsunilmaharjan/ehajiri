@@ -162,6 +162,25 @@ export default function Imports() {
   };
   const itemOpts = useMemo(() => items.filter((i) => i.active).map((i) => ({ ...i,
     group_name: i.item_type === 'service' ? `${i.code} · service` : `${i.code} · stock ${i.stock} ${i.unit}` })), [items]);
+  // F1 in a product cell → add a new product without leaving the form
+  const [np, setNp] = useState(null);  // { k, name, hs_code, unit_id, category_id }
+  const [units, setUnits] = useState([]);
+  const [cats, setCats] = useState([]);
+  const openNewProduct = async (k, typed) => {
+    if (!canEdit || locked) return;
+    try { if (!units.length) { const [u, c] = await Promise.all([api.get('/units'), api.get('/categories')]); setUnits(u); setCats(c); setNp({ k, name: typed || '', hs_code: '', category_id: '', unit_id: String((u.find((x) => x.name === 'Pcs') || u[0] || {}).id || '') }); return; } } catch (e) { notify(e.message, 'err'); return; }
+    setNp({ k, name: typed || '', hs_code: '', category_id: '', unit_id: String((units.find((x) => x.name === 'Pcs') || units[0] || {}).id || '') });
+  };
+  const saveNewProduct = async () => {
+    if (!np.name.trim()) { notify('Enter the product name.', 'err'); return; }
+    if (!np.unit_id) { notify('Choose a unit.', 'err'); return; }
+    try {
+      const it = await api.post('/items', { name: np.name.trim(), hs_code: np.hs_code.trim(), unit_id: Number(np.unit_id), category_id: np.category_id ? Number(np.category_id) : null, item_type: 'goods' });
+      const all = await api.get('/items'); setItems(all);
+      setItem(np.k, { item_id: String(it.id), product_name: it.name, hs_code: it.hs_code || '' });
+      setNp(null); notify(`Product ${it.name} added`);
+    } catch (e) { notify(e.message, 'err'); }
+  };
   const addRowRef = useRef(null);
   const addRow = () => {
     setForm((f) => ({ ...f, items: [...f.items, blankRow()] }));
@@ -273,8 +292,9 @@ export default function Imports() {
     try { await api.del(`/imports/${r.id}`); await load(); notify('Deleted'); } catch (e) { notify(e.message, 'err'); }
   };
 
-  const onWin = !!win && !arr && !bp;
+  const onWin = !!win && !arr && !bp && !np;
   useShortcuts({ save: () => { if (win?.tab === 'detail') saveForm(); else if (win?.tab === 'exp') saveExp(); }, close: closeWin }, onWin);
+  useShortcuts({ save: () => saveNewProduct(), close: () => setNp(null) }, !!np);
   useShortcuts({ save: () => saveBankPay(), close: () => setBp(null) }, !!bp);
   useShortcuts({ save: () => arrive(), close: () => setArr(null) }, !!arr);
 
@@ -395,7 +415,7 @@ export default function Imports() {
                         <th className="num" style={{ width: 90 }}>QTY</th><th className="num" style={{ width: 130 }}>RATE ({SYM[form.currency] || form.currency})</th>
                         <th className="num" style={{ width: 140 }}>TOTAL ({SYM[form.currency] || form.currency})</th><th style={{ minWidth: 180 }}>REMARKS</th><th style={{ width: 30 }} />
                       </tr></thead>
-                      <tbody onKeyDown={gridArrows}>
+                      <tbody onKeyDown={(e) => { if (e.key === 'F1' && !e.ctrlKey && !e.altKey && !e.shiftKey && e.target.closest?.('.acsel')) { e.preventDefault(); e.stopPropagation(); const row = e.target.closest('tr'); const k = form.items[[...row.parentNode.children].indexOf(row)]?._k; if (k != null) openNewProduct(k, e.target.value && !form.items.find((x) => x._k === k)?.item_id ? e.target.value : ''); return; } gridArrows(e); }}>
                         {form.items.map((r, i) => (
                           <tr key={r._k}>
                             <td className="sn">{i + 1}</td>
@@ -585,6 +605,26 @@ export default function Imports() {
                 {win.id && imp && !imp.arrived && canEdit && win.tab !== 'cost' && <button type="button" className="imp-go imp-go-sm" disabled={imp.missing.length > 0} title={imp.missing.length ? 'Complete the documents first' : ''} onClick={() => openArrive(imp)}>📦 Goods Arrived in Godown</button>}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {np && (
+        <div className="imp-ov imp-ov2">
+          <div className="imp-win imp-win-sm">
+            <div className="imp-win-h"><div className="imp-win-ic">📦</div><div className="imp-win-t"><h2>New Product</h2><p>Added to Products and selected on this line</p></div><button type="button" className="imp-x" onClick={() => setNp(null)}>✕</button></div>
+            <div className="imp-win-b">
+              <div className="doc-form" style={{ margin: 0, gridTemplateColumns: '1fr 1fr' }}>
+                <label style={{ gridColumn: '1 / -1' }}>Product Name *<input autoFocus data-nocap value={np.name} onChange={(e) => setNp({ ...np, name: e.target.value })} /></label>
+                <label>HS Code<input data-nocap value={np.hs_code} onChange={(e) => setNp({ ...np, hs_code: e.target.value })} /></label>
+                <label>Unit *<select value={np.unit_id} onChange={(e) => setNp({ ...np, unit_id: e.target.value })}>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+                <label style={{ gridColumn: '1 / -1' }}>Category<select value={np.category_id} onChange={(e) => setNp({ ...np, category_id: e.target.value })}><option value="">— none —</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.parent_name ? `${c.parent_name} › ` : ''}{c.name}</option>)}</select></label>
+              </div>
+            </div>
+            <div className="imp-win-f"><span /><div style={{ display: 'flex', gap: 10 }}>
+              <button type="button" className="btn btn-outline" onClick={() => setNp(null)}>Cancel <Kbd>Esc</Kbd></button>
+              <button type="button" className="btn btn-primary" onClick={saveNewProduct}>💾 Save Product</button>
+            </div></div>
           </div>
         </div>
       )}

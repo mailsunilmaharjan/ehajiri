@@ -50,9 +50,9 @@ export const ACCOUNTS_HUBS = {
     { title: 'Sales Posting', icon: 'trendingUp', cards: [['/docs/QT', 'Sales Quotation', 'mail'], ['/docs/SO', 'Sales Order', 'clipboard'], ['/docs/SI', 'Sales Invoice', 'fileText'], ['/docs/SR', 'Sales Return', 'logOut'],
       ['/docs/SI/new', '+ New Sales Invoice', 'fileText'], ['/docs/QT/new', '+ New Quotation', 'mail']] },
     { title: 'Vouchers', icon: 'edit3', cards: [
-      ['/entry/expense', 'Expenses Voucher', 'fileText'], ['/journals', 'Journal Voucher', 'edit3'], ['/entry/supplier_payment', 'Supplier Payment', 'fileText'],
-      ['/entry/receipt', 'Payment Received', 'fileText'], ['/entry/transfer', 'Cash / Bank Transfer', 'fileText'], ['/entry/capital_loan', 'Capital / Loan Received', 'fileText'],
-      ['/entry/staff_advance', 'Staff Advance / Loan', 'users'], ['/entry/asset_purchase', 'Asset Purchase', 'fileText'], ['/entry/asset_sale', 'Asset Sale', 'fileText'],
+      ['/vouchers/expense', 'Expenses Voucher', 'fileText'], ['/journals', 'Journal Voucher', 'edit3'], ['/vouchers/supplier_payment', 'Supplier Payment', 'fileText'],
+      ['/vouchers/receipt', 'Payment Received', 'fileText'], ['/vouchers/transfer', 'Cash / Bank Transfer', 'fileText'], ['/vouchers/capital_loan', 'Capital / Loan Received', 'fileText'],
+      ['/vouchers/staff_advance', 'Staff Advance / Loan', 'users'], ['/vouchers/asset_purchase', 'Asset Purchase', 'fileText'], ['/vouchers/asset_sale', 'Asset Sale', 'fileText'],
       ['/entry/journal', '+ New Journal Voucher', 'edit3'],
     ] },
   ] },

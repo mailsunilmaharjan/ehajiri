@@ -22,12 +22,13 @@ const DAY_KINDS = {
 const dayType = (vtype, kind) => DAY_KINDS[kind || ''] || DAY_TYPES[vtype] || VTYPES[vtype] || vtype;
 
 router.get('/reports/day-book', ah(async (req, res) => {
-  const { date_from, date_to, vtype } = req.query;
+  const { date_from, date_to, vtype, kind } = req.query;
   if (!date_from || !date_to) bad('Choose a date range.');
   const includeCancelled = truthy(req.query.include_cancelled, true);
   const params = [date_from, date_to];
   let sql = `SELECT v.*, ${SAVED_BY} AS saved_by_name FROM acc_vouchers v WHERE v.vdate BETWEEN %s AND %s`;
   if (vtype) { sql += ' AND v.vtype = %s'; params.push(vtype); }
+  if (kind) { sql += ' AND v.kind = %s'; params.push(kind); }
   if (!includeCancelled) sql += ` AND ${POSTED}`;
   const vouchers = (await q(`${sql} ORDER BY v.vdate, v.id`, params)).rows;
   if (vouchers.length) {
