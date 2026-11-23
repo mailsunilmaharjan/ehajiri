@@ -831,3 +831,5 @@ router.post('/docs/:did/send', ah(async (req, res) => {
 }));
 
 export default router;
+
+export { post as postDoc };

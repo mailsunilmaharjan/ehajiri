@@ -30,6 +30,7 @@ export const api = {
   get: (url, params) => call('GET', params ? `${url}?${new URLSearchParams(params)}` : url),
   post: (url, body) => call('POST', url, body ?? {}),
   put: (url, body) => call('PUT', url, body),
+  patch: (url, body) => call('PATCH', url, body),
   del: (url) => call('DELETE', url),
 };
 

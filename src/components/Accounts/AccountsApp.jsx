@@ -27,6 +27,7 @@ import SimpleVoucher from './pages/SimpleVoucher';
 import JournalHub from './pages/JournalHub';
 import QuoteTemplates from './pages/QuoteTemplates';
 import MenuHub from './pages/MenuHub';
+import Imports from './pages/Imports';
 import BalanceSheet from './pages/BalanceSheet';
 import '../DataGrid/DataGrid.css';   // the grid look (variables + Accounts grid rules) lives in ONE place
 import './accounts.css';
@@ -76,6 +77,7 @@ function Shell() {
           <Route path="/customers" element={<Parties type="customer" />} />
           <Route path="/suppliers" element={<Parties type="supplier" />} />
           <Route path="/products" element={<Products />} />
+          <Route path="/imports" element={<Imports />} />
           <Route path="/docs/:type" element={<DocList />} />
           <Route path="/docs/:type/new" element={<DocEntry />} />
           <Route path="/docs/:type/:id/edit" element={<DocEntry />} />

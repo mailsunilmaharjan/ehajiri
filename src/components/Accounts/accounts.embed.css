@@ -148,3 +148,112 @@ body .acc-app .modal > .card.qt-form > .actions { position: sticky; bottom: 0; z
     linear-gradient(#1a56db, #1a56db) no-repeat left top / 34px 100%,
     #fff !important;
 }
+
+/* Customers / Suppliers grid (Parties.jsx) — laid out like Staff Details:
+   the card fills the screen; the table scrolls inside it with a frozen heading (and totals);
+   the remarks strip is pinned to the bottom edge. Names are not bold; a row turns bold on mouse-over. */
+.acc-app .page-container:has(.parties-card) { padding-bottom: 0; }
+.acc-app section.parties-card { display: flex; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid #dedede; border-radius: 8px 8px 0 0; box-shadow: 0 1px 3px rgba(0,0,0,.07); min-height: 280px; margin-bottom: 0; }
+.acc-app .parties-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.acc-app .parties-scroll > table.grid.dg-soft { border: none !important; width: 100%; margin: 0; }
+.acc-app table.parties-grid thead th { position: sticky; top: 0; z-index: 3; box-shadow: inset 0 -1px 0 #cfcfcf; }
+.acc-app table.parties-grid tbody td.pname { font-weight: 400; color: inherit; }
+.acc-app table.parties-grid tbody tr:hover td { font-weight: 700; }
+.acc-app .parties-remarks { flex: 0 0 auto; min-height: 84px; padding: 8px 14px; background: #fff; border-top: 1px solid #cfcfcf; font-size: 12.5px; color: #334155; overflow: auto; max-height: 30vh; }
+.acc-app .parties-remarks .rm-wrap { display: flex; align-items: flex-start; gap: 24px; }
+.acc-app .parties-remarks .rm-grid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.acc-app .parties-remarks .rm-by { margin-left: auto; text-align: right; white-space: nowrap; }
+
+/* "also supplier" / "also customer" badge in the Customers / Suppliers grids: stands out with its own colour */
+.acc-app table.parties-grid .tag.tag-both { background: #fff1d6; color: #9a4b00; border: 1px solid #f3c77a; font-size: 10px !important; font-weight: 500; line-height: 1.4; border-radius: 2px; padding: 0 5px; margin-left: 8px; }
+.acc-app table.parties-grid tr.current .tag.tag-both, .acc-app table.parties-grid tr:hover .tag.tag-both { background: #ffe2a8; }
+
+/* Tree view in the Customers / Suppliers grid: ▸ / ▾ opens the sub ledgers under a main party (plain handles, no colour boxes) */
+.acc-app table.parties-grid .tv-tog { display: inline-block; width: 16px; height: 16px; margin: 0 4px 0 0; padding: 0; border: 0; background: transparent; color: #475569; font-size: 15px; line-height: 16px; text-align: center; cursor: pointer; font-family: "Segoe UI Symbol", Arial, sans-serif; vertical-align: middle; min-height: 0; }
+.acc-app table.parties-grid .tv-tog:hover { color: #1a56db; }
+.acc-app table.parties-grid .tv-tog.tv-none { cursor: default; }
+.acc-app table.parties-grid tr.tv-child td.pname { padding-left: 34px; }
+.acc-app table.parties-grid .tv-elbow { display: inline-block; width: 16px; margin-right: 4px; color: #b8c0cc; text-align: center; }
+
+/* Customers / Suppliers: page navigation under the remarks strip (same footer as Staff Detail) */
+.acc-app .parties-pager { flex: 0 0 auto; justify-content: flex-end; gap: 18px; border-top: 1px solid #cfcfcf; }
+.acc-app .parties-pager .pg-btn { min-width: 22px; height: 22px; padding: 0 4px; font-size: 12px; line-height: 1; background: #fff; color: #374151; border: 1px solid #dedede; border-radius: 4px; box-shadow: none; font-weight: 400; min-height: 0; }
+.acc-app .parties-pager .pg-btn:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; }
+.acc-app .parties-pager .pg-btn.active { background: #1a56db; border-color: #1a56db; color: #fff; font-weight: 600; }
+.acc-app .parties-pager .pg-btn:disabled { opacity: .4; }
+.acc-app .parties-pager .dg-pagesize select { height: 22px; padding: 1px 4px; font-size: 12px; width: auto; min-width: 0; border: 1px solid #dedede; border-radius: 4px; background: #fff; }
+.acc-app .parties-pager .dg-pagesize label { margin: 0; }
+.acc-app .parties-pager .dg-pagesize select { width: 56px; padding: 0 2px; }
+/* Customer type (price level) badge: plain coloured box, not a rounded capsule */
+.acc-app table.parties-grid .lvl-badge { display: inline-block; padding: 0 7px; font-size: 11px; line-height: 1.5; border-radius: 2px; border: 1px solid; white-space: nowrap; }
+.acc-app table.parties-grid .lvl-mrp { background: #e0f2fe; color: #075985; border-color: #7dd3fc; }
+.acc-app table.parties-grid .lvl-dealer { background: #dcfce7; color: #166534; border-color: #86efac; }
+.acc-app table.parties-grid .lvl-partner { background: #f3e8ff; color: #6b21a8; border-color: #d8b4fe; }
+/* page-size box: same small size as the other footer controls (the global select style made it tall) */
+.acc-app .parties-pager .dg-pagesize select { height: 22px !important; min-height: 0 !important; width: 54px !important; padding: 0 16px 0 6px !important; font-size: 12px !important; line-height: 20px !important; background-position: right 4px center !important; background-size: 10px !important; border-radius: 4px !important; }
+
+/* Type / relation filter next to "Only with balance" */
+.acc-app .pdc-bar select.type-filter { height: 28px; width: auto; min-width: 150px; max-width: 220px; font-size: 12px; padding: 0 8px; margin-left: 14px; border: 1px solid #dedede; border-radius: 6px; background-color: #fff; }
+.acc-app .pdc-bar select.type-filter { height: 30px !important; min-height: 0 !important; padding: 0 26px 0 10px !important; font-size: 12.5px !important; line-height: 28px !important; min-width: 170px !important; }
+
+/* ───── Import Purchases (Accounts → Posting → Purchase Posting): Staff Detail look ───── */
+.acc-app .imp-ov { position: fixed; inset: 0; z-index: 1000; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; padding: 8px; }
+.acc-app .imp-ov2 { z-index: 1100; }
+.acc-app .imp-win { background: #fff; border-radius: 14px; width: 96vw; max-width: 1100px; height: 95vh; display: flex; flex-direction: column; box-shadow: 0 30px 80px rgba(15,23,42,.35); overflow: hidden; font-family: 'Inter','Noto Sans Devanagari','Segoe UI',system-ui,sans-serif; }
+.acc-app .imp-win-sm { height: auto; max-height: 92vh; max-width: 860px; }
+.acc-app .imp-win-h { display: flex; align-items: center; gap: 11px; padding: 12px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+.acc-app .imp-win-ic { width: 34px; height: 34px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 2px 8px rgba(15,42,61,.12); flex-shrink: 0; }
+.acc-app .imp-win-t h2 { font-size: 15px; font-weight: 700; color: #0f2a3d; margin: 0; letter-spacing: -.1px; }
+.acc-app .imp-win-t p { margin: 1px 0 0; font-size: 11.5px; color: #4b6477; }
+.acc-app .imp-x { margin-left: auto; width: 28px; height: 28px; padding: 0; border-radius: 8px; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.1); font-size: 13px; color: #0f2a3d; border: 0; cursor: pointer; }
+.acc-app .imp-x:hover { background: #e2e8f0; }
+.acc-app .imp-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid #e2e8f0; padding: 0 20px; background: #fff; }
+.acc-app .imp-win-b { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 20px; background: #f8fafc; }
+.acc-app .imp-win-f { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid #e2e8f0; background: #fff; flex-shrink: 0; }
+.acc-app .imp-fs { border: 0; margin: 0; padding: 0; min-width: 0; }
+.acc-app .imp-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; align-items: start; }
+.acc-app .imp-cols2 { grid-template-columns: 2fr 1fr; }
+.acc-app .imp-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.acc-app .imp-pn { border: 1px solid #e8edf5; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.acc-app .imp-pn-h { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #eef2f7; font-size: 12.5px; font-weight: 700; color: #0f172a; }
+.acc-app .imp-fg { padding: 8px 14px; border-bottom: 1px solid #eef0f4; }
+.acc-app .imp-fl { font-size: 11.5px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+.acc-app .imp-hint { font-size: 11px; color: #6b7280; margin-top: 3px; }
+.acc-app .imp-pad { padding: 10px 14px; }
+.acc-app .imp-in { width: 100%; height: 34px; padding: 0 10px; font-size: 13px; border: 1.5px solid #d1d5db; border-radius: 7px; background: #fff; box-sizing: border-box; font-family: inherit; }
+.acc-app .imp-in:focus { border-color: #1a56db; outline: none; }
+.acc-app .imp-in.r { text-align: right; }
+.acc-app .imp-in:disabled { background: #f3f4f6; color: #6b7280; }
+.acc-app textarea.imp-in { padding: 8px 10px; }
+.acc-app .imp-big { font-size: 17px; font-weight: 700; }
+.acc-app .blue { color: #1d4ed8; } .acc-app .green { color: #059669; } .acc-app .req { color: #f05252; }
+.acc-app .imp-tw { overflow-x: auto; }
+.acc-app .imp-t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.acc-app .imp-t th { background: #f1f5f9; text-align: left; padding: 7px 8px; font-weight: 700; color: #334155; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.acc-app .imp-t td { padding: 5px 8px; border-bottom: 1px solid #eef0f4; vertical-align: middle; }
+.acc-app .imp-t .num { text-align: right; white-space: nowrap; } .acc-app .imp-t .c { text-align: center; color: #6b7280; }
+.acc-app .imp-prod-foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+.acc-app .imp-sums { padding: 10px 14px; text-align: right; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.acc-app .imp-add { height: 26px; padding: 0 10px; font-size: 12px; }
+.acc-app .imp-mrp { font-weight: 500; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.acc-app .imp-files-h { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+.acc-app .imp-file { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 1px 0; }
+.acc-app .imp-file a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.acc-app .imp-check { list-style: none; margin: 0; padding: 0; font-size: 12.5px; color: #b45309; display: flex; flex-direction: column; gap: 4px; }
+.acc-app .imp-check li.ok { color: #047857; }
+.acc-app .imp-done { font-size: 13px; color: #065f46; background: #ecfdf3; border-radius: 8px; padding: 10px 12px; line-height: 1.5; }
+.acc-app .imp-go { width: 100%; height: 38px; background: #16a34a; color: #fff; border: 0; border-radius: 8px; font-weight: 600; cursor: pointer; }
+.acc-app .imp-go:disabled { background: #9ca3af; cursor: not-allowed; }
+.acc-app .imp-go-sm { width: auto; height: 34px; padding: 0 16px; }
+.acc-app .imp-badge { display: inline-block; padding: 1px 7px; border-radius: 2px; font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+.acc-app .imp-arrived { background: #dcfce7; color: #166534; } .acc-app .imp-wait { background: #fff1d6; color: #9a4b00; } .acc-app .imp-ready { background: #dbeafe; color: #1e40af; }
+@media (max-width: 1000px) { .acc-app .imp-cols, .acc-app .imp-cols2 { grid-template-columns: 1fr; } }
+body .acc-app .imp-win .btn.btn-outline { background: #fff !important; color: #374151 !important; border: 1px solid #d1d5db !important; box-shadow: none !important; }
+body .acc-app .imp-win .btn.btn-outline:hover { background: #f3f4f6 !important; }
+
+/* Import Purchase — Purchase Information laid out in one horizontal row, like the Sales Invoice header */
+.acc-app .doc-form.imp-top { grid-template-columns: 140px 170px minmax(0, 2.4fr) minmax(0, 1.4fr); align-items: start; gap: 14px 20px; }
+.acc-app .doc-form.imp-top2 { grid-template-columns: 150px minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1.3fr) minmax(0, 1.3fr); align-items: start; gap: 14px 20px; }
+.acc-app .imp-pi-up { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; min-width: 0; }
+.acc-app .imp-pi-up .imp-files { border: 0; padding: 0; background: none; }
+@media (max-width: 1100px) { .acc-app .doc-form.imp-top, .acc-app .doc-form.imp-top2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

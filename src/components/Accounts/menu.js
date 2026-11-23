@@ -8,7 +8,7 @@ export const ACCOUNTS_MENU = [
     ['/products', 'Products & Categories', 'grid'], ['/accounts', 'Chart of Accounts', 'list'], ['/company', 'Company Setup', 'sliders'],
   ] },
   { title: 'Purchase', icon: 'truck', items: [
-    ['/docs/PO', 'Purchase Order', 'clipboard'], ['/docs/PB', 'Purchase', 'fileText'], ['/docs/PR', 'Purchase Return', 'logOut'],
+    ['/docs/PO', 'Purchase Order', 'clipboard'], ['/docs/PB', 'Purchase', 'fileText'], ['/docs/PR', 'Purchase Return', 'logOut'], ['/imports', 'Import Purchase', 'truck'],
   ] },
   { title: 'Sales', icon: 'trendingUp', items: [
     ['/docs/QT', 'Sales Quotation', 'mail'], ['/docs/SO', 'Sales Order', 'clipboard'], ['/docs/SI', 'Sales Invoice', 'fileText'],
@@ -46,7 +46,7 @@ export const ACCOUNTS_HUBS = {
   ] },
   posting: { title: 'Posting', icon: 'edit3', actions: [['/docs/SI/new', 'Sales Invoice'], ['/docs/PB/new', 'Purchase Invoice'], ['/entry/journal', 'Journal Voucher']], groups: [
     { title: 'Purchase Posting', icon: 'truck', cards: [['/docs/PB', 'Purchase Invoice', 'fileText'], ['/docs/PO', 'Purchase Order', 'clipboard'], ['/docs/PR', 'Purchase Return', 'logOut'],
-      ['/docs/PB/new', '+ New Purchase Invoice', 'fileText']] },
+      ['/docs/PB/new', '+ New Purchase Invoice', 'fileText'], ['/imports', 'Import Purchase', 'truck']] },
     { title: 'Sales Posting', icon: 'trendingUp', cards: [['/docs/QT', 'Sales Quotation', 'mail'], ['/docs/SO', 'Sales Order', 'clipboard'], ['/docs/SI', 'Sales Invoice', 'fileText'], ['/docs/SR', 'Sales Return', 'logOut'],
       ['/docs/SI/new', '+ New Sales Invoice', 'fileText'], ['/docs/QT/new', '+ New Quotation', 'mail']] },
     { title: 'Vouchers', icon: 'edit3', cards: [

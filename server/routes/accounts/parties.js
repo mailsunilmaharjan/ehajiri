@@ -269,6 +269,34 @@ router.post('/parties/bulk-import', ah(async (req, res) => {
   res.json({ ok: true, added, skipped, results: out });
 }));
 
+/** Make an EXISTING customer / supplier a sub ledger of another one of the same kind (or take it out again with parent_id = null).
+ *  Only the link (parent_party_id) changes — the ledger keeps its own name, PAN, balance, contacts and history.
+ *  One level only: the main party can't itself be a sub ledger, and a party that already has sub ledgers can't become one. */
+router.put('/parties/:pid/parent', ah(async (req, res) => {
+  const pid = +req.params.pid;
+  const cur = await one('SELECT * FROM acc_ledgers WHERE id = %s AND party_type IS NOT NULL', [pid]) || bad('Party not found.', 404);
+  const user = userOf(req);
+  const parentId = req.body?.parent_id ? +req.body.parent_id : null;
+  if (!parentId) {
+    if (!cur.parent_party_id) bad(`${cur.name} is not a sub ledger.`);
+    await tx(async (t) => {
+      await t.query('UPDATE acc_ledgers SET parent_party_id = NULL, updated_by = %s, updated_at = NOW() WHERE id = %s', [user, pid]);
+      await audit(t, user, 'update', cur.party_type, pid, { sub_ledger_of: [cur.parent_party_id, null], name: cur.name });
+    });
+    return res.json({ ok: true, parent_party_id: null });
+  }
+  if (parentId === pid) bad('A ledger cannot be a sub ledger of itself.');
+  const parent = await one('SELECT * FROM acc_ledgers WHERE id = %s AND party_type IS NOT NULL', [parentId]) || bad('Choose the main customer / supplier.');
+  if (parent.party_type !== cur.party_type) bad(`The main party must be a ${cur.party_type} too.`);
+  if (parent.parent_party_id) bad(`${parent.name} is itself a sub ledger — choose its main party instead.`);
+  if (await one('SELECT id FROM acc_ledgers WHERE parent_party_id = %s LIMIT 1', [pid])) bad(`${cur.name} already has sub ledgers of its own, so it can't become a sub ledger.`);
+  await tx(async (t) => {
+    await t.query('UPDATE acc_ledgers SET parent_party_id = %s, updated_by = %s, updated_at = NOW() WHERE id = %s', [parentId, user, pid]);
+    await audit(t, user, 'update', cur.party_type, pid, { sub_ledger_of: [cur.parent_party_id || null, parentId], main: parent.name, name: cur.name });
+  });
+  res.json({ ok: true, parent_party_id: parentId });
+}));
+
 router.put('/parties/:pid', ah(async (req, res) => {
   const pid = +req.params.pid, b = req.body || {};
   const cur = await one('SELECT * FROM acc_ledgers WHERE id = %s AND party_type IS NOT NULL', [pid]) || bad('Party not found.', 404);

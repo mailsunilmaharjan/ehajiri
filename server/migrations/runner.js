@@ -3646,6 +3646,77 @@ const MIGRATIONS = [
       await client.query(`CREATE INDEX IF NOT EXISTS ix_acc_ledgers_parent_party ON acc_ledgers(parent_party_id)`);
     },
   },
+  {
+    version    : 183,
+    description: 'Accounts: Import Purchases (PI → payment → documents → Goods Arrived in Godown). New acc_import_purchases / _items / _expenses. Nothing reaches purchases or stock until Goods Arrived posts a Purchase (PB) document. Additive, IF NOT EXISTS.',
+    up: async (client) => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS acc_import_purchases (
+          id                     SERIAL PRIMARY KEY,
+          pi_no                  TEXT NOT NULL,
+          pi_date                DATE,
+          supplier_id            INTEGER REFERENCES acc_ledgers(id) ON DELETE SET NULL,
+          import_from            TEXT,
+          country                TEXT,
+          payment_mode           TEXT NOT NULL DEFAULT 'TT',
+          payment_mode_other     TEXT,
+          payment_status         TEXT NOT NULL DEFAULT 'Pending',
+          payment_completed_date DATE,
+          currency               TEXT NOT NULL DEFAULT 'USD',
+          exchange_rate          NUMERIC(14,4) NOT NULL DEFAULT 1,
+          mrp_multiplier         NUMERIC(10,4),
+          est_ready_date         DATE,
+          ci_no                  TEXT,
+          ci_date                DATE,
+          packing_list_no        TEXT,
+          customs_doc_no         TEXT,
+          customs_doc_date       DATE,
+          files                  TEXT NOT NULL DEFAULT '{}',
+          grand_total            NUMERIC(16,2) NOT NULL DEFAULT 0,
+          status                 TEXT NOT NULL DEFAULT 'open',
+          arrived_at             TIMESTAMPTZ,
+          arrived_by             TEXT,
+          arrival_date           DATE,
+          pb_doc_id              INTEGER REFERENCES acc_docs(id) ON DELETE SET NULL,
+          created_by             TEXT,
+          created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_by             TEXT,
+          updated_at             TIMESTAMPTZ
+        );
+        CREATE TABLE IF NOT EXISTS acc_import_items (
+          id           SERIAL PRIMARY KEY,
+          import_id    INTEGER NOT NULL REFERENCES acc_import_purchases(id) ON DELETE CASCADE,
+          item_id      INTEGER REFERENCES acc_items(id) ON DELETE SET NULL,
+          product_name TEXT NOT NULL,
+          hs_code      TEXT,
+          rate         NUMERIC(16,4) NOT NULL DEFAULT 0,
+          qty          NUMERIC(14,3) NOT NULL DEFAULT 0,
+          total        NUMERIC(16,2) NOT NULL DEFAULT 0,
+          sort         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS acc_import_expenses (
+          id            SERIAL PRIMARY KEY,
+          import_id     INTEGER NOT NULL REFERENCES acc_import_purchases(id) ON DELETE CASCADE,
+          expense_type  TEXT NOT NULL DEFAULT 'Bank Expenses',
+          title         TEXT NOT NULL,
+          amount        NUMERIC(16,2) NOT NULL DEFAULT 0,
+          sort          INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS ix_acc_import_items_imp ON acc_import_items(import_id);
+        CREATE INDEX IF NOT EXISTS ix_acc_import_exp_imp ON acc_import_expenses(import_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_acc_import_pi ON acc_import_purchases(LOWER(pi_no));
+      `);
+    },
+  },
+  {
+    version    : 184,
+    description: 'Accounts: Import Purchases — TT/LC condition and Customs "via" point on the PI, and a per-product Remarks column. Adds nullable text columns. Additive.',
+    up: async (client) => {
+      await client.query(`ALTER TABLE acc_import_purchases ADD COLUMN IF NOT EXISTS payment_condition TEXT`);
+      await client.query(`ALTER TABLE acc_import_purchases ADD COLUMN IF NOT EXISTS custom_via TEXT`);
+      await client.query(`ALTER TABLE acc_import_items ADD COLUMN IF NOT EXISTS remarks TEXT`);
+    },
+  },
 ];
 
 // ══════════════════════════════════════════════════════════

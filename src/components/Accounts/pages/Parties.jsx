@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useGrid } from '../components/DataGrid';
 import { useNavigate, useSearchParams } from '../lib/router';
 import { useApp } from '../context';
@@ -47,13 +47,14 @@ export default function Parties({ type }) {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
   const [onlyDue, setOnlyDue] = useState(false);
+  const [typeF, setTypeF] = useState('');       // Customers: price level (mrp / dealer / partner) · Suppliers: relation (both / only / sub / main)
   const [edit, setEdit] = useState(null);
   const [menu, setMenu] = useState(null);
   const [picked, setPicked] = useState(new Set());
 
   const load = () => api.get('/parties', { type, include_inactive: true }).then(setRows);
   const [sp, setSp] = useSearchParams();
-  useEffect(() => { load(); setEdit(null); setCur(null); }, [type]);
+  useEffect(() => { load(); setEdit(null); setCur(null); setTypeF(''); }, [type]);
   // ?new=1 (from Chart of Accounts → Parties) opens a blank customer / supplier form straight away
   useEffect(() => { if (sp.get('new') && canEdit) { open(null); setSp({}, { replace: true }); } }, [sp, type]);
 
@@ -73,6 +74,25 @@ export default function Parties({ type }) {
     } catch (err) { notify(err.message, 'err'); }
   };
   useShortcuts({ save: () => saveSub(), close: () => setSub(null) }, !!sub);
+
+  // ── Make an existing customer / supplier a sub ledger of another one (right-click → Make sub ledger of…) ──
+  const [mk, setMk] = useState(null);          // { row, parent_id }
+  const saveMk = async (e) => {
+    e?.preventDefault();
+    if (!mk?.parent_id) return;
+    try {
+      await api.put(`/parties/${mk.row.id}/parent`, { parent_id: +mk.parent_id });
+      const main = rows.find((r) => String(r.id) === String(mk.parent_id));
+      setMk(null); await load(); await reload();
+      notify(`${mk.row.name} is now a sub ledger of ${main?.name || 'the main ' + word.toLowerCase()}`);
+    } catch (err) { notify(err.message, 'err'); }
+  };
+  const unSub = async (r) => {
+    if (!window.confirm(`Take ${r.name} out of ${r.parent_name}? It stays as a normal ${word.toLowerCase()} with all its data.`)) return;
+    try { await api.put(`/parties/${r.id}/parent`, { parent_id: null }); await load(); await reload(); notify(`${r.name} is no longer a sub ledger`); }
+    catch (err) { notify(err.message, 'err'); }
+  };
+  useShortcuts({ save: () => saveMk(), close: () => setMk(null) }, !!mk);
 
   // ── Bulk import (Super Admin only): paste rows copied from Excel, preview, import ──
   // Columns: SN, Ledger, PAN, Address, City, Office Phone, Email, Mobile, Customer Group, Contact Person
@@ -94,14 +114,100 @@ export default function Parties({ type }) {
 
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return rows.filter((r) => (!s || `${r.name} ${r.pan || ''} ${r.phone || ''} ${r.whatsapp || ''} ${r.address || ''} ${r.main_contact || ''}`.toLowerCase().includes(s))
+    const mainIds = new Set(rows.filter((r) => r.parent_party_id).map((r) => r.parent_party_id));
+    const typeOk = (r) => {
+      if (!typeF) return true;
+      if (isCus) return r.price_level === typeF;
+      if (typeF === 'both') return !!r.linked_party_id;
+      if (typeF === 'only') return !r.linked_party_id;
+      if (typeF === 'sub') return !!r.parent_party_id;
+      if (typeF === 'main') return mainIds.has(r.id);
+      return true;
+    };
+    return rows.filter((r) => typeOk(r) && (!s || `${r.name} ${r.pan || ''} ${r.phone || ''} ${r.whatsapp || ''} ${r.address || ''} ${r.main_contact || ''}`.toLowerCase().includes(s))
       && (!onlyDue || Math.abs(r.balance) > 0.005));
-  }, [rows, q, onlyDue]);
+  }, [rows, q, onlyDue, typeF, isCus]);
   const total = shown.reduce((s, r) => s + r.balance, 0);
-  const colCount = isCus ? 13 : 12;
+
+  // ── Tree view: a main customer / supplier can be opened (▸ / ▾) to show its sub ledgers just under it ──
+  const [openIds, setOpenIds] = useState(() => new Set());
+  const toggleOpen = (id) => setOpenIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const searching = !!q.trim();
+  const allKids = useMemo(() => {            // every sub ledger of each main party (ignores the search / filter)
+    const m = new Map();
+    rows.forEach((r) => { if (r.parent_party_id) { if (!m.has(r.parent_party_id)) m.set(r.parent_party_id, []); m.get(r.parent_party_id).push(r); } });
+    return m;
+  }, [rows]);
+  // A sub ledger always lives UNDER its main party — never as a separate row further down the list.
+  // Filter / search: a main row is kept if it OR any of its sub ledgers matches. If only a sub ledger matches, the main row opens
+  // by itself and shows just the matching sub ledgers; if the main row matches, its ▸ opens ALL its sub ledgers.
+  const filtering = searching || onlyDue || !!typeF;
+  const { display, metaOf } = useMemo(() => {
+    const hit = new Set(shown.map((r) => r.id));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const out = [], meta = new Map();
+    rows.forEach((r) => {
+      if (r.parent_party_id && byId.has(r.parent_party_id)) return;       // listed under its main party below
+      const kids = allKids.get(r.id) || [];
+      const kidHits = kids.filter((k) => hit.has(k.id));
+      const self = hit.has(r.id);
+      if (!self && kidHits.length === 0) return;
+      const autoOpen = filtering && !self && kidHits.length > 0;
+      const isOpen = openIds.has(r.id) || autoOpen;
+      out.push(r); meta.set(r.id, { depth: 0, hasKids: kids.length > 0, isOpen });
+      if (isOpen) (self ? kids : kidHits).forEach((c) => { out.push(c); meta.set(c.id, { depth: 1, hasKids: false, isOpen: false }); });
+    });
+    return { display: out, metaOf: meta };
+  }, [rows, shown, openIds, filtering, allKids]);
+  const colCount = isCus ? 12 : 11;
+  // ── Paging (like Staff Detail): a main party stays together with its open sub ledgers on one page ──
+  const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [q, onlyDue, typeF, type, pageSize]);
+  const groups = useMemo(() => {
+    const gs = [];
+    display.forEach((r) => { if ((metaOf.get(r.id)?.depth || 0) === 0 || !gs.length) gs.push([r]); else gs[gs.length - 1].push(r); });
+    return gs;
+  }, [display, metaOf]);
+  const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
+  const curPage = Math.min(page, totalPages);
+  const pageRows = useMemo(() => groups.slice((curPage - 1) * pageSize, curPage * pageSize).flat(), [groups, curPage, pageSize]);
+  const snBase = useMemo(() => groups.slice(0, (curPage - 1) * pageSize).reduce((n, gp) => n + gp.length, 0), [groups, curPage, pageSize]);
+  const pageNumbers = useMemo(() => {
+    const arr = [];
+    if (totalPages <= 7) { for (let i = 1; i <= totalPages; i++) arr.push(i); }
+    else {
+      arr.push(1);
+      if (curPage > 3) arr.push('...');
+      for (let i = Math.max(2, curPage - 1); i <= Math.min(totalPages - 1, curPage + 1); i++) arr.push(i);
+      if (curPage < totalPages - 2) arr.push('...');
+      arr.push(totalPages);
+    }
+    return arr;
+  }, [totalPages, curPage]);
   // standard grid: current row, ticks, ↑ / ↓ / Enter, blank rows + details box down to the screen bottom
-  const g = useGrid({ rows: shown, onOpen: (r) => (canEdit ? open(r) : ledger(r)) });
+  const g = useGrid({ rows: pageRows, onOpen: (r) => (canEdit ? open(r) : ledger(r)) });
   const { gridRef, cur, setCur, curRow, sel, setSel, remH } = g;
+  // Staff-Details style layout: the card fills the screen, the table scrolls inside it under a frozen heading,
+  // blank striped rows fill any spare room, and the remarks + totals stay pinned to the bottom edge.
+  const cardRef = useRef(null), scrollRef = useRef(null);
+  const [nBlank, setNBlank] = useState(0);
+  useLayoutEffect(() => {
+    const fit = () => {
+      const card = cardRef.current, sc = scrollRef.current;
+      if (!card || !sc) return;
+      card.style.height = Math.max(280, window.innerHeight - (card.getBoundingClientRect().top + window.scrollY) - 4) + 'px';
+      const real = [...sc.querySelectorAll('tbody > tr:not(.blank)')];
+      const rowH = real[0]?.offsetHeight || 37;
+      const used = (sc.querySelector('thead')?.offsetHeight || 0) + (sc.querySelector('tfoot')?.offsetHeight || 0) + real.reduce((t, r) => t + r.offsetHeight, 0);
+      setNBlank(Math.max(0, Math.floor((sc.clientHeight - used) / rowH)));
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (ro && gridRef.current) ro.observe(gridRef.current);
+    return () => { window.removeEventListener('resize', fit); ro?.disconnect(); };
+  }, [pageRows, curRow]); // eslint-disable-line react-hooks/exhaustive-deps
   const ledger = (r) => nav(`/ledger?account=${r.id}&from=${fy.start_date}&to=${today}`);
 
   const open = async (r) => {
@@ -156,6 +262,8 @@ export default function Parties({ type }) {
       canEdit && { icon: '➕', label: `Add ${word.toLowerCase()}`, onClick: () => open(null) },
       r && canEdit && { icon: '✏️', label: `Edit ${word.toLowerCase()}`, onClick: () => open(r) },
       r && canEdit && { icon: '🏢', label: 'Add sub ledger under this', onClick: () => openSub(r.parent_party_id || r.id) },
+      r && canEdit && !rows.some((x) => x.parent_party_id === r.id) && { icon: '🔗', label: r.parent_party_id ? `Change main ${word.toLowerCase()} (sub ledger of…)` : 'Make sub ledger of…', onClick: () => setMk({ row: r, parent_id: r.parent_party_id ? String(r.parent_party_id) : '' }) },
+      r && canEdit && r.parent_party_id && { icon: '↩️', label: 'Remove from sub ledger', onClick: () => unSub(r) },
       r && { icon: '📄', label: 'Ledger statement', onClick: () => ledger(r) },
       r && r.linked_party_id && { icon: '🔗', label: `${otherWord} ledger (same party)`, onClick: () => nav(`/ledger?account=${r.linked_party_id}&from=${fy.start_date}&to=${today}`) },
       r && canEdit && (isCus ? { icon: '📥', label: 'Receive payment', onClick: () => nav('/entry/receipt') } : { icon: '📤', label: 'Make payment', onClick: () => nav('/entry/supplier_payment') }),
@@ -178,45 +286,65 @@ export default function Parties({ type }) {
       {/* toolbar: filters on the left, search on the right (same place as the other grids) */}
       <div className="pdc-bar">
         <label className="check small"><input type="checkbox" checked={onlyDue} onChange={(e) => setOnlyDue(e.target.checked)} /> Only with balance</label>
+        <select className="type-filter" value={typeF} onChange={(e) => setTypeF(e.target.value)} title={isCus ? 'Filter by customer type' : 'Filter suppliers'}>
+          {isCus
+            ? <><option value="">All types</option>{LEVELS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</>
+            : <><option value="">All suppliers</option><option value="both">Also customer</option><option value="only">Supplier only</option><option value="main">Main (with sub ledgers)</option><option value="sub">Sub ledgers</option></>}
+        </select>
         <span className="spacer" />
         <span className="muted small">{shown.length} of {rows.length}</span>
         <span className="tb-search"><input data-find title="Ctrl+F" value={q} onChange={(e) => setQ(e.target.value)}
           placeholder="Search name, PAN, phone, address, contact…" />{q && <button type="button" className="link" onClick={() => setQ('')}>✕</button>}</span>
       </div>
-      <section className="card">
-        <table ref={gridRef} className="grid dg-soft" onContextMenu={(e) => rowMenu(e, null)}>
+      <section className="card parties-card" ref={cardRef}>
+        <div className="parties-scroll" ref={scrollRef}>
+        <table ref={gridRef} className="grid dg-soft parties-grid" onContextMenu={(e) => rowMenu(e, null)}>
           <thead><tr>
-            <th className="sel"><input type="checkbox" title="Select all" checked={shown.length > 0 && shown.every((r) => sel.has(r.id))}
-              onChange={(e) => setSel(e.target.checked ? new Set(shown.map((r) => r.id)) : new Set())} /></th>
+            <th className="sel"><input type="checkbox" title="Select all" checked={pageRows.length > 0 && pageRows.every((r) => sel.has(r.id))}
+              onChange={(e) => setSel(e.target.checked ? new Set(pageRows.map((r) => r.id)) : new Set())} /></th>
             <th className="sn">SN</th><th>Name</th><th>PAN</th><th>Office Phone</th><th>WhatsApp</th><th>Contact Person</th><th>Address</th>
-            {isCus && <th className="nowrap">Type</th>}<th className="num nowrap">Credit</th><th className="nowrap">Last Txn</th><th className="num">Balance</th><th className="nowrap">Updated By</th>
+            {isCus && <th className="nowrap">Type</th>}<th className="num nowrap">Credit</th><th className="nowrap">Last Txn</th><th className="num">Balance</th>
           </tr></thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={colCount} className="muted">No {isCus ? 'customers' : 'suppliers'} found.{canEdit && <> Press <kbd className="kbd">F1</kbd> to add a new {word.toLowerCase()} (or right-click).</>}</td></tr>}
-            {shown.map((r, idx) => {
+            {display.length === 0 && <tr><td colSpan={colCount} className="muted">No {isCus ? 'customers' : 'suppliers'} found.{canEdit && <> Press <kbd className="kbd">F1</kbd> to add a new {word.toLowerCase()} (or right-click).</>}</td></tr>}
+            {pageRows.map((r, idx) => {
+              const meta = metaOf.get(r.id) || { depth: 0, hasKids: false, isOpen: false };
+              // like a thread-statistics tree: a closed main row shows the total of itself + its sub ledgers, an open one only its own balance
+              const subSum = meta.hasKids && !meta.isOpen ? (allKids.get(r.id) || []).reduce((t, x) => t + x.balance, 0) : 0;
+              const bal = r.balance + subSum;
               const over = isCus && r.credit_limit > 0 && r.balance > r.credit_limit;
               return (
-                <tr key={r.id} data-id={r.id} className={`clickable ${r.active ? '' : 'inactive-row'} ${cur === r.id ? 'current' : ''} ${sel.has(r.id) ? 'selected' : ''}`}
+                <tr key={r.id} data-id={r.id} className={`clickable ${meta.depth ? 'tv-child' : ''} ${r.active ? '' : 'inactive-row'} ${cur === r.id ? 'current' : ''} ${sel.has(r.id) ? 'selected' : ''}`}
                   onClick={() => setCur(r.id)} onDoubleClick={() => (canEdit ? open(r) : ledger(r))} onContextMenu={(e) => rowMenu(e, r)}>
                   <td className="sel" onDoubleClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(r.id)}
                     onChange={() => setSel((s) => { const n = new Set(s); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} /></td>
-                  <td className="sn">{idx + 1}</td>
-                  <td className="pname">{r.name}{r.parent_name && <span className="tag" title={`Sub ledger of ${r.parent_name}`}>↳ under {r.parent_name}</span>}{!r.active && <span className="tag">inactive</span>}{r.linked_party_id && <span className="tag" title={`Also a ${otherWord.toLowerCase()} — ${isCus ? 'payable' : 'receivable'} ${fmtBal(r.linked_balance)}`}>also {otherWord.toLowerCase()}</span>}</td>
+                  <td className="sn">{snBase + idx + 1}</td>
+                  <td className="pname">
+                    {meta.depth > 0 && <span className="tv-elbow" aria-hidden>└</span>}
+                    {meta.hasKids
+                      ? <button type="button" className="tv-tog" title={meta.isOpen ? 'Close sub ledgers' : `Open sub ledgers (${(allKids.get(r.id) || []).length})`}
+                          onClick={(e) => { e.stopPropagation(); toggleOpen(r.id); }} onDoubleClick={(e) => e.stopPropagation()}>{meta.isOpen ? '▾' : '▸'}</button>
+                      : (meta.depth === 0 && <span className="tv-tog tv-none" />)}
+                    {r.name}{meta.hasKids && !meta.isOpen && <span className="tag" title="Balance includes its sub ledgers">{(allKids.get(r.id) || []).length} sub</span>}{r.parent_name && meta.depth === 0 && <span className="tag" title={`Sub ledger of ${r.parent_name}`}>↳ under {r.parent_name}</span>}{!r.active && <span className="tag">inactive</span>}{r.linked_party_id && <span className="tag tag-both" title={`Also a ${otherWord.toLowerCase()} — ${isCus ? 'payable' : 'receivable'} ${fmtBal(r.linked_balance)}`}>also {otherWord.toLowerCase()}</span>}</td>
                   <td>{r.pan}</td><td className="nowrap">{r.office_phone}</td>
                   <td className="nowrap">{(r.whatsapp || r.phone) && <a href={waLink(r.whatsapp || r.phone, `Namaste ${r.name},`)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{r.whatsapp || r.phone}</a>}</td>
                   <td>{r.main_contact}{r.contact_count > 1 && <span className="tag">+{r.contact_count - 1}</span>}</td>
                   <td>{r.address}</td>
-                  {isCus && <td className="nowrap">{LEVELS.find((l) => l[0] === r.price_level)?.[1]}</td>}
+                  {isCus && <td className="nowrap">{r.price_level && <span className={`lvl-badge lvl-${r.price_level}`}>{LEVELS.find((l) => l[0] === r.price_level)?.[1]}</span>}</td>}
                   <td className="num nowrap">{r.credit_days ? `${r.credit_days} d` : ''}{r.credit_limit ? ` · ${fmtMoney(r.credit_limit)}` : ''}</td>
                   <td className="nowrap">{r.last_date ? fmtDateShort(r.last_date) : ''}</td>
-                  <td className={`num b ${over ? 'neg' : ''}`}>{fmtBal(r.balance)}{over && <span className="tag">over limit</span>}</td>
-                  <td className="nowrap">{r.saved_by_name || r.updated_by || r.created_by}</td>
+                  <td className={`num b ${over ? 'neg' : ''}`} title={subSum ? 'Includes its sub ledgers' : undefined}>{fmtBal(bal)}{over && <span className="tag">over limit</span>}</td>
                 </tr>
               );
             })}
-            {g.blankRows(colCount)}
-            <tr className="remarks-row"><td colSpan={colCount} style={{ height: remH }}>
+            {Array.from({ length: nBlank }, (_, k) => <tr key={`blank${k}`} className="blank">{Array.from({ length: colCount }, (__, j) => <td key={j} className={j === 0 ? "sel" : j === 1 ? "sn" : undefined}>&nbsp;</td>)}</tr>)}
+            
+          </tbody>
+        </table>
+        </div>
+        <div className="parties-remarks">
               {curRow ? (
+                <div className="rm-wrap">
                 <div className="rm-grid">
                   <div><b>{curRow.name}</b>
                     {curRow.address && <> · {curRow.address}</>}{curRow.pan && <> · PAN {curRow.pan}</>}</div>
@@ -228,13 +356,63 @@ export default function Parties({ type }) {
                     {curRow.last_date ? ` · Last transaction ${fmtDate(curRow.last_date)}` : ''}</div>
                   {curRow.linked_party_id && <div className="rm-pay"><b>🔗 Also a {otherWord.toLowerCase()}:</b> {isCus ? 'payable' : 'receivable'} {fmtBal(curRow.linked_balance)} · Net position {fmtBal(Number(curRow.balance) + Number(curRow.linked_balance))}</div>}
                 </div>
+                <div className="rm-by"><b>Updated by:</b> {curRow.saved_by_name || curRow.updated_by || curRow.created_by || "—"}<br />{(curRow.updated_at || curRow.created_at) ? fmtDate(String(curRow.updated_at || curRow.created_at).slice(0, 10)) + " · " + new Date(curRow.updated_at || curRow.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</div>
+                </div>
               ) : <span className="muted">Click a {word.toLowerCase()} to see their details.</span>}
-            </td></tr>
-          </tbody>
-          <tfoot><tr><th colSpan={isCus ? 11 : 10} className="num">Total {isCus ? 'to take' : 'to pay'} ({shown.length})</th>
-            <th className="num">{fmtBal(total)}</th><th /></tr></tfoot>
-        </table>
+            </div>
+              <div className="dg-footer parties-pager">
+          <div className="dg-info">
+            {groups.length > 0 ? (
+              <span style={{ color: '#000', fontWeight: 700, fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ background: '#fef08a', border: '1px solid #facc15', borderRadius: 5, padding: '1px 8px' }}>Total Data : {groups.length}</span>
+                <span>Total Page {(curPage - 1) * pageSize + 1}–{Math.min(curPage * pageSize, groups.length)}</span>
+                {(q.trim() || onlyDue || typeF) && <span style={{ fontWeight: 400 }}>(filtered from {rows.filter((r) => !r.parent_party_id).length})</span>}
+              </span>
+            ) : <span>No records found</span>}
+          </div>
+          <div className="dg-paging">
+            <div className="dg-pagesize">
+              <label>Per page:</label>
+              <select value={pageSize} onChange={(e) => setPageSize(+e.target.value)}>
+                {[10, 25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="dg-page-btns">
+              <button type="button" className="pg-btn" disabled={curPage === 1} onClick={() => setPage(1)} title="First">«</button>
+              <button type="button" className="pg-btn" disabled={curPage === 1} onClick={() => setPage(curPage - 1)} title="Previous">‹</button>
+              {pageNumbers.map((pg, k) => (pg === '...'
+                ? <span key={k} className="pg-ellipsis">…</span>
+                : <button type="button" key={k} className={`pg-btn ${pg === curPage ? 'active' : ''}`} onClick={() => setPage(pg)}>{pg}</button>))}
+              <button type="button" className="pg-btn" disabled={curPage === totalPages} onClick={() => setPage(curPage + 1)} title="Next">›</button>
+              <button type="button" className="pg-btn" disabled={curPage === totalPages} onClick={() => setPage(totalPages)} title="Last">»</button>
+            </div>
+          </div>
+        </div>
       </section>
+      {mk && (
+        <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setMk(null)}>
+          <form className="card form acc-cardform" onSubmit={saveMk} autoComplete="off">
+            <h2 className="acc-head"><span className="acc-head-ic">🔗</span><span className="acc-head-txt">Make Sub Ledger
+              <small>{mk.row.name} keeps its own balance, PAN and history — it is only grouped under a main {word.toLowerCase()}</small></span></h2>
+            <div className="acc-card">
+              <div className="acc-step"><i>1</i>This ledger</div>
+              <label className="full">{word} (becomes the sub ledger)<input readOnly tabIndex={-1} value={mk.row.name} /></label>
+              <div className="acc-step"><i>2</i>Main {word.toLowerCase()}</div>
+              <label className="full">Sub ledger of *
+                <SearchableSelect value={mk.parent_id} onChange={(v) => setMk({ ...mk, parent_id: v })}
+                  placeholder={`— Select the main ${word.toLowerCase()} —`}
+                  options={rows.filter((r) => r.id !== mk.row.id && !r.parent_party_id && r.active).map((r) => ({ value: String(r.id), label: r.name,
+                    sub: [r.pan && `PAN ${r.pan}`, r.address].filter(Boolean).join(' · ') }))} />
+              </label>
+            </div>
+            <div className="actions">
+              <span className="spacer" />
+              <button type="button" className="ghost" onClick={() => setMk(null)}>Close <Kbd>Esc</Kbd></button>
+              <button data-save disabled={!mk.parent_id}>Save <Kbd>Ctrl+S</Kbd></button>
+            </div>
+          </form>
+        </div>
+      )}
       {sub && (
         <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && setSub(null)}>
           <form className="card form acc-cardform" onSubmit={saveSub} autoComplete="off">
