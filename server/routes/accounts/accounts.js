@@ -244,8 +244,11 @@ router.post('/accounts', ah(async (req, res) => {
 router.put('/accounts/:aid', ah(async (req, res) => {
   const aid = +req.params.aid, b = req.body || {};
   const cur = await one('SELECT * FROM acc_ledgers WHERE id = %s', [aid]) || bad('Ledger not found.', 404);
+  // system ledgers (automatic posting): name, group and type are fixed — only the opening balance / bank details / contact can change
+  if (cur.system_key) Object.assign(b, { name: cur.name, name_np: cur.name_np, group_id: cur.group_id, kind: cur.kind });
   await validateLedger(b, aid);
   const active = b.active === false ? 0 : 1;
+
   if (cur.system_key && !active) bad("System ledgers are used by automatic posting and can't be deactivated.");
   const pan = checkPan(b.pan);
   const user = userOf(req);
@@ -302,6 +305,7 @@ async function checkDeletable(cur) {
 router.post('/accounts/:aid/delete', ah(async (req, res) => {
   const aid = +req.params.aid, b = req.body || {};
   const cur = await one('SELECT * FROM acc_ledgers WHERE id = %s', [aid]) || bad('Ledger not found.', 404);
+  if (cur.system_key) bad("This is a system ledger used by automatic posting — it can't be deleted.");
   await checkDeletable(cur);
   let approver = null;
   if (cur.system_key) approver = await adminApproval(req, b.admin_username, b.admin_password);

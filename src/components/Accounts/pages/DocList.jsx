@@ -7,7 +7,7 @@ import DocView from '../components/DocView';
 import ContextMenu from '../components/ContextMenu';
 import TransportDialog from '../components/TransportDialog';
 import { DeleteDialog } from '../components/Guards';
-import { api, fmtMoney } from '../lib/api';
+import { api, fmtMoney, waLink } from '../lib/api';
 import { fmtAd, fmtBs, fmtDate, fmtBsShort } from '../lib/dates';
 import { DOCS, payLabel, shortDocNo, statusLabel } from '../lib/docs';
 import Avatar from '../../Common/Avatar.jsx';
@@ -17,7 +17,7 @@ import HoverCard from '../../Common/HoverCard.jsx';
 export default function DocList() {
   const { type } = useParams();
   const meta = DOCS[type];
-  const { fy, today, canEdit } = useApp();
+  const { fy, today, canEdit, company } = useApp();
   const [from, setFrom] = useState(fy.start_date);
   const [to, setTo] = useState(today);
   const [status, setStatus] = useState('');
@@ -59,7 +59,16 @@ export default function DocList() {
   const byUser = true;                   // every list shows "Updated By"; a status other than posted shows as a tag by the No.
   const transportOk = ['PB', 'SI', 'PR', 'SR'].includes(type);
   const [trans, setTrans] = useState(null);
-  const footSpan = 7 + (type === 'PB' ? 1 : 0) + (type === 'SI' ? 2 : 0);
+  const showMobile = !isQuote;           // Mobile column (WhatsApp no.) on orders, invoices and returns
+  const footSpan = 7 + (type === 'PB' ? 1 : 0) + (type === 'SI' ? 2 : 0) + (showMobile ? 1 : 0);
+  // click the number → WhatsApp chat with this row's details
+  const waRow = (r) => {
+    const phone = r.party_whatsapp || r.party_mobile;
+    const text = [`Namaste ${r.party_name},`, `${meta.name} No.: ${r.doc_no}`, `Miti: ${fmtBs(r.doc_date)} (${fmtAd(r.doc_date)})`,
+      `Payment: ${payLabel(r.payment_mode)}`, `Taxable: Rs ${fmtMoney(r.taxable + r.exempt)} · VAT: Rs ${fmtMoney(r.vat)}`, `Total: Rs ${fmtMoney(r.total)}`,
+      r.narration && `Remarks: ${r.narration}`, `— ${company?.name || ''}`].filter(Boolean).join('\n');
+    window.open(waLink(phone, text), '_blank', 'noopener');
+  };
   const colCount = footSpan + 3;         // + Taxable, VAT, Total   (Updated By + mobile now sit in the remarks box)
   // standard grid: current row, ticks, ↑ / ↓ / Enter, blank rows + remarks box down to the screen bottom
   const g = useGrid({ rows, onOpen: (r) => view(r.id) });
@@ -144,7 +153,7 @@ export default function DocList() {
             <th className="sn">SN</th><th className="nowrap">Miti | Date</th>
             {type === 'PB' && <th className="nowrap">Supplier Bill No.</th>}<th>No.</th>
             {type === 'SI' && <><th className="nowrap">Challan</th><th className="nowrap">VAT Bill</th></>}
-            <th>{meta.side === 'sales' ? 'Customer' : 'Supplier'}</th><th>PAN</th><th>{isQuote ? 'Subject' : 'Payment'}</th>
+            <th>{meta.side === 'sales' ? 'Customer' : 'Supplier'}</th><th>PAN</th>{showMobile && <th className="nowrap">Mobile</th>}<th>{isQuote ? 'Subject' : 'Payment'}</th>
             <th className="num">Taxable</th><th className="num">VAT</th><th className="num">Total</th></tr></thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={colCount} className="muted">Nothing in this period. Right-click to add.</td></tr>}
@@ -179,6 +188,11 @@ export default function DocList() {
                   })}
                   {(r.task_users || []).length > 3 && <span className="muted" style={{ marginLeft: 4 }}>+{r.task_users.length - 3}</span>}
                 </td><td>{r.party_pan}</td>
+                {showMobile && <td className="nowrap">{(r.party_whatsapp || r.party_mobile) && (
+                  <a className="dl-wa" title={`WhatsApp ${r.party_name} with this ${meta.name.toLowerCase()}`}
+                    onClick={(e) => { e.stopPropagation(); waRow(r); }} onDoubleClick={(e) => e.stopPropagation()}>
+                    <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="#25d366" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .3-3.4-.7-2.9-1.2-4.7-4.1-4.9-4.3-.1-.2-1.2-1.6-1.2-3s.7-2.2 1-2.5c.3-.3.6-.3.8-.3h.6c.2 0 .4 0 .6.5l.9 2.1c.1.2.1.4 0 .6l-.4.6-.4.4c-.1.2-.3.3-.1.6.2.3.8 1.4 1.8 2.2 1.2 1.1 2.3 1.4 2.6 1.6.3.1.5.1.7-.1l.9-1.1c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.3.1.2.1.7-.1 1.3z"/></svg>
+                    {r.party_whatsapp || r.party_mobile}</a>)}</td>}
                 <td>{isQuote ? r.qt_subject : payLabel(r.payment_mode)}</td>
                 <td className="num">{fmtMoney(r.taxable + r.exempt)}</td><td className="num">{fmtMoney(r.vat)}</td>
                 <td className="num" title={savedTip(r)}>{fmtMoney(r.total)}</td>

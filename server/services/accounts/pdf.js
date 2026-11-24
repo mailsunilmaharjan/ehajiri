@@ -210,7 +210,7 @@ export async function docPdf(company, d, user, banks = []) {
   // ── Pay to our bank account: one box per bank (max 3 side by side), QR on the left of its details ──
   if (banks.length) {
     let by = Math.max(ry, yl) + 14;
-    const boxH = 96;
+    const boxH = 132, QR = 120;     // big enough to scan straight off the printed bill
     if (by + boxH + 60 > bottom()) { doc.addPage(); by = 36; }
     font(true, 9).fillColor('#0f2a3d').text('Pay to our bank account', M, by, { width: CW, lineBreak: false });
     by += 13;
@@ -220,17 +220,22 @@ export async function docPdf(company, d, user, banks = []) {
       doc.save().lineWidth(0.6).strokeColor('#9ca3af').roundedRect(x, by, bw, boxH, 4).stroke().restore();
       let tx = x + 8;
       if (b.qr_data) {
-        try { doc.image(b.qr_data, x + 6, by + 6, { fit: [84, 84], align: 'center', valign: 'center' }); tx = x + 96; } catch { /* unreadable image: details only */ }
+        try {
+          const img = doc.openImage(b.qr_data), s = Math.min(QR / img.width, QR / img.height);    // keep the poster's own shape
+          const w = img.width * s;
+          doc.image(img, x + 4, by + 3, { width: w, height: img.height * s });
+          b.qr_w = w; tx = x + w + 12;
+        } catch { /* unreadable image: details only */ }
       }
-      const tw = x + bw - tx - 6;
-      let ly = by + 10;
-      font(true, 9).fillColor('#000').text(txt(b.name), tx, ly, { width: tw, lineBreak: false, ellipsis: true }); ly += 14;
+      const tw = x + bw - tx - 5;
+      let ly = by + 8;
+      font(true, 8).fillColor('#000').text(txt(b.name), tx, ly, { width: tw, lineBreak: false, ellipsis: true }); ly += 12;
       for (const [k, v] of [['A/c Name', b.account_name], ['A/c No.', b.account_no], ['Branch', b.branch]]) {
         if (!v) continue;
-        font(false, 7.5).fillColor('#555').text(k, tx, ly, { width: tw, lineBreak: false }); ly += 9;
-        font(true, 8.5).fillColor('#000').text(txt(v), tx, ly, { width: tw, lineBreak: false, ellipsis: true }); ly += 13;
+        font(false, 6.5).fillColor('#555').text(k, tx, ly, { width: tw, lineBreak: false }); ly += 8;
+        font(true, 7.5).fillColor('#000').text(txt(v), tx, ly, { width: tw, lineBreak: false, ellipsis: true }); ly += 11;
       }
-      if (b.qr_data) font(false, 7).fillColor('#555').text('Scan to pay', x + 6, by + boxH - 10, { width: 84, align: 'center', lineBreak: false });
+      if (b.qr_w) font(false, 6.5).fillColor('#555').text('Scan to pay', x + 4, by + boxH - 9, { width: b.qr_w, align: 'center', lineBreak: false });
     });
     sy = by + boxH + 40;
   }

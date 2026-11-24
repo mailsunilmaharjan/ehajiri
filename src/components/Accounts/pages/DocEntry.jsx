@@ -14,6 +14,7 @@ import { clearCart, getCart } from '../lib/cart';
 import { QuoteTerms, QuoteTop, quoteDefaults, quoteFromDoc } from '../components/QuoteFields';
 import { getTenantPrefix } from '../../../utils/tenantPath.js';
 import TaskDialog from '../components/TaskDialog';
+import NewProductDialog from '../components/NewProductDialog';
 
 const LEVELS = [['mrp', 'Retail (MRP)'], ['dealer', 'Dealer'], ['partner', 'Partner']];
 const RATE_LABEL = { mrp: 'MRP RATE', dealer: 'DEALER RATE', partner: 'PARTNER RATE' };
@@ -117,6 +118,7 @@ export default function DocEntry() {
   const proofRef = useRef(null);
 
   const [items, setItems] = useState([]);
+  const [newProd, setNewProd] = useState(null);   // { line, typed } — F1 / Alt+N in a product box
   const [parties, setParties] = useState([]);
   const [ref, setRef] = useState(null);
   const [orig, setOrig] = useState(null);       // document being edited
@@ -336,7 +338,7 @@ export default function DocEntry() {
   useShortcuts({
     save,
     close: () => { if (!dirty || confirm('Leave without saving?')) nav(`/docs/${type}`); },
-  }, !saved && !askTask && serialFor === null && !addParty && !askPw);
+  }, !saved && !askTask && serialFor === null && !addParty && !askPw && !newProd);
 
   if (!f) return <div className="muted">Loading…</div>;
   const setMode = (m) => setF({ ...f, payment_mode: m,
@@ -542,7 +544,7 @@ export default function DocEntry() {
                   <td className="sn">{i + 1}</td>
                   <td>
                     <AccountSelect accounts={itemOpts} value={l.item_id} onChange={(idv) => pickItem(i, idv)} placeholder="Search product…"
-                      onEmptyEnter={() => remarksRef.current?.focus()} />
+                      onEmptyEnter={() => remarksRef.current?.focus()} onNew={(typed) => setNewProd({ line: i, typed })} />
                     {c?.short && <small className="neg">Only {it.stock} in stock</small>}
                     {l.max != null && <small className="muted"> max {l.max}</small>}
                     {c?.needSerial && (
@@ -631,6 +633,19 @@ export default function DocEntry() {
             setParties(pa); setAddParty(null); pickParty(p.id, pa);
           }} />
       )}
+      {newProd && <NewProductDialog typed={newProd.typed} onClose={() => setNewProd(null)}
+        onSaved={async (saved0) => {
+          // reload Products (stock / unit names), then select the new one on the line F1 was pressed in
+          const line = newProd.line;
+          setNewProd(null);
+          const list = await api.get('/items', { include_inactive: !!editId }).catch(() => null);
+          if (list) setItems(list);
+          const it = list?.find((x) => x.id === saved0.id) || saved0;
+          const p = priceOf(it);
+          const from = it.item_type === 'service' ? (lines[line]?.service_from || f.doc_date) : '';
+          setLine(line, { item_id: it.id, qty: lines[line]?.qty || 1, rate: p.rate, incl: p.incl, serials: [], service_from: from,
+            service_to: it.item_type === 'service' ? periodEnd(from, it.service_months) : '' });
+        }} />}
       {askPw && <PasswordPrompt title={`Save changes to ${orig?.doc_no}`} onConfirm={saveEdit} onClose={() => setAskPw(false)} />}
       {askTask && <TaskDialog doc={askTask} onDone={(nd) => { setAskTask(null); setSaved(nd); }}
         onSkip={() => { const d = askTask; setAskTask(null); setSaved(d); }} />}

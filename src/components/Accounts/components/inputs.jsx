@@ -199,7 +199,8 @@ export function BsDateInput({ value, onChange, showAd = true, autoFocus = false 
 }
 
 /** Searchable ledger picker. accounts = [{id, code, name, group_name}] */
-export function AccountSelect({ accounts, value, onChange, placeholder = 'Search ledger…', filter, onEmptyEnter, onAdd, autoFocus }) {
+/** onNew(typed): F1 or Alt+N in the box (or the "+ New …" row in the list) creates a new entry — e.g. a new product. */
+export function AccountSelect({ accounts, value, onChange, placeholder = 'Search ledger…', filter, onEmptyEnter, onAdd, onNew, newLabel = 'product', autoFocus }) {
   const list = useMemo(() => (filter ? accounts.filter(filter) : accounts), [accounts, filter]);
   const current = list.find((a) => a.id === value) || accounts.find((a) => a.id === value);
   // A party that is both customer and supplier has two ledgers with the same name — tell them apart (only when both are in this list)
@@ -252,6 +253,9 @@ export function AccountSelect({ accounts, value, onChange, placeholder = 'Search
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onChange={(e) => { setQ(e.target.value); setHi(0); setOpen(true); }}
         onKeyDown={(e) => {
+          if (onNew && (e.key === 'F1' || (e.altKey && !e.ctrlKey && (e.key === 'n' || e.key === 'N')))) {
+            e.preventDefault(); e.stopPropagation(); setOpen(false); onNew(q.trim()); return;
+          }
           if (e.key === 'ArrowDown') { e.preventDefault(); arrowed.current = true; setOpen(true); setHi((h) => Math.min(h + 1, matches.length - 1)); }
           else if (e.key === 'ArrowUp') { e.preventDefault(); arrowed.current = true; setOpen(true); setHi((h) => Math.max(h - 1, 0)); }
           // Enter picks the highlighted row — after typing, or after moving with ↑ / ↓
@@ -265,6 +269,11 @@ export function AccountSelect({ accounts, value, onChange, placeholder = 'Search
       {open && (
         <ul className="acsel-list">
           {matches.length === 0 && <li className="muted">Nothing found</li>}
+          {onNew && (matches.length === 0 || q) && (
+            <li className="add acsel-new" onMouseDown={(e) => { e.preventDefault(); setOpen(false); onNew(q.trim()); }}>
+              + New {newLabel}{q ? ` “${q}”` : ''} <span className="acsel-keys"><kbd>F1</kbd> / <kbd>Alt+N</kbd></span>
+            </li>
+          )}
           {onAdd && q && <li className="add" onMouseDown={(e) => { e.preventDefault(); setOpen(false); onAdd(q); }}>+ Add “{q}”</li>}
           {matches.map((a, i) => (
             <li key={a.id} ref={i === hi ? hiRef : undefined} className={`${i === hi ? 'hi' : ''} ${a.id === value ? 'cur' : ''}`} onMouseDown={(e) => { e.preventDefault(); pick(a, true); }}>

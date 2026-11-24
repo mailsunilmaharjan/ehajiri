@@ -55,6 +55,15 @@ async function loadUser(id) {
   return row;
 }
 
+/** A person's name for printing: their full name, never an e-mail address (falls back to the part before '@'). */
+export async function displayName(username) {
+  const u = String(username || '').trim();
+  if (!u || u === 'system') return u;
+  const { rows } = await pool.query('SELECT full_name FROM users WHERE username = $1 OR LOWER(email) = LOWER($1) LIMIT 1', [u]).catch(() => ({ rows: [] }));
+  const name = String(rows[0]?.full_name || '').trim();
+  return name && !name.includes('@') ? name : u.split('@')[0];
+}
+
 /** Mount after authGuard + requireModuleEnabled. Sets req.accUser, seeds on first use, opens the audit context. */
 export const accountsGuard = ah(async (req, res, next) => {
   const u = req.user && (await loadUser(req.user.id));

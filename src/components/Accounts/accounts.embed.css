@@ -291,3 +291,68 @@ body .acc-app .imp-win .btn.btn-outline:hover { background: #f3f4f6 !important; 
 .acc-app .dg-searchbox .dg-search-input:focus { box-shadow: none !important; }
 .acc-app .dg-searchbox .dg-search-clear { padding: 0 10px 0 0; }
 .acc-app .dg-toolbar-right > button { flex-shrink: 0; white-space: nowrap; }
+
+/* ── "Pay to our bank account" on a sales order / invoice (screen + print), QR on the left of the details ── */
+.acc-app .pay-banks { margin-top: 14px; break-inside: avoid; }
+.acc-app .pay-banks .pb-title { font-weight: 700; font-size: 13px; color: #0f2a3d; margin-bottom: 4px; }
+.acc-app .pay-banks .pb-row { display: flex; gap: 8px; }
+.acc-app .pay-banks .pb-box { flex: 1 1 0; min-width: 0; display: flex; gap: 10px; align-items: flex-start; border: 1px solid #9ca3af; border-radius: 4px; padding: 5px; }
+.acc-app .pay-banks .pb-qr { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; }
+.acc-app .pay-banks .pb-qr img { display: block; height: 160px; width: auto; max-width: 160px; object-fit: contain; }
+.acc-app .pay-banks .pb-qr small { font-size: 10px; color: #555; }
+.acc-app .pay-banks .pb-info { display: flex; flex-direction: column; min-width: 0; font-size: 11px; line-height: 1.3; padding-top: 2px; }
+.acc-app .pay-banks .pb-info > b:first-child { font-size: 12px; margin-bottom: 3px; }
+.acc-app .pay-banks .pb-info span { color: #555; font-size: 10px; margin-top: 3px; }
+.acc-app .pay-banks .pb-info b { overflow-wrap: anywhere; }
+
+/* ── every print gets a page border (bills, vouchers, reports) ── */
+@media print {
+  .acc-app .print-area.print-area.print-area, .acc-app .card.print-area.print-area.print-area {
+    border: 1px solid #000 !important; padding: 5mm !important; box-sizing: border-box !important;
+  }
+  .acc-app .pay-banks .pb-box { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ── bill view header: one row — party (address chip by its label) · type · challan · date · PAN | contact ── */
+.acc-app .iv2 .dv-top { display: flex; gap: 16px 22px; align-items: flex-end; }
+.acc-app .iv2 .dv-top > .dv-f { flex: 1.15 1 0; min-width: 0; }
+.acc-app .iv2 .dv-top > .dv-f.wide { flex: 1.7 1 0; }
+.acc-app .iv2 .dv-top > .dv-f.dv-pc { flex: 1.9 1 0; }
+.acc-app .iv2 .dv-f > label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.acc-app .iv2 .dv-addr { font-size: 12px; font-weight: 500; color: #075985; background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 4px; padding: 1px 8px; }
+.acc-app .iv2 .dv-addr b { font-weight: 600; }
+@media (max-width: 1000px) { .acc-app .iv2 .dv-top { flex-wrap: wrap; } .acc-app .iv2 .dv-top > .dv-f { flex: 1 1 45%; } }
+
+/* Mobile column in the bill lists: WhatsApp number, click opens the chat */
+.acc-app a.dl-wa { display: inline-flex; align-items: center; gap: 4px; color: #128c7e; cursor: pointer; font-variant-numeric: tabular-nums; }
+.acc-app a.dl-wa:hover { text-decoration: underline; color: #075e54; }
+
+/* ── bill / import product grids: smaller blue search square + shorter rows ── */
+.acc-app .grid.entry.bill-grid .acsel > input[placeholder],
+.acc-app .imp-win .acsel > input[placeholder] {
+  height: 26px !important; min-height: 26px !important; padding: 0 6px 0 30px !important; font-size: 13px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23fff'%3E%3Cpath fill-rule='evenodd' d='M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z' clip-rule='evenodd'/%3E%3C/svg%3E") no-repeat 6px center / 12px 12px,
+    linear-gradient(#1a56db, #1a56db) no-repeat left top / 23px 100%,
+    #fff !important;
+}
+.acc-app .grid.entry.bill-grid > tbody > tr > td { padding-top: 2px; padding-bottom: 2px; }
+/* "+ New product … F1 / Alt+N" row in the product drop-down */
+.acc-app .acsel-list li.acsel-new { color: #1a56db; font-weight: 600; display: flex; justify-content: space-between; gap: 10px; }
+.acc-app .acsel-list li.acsel-new .acsel-keys { color: #6b7280; font-weight: 400; font-size: 11.5px; white-space: nowrap; }
+.acc-app .acsel-list li.acsel-new kbd { font: 600 10.5px/1 inherit; border: 1px solid #cbd5e1; border-bottom-width: 2px; border-radius: 3px; padding: 1px 4px; background: #f8fafc; }
+
+/* Chart of Accounts → List view: filter bar + flat ledger grid */
+.acc-app .coa-list-bar { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
+.acc-app .coa-list-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: #374151; }
+.acc-app .coa-list-bar select { min-width: 260px; height: 32px; }
+.acc-app .coa-list-grid td { vertical-align: middle; }
+.acc-app .coa-list-grid .coa2-chip { margin-right: 4px; }
+.acc-app .coa-list-grid .coa2-chip.sys { display: inline-flex; align-items: center; gap: 3px; }
+
+/* ── pop-up forms (Ledger / Bank / Group …): when taller than the screen, the fields scroll inside the white card —
+   title stays at the top, Save / Close at the bottom (nothing spills out over the page behind) ── */
+body .acc-app .modal > .card.form { overflow-y: auto !important; overflow-x: hidden !important; overscroll-behavior: contain; }
+body .acc-app .modal > .card.form > h2:first-child { position: sticky; top: 0; z-index: 6; }
+body .acc-app .modal > .card.form.acc-cardform > h2:first-child { background: var(--ui-modal-head-bg, #f8fafc); }
+body .acc-app .modal > .card.form > .actions { position: sticky; bottom: 0; z-index: 6; }

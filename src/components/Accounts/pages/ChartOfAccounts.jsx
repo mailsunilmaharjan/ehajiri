@@ -35,7 +35,7 @@ export default function ChartOfAccounts() {
   const [newGroup, setNewGroup] = useState(null);
   const [delLedger, setDelLedger] = useState(null);    // system ledger waiting for admin password
   // 'statement' = Balance-Sheet style blocks (default); 'tree' = the classic grid with the sub-group tools
-  const [view, setView] = useState(() => { try { return localStorage.getItem('acc.coa.view') || 'statement'; } catch { return 'statement'; } });
+  const [view, setView] = useState(() => { try { return localStorage.getItem('acc.coa.view') || 'list'; } catch { return 'statement'; } });
   const pickView = (v) => { setView(v); try { localStorage.setItem('acc.coa.view', v); } catch { /* private mode */ } };
 
   const firstLoad = useRef(true);
@@ -148,17 +148,17 @@ export default function ChartOfAccounts() {
   const ledgerMenu = (e, a) => {
     e.preventDefault(); e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, title: a.name, items: [
-      { icon: '✏️', label: 'Edit ledger', onClick: () => openLedger(a) },
+      { icon: '✏️', label: a.system_key ? 'Edit opening balance' : 'Edit ledger', hint: a.system_key ? 'System ledger — name & group fixed' : '', onClick: () => openLedger(a) },
       { icon: '📄', label: 'Open ledger statement', onClick: () => nav(`/ledger?account=${a.id}`) },
       'divider',
       { icon: '➕', label: 'Add Ledger (same group)', onClick: () => openLedger(null, a.group_id) },
       { icon: '📁', label: 'Add Sub Ledger Group', onClick: () => setNewGroup({ parent_id: a.group_id, name: '', name_np: '' }) },
       'divider',
-      { icon: '🗑', label: a.system_key ? 'Delete system ledger (admin)' : 'Delete ledger', danger: true, disabled: holdsValue(a),
-        hint: a.used ? 'Has entries — untick Active instead' : holdsValue(a) ? 'Set the opening balance to 0 first' : '', onClick: () => removeLedger(a) },
+      { icon: '🗑', label: 'Delete ledger', danger: true, disabled: !!a.system_key || holdsValue(a),
+        hint: a.system_key ? 'System ledger — used by automatic posting' : a.used ? 'Has entries — untick Active instead' : holdsValue(a) ? 'Set the opening balance to 0 first' : '', onClick: () => removeLedger(a) },
     ] });
   };
-  useShortcuts({ save: () => saveLedger(), close: () => setEdit(null), del: () => edit?.id && !holdsValue(edit) && removeLedger() }, !!edit && !delLedger);
+  useShortcuts({ save: () => saveLedger(), close: () => setEdit(null), del: () => edit?.id && !edit.system_key && !holdsValue(edit) && removeLedger() }, !!edit && !delLedger);
   useShortcuts({ save: () => saveGroup(), close: () => setNewGroup(null) }, !!newGroup);
   /** A user sub-group anywhere under Cash and Cash Equivalents (1203) is a bank sub-ledger: it gets bank details + QR. */
   const isBankParent = (pid) => {
@@ -217,6 +217,36 @@ export default function ChartOfAccounts() {
     }
   };
 
+  // ── List view: one row per ledger, search + filter by group (incl. its sub-groups) / type ──
+  const [grpF, setGrpF] = useState('');
+  const [kindF, setKindF] = useState('');
+  const groupOpts = useMemo(() => {
+    const out = [];
+    const m = {};
+    groups.forEach((g) => (m[g.parent_id ?? 0] ||= []).push(g));
+    const walk = (pid, depth) => (m[pid] || []).forEach((g) => { out.push({ ...g, depth }); walk(g.id, depth + 1); });
+    walk(0, 0);
+    return out;
+  }, [groups]);
+  const groupPath = (gid) => {
+    const parts = [];
+    for (let g = groups.find((x) => x.id === gid), i = 0; g && g.parent_id && i < 20; g = groups.find((x) => x.id === g.parent_id), i += 1) parts.unshift(g.name);
+    return parts.join(' › ');
+  };
+  const listRows = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    let inGroup = null;
+    if (grpF) {
+      inGroup = new Set([Number(grpF)]);
+      let grew = true;
+      while (grew) { grew = false; groups.forEach((g) => { if (inGroup.has(g.parent_id) && !inGroup.has(g.id)) { inGroup.add(g.id); grew = true; } }); }
+    }
+    return accounts.filter((a) => (!inGroup || inGroup.has(a.group_id))
+      && (!kindF || (kindF === 'system' ? !!a.system_key : a.kind === kindF))
+      && (!s || `${a.name} ${a.code} ${a.name_np || ''} ${a.bank_account_no || ''} ${groupPath(a.group_id)}`.toLowerCase().includes(s)))
+      .sort((x, y) => String(x.code).localeCompare(String(y.code), undefined, { numeric: true }));
+  }, [accounts, groups, q, grpF, kindF]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── classic grid with tree lines ──
   // Each group lists its ledgers first, then its sub-groups; branch lines (├ └ │) are drawn from the
   // sibling order, so a sub-group like "Kumari Bank" hangs off the same branch as "Bank Account - Current".
@@ -272,6 +302,7 @@ export default function ChartOfAccounts() {
         <span className="spacer" />
         <input className="coa2-search" data-find title="Ctrl+F" placeholder="Search ledger, code, A/c no…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="view-toggle coa-viewtg">
+          <button type="button" className={view === 'list' ? 'on' : 'ghost'} onClick={() => pickView('list')}>List view</button>
           <button type="button" className={view === 'statement' ? 'on' : 'ghost'} onClick={() => pickView('statement')}>Statement view</button>
           <button type="button" className={view === 'tree' ? 'on' : 'ghost'} onClick={() => pickView('tree')}>Tree view</button>
         </span>
@@ -280,6 +311,61 @@ export default function ChartOfAccounts() {
       </header>
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
 
+      {view === 'list' && (
+        <section className="card dg coa-list">
+          <div className="coa-list-bar">
+            <label>Group
+              <select value={grpF} onChange={(e) => setGrpF(e.target.value)}>
+                <option value="">All groups</option>
+                {groupOpts.map((g) => <option key={g.id} value={g.id}>{'   '.repeat(g.depth)}{g.code} — {g.name}</option>)}
+              </select>
+            </label>
+            <label>Type
+              <select value={kindF} onChange={(e) => setKindF(e.target.value)}>
+                <option value="">All types</option>
+                {KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                <option value="system">System ledgers</option>
+              </select>
+            </label>
+            {(grpF || kindF || q) && <button type="button" className="ghost btn-sm" onClick={() => { setGrpF(''); setKindF(''); setQ(''); }}>Clear filters</button>}
+            <span className="spacer" />
+            <span className="muted small">{listRows.length} of {accounts.length} ledgers</span>
+          </div>
+          <div className="dg-scroll coa3-scroll">
+            <table className="grid coa-list-grid">
+              <thead><tr>
+                <th className="sn">SN</th><th style={{ width: 90 }}>Code</th><th>Ledger Name</th><th>Group</th>
+                <th style={{ width: 190 }}>Type</th><th className="num" style={{ width: 150 }}>Opening Balance</th><th style={{ width: 100 }}>Action</th>
+              </tr></thead>
+              <tbody>
+                {listRows.length === 0 && <tr><td colSpan={7} className="muted">No ledger matches.</td></tr>}
+                {listRows.map((a, i) => (
+                  <tr key={a.id} className={`clickable ${a.active ? '' : 'inactive-row'}`} onDoubleClick={() => openLedger(a)} onContextMenu={(e) => canEdit && ledgerMenu(e, a)}>
+                    <td className="sn">{i + 1}</td>
+                    <td className="mono">{a.code}</td>
+                    <td><span className={`coa2-dot k-${a.kind}`} /> {a.name}
+                      {a.name_np && <span className="coa3-sub"> {a.name_np}</span>}
+                      {a.kind === 'bank' && a.bank_account_no && <span className="coa3-sub"> · A/c {a.bank_account_no}</span>}</td>
+                    <td className="muted">{groupPath(a.group_id)}</td>
+                    <td className="nowrap">
+                      {KIND_LABEL[a.kind] ? <span className={`coa2-chip k-${a.kind}`}>{KIND_LABEL[a.kind]}</span> : <span className="coa3-sub">Ledger</span>}
+                      {a.kind === 'bank' && a.qr_image && <span className="coa2-chip">QR</span>}
+                      {a.system_key && <span className="coa2-chip sys" title="System ledger — used by automatic posting; name & group fixed, can't be deleted"><Lock /> System</span>}
+                      {!a.active && <span className="coa2-chip off">Inactive</span>}
+                    </td>
+                    <td className="num">{Number(a.opening_balance) ? fmtBal(a.opening_balance) : ''}</td>
+                    <td className="nowrap" onClick={(e) => e.stopPropagation()}>
+                      <button className="coa3-btn" title="Open ledger statement" onClick={() => nav(`/ledger?account=${a.id}`)}>📄</button>
+                      {canEdit && <button className="coa3-btn" title={a.system_key ? 'Opening balance (system ledger — name & group fixed)' : 'Edit'} onClick={() => openLedger(a)}>✎</button>}
+                      {canEdit && !a.system_key && !holdsValue(a) && <button className="coa3-btn" title="Delete" onClick={() => removeLedger(a)}>🗑</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       {view === 'statement' && (
         <CoaStatement groups={groups} accounts={accounts} q={q} canEdit={canEdit} openingDiff={openingDiff}
           openLedger={openLedger} nav={nav} onMenu={(e, a) => canEdit && ledgerMenu(e, a)} />
@@ -364,8 +450,8 @@ export default function ChartOfAccounts() {
                     <td className="num">{Number(a.opening_balance) ? fmtBal(a.opening_balance) : ''}</td>
                     {canEdit && (
                       <td className="nowrap" onClick={(e) => e.stopPropagation()}>
-                        <button className="coa3-btn" title="Edit" onClick={() => openLedger(a)}>✎</button>
-                        <button className="coa3-btn" title="More" onClick={(e) => ledgerMenu(e, a)}>⋯</button>
+                        <button className="coa3-btn" title={a.system_key ? 'Opening balance (system ledger — name & group fixed)' : 'Edit'} onClick={() => openLedger(a)}>✎</button>
+                        {!a.system_key && <button className="coa3-btn" title="More" onClick={(e) => ledgerMenu(e, a)}>⋯</button>}
                       </td>
                     )}
                   </tr>
@@ -382,9 +468,11 @@ export default function ChartOfAccounts() {
             <h2 className="acc-head"><span className="acc-head-ic">{edit.id ? '✏️' : '＋'}</span><span className="acc-head-txt">{edit.id ? 'Edit Ledger' : edit.lock === 'bank' ? 'New Bank Account' : edit.lock === 'cash' ? 'New Cash Account' : 'New Ledger'}{edit.system_key && <span className="tag"> system</span>}<small>{edit.id ? 'Update this ledger account' : 'Create a ledger account in the chart of accounts'}</small></span></h2>
             <div className="acc-card">
             <div className="acc-step"><i>1</i>Ledger details</div>
-            <label>Name<input autoFocus value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} required /></label>
-            <label>Name in Nepali<input value={edit.name_np || ''} onChange={(e) => setEdit({ ...edit, name_np: e.target.value })} /></label>
-            {edit.lock ? (
+            <label>Name<input autoFocus={!edit.system_key} readOnly={!!edit.system_key} tabIndex={edit.system_key ? -1 : undefined} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} required /></label>
+            <label>Name in Nepali<input readOnly={!!edit.system_key} tabIndex={edit.system_key ? -1 : undefined} value={edit.name_np || ''} onChange={(e) => setEdit({ ...edit, name_np: e.target.value })} /></label>
+            {edit.system_key ? (
+              <label>Under<input readOnly tabIndex={-1} value={`${groups.find((g) => g.id === Number(edit.group_id))?.name || ''} · system ledger (fixed)`} /></label>
+            ) : edit.lock ? (
               <label>Under<input readOnly tabIndex={-1} value={`${groups.find((g) => g.id === Number(edit.group_id))?.name || ''} · ${edit.lock === 'bank' ? 'Bank' : 'Cash'} ledger`} /></label>
             ) : <>
             <label>Group
@@ -451,7 +539,7 @@ export default function ChartOfAccounts() {
             )}
             <LastSaved row={edit} />
             <div className="actions">
-              {edit.id && !holdsValue(edit) && (
+              {edit.id && !edit.system_key && !holdsValue(edit) && (
                 <button type="button" className="danger edit-only" onClick={() => removeLedger()}>
                   {edit.system_key ? '🔒 Delete (admin)' : 'Delete'} <kbd className="kbd">Ctrl+Del</kbd>
                 </button>

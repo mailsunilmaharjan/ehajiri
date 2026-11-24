@@ -110,6 +110,30 @@ function docHtml(d, c) {
 <p style="color:#666">Sent by eHajiri Accounts.</p></div>`;
 }
 
+/** "Pay to our bank account" for the mail body: one box per bank, QR shown inline (cid attachment). */
+async function bankEmail(d) {
+  const { bankAccountsFor } = await import('../../routes/accounts/accounts.js');
+  const { getFile } = await import('./files.js');
+  const banks = (await bankAccountsFor(d.cash_account_id)).slice(0, 3);
+  if (!banks.length) return { block: '', files: [] };
+  const files = [];
+  const cells = [];
+  for (const [i, b] of banks.entries()) {
+    const f = b.qr_image ? await getFile('bank-qr', b.qr_image).catch(() => null) : null;
+    let qr = '';
+    if (f?.data) {
+      const cid = `bankqr${i}@ehajiri`, ext = (String(f.mime || '').split('/')[1] || 'png').replace('jpeg', 'jpg');
+      files.push({ filename: `QR-${String(b.name).replace(/[^\w]+/g, '_')}.${ext}`, content: f.data, contentType: f.mime || 'image/png', cid });
+      qr = `<td style="padding:6px;vertical-align:top"><img src="cid:${cid}" alt="QR" style="display:block;height:170px;width:auto;max-width:170px"><div style="font-size:11px;color:#555;text-align:center">Scan to pay</div></td>`;
+    }
+    const row = (k, v) => (v ? `<div style="font-size:11px;color:#555;margin-top:4px">${k}</div><div style="font-size:13px;font-weight:600">${esc(v)}</div>` : '');
+    cells.push(`<td style="padding:4px;vertical-align:top"><table cellpadding=0 cellspacing=0 style="border:1px solid #9ca3af;border-radius:6px"><tr>${qr}`
+      + `<td style="padding:8px 10px;vertical-align:top"><div style="font-size:14px;font-weight:700">${esc(b.name)}</div>`
+      + `${row('A/c Name', b.account_name)}${row('A/c No.', b.account_no)}${row('Branch', b.branch)}</td></tr></table></td>`);
+  }
+  return { block: `<h4 style="margin:16px 0 4px;color:#0f2a3d">Pay to our bank account</h4><table cellpadding=0 cellspacing=0><tr>${cells.join('')}</tr></table>`, files };
+}
+
 export async function log(channel, docId, partyId, recipient, subject, status, error, user) {
   await q('INSERT INTO acc_notifications (channel, doc_id, party_id, recipient, subject, status, error, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)',
     [channel, docId, partyId, recipient, subject, status, error, user]);
@@ -130,6 +154,13 @@ export async function sendDoc(d, channel, user, text = null, to = null) {
       const body = esc(text || quoteText(d, c)).replace(/\n/g, '<br>');
       await sendEmail(target, subject, `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">${body}</div>`,
         [{ filename: pdfName(d), content: await docPdfBytes(d, user), contentType: 'application/pdf' }]);
+    } else if (channel === 'email' && ['SO', 'SI'].includes(d.doc_type)) {
+      // sales order / invoice: bill + bank account(s) with QR in the mail body, and the bill PDF (bank + QR printed on it) attached
+      const { docPdfBytes, pdfName } = await import('../../routes/accounts/docs.js');
+      const { block, files } = await bankEmail(d);
+      const html = (text ? `<p>${esc(text).replace(/\n/g, '<br>')}</p>` : '') + docHtml(d, c).replace('<p style="color:#666">Sent by', `${block}<p style="color:#666">Sent by`);
+      await sendEmail(target, subject, html,
+        [{ filename: pdfName(d), content: await docPdfBytes(d, user), contentType: 'application/pdf' }, ...files]);
     } else if (channel === 'email') {
       await sendEmail(target, subject, text ? `<p>${esc(text).replace(/\n/g, '<br>')}</p>${docHtml(d, c)}` : docHtml(d, c));
     } else {

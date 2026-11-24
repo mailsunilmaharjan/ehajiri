@@ -170,6 +170,14 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
     XLSX.utils.book_append_sheet(wb, ws, d.doc_type);
     XLSX.writeFile(wb, `${d.doc_no.replace(/\//g, '-')}.xlsx`);
   };
+  // sales order / invoice: the bank account(s) + QR to pay into, printed on the bill (same as the PDF)
+  const [payBanks, setPayBanks] = useState([]);
+  useEffect(() => {
+    let live = true;
+    setPayBanks([]);
+    if (['SO', 'SI'].includes(d.doc_type)) bankShare().then((l) => live && setPayBanks(l.slice(0, 3))).catch(() => {});
+    return () => { live = false; };
+  }, [d.id]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [delOpen, setDelOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   // Task button: if a task was already assigned for this document, show the Task module's history right here in a
@@ -250,9 +258,13 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
             <div className="dv-f wide">
               <label>{isSale ? 'Customer Name' : 'Supplier Name'}</label>
               <div className="dv-v"><b>{d.party_name}</b></div>
-              <small>PAN {d.party_pan || '—'}{d.party_address ? ` · ${d.party_address}` : ''}</small>
-              {(d.party_contact || d.party_mobile || d.party_whatsapp) && <small>{d.party_contact ? `Contact: ${d.party_contact}` : ''}{d.party_contact && (d.party_mobile || d.party_whatsapp) ? ' · ' : ''}{partyPhones(d)}</small>}
             </div>
+            {/* right after the party: PAN, contact person name + number; address beside the label */}
+            <div className="dv-f dv-pc"><label>PAN | Contact Detail
+                {d.party_address && <span className="dv-addr">Address: <b>{d.party_address}</b></span>}</label>
+              <div className="dv-v">PAN: <b>{d.party_pan || '—'}</b><span className="iv-sep">|</span>
+                {d.party_contact && <>Name: <b>{d.party_contact}</b><span className="iv-sep">·</span></>}
+                <b>{d.party_whatsapp || d.party_mobile || d.party_phone || '—'}</b></div></div>
             {isSale
               ? <div className="dv-f"><label>Type</label><div className="dv-v">{LEVEL_NAMES[d.price_level] || 'Retail (MRP)'}</div></div>
               : d.supplier_bill_no ? <div className="dv-f"><label>Supplier Bill No.</label><div className="dv-v">{d.supplier_bill_no}</div></div> : null}
@@ -470,13 +482,31 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
             </tbody>
           </table>
         </div>
-        <div className="signs"><span>Prepared by: {d.created_by}</span><span>Received by</span><span>Authorised signature</span></div>
+        {payBanks.length > 0 && (
+          <div className="pay-banks">
+            <div className="pb-title">Pay to our bank account</div>
+            <div className="pb-row">
+              {payBanks.map((b) => (
+                <div className="pb-box" key={b.name}>
+                  {b.qr && <div className="pb-qr"><AuthImg src={b.qr} alt="QR" /><small>Scan to pay</small></div>}
+                  <div className="pb-info">
+                    <b>{b.name}</b>
+                    {b.account_name && <><span>A/c Name</span><b>{b.account_name}</b></>}
+                    {b.account_no && <><span>A/c No.</span><b>{b.account_no}</b></>}
+                    {b.branch && <><span>Branch</span><b>{b.branch}</b></>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="signs"><span>Prepared by: {d.created_by_name || d.created_by}</span><span>Received by</span><span>Authorised signature</span></div>
         <div className="printed small muted">Printed {new Date().toLocaleString()} {d.voucher_no ? `· Voucher ${d.voucher_no}` : ''}</div>
         </div>
 
         <div className="last-saved iv-audit no-print">
-          <span>📝 Entered by <b>{d.created_by}</b> · {fmtStamp(d.created_at)}</span>
-          {d.updated_by && <span>✏️ Last edited by <b>{d.updated_by}</b> · {fmtStamp(d.updated_at)} ({d.edit_count}×)</span>}
+          <span>📝 Entered by <b>{d.created_by_name || d.created_by}</b> · {fmtStamp(d.created_at)}</span>
+          {d.updated_by && <span>✏️ Last edited by <b>{d.updated_by_name || d.updated_by}</b> · {fmtStamp(d.updated_at)} ({d.edit_count}×)</span>}
           {d.cancelled_by && <span>⛔ Cancelled by <b>{d.cancelled_by}</b> · {fmtStamp(d.cancelled_at)}</span>}
           {d.print_count > 0 && <span>🖨 Printed {d.print_count}×</span>}
         </div>

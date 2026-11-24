@@ -419,7 +419,7 @@ export default function Imports() {
                         {form.items.map((r, i) => (
                           <tr key={r._k}>
                             <td className="sn">{i + 1}</td>
-                            <td><AccountSelect accounts={itemOpts} value={r.item_id ? Number(r.item_id) : null} onChange={(v) => pickProduct(r._k, v)} placeholder="Search product…"
+                            <td><AccountSelect accounts={itemOpts} value={r.item_id ? Number(r.item_id) : null} onChange={(v) => pickProduct(r._k, v)} placeholder="Search product…" onNew={(typed) => openNewProduct(r._k, typed)}
                               onEmptyEnter={() => addRowRef.current?.focus()} /></td>
                             <td><input data-nocap value={r.hs_code} onChange={(e) => setItem(r._k, { hs_code: e.target.value })} /></td>
                             <td><input className="num qty" type="number" min="0" step="0.001" value={r.qty} onChange={(e) => setItem(r._k, { qty: e.target.value })} /></td>

@@ -116,6 +116,9 @@ export async function getDoc(did, run = dbRun) {
     + ' LEFT JOIN acc_vouchers v ON v.id = c.voucher_id WHERE c.doc_id = %s ORDER BY c.id DESC LIMIT 1', [did]);
   d.notifications = (await run.query('SELECT * FROM acc_notifications WHERE doc_id = %s ORDER BY id DESC', [did])).rows;
   d.pending_delete = await run.one("SELECT id, requested_by FROM acc_approvals WHERE entity = 'doc' AND entity_id = %s AND status = 'pending'", [did]);
+  const { displayName } = await import('../../services/accounts/authz.js');
+  d.created_by_name = await displayName(d.created_by);
+  d.updated_by_name = d.updated_by ? await displayName(d.updated_by) : null;
   return d;
 }
 
@@ -141,7 +144,8 @@ router.get('/docs', ah(async (req, res) => {
     + ' LEFT JOIN users u ON u.username = COALESCE(d.updated_by, d.created_by)'
     + ' LEFT JOIN users cu ON cu.username = d.created_by'
     + ` WHERE ${where.join(' AND ')} ORDER BY d.doc_date DESC, d.id DESC`, params)).rows;
-  for (const r of rows) r.doc_date_bs = bsStr(r.doc_date);
+  const noMail = (s) => (s ? String(s).split('@')[0] : s);     // a name, never an e-mail address
+  for (const r of rows) { r.doc_date_bs = bsStr(r.doc_date); r.saved_by_name = noMail(r.saved_by_name); r.created_by_name = noMail(r.created_by_name); }
   res.json(rows);
 }));
 
@@ -166,7 +170,10 @@ export async function docPdfBytes(d, user) {
       b.qr_data = f && /png|jpe?g/i.test(f.mime || '') ? f.data : null;     // pdfkit draws PNG / JPG only
     }
   }
-  return (await import('../../services/accounts/pdf.js')).docPdf(company, d, user, banks);
+  // names, not e-mail addresses, on paper
+  const { displayName } = await import('../../services/accounts/authz.js');
+  d = { ...d, created_by: d.created_by_name || await displayName(d.created_by) };
+  return (await import('../../services/accounts/pdf.js')).docPdf(company, d, await displayName(user), banks);
 }
 
 router.get('/docs/:did/pdf', ah(async (req, res) => {
