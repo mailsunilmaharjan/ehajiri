@@ -356,3 +356,24 @@ body .acc-app .modal > .card.form { overflow-y: auto !important; overflow-x: hid
 body .acc-app .modal > .card.form > h2:first-child { position: sticky; top: 0; z-index: 6; }
 body .acc-app .modal > .card.form.acc-cardform > h2:first-child { background: var(--ui-modal-head-bg, #f8fafc); }
 body .acc-app .modal > .card.form > .actions { position: sticky; bottom: 0; z-index: 6; }
+
+/* ── bill entry (all sales / purchase forms): "PAN | Contact Detail" box right after the party, like the bill view ── */
+.acc-app .doc-form.bill-top { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.8fr) 160px minmax(0, 1.2fr); }
+.acc-app .doc-form.bill-top.si { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.7fr) 140px 120px 120px minmax(0, 1.15fr); }
+.acc-app .doc-form.bill-top.two { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.8fr) minmax(0, 1.2fr); }
+.acc-app .bill-pc { display: flex; flex-direction: column; min-width: 0; }
+.acc-app .bill-pc-l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: #111827; margin-bottom: 6px; min-height: 18px; }
+.acc-app .bill-pc .dv-addr { font-size: 12px; font-weight: 500; color: #075985; background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 4px; padding: 0 8px; }
+.acc-app .bill-pc .dv-addr b { font-weight: 600; }
+.acc-app .bill-pc-v { min-height: 40px; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 12px; font-size: 13.5px; color: #111827;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+.acc-app .bill-pc-v .iv-sep { margin: 0 8px; color: #9ca3af; }
+@media (max-width: 1000px) {
+  .acc-app .doc-form.bill-top, .acc-app .doc-form.bill-top.si, .acc-app .doc-form.bill-top.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+/* party label row: "Customer Name ……… [Address: X]" — address tag at the right end, amber so it stands apart */
+.acc-app .dv-lrow { display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.acc-app .dv-addr2 { margin-left: auto; font-size: 12px; font-weight: 500; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px;
+  padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%; }
+.acc-app .dv-addr2 b { font-weight: 600; }

@@ -378,7 +378,9 @@ export default function DocEntry() {
         </header>
         <div className={`doc-form bill-top ${type === 'SI' ? 'si' : isSale || type === 'PB' ? '' : 'two'}`}>
           <div className="acc-step"><i>1</i>{isQuote ? `${partyWord} & date` : `${partyWord} & bill details`}</div>
-          <label>{partyWord} Name *
+          <label><span className="dv-lrow">{partyWord} Name *
+            {(() => { const ad = party ? party.address : isQuote && contactSel ? contactSel.address : f.party_address;
+              return ad ? <span className="dv-addr2">Address: <b>{ad}</b></span> : null; })()}</span>
             <span className="inline">
               {isQuote && !f.party_id ? (
                 <AccountSelect accounts={contactList} value={f.contact_id} onChange={(cid) => pickContact(contacts.find((c) => c.id === cid))}
@@ -391,8 +393,24 @@ export default function DocEntry() {
               <button type="button" className="ghost add-btn" tabIndex={-1} onClick={() => setAddParty({ name: '' })}>＋ Add</button>
             </span>
             {isQuote && !f.party_id && contactSel && <small>{[contactSel.phone, contactSel.address].filter(Boolean).join(' · ') || 'Contact'}{contactSel.party_id ? ' · already an Accounts customer' : ' · becomes an Accounts customer when converted to an order / invoice'}</small>}
-            {party && <small>PAN {party.pan || '—'} · Balance {fmtBal(party.balance)}{party.credit_limit ? ` · Limit ${fmtMoney(party.credit_limit)}` : ''}</small>}
+            {party && <small>Balance {fmtBal(party.balance)}{party.credit_limit ? ` · Limit ${fmtMoney(party.credit_limit)}` : ''}</small>}
           </label>
+          {/* same as the bill view: PAN, contact person + number of the chosen party; address beside the label */}
+          {(() => {
+            const pc = party
+              ? { pan: party.pan, name: party.contact_person, phone: party.whatsapp || party.phone, address: party.address }
+              : isQuote && contactSel
+                ? { pan: contactSel.pan, name: contactSel.persons?.[0]?.name, phone: contactSel.phone, address: contactSel.address }
+                : { pan: f.party_pan, address: f.party_address };
+            return (
+              <div className="bill-pc">
+                <span className="bill-pc-l">PAN | Contact Detail</span>
+                <div className="bill-pc-v">PAN: <b>{pc.pan || '—'}</b><span className="iv-sep">|</span>
+                  {pc.name && <>Name: <b>{pc.name}</b><span className="iv-sep">·</span></>}
+                  <b>{pc.phone || '—'}</b></div>
+              </div>
+            );
+          })()}
           {isSale ? (
             <label>Type
               <select value={f.price_level} onChange={(e) => changeLevel(e.target.value)}>

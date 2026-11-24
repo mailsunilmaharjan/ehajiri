@@ -256,12 +256,12 @@ export default function DocView({ doc: initial, onClose, onChanged, autoPrint })
           {d.status === 'cancelled' && <div className="stamp">CANCELLED — {d.cancel_reason}</div>}
           <div className={`dv-top ${isSale ? 'sale' : ''}`}>
             <div className="dv-f wide">
-              <label>{isSale ? 'Customer Name' : 'Supplier Name'}</label>
+              <label className="dv-lrow">{isSale ? 'Customer Name' : 'Supplier Name'}
+                {d.party_address && <span className="dv-addr2">Address: <b>{d.party_address}</b></span>}</label>
               <div className="dv-v"><b>{d.party_name}</b></div>
             </div>
             {/* right after the party: PAN, contact person name + number; address beside the label */}
-            <div className="dv-f dv-pc"><label>PAN | Contact Detail
-                {d.party_address && <span className="dv-addr">Address: <b>{d.party_address}</b></span>}</label>
+            <div className="dv-f dv-pc"><label>PAN | Contact Detail</label>
               <div className="dv-v">PAN: <b>{d.party_pan || '—'}</b><span className="iv-sep">|</span>
                 {d.party_contact && <>Name: <b>{d.party_contact}</b><span className="iv-sep">·</span></>}
                 <b>{d.party_whatsapp || d.party_mobile || d.party_phone || '—'}</b></div></div>
