@@ -4,26 +4,30 @@ import { api } from '../lib/api';
 import { useShortcuts } from '../lib/keys';
 import { Kbd } from './inputs';
 
-/** Ask the signed-in user's own password before saving an edit. */
+/** Saving an edit needs admin approval: an admin types their own password, anyone else needs an admin's username + password. */
 export function PasswordPrompt({ title, onConfirm, onClose }) {
+  const { user } = useApp();
+  const isAdmin = user?.role === 'admin' || user?.role === 'superAdmin';
   const [pw, setPw] = useState('');
+  const [adminUser, setAdminUser] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async (e) => {
     e?.preventDefault();
-    if (!pw) return;
+    if (!pw || (!isAdmin && !adminUser.trim())) return;
     setBusy(true);
-    try { await onConfirm(pw); } finally { setBusy(false); }
+    try { await onConfirm(pw, isAdmin ? undefined : adminUser.trim()); } finally { setBusy(false); }
   };
   useShortcuts({ save: go, close: onClose });
   return (
     <div className="modal" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="card form narrow" onSubmit={go}>
-        <h2>🔒 {title || 'Confirm with your password'}</h2>
-        <p className="muted small full">Editing a saved bill or voucher changes the books. Type your password to confirm — the change is recorded in the Audit Trail.</p>
-        <label className="full">Your password<input type="password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" /></label>
+        <h2>🔒 {title || 'Admin approval'}</h2>
+        <p className="muted small full">Editing a saved bill or voucher changes the books, so it needs admin approval. The change is recorded in the Audit Trail.</p>
+        {!isAdmin && <label className="full">Admin username<input autoFocus value={adminUser} onChange={(e) => setAdminUser(e.target.value)} autoComplete="off" /></label>}
+        <label className="full">{isAdmin ? 'Your (admin) password' : 'Admin password'}<input type="password" autoFocus={isAdmin} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></label>
         <div className="actions"><span className="spacer" />
           <button type="button" className="ghost" onClick={onClose}>Close <Kbd>Esc</Kbd></button>
-          <button data-save disabled={busy || !pw}>Confirm & save</button>
+          <button data-save disabled={busy || !pw || (!isAdmin && !adminUser.trim())}>Confirm & save</button>
         </div>
       </form>
     </div>

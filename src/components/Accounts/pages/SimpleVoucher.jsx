@@ -270,8 +270,8 @@ export default function SimpleVoucher() {
     catch (e) { notify(e.message, 'err'); }
     setBusy(false);
   };
-  const saveEdit = async (password) => {
-    try { const v = await api.put(`/vouchers/${editId}`, { ...payload(), password }); setAskPw(false); notify(`${v.voucher_no} updated`); setSaved(v); }
+  const saveEdit = async (password, admin_username) => {
+    try { const v = await api.put(`/vouchers/${editId}`, { ...payload(), password, admin_username }); setAskPw(false); notify(`${v.voucher_no} updated`); setSaved(v); }
     catch (e) { notify(e.message, 'err'); }
   };
   useShortcuts({ save, close: () => nav('/day-book') }, !saved && !askPw);

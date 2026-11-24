@@ -275,7 +275,7 @@ router.put('/items/:iid', ah(async (req, res) => {
   await checkItem(b, iid);
   if (cur.item_type !== b.item_type && await one('SELECT 1 AS x FROM acc_doc_lines WHERE item_id = %s LIMIT 1', [iid])) bad('This product is already on bills, so it can\'t switch between Goods and Service.');
   if (cur.track_serial && !b.track_serial && await one("SELECT 1 AS x FROM acc_serials WHERE item_id = %s AND status = 'in_stock' AND in_doc_id IS NOT NULL LIMIT 1", [iid])) bad("Serial numbers are in stock from purchases, so serial tracking can't be turned off.");
-  if (!cur.track_serial && b.track_serial && await one("SELECT 1 AS x FROM acc_stock_moves WHERE item_id = %s AND kind <> 'opening' LIMIT 1", [iid])) bad('Turn on serial tracking before the first purchase or sale of this product.');
+  // serial tracking may be switched on later: the opening serial numbers become the serial-tracked stock from now on
   const user = userOf(req);
   const row = await tx(async (t) => {
     const sets = COLS.map((c) => `${c}=%s`).join(', ');

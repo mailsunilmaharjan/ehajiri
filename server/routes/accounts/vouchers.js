@@ -120,10 +120,10 @@ export async function manualVoucher(vid, run = { query: q, one }) {
   return v;
 }
 
-/** Edit a manual voucher (same number): needs the user's own password. */
+/** Edit a manual voucher (same number): needs admin approval (admin password). */
 router.put('/vouchers/:vid', ah(async (req, res) => {
   const vid = +req.params.vid, b = req.body || {};
-  await confirmPassword(req, b.password);
+  const approver = await adminApproval(req, b.admin_username, b.password);   // edit needs admin approval
   const user = userOf(req);
   await tx(async (t) => {
     await t.query('SELECT id FROM acc_vouchers WHERE id = %s FOR UPDATE', [vid]);
@@ -139,7 +139,7 @@ router.put('/vouchers/:vid', ah(async (req, res) => {
     for (let i = 0; i < lines.length; i++) {
       await t.query('INSERT INTO acc_voucher_lines (voucher_id, account_id, dr, cr, note, sort) VALUES (%s,%s,%s,%s,%s,%s)', [vid, lines[i].account_id, lines[i].dr, lines[i].cr, lines[i].note, i]);
     }
-    await audit(t, user, 'edit', 'voucher', vid, { before: vsnap(v), after: vsnap(await getVoucher(vid, t)) });
+    await audit(t, user, 'edit', 'voucher', vid, { approved_by: approver, before: vsnap(v), after: vsnap(await getVoucher(vid, t)) });
   });
   res.json(await getVoucher(vid));
 }));

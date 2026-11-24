@@ -679,10 +679,10 @@ router.post('/docs', ah(async (req, res) => {
   res.json(out);
 }));
 
-/** Edit a posted bill / order: needs the user's own password. Keeps its number. */
+/** Edit a posted bill / order: needs admin approval (admin password). Keeps its number. */
 router.put('/docs/:did', ah(async (req, res) => {
   const did = +req.params.did, b = req.body || {};
-  await confirmPassword(req, b.password);
+  const approver = await adminApproval(req, b.admin_username, b.password);
   const user = userOf(req);
   await tx(async (t) => {
     await t.query('SELECT id FROM acc_docs WHERE id = %s FOR UPDATE', [did]);
@@ -704,7 +704,7 @@ router.put('/docs/:did', ah(async (req, res) => {
       const qn = await currentQty(t, iid);
       if (qn < -0.0005) bad(`This change would make stock of ${(await t.one('SELECT name FROM acc_items WHERE id = %s', [iid])).name} negative (${nsig(qn)}).`);
     }
-    await audit(t, user, 'edit', 'doc', did, { before: snapshot(d), after: snapshot(await getDoc(did, t)) });
+    await audit(t, user, 'edit', 'doc', did, { approved_by: approver, before: snapshot(d), after: snapshot(await getDoc(did, t)) });
   });
   await syncDocTasks(did, user);
   res.json(await getDoc(did));

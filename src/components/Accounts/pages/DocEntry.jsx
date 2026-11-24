@@ -55,11 +55,12 @@ function periodEnd(fromIso, months) {
 }
 
 /** "500" → Rs 500 ; "10%" → 10 % of the line amount */
-function discAmount(text, gross) {
+/** Line discount: "10%" = percent of the line, a plain number = Rs off EACH unit (× qty). */
+function discAmount(text, gross, qty = 1) {
   const s = String(text ?? '').trim();
   if (!s) return 0;
   if (s.endsWith('%')) return r2(gross * (Number(s.slice(0, -1)) || 0) / 100);
-  return r2(Number(s) || 0);
+  return r2((Number(s) || 0) * (qty || 0));
 }
 
 /** Quick "+ Add" customer / supplier without leaving the bill. */
@@ -142,7 +143,8 @@ export default function DocEntry() {
 
   const fromDocLine = (l, isReturn) => ({
     item_id: l.item_id, rate: l.rate, incl: !!l.vat_inclusive,
-    disc: l.discount ? String(r2(l.vat_inclusive ? l.discount * (1 + vatRate / 100) : l.discount)) : '',
+    // saved discount is the line total (excl. VAT) → show it back as Rs per unit, as typed
+    disc: l.discount && Number(l.qty) ? String(r2((l.vat_inclusive ? l.discount * (1 + vatRate / 100) : l.discount) / Number(l.qty))) : '',
     qty: isReturn ? r2(l.qty - (l.returned || 0)) : l.qty,
     max: isReturn ? r2(l.qty - (l.returned || 0)) : null,
     allowed: isReturn && l.track_serial ? l.returnable_serials : null,
@@ -273,7 +275,7 @@ export default function DocEntry() {
       const it = itemById[l.item_id];
       if (!it) return null;
       const gross = r2(Number(l.qty || 0) * Number(l.rate || 0));
-      const disc = Math.min(discAmount(l.disc, gross), gross);
+      const disc = Math.min(discAmount(l.disc, gross, Number(l.qty || 0)), gross);
       const net = r2(gross - disc);
       const vatOk = !!it.vat_applicable && lineVat > 0;
       let amt; let v;
@@ -325,9 +327,9 @@ export default function DocEntry() {
     } catch (err) { notify(err.message, 'err'); }
     setBusy(false);
   };
-  const saveEdit = async (password) => {
+  const saveEdit = async (password, admin_username) => {
     try {
-      const d = await api.put(`/docs/${editId}`, { ...body(), password });
+      const d = await api.put(`/docs/${editId}`, { ...body(), password, admin_username });
       setAskPw(false);
       notify(`${d.doc_no} updated`);
       setSaved(d);
@@ -549,7 +551,7 @@ export default function DocEntry() {
             <th className="sn">SN</th><th style={{ minWidth: 280 }}>PRODUCT NAME</th><th style={{ width: 90 }}>HS CODE</th>
             <th className="num" style={{ width: 80 }}>QTY</th><th className="num" style={{ width: 105 }}>MRP Rs.</th>
             <th className="num" style={{ width: 120 }}>{isSale ? RATE_LABEL[f.price_level] : 'RATE'}</th><th style={{ width: 110 }}>VAT TYPE</th>
-            <th className="num" style={{ width: 100 }}>DISCOUNT</th><th className="num" style={{ width: 115 }}>VAT EXCL. Rs.</th>
+            <th className="num" style={{ width: 100 }} title="Rs off each unit, or % of the line (e.g. 5%)">DISC./UNIT</th><th className="num" style={{ width: 115 }}>VAT EXCL. Rs.</th>
             <th className="num" style={{ width: 115 }}>TOTAL Rs.</th><th style={{ width: 30 }} />
           </tr></thead>
           <tbody onKeyDown={gridArrows}>
@@ -597,7 +599,7 @@ export default function DocEntry() {
                       <option value="incl">Inclusive</option><option value="excl">Exclusive</option>
                     </select>
                   </td>
-                  <td><input className="num" placeholder="Rs or %" value={l.disc} onChange={(e) => setLine(i, { disc: e.target.value })} /></td>
+                  <td><input className="num" placeholder="Rs/unit or %" title="Rs off each unit (× Qty), or % of the line e.g. 5%" value={l.disc} onChange={(e) => setLine(i, { disc: e.target.value })} /></td>
                   <td className="num excl" title="Cost per unit, without VAT">{c ? fmtMoney(c.unit) : ''}</td>
                   <td className="num tot" title="Cost per unit × Qty (VAT is added in the totals below)">{c ? fmtMoney(c.amt) : '—'}</td>
                   <td>{lines.length > 1 && <button type="button" className="link del-x" tabIndex={-1} title="Remove line" onClick={() => setLines(lines.filter((_, j) => j !== i))}>✕</button>}</td>

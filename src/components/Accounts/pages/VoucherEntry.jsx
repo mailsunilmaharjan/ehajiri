@@ -77,9 +77,9 @@ export default function VoucherEntry() {
     } catch (err) { notify(err.message, 'err'); }
     setBusy(false);
   };
-  const saveEdit = async (password) => {
+  const saveEdit = async (password, admin_username) => {
     try {
-      const v = await api.put(`/vouchers/${editId}`, { ...payload(), password });
+      const v = await api.put(`/vouchers/${editId}`, { ...payload(), password, admin_username });
       setAskPw(false); setSaved(v); notify(`${v.voucher_no} updated`);
     } catch (err) { notify(err.message, 'err'); }
   };
