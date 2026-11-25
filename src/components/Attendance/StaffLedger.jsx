@@ -16,7 +16,7 @@ import ViewMonthlyBtn    from './ViewMonthlyBtn.jsx';
 import SearchableSelect  from '../Common/SearchableSelect.jsx';
 import ReportDateRange, { useReportDateRange } from '../Common/ReportDateRange.jsx';
 import { adToBS, bsToAD, getBSDays, BS_MONTHS_NP, BS_MONTHS_EN, toNepaliDigits, getNepalNow, getNepalTodayISO, getCurrentFiscalYear } from '../../utils/dateUtils.js';
-import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
+import { buildPrintDoc, openPrintWindow, downloadBlob } from '../../utils/printHelper.js';
 import { staffRankCompare } from '../../utils/branchUtils.js';
 import { DutyLines, ShiftLines, dutyInLines, dutyOutLines, dutyInStatusLines, dutyOutStatusLines, dutyHtml } from './DutyStack.jsx';
 import { reportBsYears, reportAdYears } from '../../utils/dateUtils.js';
@@ -558,6 +558,117 @@ const StaffLedger = () => {
     },
   ];
 
+  /* ── Excel export: real .xlsx with the DataGrid's look (grey header + SN column, coloured status,
+        Total Working Hours / Total OT row at the bottom). Hours are written as text so Excel keeps "35:16". ── */
+  const exportExcel = async () => {
+    if (!days.length || !emp) return;
+    try {
+      const { default: ExcelJS } = await import('exceljs');
+      const argb = (hex) => 'FF' + String(hex || '#000000').replace('#', '').toUpperCase();
+      const reportTitle = isHalfMonthlyCtx ? 'Half Monthly Staff Ledger' : 'Monthly Staff Ledger';
+      const s = summary || {};
+      const companyName = language === 'np' ? (settings.companyNameNp || settings.companyNameEn || '') : (settings.companyNameEn || settings.companyNameNp || '');
+      const companyAddr = language === 'np' ? (settings.companyAddressNp || settings.companyAddressEn || '') : (settings.companyAddressEn || settings.companyAddressNp || '');
+      const HDR = ['SN', L('मिति','Date'), L('दिन','Day'), L('सिफ्ट','Shift'), L('आएको','Time In'), L('गएको','Time Out'), 'Total Hrs',
+        'IN Status', 'OUT Status', 'OT', L('स्थिति','Status'), L('कैफियत','Remarks')];
+      const lastCol = HDR.length;
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Staff Ledger');
+      const thin = { style: 'thin', color: { argb: 'FFDEDEDE' } };
+      const heavy = { style: 'medium', color: { argb: 'FFC5CDD8' } };
+
+      const titleRows = [companyName, [companyAddr, settings.companyPhone ? `Tel: ${settings.companyPhone}` : ''].filter(Boolean).join('  |  '),
+        reportTitle, periodLabel() + (period.startDate ? `   (${fd(period.startDate)} to ${fd(period.endDate)})` : '')];
+      titleRows.forEach((text, i) => {
+        const row = ws.addRow([text]);
+        ws.mergeCells(row.number, 1, row.number, lastCol);
+        row.getCell(1).font = i === 0 ? { bold: true, size: 13 } : i === 2 ? { bold: true, size: 12 } : { size: 10, color: { argb: 'FF6B7280' } };
+        row.getCell(1).alignment = { horizontal: 'center' };
+      });
+      const info = [
+        `Staff Name: ${emp.fullName || ''}`, `Post: ${emp.postShort || emp.position || ''}`, `Dept: ${emp.deptShort || emp.department || ''}`,
+        `Grade: ${emp.grade || ''}`, `Mode: ${emp.mode || ''}`, `Branch: ${emp.branchShort || emp.branch || ''}`].join('   |   ');
+      const summ = [`Present: ${s.presentCount || 0}`, `Absent: ${s.absentCount || 0}`, `Leave: ${s.leaveCount || 0}`,
+        `Office Visit: ${days.filter(r => r.hasVisit).length}`, `Late In: ${s.lateCount || 0}`, `Early Out: ${s.earlyCount || 0}`,
+        `Att. Rate: ${s.attendanceRate || 0}%`, `Present in Holiday: ${days.filter(r => r.isPublicHoliday && r.timeIn).length}`,
+        `Present in Weekend: ${days.filter(r => r.isWeekend && r.timeIn).length}`].join('   ·   ');
+      [[info, 'FFF8FAFC', true], [summ, 'FFF9FAFB', false], ['', null, false]].forEach(([text, fill, bold]) => {
+        const row = ws.addRow([text]);
+        ws.mergeCells(row.number, 1, row.number, lastCol);
+        row.getCell(1).font = { bold, size: 10, color: { argb: 'FF374151' } };
+        if (fill) row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+      });
+
+      const hdr = ws.addRow(HDR);
+      const hdrRowNo = hdr.number;
+      hdr.eachCell({ includeEmpty: true }, (cell, c) => {
+        cell.font = { bold: true, size: 10.5, color: { argb: 'FF374151' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
+        cell.alignment = { horizontal: [2, 3, 4, 12].includes(c) ? 'left' : 'center', vertical: 'middle' };
+        cell.border = { right: thin, bottom: heavy };
+      });
+
+      days.forEach((r, i) => {
+        const isRosterOff = r.status === 'Day Off' || r.status === 'Night Off';
+        const shift = isRosterOff ? r.shiftName : (!r.isWeekend ? r.shiftName : '');
+        const status = r.status === 'On Leave' ? (r.leaveInfo?.halfDay ? '½ Half Day' : 'On Leave') : statusLabel(r.status, language);
+        const remarks = r.leaveInfo
+          ? [r.leaveInfo.typeName + (r.leaveInfo.halfDay ? ' (½ Half Day)' : ''), r.leaveInfo.reason,
+             r.leaveInfo.recommendedBy && `Reco. by: ${r.leaveInfo.recommendedBy}`, r.leaveInfo.approvedBy && `Appr. by: ${r.leaveInfo.approvedBy}`].filter(Boolean).join(' | ')
+          : (r.remarks || '');
+        const row = ws.addRow([
+          i + 1, fd(r.dateStr) || r.dateStr, r.dayFull || '', String(shift || '').replace(/\n/g, ' / '),
+          r.timeIn ? fmtTime(r.timeIn) : '', r.timeOut ? fmtTime(r.timeOut) : '', r.totalFormatted || '',
+          r.lateFormatted || '', r.earlyFormatted || '', (emp.eligibleForOt && r.otApprovedFormatted) || '', status, remarks,
+        ]);
+        const zebra = i % 2 === 1 ? 'FFFAFAFA' : 'FFFFFFFF';
+        const muted = r.isWeekend ? 'FF9CA3AF' : 'FF1F2937';
+        row.eachCell({ includeEmpty: true }, (cell, c) => {
+          cell.alignment = { horizontal: [2, 3, 4, 8, 9, 12].includes(c) ? 'left' : 'center', vertical: 'middle', wrapText: c === 12 };
+          cell.border = { right: thin, bottom: { style: 'thin', color: { argb: 'FFEEF0F4' } } };
+          cell.font = { size: 10, color: { argb: muted } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c === 1 ? 'FFEFEFEF' : zebra } };
+        });
+        row.getCell(1).font = { size: 10, color: { argb: 'FF6B7280' } };
+        if (r.totalFormatted) row.getCell(7).font = { size: 10, bold: true, color: { argb: 'FF0369A1' } };
+        const li = r.lateFormatted || '';
+        if (li && li !== 'On Time') row.getCell(8).font = { size: 10, bold: true, color: { argb: li.startsWith('Early In') ? 'FF10B981' : 'FFEF4444' } };
+        const eo = r.earlyFormatted || '';
+        if (eo && eo !== 'On Time') row.getCell(9).font = { size: 10, bold: true, color: { argb: eo.startsWith('Late Out') ? 'FF3B82F6' : 'FFF59E0B' } };
+        if (emp.eligibleForOt && r.otApprovedFormatted) row.getCell(10).font = { size: 10, bold: true, color: { argb: 'FF059669' } };
+        const st = statusStyle(r.status === 'On Leave' ? 'Leave' : r.status);
+        const sc = row.getCell(11);
+        sc.font = { size: 10, bold: true, color: { argb: argb(st.color) } };
+        sc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(st.bg) } };
+      });
+
+      // totals: "Total Working Hours" | hrs  ·  "Total OT" | ot
+      const tot = ws.addRow(['', '', '', '', L('जम्मा काम घण्टा','Total Working Hours'), '', totalWorkHrs, emp.eligibleForOt ? L('जम्मा ओटी','Total OT') : '', '', emp.eligibleForOt ? totalOtHrs : '', '', '']);
+      ws.mergeCells(tot.number, 5, tot.number, 6);
+      ws.mergeCells(tot.number, 8, tot.number, 9);
+      tot.eachCell({ includeEmpty: true }, (cell) => {
+        cell.font = { bold: true, size: 10.5, color: { argb: 'FF1F2937' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF6FF' } };
+        cell.border = { top: { style: 'medium', color: { argb: 'FF93C5FD' } }, bottom: heavy, right: thin };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+      tot.getCell(5).alignment = { horizontal: 'right', vertical: 'middle' };
+      tot.getCell(8).alignment = { horizontal: 'right', vertical: 'middle' };
+      tot.getCell(7).font = { bold: true, size: 11, color: { argb: 'FF0369A1' } };
+      tot.getCell(10).font = { bold: true, size: 11, color: { argb: 'FF059669' } };
+
+      ws.columns = [{ width: 5 }, { width: 18 }, { width: 11 }, { width: 13 }, { width: 10 }, { width: 10 }, { width: 10 },
+        { width: 16 }, { width: 16 }, { width: 8 }, { width: 13 }, { width: 40 }];
+      ws.views = [{ state: 'frozen', ySplit: hdrRowNo }];
+
+      const buffer = await wb.xlsx.writeBuffer();
+      downloadBlob(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+        `StaffLedger_${emp.fullName || 'Staff'}_${period.startDate || ''}.xlsx`);
+    } catch (err) {
+      alert(`Export failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
   return (
     <div className="page-container">
 
@@ -638,9 +749,6 @@ const StaffLedger = () => {
                   <span>Present in Holiday: <strong style="color:#92400e">${presentInHoliday}</strong></span>
                   <span>·</span>
                   <span>Present in Weekend: <strong style="color:#6b7280">${presentInWeekend}</strong></span>
-                  <span>·</span>
-                  <span>Total Work Hrs: <strong style="color:#0369a1">${totalWorkHrs}</strong></span>
-                  ${emp?.eligibleForOt ? `<span>·</span><span>Total OT: <strong style="color:#059669">${totalOtHrs}</strong></span>` : ''}
                 </div>`;
 
               // Date column uses fd() to match the data grid display (BS if Nepali calendar)
@@ -675,9 +783,9 @@ const StaffLedger = () => {
                   </tr></thead>
                   <tbody>${tableRows}</tbody>
                   <tfoot><tr style="background:#eef6ff;font-weight:800">
-                    <td colspan="5" style="padding:5px 6px;border:1px solid #c7d2fe;text-align:right">Total</td>
+                    <td colspan="5" style="padding:5px 6px;border:1px solid #c7d2fe;text-align:right">Total Working Hours</td>
                     <td style="padding:5px 6px;border:1px solid #c7d2fe;text-align:center;color:#0369a1">${totalWorkHrs}</td>
-                    <td colspan="2" style="padding:5px 6px;border:1px solid #c7d2fe"></td>
+                    <td colspan="2" style="padding:5px 6px;border:1px solid #c7d2fe;text-align:right">${emp?.eligibleForOt ? 'Total OT' : ''}</td>
                     <td style="padding:5px 6px;border:1px solid #c7d2fe;text-align:center;color:#059669">${emp?.eligibleForOt ? totalOtHrs : ''}</td>
                     <td colspan="2" style="padding:5px 6px;border:1px solid #c7d2fe"></td>
                   </tr></tfoot>
@@ -705,41 +813,10 @@ const StaffLedger = () => {
             </svg>
             Print
           </button>
-          {/* Export CSV */}
+          {/* Export Excel (.xlsx, coloured like the DataGrid) */}
           <button
-            title="Export CSV"
-            onClick={() => {
-              if (!days.length || !emp) return;
-              const reportTitle = isHalfMonthlyCtx ? 'Half Monthly Staff Ledger' : 'Monthly Staff Ledger';
-              const s = summary || {};
-              const visitCount2       = days.filter(r => r.hasVisit).length;
-              const presentInHoliday2 = days.filter(r => r.isPublicHoliday && r.timeIn).length;
-              const presentInWeekend2 = days.filter(r => r.isWeekend      && r.timeIn).length;
-              // Staff info + summary as extra CSV rows after company header
-              const staffInfoRow = `"Staff Name: ${emp.fullName||''}","Post: ${emp.postShort||emp.position||''}","Dept: ${emp.deptShort||emp.department||''}","Grade: ${emp.grade||''}","Mode: ${emp.mode||''}","Branch: ${emp.branchShort||emp.branch||''}"`;
-              const summaryRow = `"Present: ${s.presentCount||0}  Absent: ${s.absentCount||0}  Leave: ${s.leaveCount||0}  Office Visit: ${visitCount2}  Late In: ${s.lateCount||0}  Early Out: ${s.earlyCount||0}  Att.Rate: ${s.attendanceRate||0}%  Present in Holiday: ${presentInHoliday2}  Present in Weekend: ${presentInWeekend2}  Total Work Hrs: ${totalWorkHrs}${emp?.eligibleForOt ? `  Total OT: ${totalOtHrs}` : ''}"`;
-              const header = ['SN','Date','Day',L('आएको','Time In'),L('गएको','Time Out'),'Total Hrs','IN Status','OUT Status','OT','Status','Remarks'];
-              const dataRows = days.map(r => [
-                r.sn, fd(r.dateStr)||r.dateStr, r.dayFull,
-                r.timeIn  ? fmtTime(r.timeIn)  : '',
-                r.timeOut ? fmtTime(r.timeOut) : '',
-                r.totalFormatted||'',
-                r.lateFormatted||'',
-                r.earlyFormatted||'',
-                (emp?.eligibleForOt && r.otApprovedFormatted)||'',
-                r.status, r.remarks||''
-              ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
-                // totals row under Total Hrs and OT
-                + '\n' + ['', 'Total', '', '', '', totalWorkHrs, '', '', emp?.eligibleForOt ? totalOtHrs : '', '', '']
-                  .map(v=>`"${v}"`).join(',');
-              const excelContent = getExcelHeaderRows(settings, language, reportTitle, periodLabel())
-                + staffInfoRow + '\n'
-                + summaryRow  + '\n'
-                + '""\n'       // blank separator
-                + header.join(',') + '\n'
-                + dataRows;
-              downloadCSV(excelContent, `StaffLedger_${emp.fullName||'Staff'}_${data?.period?.startDate||''}.csv`);
-            }}
+            title="Export Excel"
+            onClick={exportExcel}
             style={{ display:'inline-flex',alignItems:'center',gap:5,padding:'0 14px',height:34,
               background:'#f0fdf4',border:'1px solid #86efac',color:'#15803d',
               borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer' }}>
@@ -1079,18 +1156,14 @@ const StaffLedger = () => {
             ] : []),
           ]}
           toolbar={null}
-          footerLeft={emp && days.length > 0 ? (
-            <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-              <span style={{ background:'#e0f2fe', border:'1px solid #7dd3fc', color:'#0369a1', borderRadius:6, padding:'2px 10px', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
-                {L('जम्मा काम घण्टा','Total Working Hrs')} : {totalWorkHrs}
-              </span>
-              {emp.eligibleForOt && (
-                <span style={{ background:'#d1fae5', border:'1px solid #6ee7b7', color:'#059669', borderRadius:6, padding:'2px 10px', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
-                  {L('जम्मा ओटी','Total OT')} : {totalOtHrs}
-                </span>
-              )}
-            </div>
-          ) : null}
+          totalsRow={emp && days.length > 0 ? {
+            timeOut: <span style={{ display:'block', textAlign:'right', color:'#1f2937', fontSize:13 }}>{L('जम्मा काम घण्टा','Total Working Hours')}</span>,
+            totalFormatted: <span style={{ color:'#0369a1', fontSize:13 }}>{totalWorkHrs}</span>,
+            ...(emp.eligibleForOt ? {
+              earlyFormatted: <span style={{ display:'block', textAlign:'right', color:'#1f2937', fontSize:13 }}>{L('जम्मा ओटी','Total OT')}</span>,
+              otApprovedFormatted: <span style={{ color:'#059669', fontSize:13 }}>{totalOtHrs}</span>,
+            } : {}),
+          } : null}
         />
       )}
     </div>

@@ -42,6 +42,7 @@ const DataGrid = ({
   groupBy = null,             // (row) => groupKey — when set, rows render under merged full-width section headers instead of flat/paginated (e.g. Task's date-bucket sections)
   groupOrder = null,          // [groupKey, ...] display order for sections; a key with no matching rows still renders its header. Defaults to first-seen order when omitted
   groupLabel = null,          // (groupKey, rowCount) => ReactNode — section header content; defaults to the raw key
+  totalsRow = null,           // { [field]: node } — a totals row pinned at the bottom of the table (sticky), each value under its own column; fields not listed stay blank
   footerLeft = null,          // extra content on the footer's left side (e.g. a selected-row preview strip) — pushes the Total/pagination info to the right instead of leaving it alone on the left
   fillToBottom,               // undefined (default) = automatic: a full-page grid sizes itself to the screen — it gets exactly the height left under it, scrolls its body inside (sticky header), shows blank ruled rows when there are few records, and keeps the paging bar visible. true = always, false = never (the grid ends after its last row)
   remarks = null,             // (row) => node — with fillToBottom: a details/remarks strip pinned at the bottom of the grid showing the focused (or first) row; its height takes whatever space is left under the blank rows, so it adapts to any screen
@@ -330,7 +331,8 @@ const DataGrid = ({
       const head = wrap.querySelector('thead');
       if (!body) return;
       const others = [...body.rows].filter((r) => !r.classList.contains('dg-blank-row'));
-      const used = (head?.offsetHeight || 0) + others.reduce((a2, r) => a2 + r.offsetHeight, 0);
+      const foot = wrap.querySelector('tfoot');
+      const used = (head?.offsetHeight || 0) + (foot?.offsetHeight || 0) + others.reduce((a2, r) => a2 + r.offsetHeight, 0);
       // real (sub-pixel) height of one blank filler row — they are no longer stretched, so measuring them is stable; before the first blank row exists use a data row
       const rowH = body.querySelector('tr.dg-blank-row')?.getBoundingClientRect().height || body.querySelector('tr.dg-row')?.getBoundingClientRect().height || 30;
       // clientHeight already shrank by the extra (restH) the strip/footer took last time — add it back so the result is stable, not oscillating
@@ -533,6 +535,20 @@ const DataGrid = ({
               </tr>
             ))}
           </tbody>
+          {totalsRow && !loading && pageData.length > 0 && (
+            <tfoot className="dg-total-foot">
+              <tr className="dg-total-row">
+                {showCheckbox && <td className="dg-td dg-total-td" />}
+                <td className="dg-td dg-total-td dg-sn-col" style={{ width: snWidth, minWidth: snWidth }} />
+                {columns.map((col, ci) => (
+                  <td key={ci} className="dg-td dg-total-td"
+                    style={{ textAlign: col.align || 'left', whiteSpace: 'nowrap' }}>
+                    {totalsRow[col.field] ?? ''}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 

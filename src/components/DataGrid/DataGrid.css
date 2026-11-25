@@ -436,6 +436,10 @@ th.dg-sn-col {
   .dg-filter-btn { font-size: 12px; }
 }
 
+/* totalsRow: a totals line pinned to the bottom of the table */
+.dg-total-foot { position: sticky; bottom: 0; z-index: 2; }
+.dg-total-row .dg-total-td { background: #eef6ff !important; border-top: 2px solid #93c5fd; font-weight: 800; padding: var(--dg-row-pad); }
+
 /* fillToBottom: blank ruled rows that carry the grid down to the bottom of the screen (same look as the Accounts lists) */
 .dg-blank-row .dg-blank-td { background: #fff !important; padding: var(--dg-row-pad); }
 /* empty filler rows continue the same even-row stripe as the data rows above them (like the Staff grid) */
