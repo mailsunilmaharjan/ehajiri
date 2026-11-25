@@ -22,7 +22,17 @@ const ImportDeviceUsersModal = ({ onClose, onDone }) => {
 
   useEffect(() => {
     api.get('/zkteco/device-users')
-      .then(rows => setDeviceUsers(rows || []))
+      .then(rows => {
+        // One row per PIN — the same person is stored once per device (or left
+        // over from a removed device), but becomes ONE staff member. Prefer the linked copy.
+        const byPin = new Map();
+        for (const u of rows || []) {
+          const k = String(u.pin ?? '').trim();
+          const prev = byPin.get(k);
+          if (!prev || (!prev.employee_id && u.employee_id)) byPin.set(k, u);
+        }
+        setDeviceUsers([...byPin.values()]);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);

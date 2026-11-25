@@ -45,6 +45,14 @@ export function cellValue(day, key, isWeekend, isHoliday, holidayName, L) {
   const dash = { text:'—', color:'#e5e7eb', bg:ROW_BG[key] };
   const hasIn = !!(day?.timeIn || day?.duties?.some((d) => d.timeIn));
   if (!hasIn) {
+    // Office Visit whose type counts holidays (Reduce Public Holiday OFF) wins over the holiday
+    if (day?.visit?.countsOffDay && isHoliday) {
+      if (key === 'in') {
+        const tip = [day.visit.purpose, day.visit.location].filter(Boolean).join(' | ');
+        return { text:L('भ्रमण','OV'), color:'#1e40af', bg:'#dbeafe', bold:true, title:tip || L('कार्यालय भ्रमण','Office Visit') };
+      }
+      return dash;
+    }
     // Public Holiday wins over a same-day leave (same precedence as attendance.js)
     if (isHoliday) {
       if (key === 'in') return { text:(holidayName || L('साबि','PH')).slice(0, 8), color:'#92400e', bg:'#fef3c7', small:true, bold:true, title:holidayName || L('सार्वजनिक बिदा','Public Holiday') };

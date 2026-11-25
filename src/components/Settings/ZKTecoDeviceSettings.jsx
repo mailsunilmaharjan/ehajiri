@@ -1530,31 +1530,38 @@ const ZKTecoDeviceSettings = () => {
   /* ── Delete selected users from their device ── */
   const handleDeleteSelectedUsers = async () => {
     if (!selectedUserIds.length) return;
-    const usersToDelete = devUsers.filter(u => selectedUserIds.includes(u.id));
+    // One row per person — delete EVERY per-device copy of that PIN, and queue the
+    // delete on every registered device that has it.
+    const people = selectedUserIds.map(id => mergedById.get(id)).filter(Boolean);
+    if (!people.length) return;
     if (!window.confirm(
-      `Delete ${usersToDelete.length} user(s) from their device(s)?\n` +
-      usersToDelete.map(u => `• PIN ${u.pin} — ${u.name||'—'} (${u.device_sn})`).join('\n')
+      `Delete ${people.length} user(s) from eHajiri AND from the device(s)?\n` +
+      people.map(u => `• PIN ${u.pin} — ${u.name||'—'} (${u._deviceSns.join(', ')})`).join('\n')
     )) return;
     setUserActionBusy(true);
     try {
-      let deleted = 0, noDevice = 0;
-      for (const user of usersToDelete) {
-        const device = devices.find(d => d.serial_number === user.device_sn);
-        if (device) {
-          // Queue DATA DELETE USERINFO PIN=X on the device
-          await api.post(`/zkteco/devices/${device.id}/delete-user`, { pin: user.pin });
-        } else {
-          noDevice++;
+      let deleted = 0, queued = 0, staleOnly = 0;
+      for (const person of people) {
+        const sentTo = new Set();
+        let onDevice = false;
+        for (const row of person._rows) {
+          const device = devices.find(d => d.serial_number === row.device_sn);
+          if (device && !sentTo.has(device.serial_number)) {
+            // Queue DATA DELETE USERINFO PIN=X on the device (also its Area siblings)
+            await api.post(`/zkteco/devices/${device.id}/delete-user`, { pin: row.pin });
+            sentTo.add(device.serial_number); queued++; onDevice = true;
+          }
+          // Remove this copy from the local DB
+          await api.delete(`/zkteco/device-users/${row.id}`);
         }
-        // Remove from local DB
-        await api.delete(`/zkteco/device-users/${user.id}`);
+        if (!onDevice) staleOnly++;
         deleted++;
       }
       showToast(
-        noDevice
-          ? `${deleted} user(s) removed — ⚠️ ${noDevice} had no registered device, removed from database only`
-          : `${deleted} user(s) deleted — device command queued`,
-        noDevice ? 'danger' : 'success'
+        staleOnly
+          ? `${deleted} user(s) removed — device delete queued on ${queued} device(s); ⚠️ ${staleOnly} were only on unregistered devices (database only)`
+          : `${deleted} user(s) deleted — device delete queued on ${queued} device(s)`,
+        staleOnly ? 'danger' : 'success'
       );
       setSelectedUserIds([]);
       await loadDevUsers(false);
@@ -1565,23 +1572,27 @@ const ZKTecoDeviceSettings = () => {
   /* ── Save edited name to DB + queue device update ── */
   const handleSaveUserName = async () => {
     if (!editingUserId || !editName.trim()) return;
-    const user = devUsers.find(u => u.id === editingUserId);
-    if (!user) return;
+    const person = mergedById.get(editingUserId);
+    if (!person) return;
     setUserActionBusy(true);
     try {
-      // 1. Update name in DB
-      await api.put(`/zkteco/device-users/${editingUserId}`, { name: editName.trim() });
-      // 2. Queue DATA UPDATE USERINFO on the device (updates name on device screen)
-      const device = devices.find(d => d.serial_number === user.device_sn);
-      if (device) {
-        await api.post(`/zkteco/devices/${device.id}/upload-user`, {
-          pin      : user.pin,
-          name     : editName.trim(),
-          privilege: user.privilege || 0,
-          card     : user.card_no   || '0',
-        });
+      // Every per-device copy of this PIN: 1. update the name in DB (the PUT also
+      // queues DATA UPDATE USERINFO for that row's device), 2. push to registered devices.
+      const pushed = [];
+      for (const user of person._rows) {
+        await api.put(`/zkteco/device-users/${user.id}`, { name: editName.trim() });
+        const device = devices.find(d => d.serial_number === user.device_sn);
+        if (device && !pushed.includes(device.name)) {
+          await api.post(`/zkteco/devices/${device.id}/upload-user`, {
+            pin      : user.pin,
+            name     : editName.trim(),
+            privilege: user.privilege || 0,
+            card     : user.card_no   || '0',
+          });
+          pushed.push(device.name);
+        }
       }
-      showToast(`Name updated${device ? ` — queued for device "${device.name}"` : ''}`);
+      showToast(`Name updated${pushed.length ? ` — queued for device ${pushed.map(n => `"${n}"`).join(', ')}` : ''}`);
       setEditingUserId(null);
       setEditName('');
       setSelectedUserIds([]);
@@ -1592,7 +1603,9 @@ const ZKTecoDeviceSettings = () => {
 
   const handleLinkUser = async (deviceUserId, employeeId) => {
     try {
-      await api.post(`/zkteco/device-users/${deviceUserId}/link`, { employeeId });
+      // link every per-device copy of this PIN (the tab shows one row per person)
+      const rows = mergedById.get(deviceUserId)?._rows || [{ id: deviceUserId }];
+      for (const r of rows) await api.post(`/zkteco/device-users/${r.id}/link`, { employeeId });
       showToast(L('जोडियो', 'Linked successfully'));
       setLinkModal(null);
       loadDevUsers(false);
@@ -1601,7 +1614,8 @@ const ZKTecoDeviceSettings = () => {
 
   const handleUnlinkUser = async (deviceUserId) => {
     try {
-      await api.post(`/zkteco/device-users/${deviceUserId}/unlink`, {});
+      const rows = mergedById.get(deviceUserId)?._rows || [{ id: deviceUserId }];
+      for (const r of rows) await api.post(`/zkteco/device-users/${r.id}/unlink`, {});
       showToast(L('लिङ्क हटाइयो', 'Unlinked'));
       loadDevUsers(false);
     } catch (err) { showToast(err.message, 'danger'); }
@@ -1633,7 +1647,7 @@ const ZKTecoDeviceSettings = () => {
   const subTabs = [
     { key:'devices',      icon:'📡', label:L('डिभाइस','Devices'),              count: devices.length },
     { key:'logs',         icon:'📋', label:L('हाजिरी लग','Att. Logs'),          count: logTotal||null },
-    { key:'users',        icon:'👥', label:L('प्रयोगकर्ता','Device Users'),     count: devUsers.length||null },
+    { key:'users',        icon:'👥', label:L('प्रयोगकर्ता','Device Users'),     count: new Set(devUsers.map(u => String(u.pin ?? '').trim())).size||null },
     { key:'fingerprints', icon:'👆', label:L('बायोमेट्रिक','Biometrics'),
       count: devUsers.filter(u=>(u.fp_count||0)+(u.face_count||0)>0).length || null },
     { key:'areas',        icon:'🗺️', label:L('Area','Area'),                      count: areas.length||null },
@@ -1848,8 +1862,23 @@ const ZKTecoDeviceSettings = () => {
       ),
     },
     {
-      field:'device_sn', header:'Device SN', width:135,
-      render: v => <span style={{ fontFamily:'monospace', fontSize:11, color:'#9ca3af' }}>{v}</span>,
+      field:'device_sn', header:'Device SN', width:150,
+      render: (v, row) => {
+        const sns = row._deviceSns || [v];
+        return (
+          <span style={{ display:'flex', flexDirection:'column', gap:1 }}>
+            {sns.map(sn => {
+              const reg = devices.some(d => d.serial_number === sn);
+              return (
+                <span key={sn} title={reg ? '' : L('यो डिभाइस दर्ता छैन — पुरानो रेकर्ड','Device not registered — old record')}
+                  style={{ fontFamily:'monospace', fontSize:11, color: reg ? '#6b7280' : '#d1d5db', textDecoration: reg ? 'none' : 'line-through' }}>
+                  {sn}
+                </span>
+              );
+            })}
+          </span>
+        );
+      },
     },
     {
       field:'last_sync', header:L('सिंक','Synced'), width:100,
@@ -1910,6 +1939,32 @@ const ZKTecoDeviceSettings = () => {
   // which terminals contributed. Other consumers of the raw `devUsers` state
   // (e.g. the Transfer Samples modal, which needs "who's on THIS specific
   // source device") are untouched — this merge only feeds this one grid.
+  // Device Users tab: one row per PIN (a person enrolled on 2+ devices, or left
+  // over from a device that was removed, used to show once per device). The
+  // shown row is the copy on a registered device (then a linked one); _rows keeps
+  // every per-device copy so Delete / Link / Edit act on all of them.
+  const mergedDevUsers = useMemo(() => {
+    const registered = new Set(devices.map(d => d.serial_number).filter(Boolean));
+    const score = (u) => (registered.has(u.device_sn) ? 2 : 0) + (u.employee_id ? 1 : 0);
+    const byPin = new Map();
+    for (const u of devUsers) {
+      const key = String(u.pin ?? '').trim();
+      const g = byPin.get(key);
+      if (!g) { byPin.set(key, { rep: u, rows: [u] }); continue; }
+      g.rows.push(u);
+      if (score(u) > score(g.rep)) g.rep = u;
+    }
+    return [...byPin.values()].map(({ rep, rows }) => ({
+      ...rep,
+      employee_name: rep.employee_name || rows.find(r => r.employee_name)?.employee_name || null,
+      employee_id:   rep.employee_id   || rows.find(r => r.employee_id)?.employee_id     || null,
+      last_sync: rows.reduce((a, r) => (new Date(r.last_sync || 0) > new Date(a || 0) ? r.last_sync : a), rep.last_sync),
+      _rows: rows,
+      _deviceSns: [...new Set(rows.map(r => r.device_sn).filter(Boolean))],
+    }));
+  }, [devUsers, devices]);
+  const mergedById = useMemo(() => new Map(mergedDevUsers.map(m => [m.id, m])), [mergedDevUsers]);
+
   const mergedBioUsers = useMemo(() => {
     const byPin = new Map();
     for (const u of devUsers) {
@@ -2363,13 +2418,13 @@ const ZKTecoDeviceSettings = () => {
               <span style={{ fontSize:12,fontWeight:700,color:'#059669' }}>LIVE</span>
               <span style={{ fontSize:11,color:'#9ca3af' }}>3s refresh</span>
               <span style={{ fontWeight:700,color:'#0369a1',fontSize:13 }}>
-                {devUsers.length} {L('प्रयोगकर्ता','users')}
+                {mergedDevUsers.length} {L('प्रयोगकर्ता','users')}
               </span>
               <span style={{ fontSize:11,color:'#059669',fontWeight:600 }}>
-                · {devUsers.filter(u=>u.employee_id).length} {L('जोडिएको','linked')}
+                · {mergedDevUsers.filter(u=>u.employee_id).length} {L('जोडिएको','linked')}
               </span>
               <span style={{ fontSize:11,color:'#9ca3af' }}>
-                · {devUsers.filter(u=>!u.employee_id).length} {L('नजोडिएको','unlinked')}
+                · {mergedDevUsers.filter(u=>!u.employee_id).length} {L('नजोडिएको','unlinked')}
               </span>
             </div>
             <div style={{ display:'flex',gap:8 }}>
@@ -2480,7 +2535,7 @@ const ZKTecoDeviceSettings = () => {
               {selectedUserIds.length === 1 && !editingUserId && (
                 <button
                   onClick={() => {
-                    const u = devUsers.find(x => x.id === selectedUserIds[0]);
+                    const u = mergedById.get(selectedUserIds[0]);
                     setEditingUserId(u?.id || null);
                     setEditName(u?.name || '');
                   }}
@@ -2552,7 +2607,7 @@ const ZKTecoDeviceSettings = () => {
           {(usersLoading || devUsers.length > 0) && (
             <DataGrid
               columns={userColumns}
-              data={devUsers}
+              data={mergedDevUsers}
               defaultPageSize={20}
               showSearch
               compact

@@ -1614,11 +1614,25 @@ router.post('/import-to-staff', async (req, res) => {
   const { rows: dus } = await pool.query(`
     SELECT zu.*, d.name AS device_name FROM zkteco_users zu
     LEFT JOIN zkteco_devices d ON d.serial_number=zu.device_sn
-    ORDER BY CASE WHEN zu.pin~'^[0-9]+$' THEN zu.pin::int ELSE 99999 END`);
+    ORDER BY CASE WHEN zu.pin~'^[0-9]+$' THEN zu.pin::int ELSE 99999 END, (zu.employee_id IS NULL), zu.id`);
+
+  // One staff member per PIN: the same person has a zkteco_users row per device
+  // (and stale rows from removed devices) — import each PIN once (the linked copy
+  // first, per the ORDER BY), then link every device copy + its logs to that staff.
+  const seenPins = new Set();
+  const uniqueDus = dus.filter(du => {
+    const k = String(du.pin || '').trim();
+    if (!k || seenPins.has(k)) return false;
+    seenPins.add(k); return true;
+  });
+  const linkAllCopies = async (empId, pin) => {
+    await pool.query('UPDATE zkteco_users SET employee_id=$1 WHERE TRIM(pin)=$2 AND employee_id IS NULL', [empId, pin]);
+    await pool.query('UPDATE zkteco_attendance_logs SET employee_id=$1 WHERE TRIM(pin)=$2 AND employee_id IS NULL', [empId, pin]);
+  };
 
   let created=0, updated=0, skipped=0;
   const results=[];
-  for (const du of dus) {
+  for (const du of uniqueDus) {
     const pin    = du.pin.trim();
     // Some devices' own stored name already has the PIN appended (e.g. an
     // earlier bulk name-upload to the device used it to disambiguate similar
@@ -1636,13 +1650,14 @@ router.post('/import-to-staff', async (req, res) => {
       if (du.employee_id) {
         await pool.query(`UPDATE users SET device_id=$1,email=CASE WHEN(email IS NULL OR TRIM(email)='')THEN $2 ELSE email END WHERE id=$3`,
           [pin,email,du.employee_id]);
+        await linkAllCopies(du.employee_id, pin);
         updated++; results.push({ pin,name,email,action:'updated' });
       } else {
         const existByPin = await pool.query('SELECT id FROM users WHERE TRIM(device_id)=$1 LIMIT 1',[pin]);
         if (existByPin.rows[0]) {
           const empId=existByPin.rows[0].id;
           await pool.query(`UPDATE users SET device_id=$1,email=CASE WHEN(email IS NULL OR TRIM(email)='')THEN $2 ELSE email END WHERE id=$3`,[pin,email,empId]);
-          await pool.query('UPDATE zkteco_users SET employee_id=$1 WHERE id=$2',[empId,du.id]);
+          await linkAllCopies(empId, pin);
           updated++; results.push({ pin,name,email,action:'linked' });
         } else {
           const empCode=`DEV${pin}`, username=`dev${pin}`;
@@ -1660,14 +1675,13 @@ router.post('/import-to-staff', async (req, res) => {
             empDbId=newEmp.id;
             created++; results.push({ pin,name,email,action:'created',empCode });
           }
-          await pool.query('UPDATE zkteco_users SET employee_id=$1 WHERE id=$2',[empDbId,du.id]);
-          await pool.query(`UPDATE zkteco_attendance_logs SET employee_id=$1 WHERE pin=$2 AND device_sn=$3 AND employee_id IS NULL`,[empDbId,pin,du.device_sn]);
+          await linkAllCopies(empDbId, pin);
         }
       }
       syncEmailDirectory({ action: 'upsert', newEmail: email });
     } catch (err) { skipped++; results.push({ pin,name,email,action:'error',error:err.message }); }
   }
-  res.json({ ok:true, created, updated, skipped, total:dus.length, results });
+  res.json({ ok:true, created, updated, skipped, total:uniqueDus.length, results });
 });
 
 // ═══════════════════════════════════════════════════════

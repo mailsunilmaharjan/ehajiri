@@ -1641,15 +1641,15 @@ const OfficeVisitTypeSection = () => {
 
   const [modal,  setModal]  = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form,   setForm]   = useState({ name:'', shortName:'' });
+  const [form,   setForm]   = useState({ name:'', shortName:'', reduceWeekend:true, reducePublicHoliday:true });
   const [errors, setErrors] = useState({});
   const [delId,  setDelId]  = useState(null);
   const [toast,  setToast]  = useState(null);
 
   const showToast = (msg, type='danger') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
-  const openAdd  = () => { setForm({ name:'', shortName:'' }); setErrors({}); setEditId(null); setModal(true); };
-  const openEdit = (item) => { setForm({ name:item.name, shortName:item.shortName }); setErrors({}); setEditId(item.id); setModal(true); };
+  const openAdd  = () => { setForm({ name:'', shortName:'', reduceWeekend:true, reducePublicHoliday:true }); setErrors({}); setEditId(null); setModal(true); };
+  const openEdit = (item) => { setForm({ name:item.name, shortName:item.shortName, reduceWeekend:item.reduceWeekend !== false, reducePublicHoliday:item.reducePublicHoliday !== false }); setErrors({}); setEditId(item.id); setModal(true); };
 
   const isDupeName      = (v) => data.some(d => d.id !== editId && d.name.trim().toLowerCase()      === v.trim().toLowerCase());
   const isDupeShortName = (v) => data.some(d => d.id !== editId && d.shortName.trim().toLowerCase() === v.trim().toLowerCase());
@@ -1679,7 +1679,7 @@ const OfficeVisitTypeSection = () => {
       // Adding — stay on the form (cleared, back to Add mode) instead of
       // closing — lets someone entering several visit types in a row keep
       // going without reopening the modal each time.
-      setForm({ name:'', shortName:'' });
+      setForm({ name:'', shortName:'', reduceWeekend:true, reducePublicHoliday:true });
       setErrors({});
       showToast(L('सुरक्षित भयो','Saved'), 'success');
     }
@@ -1696,6 +1696,8 @@ const OfficeVisitTypeSection = () => {
         columns={[
           { field:'name',      header:L('भ्रमणको नाम','Office Visit Name'), render:v=><span style={{fontWeight:600}}>{v}</span> },
           { field:'shortName', header:L('छोटो नाम','Short Name'),           render:v=><span style={{background:'#eff6ff',color:'#1a56db',padding:'2px 8px',borderRadius:4,fontFamily:'monospace',fontSize:12,fontWeight:700}}>{v}</span> },
+          { field:'reduceWeekend',       header:L('सप्ताहन्त घटाउ','Red.Wknd'), width:95, align:'center', render:v=>v!==false?'✅':'—' },
+          { field:'reducePublicHoliday', header:L('सा.छुट्टी','Red.PH'),       width:80, align:'center', render:v=>v!==false?'✅':'—' },
           { field:'actions', header:L('कार्य','Actions'), width:80, sortable:false, filterable:false, render:(_,row)=>(
             <div className="dg-actions">
               <button className="dg-action-btn edit"   onClick={e=>{e.stopPropagation();openEdit(row);}}>✏</button>
@@ -1739,6 +1741,21 @@ const OfficeVisitTypeSection = () => {
                 <label className="form-label">{L('छोटो नाम','Office Visit Short Name')} <span style={{ color:'#ef4444' }}>*</span></label>
                 <input type="text" className={`form-control${errors.shortName?' error':''}`} placeholder="FV" value={form.shortName} onChange={e=>setForm(p=>({...p,shortName:e.target.value}))} />
                 {errors.shortName && <div className="form-error">{errors.shortName}</div>}
+              </div>
+              <div className="glm-step"><i>2</i>{L('सप्ताहन्त / सार्वजनिक छुट्टी नीति','Weekend / public holiday policy')}</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+                <div className="form-group">
+                  <label className="form-label">{L('सप्ताहन्त घटाउने','Reduce Weekend')}</label>
+                  <Toggle value={form.reduceWeekend} onChange={v => setForm(p=>({...p,reduceWeekend:v}))} label={form.reduceWeekend ? L('हो','Yes') : L('होइन','No')} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{L('सार्वजनिक छुट्टी घटाउने','Reduce Public Holiday')}</label>
+                  <Toggle value={form.reducePublicHoliday} onChange={v => setForm(p=>({...p,reducePublicHoliday:v}))} label={form.reducePublicHoliday ? L('हो','Yes') : L('होइन','No')} />
+                </div>
+              </div>
+              <div className="muted small" style={{ fontSize:11.5, color:'#6b7280' }}>
+                {L('हो = भ्रमण अवधिभित्रका सप्ताहन्त/सार्वजनिक छुट्टी भ्रमणमा गनिँदैन (सप्ताहन्त/छुट्टी नै देखिन्छ)। होइन = ती दिन पनि कार्यालय भ्रमणमा गनिन्छ — बिदा प्रकारको नीति जस्तै।',
+                   'Yes = weekends / public holidays inside the visit are not counted (they stay Weekend / Holiday). No = those days count as Office Visit days in every report — same policy as leave types.')}
               </div>
             </div>
             <div className="modal-footer">

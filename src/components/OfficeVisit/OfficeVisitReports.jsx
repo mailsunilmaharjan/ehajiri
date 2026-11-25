@@ -10,6 +10,7 @@ import Avatar from '../Common/Avatar.jsx';
 import HoverCard from '../Common/HoverCard.jsx';
 import { buildPrintDoc, openPrintWindow, getExcelHeaderRows, downloadCSV } from '../../utils/printHelper.js';
 import { LeaveAdvancedFilter, DEFAULT_ADV_FILTERS } from '../Leave/LeaveCalculation.jsx';
+import { countLeaveDays } from '../../utils/holidayScope.js';
 import { SidePanelShell, DRow, DRowPair, DRowBox, SectionLabel, InfoLine, panelBtnStyle } from '../Leave/LeaveVisitPage.jsx';
 
 const MONTHS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -186,10 +187,15 @@ const OfficeVisitReports = () => {
       render: (_, row) => personHoverCell(row.approvedBy || row.approvalId) },
   ];
 
-  // Inclusive day-span of one visit (fromDate..toDate, same day = 1).
+  // Visit days in fromDate..toDate, honouring the visit type's Reduce Weekend /
+  // Reduce Public Holiday switches (same policy as leave types). A type saved
+  // before these switches existed behaves as "reduce" (weekends/holidays skipped).
   const visitDays = (v) => {
-    const days = Math.round((new Date(v.toDate) - new Date(v.fromDate)) / 86400000) + 1;
-    return isNaN(days) ? 0 : days;
+    const key = String(v.officialVisit || v.purpose || '').trim().toLowerCase();
+    const t = (settings.officeVisitTypes || []).find(x => String(x?.name || '').trim().toLowerCase() === key
+      || String(x?.shortName || '').trim().toLowerCase() === key);
+    const cfg = { reduceWeekend: t?.reduceWeekend !== false, reducePublicHoliday: t?.reducePublicHoliday !== false };
+    return countLeaveDays(settings, cfg, v.fromDate, v.toDate, getEmployeeById(v.employeeId));
   };
 
   // Shared by the Monthly Ledger tab — zero-filled month buckets (so a

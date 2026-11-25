@@ -133,6 +133,35 @@ export const loadLeaveOffDayRule = async () => {
   };
 };
 
+// Office Visit type settings 'Reduce Weekend' / 'Reduce Public Holiday' — same
+// policy as leave types: when OFF, weekends/holidays inside an approved visit's
+// date range COUNT as Office Visit days (status 'Office Visit'); when ON they are
+// skipped and stay Weekend / Public Holiday. A visit's `purpose` holds its type
+// name. Types saved before these switches existed (flag undefined) behave as ON
+// — that is how visits were always treated, so nothing changes until an admin
+// switches it off. Returns (purpose, isWeekend, isHoliday) => true when the day
+// must show/count as Office Visit.
+export const loadVisitOffDayRule = async () => {
+  let types = [];
+  try {
+    const { rows } = await pool.query("SELECT value FROM app_settings WHERE key='main'");
+    let v = rows[0]?.value; if (typeof v === 'string') v = JSON.parse(v);
+    types = v?.officeVisitTypes || [];
+  } catch { /* keep empty */ }
+  const byKey = new Map();
+  for (const t of types) {
+    if (t?.name) byKey.set(String(t.name).trim().toLowerCase(), t);
+    if (t?.shortName) byKey.set(String(t.shortName).trim().toLowerCase(), t);
+  }
+  return (purpose, isWeekend, isHoliday) => {
+    if (!(isWeekend || isHoliday)) return false;
+    const t = byKey.get(String(purpose || '').trim().toLowerCase());
+    if (!t) return false;
+    const redW = t.reduceWeekend !== false, redH = t.reducePublicHoliday !== false;
+    return (!isWeekend || !redW) && (!isHoliday || !redH);
+  };
+};
+
 // Sandwich days: a run of weekend/public-holiday days that has NO leave of its
 // own but sits directly between two leave days whose type has Reduce Weekend /
 // Reduce Public Holiday OFF is part of that leave (the staff was away the whole
@@ -798,6 +827,7 @@ export async function computeDailyAttendance(date) {
     // of once here.
     const getHoliday  = await makeHolidayChecker(publicHolidays);
     const leaveCountsOffDay = await loadLeaveOffDayRule();
+    const visitCountsOffDay = await loadVisitOffDayRule();
 
     const DOW_KEYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     // Use local interpretation of the date to avoid UTC-shift problems
@@ -1159,7 +1189,9 @@ export async function computeDailyAttendance(date) {
       // with regardless of the leave application), it's simply a holiday.
       // Leave detail is still preserved in remarks below either way.
       const leaveOnOffDay = !!leave_id && leaveCountsOffDay(r.leave_type_code, !!(roster_is_off || isEmpWeekend), !!holidayName);
+      const visitOnOffDay = !leaveOnOffDay && !!visit_id && !leave_id && visitCountsOffDay(visit_purpose, !!(roster_is_off || isEmpWeekend), !!holidayName);
       if (leaveOnOffDay)        status = leave_type_name || 'Leave';
+      else if (visitOnOffDay)   status = 'Office Visit';
       else if (roster_is_off)   status = r.shift_name || 'Weekend';
       else if (isEmpWeekend)    status = 'Weekend';
       else if (time_in)         status = 'Present';
@@ -1418,6 +1450,7 @@ router.get('/staff-ledger', async (req, res) => {
     const leaveRecoMap = {};
     const leaveCodeDates = {}; // ds -> leave type code
     const leaveCountsOffDayL = await loadLeaveOffDayRule();
+    const visitCountsOffDayL = await loadVisitOffDayRule();
     for (const l of leaveRes.rows) {
       const from=new Date(l.from_date), to=new Date(l.to_date);
       for (let d=new Date(from);d<=to;d.setDate(d.getDate()+1)) {
@@ -1551,7 +1584,9 @@ router.get('/staff-ledger', async (req, res) => {
       const isWeekendRaw = isRosterWeekend(dayRoster, dayKey, weekends, defShift?.id);
       // A leave whose type has Reduce Weekend/Holiday OFF counts those days as leave.
       const leaveOnOff   = !!leaveDates[dateStr] && leaveCountsOffDayL(leaveCodeDates[dateStr], isWeekendRaw, !!getHoliday(dateStr, emp));
-      const isWeekend    = isWeekendRaw && !leaveOnOff;
+      // Same for an Office Visit whose type has Reduce Weekend/Holiday OFF.
+      const visitOnOff   = !leaveDates[dateStr] && !!visitDates[dateStr] && visitCountsOffDayL(visitDates[dateStr].purpose, isWeekendRaw, !!getHoliday(dateStr, emp));
+      const isWeekend    = isWeekendRaw && !leaveOnOff && !visitOnOff;
       // Effective shift times: roster (already winter-adjusted by resolveRotationShift)
       // > employee default/system default, winter-adjusted here per-date.
       const fallbackShift = resolveWinterShift(dateStr, shiftStart, shiftEnd, graceSt, graceEd, shiftWinterEnabled, shiftWinterPolicy);
@@ -1681,7 +1716,7 @@ router.get('/staff-ledger', async (req, res) => {
         }
         if (phName) remarks = remarks ? `${remarks} | ${phName}` : phName;
         if (empRemarksMap[dateStr]) remarks = remarks ? `${remarks} | ${empRemarksMap[dateStr]}` : `${empRemarksMap[dateStr]}`;
-      } else if (phName && !leaveOnOff) {
+      } else if (phName && !leaveOnOff && !visitOnOff) {
         // Public Holiday takes priority over a same-day Leave record — the
         // day doesn't count as leave taken (a holiday isn't a working day
         // to begin with), it's simply a holiday. If a leave was also
@@ -1973,19 +2008,21 @@ router.get('/half-monthly', async (req, res) => {
 
     // â”€â”€ Office visits for period â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const visitRes2 = await pool.query(`
-      SELECT employee_id, from_date, to_date FROM office_visits
+      SELECT employee_id, from_date, to_date, purpose FROM office_visits
       WHERE  status='approved' AND from_date <= $2 AND to_date >= $1
              ${effectiveEmployeeId ? 'AND employee_id = $3' : ''}
     `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]);
     const visitMap2 = {};  // empId â†’ Set of visit dates
+    const visitPurpose2 = {};  // empId → { ds → visit type (purpose) }
     for (const v of visitRes2.rows) {
       if (!visitMap2[v.employee_id]) visitMap2[v.employee_id] = new Set();
       const from = new Date(v.from_date), to = new Date(v.to_date);
       for (let d = new Date(from); d <= to; d.setDate(d.getDate()+1)) {
         const ds = d.toISOString().split('T')[0];
-        if (ds >= startDate && ds <= endDate) visitMap2[v.employee_id].add(ds);
+        if (ds >= startDate && ds <= endDate) { visitMap2[v.employee_id].add(ds); (visitPurpose2[v.employee_id] ||= {})[ds] = v.purpose; }
       }
     }
+    const visitCountsOffDayS = await loadVisitOffDayRule();
 
     // â”€â”€ Approved OT — true period total per employee (not gated on a
     // matching raw late-checkout condition, unlike the old per-day
@@ -2024,6 +2061,7 @@ router.get('/half-monthly', async (req, res) => {
       const empWorkingDatesH = [];
       const attStartH = dateOnlyStr(emp.attendanceDate);
       let offDayLeaveH = 0;
+      const offDayVisitH = new Set();
       for (const { dateStr, dayKey } of allDatesHalf) {
         // Before the staff's Attendance Date: never counted.
         if (attStartH && dateStr < attStartH) continue;
@@ -2036,8 +2074,12 @@ router.get('/half-monthly', async (req, res) => {
         } else if (empLeave.has(dateStr) && leaveCountsOffDayS(leaveCodeMap0[emp.id]?.[dateStr], isEmpWkd, !!phName2)) {
           // Leave type with Reduce Weekend/Holiday OFF: this off day IS a leave day.
           offDayLeaveH += empHalfLeave.has(dateStr) ? 0.5 : 1; empTotalWorkingDays++;
+        } else if (!empLeave.has(dateStr) && empVisit.has(dateStr) && visitCountsOffDayS(visitPurpose2[emp.id]?.[dateStr], isEmpWkd, !!phName2)) {
+          // Office Visit type with Reduce Weekend/Holiday OFF: this off day IS an office-visit day.
+          offDayVisitH.add(dateStr); empTotalWorkingDays++;
         }
       }
+      const workSetH = new Set(empWorkingDatesH.map(x => x.dateStr));
 
       let presentDays = 0, absentDays = 0, leaveDays = offDayLeaveH;
       let lateCount = 0, earlyCount = 0, totalMins = 0;
@@ -2112,7 +2154,8 @@ router.get('/half-monthly', async (req, res) => {
       const empHolidayDates   = holidayDates.filter(fromAttH);
       const weekendPresent    = empWeekendDates.filter(d => empLogs[d]?.timeIn).length;
       const holidayPresent    = empHolidayDates.filter(d => empLogs[d]?.timeIn).length;
-      const officialVisitDays = [...empVisit].filter(fromAttH).length;
+      // Visit days = working days on a visit (not on leave) + off days that count as visit (Reduce Weekend/Holiday OFF).
+      const officialVisitDays = [...empVisit].filter(fromAttH).filter(d => (workSetH.has(d) && !empLeave.has(d)) || offDayVisitH.has(d)).length;
 
       const requiredMins = presentDays * ((defShift?.work_hours || 8) * 60);
       const lackMins     = Math.max(0, requiredMins - totalMins);
@@ -2363,11 +2406,27 @@ router.get('/monthly', async (req, res) => {
     // for why this replaces the old per-day-conditional accumulation.
     const monthlyApprovedOTSumMap = await loadApprovedOTSumMap(startDate, endDate);
 
+    // Approved office visits (date → visit type) — a visit day isn't an absence, and
+    // the visit type's Reduce Weekend/Holiday switches decide whether off days count.
+    const visitResMon = await pool.query(`
+      SELECT employee_id, from_date, to_date, purpose FROM office_visits
+      WHERE  status='approved' AND from_date <= $2 AND to_date >= $1
+    `, [startDate, endDate]);
+    const visitPurposeMon = {};  // empId → { ds → purpose }
+    for (const v of visitResMon.rows) {
+      for (let d = new Date(v.from_date); d <= new Date(v.to_date); d.setDate(d.getDate() + 1)) {
+        const ds = d.toISOString().split('T')[0];
+        if (ds >= startDate && ds <= endDate) (visitPurposeMon[v.employee_id] ||= {})[ds] = v.purpose;
+      }
+    }
+    const visitCountsOffDayM = await loadVisitOffDayRule();
+
     const leaveCountsOffDayS = await loadLeaveOffDayRule();
     let stats = employees.map(emp => {
       const empLogs      = logsMap[emp.id] || {};
       const empLeave     = new Set(leaveMap[emp.id] || []);
       const empHalfLeave = halfLeaveMap[emp.id] || new Set();
+      const empVisitM    = visitPurposeMon[emp.id] || {};
 
       // Per-employee roster — resolves rotation + Day Off/Night Off for the given date
       const getEmpRosterM = (ds) => getEffectiveRoster(rosterMapMon, emp.id, ds);
@@ -2388,7 +2447,7 @@ router.get('/monthly', async (req, res) => {
       let empTotalWorkingDays = 0;
       const empWorkingDatesM = [];
       const attStartM = dateOnlyStr(emp.attendanceDate);
-      let offDayLeaveM = 0;
+      let offDayLeaveM = 0, offDayVisitM = 0;
       for (const { dateStr, dayKey } of allDatesMon) {
         // Before the staff's Attendance Date: never counted.
         if (attStartM && dateStr < attStartM) continue;
@@ -2400,10 +2459,13 @@ router.get('/monthly', async (req, res) => {
           empTotalWorkingDays++;
         } else if (empLeave.has(dateStr) && leaveCountsOffDayS(leaveCodeMap0[emp.id]?.[dateStr], isEmpWkd, !!phName3)) {
           offDayLeaveM += empHalfLeave.has(dateStr) ? 0.5 : 1; empTotalWorkingDays++;
+        } else if (!empLeave.has(dateStr) && empVisitM[dateStr] !== undefined && visitCountsOffDayM(empVisitM[dateStr], isEmpWkd, !!phName3)) {
+          // Office Visit type with Reduce Weekend/Holiday OFF: this off day IS an office-visit day.
+          offDayVisitM++; empTotalWorkingDays++;
         }
       }
 
-      let presentDays=0, absentDays=0, leaveDays=offDayLeaveM, lateCount=0, earlyCount=0;
+      let presentDays=0, absentDays=0, leaveDays=offDayLeaveM, visitDays=offDayVisitM, lateCount=0, earlyCount=0;
       let totalMins=0, lateMinsTotal=0, earlyMinsTotal=0;
       // Missing Attendance — checked in but never checked out (single punch),
       // so the day counts as Present above but has no real worked-hours data.
@@ -2415,6 +2477,7 @@ router.get('/monthly', async (req, res) => {
       for (const { dateStr, roster } of empWorkingDatesM) {
         if (empLeave.has(dateStr)) { leaveDays += empHalfLeave.has(dateStr) ? 0.5 : 1; continue; }
         const log = empLogs[dateStr];
+        if ((!log || !log.timeIn) && empVisitM[dateStr] !== undefined) { visitDays++; continue; }   // approved office visit — not an absence
         if (!log || !log.timeIn) { absentDays++; continue; }
         presentDays++;
         // Double duty: judged per duty (shared with Daily/Ledger/Half-Monthly)
@@ -2469,7 +2532,7 @@ router.get('/monthly', async (req, res) => {
         id:emp.id, empCode:emp.empCode, fullName:emp.fullName,
         department:emp.department||'—', position:emp.position||'—', branch:emp.branch||'—',
         eligibleForOt: !!emp.eligible_for_ot,
-        totalWorkingDays: empTotalWorkingDays, presentDays, absentDays, leaveDays,
+        totalWorkingDays: empTotalWorkingDays, presentDays, absentDays, leaveDays, officialVisitDays: visitDays,
         lateCount, earlyCount, otMinutes, totalMins, lateMinsTotal, earlyMinsTotal,
         missingAttendanceDays, extraShiftMinutes,
         attendanceRate, punctualityScore,
@@ -2660,6 +2723,8 @@ router.get('/half-in-out', async (req, res) => {
       }
     }
 
+    const visitCountsOffDayIO = await loadVisitOffDayRule();
+
     // Default shift for OT calculation
     const shiftRes = await pool.query(`SELECT * FROM shifts WHERE make_default=TRUE LIMIT 1`);
     const defShift  = shiftRes.rows[0];
@@ -2773,7 +2838,13 @@ router.get('/half-in-out', async (req, res) => {
         const empHolidayName = getHoliday(date, emp);
 
         const empLeaveDay = empLeave[date] || null;
-        const empVisitDay = empVisit[date] || null;
+        let empVisitDay = empVisit[date] || null;
+        // Office Visit on a weekend / day off / holiday: the visit type's Reduce Weekend/Holiday
+        // switches decide — counts → shown as OV (even over a holiday), reduced → the off day shows.
+        if (empVisitDay && (empIsWeekend || offType || empHolidayName)) {
+          empVisitDay = visitCountsOffDayIO(empVisitDay.purpose, !!(empIsWeekend || offType), !!empHolidayName)
+            ? { ...empVisitDay, countsOffDay: true } : null;
+        }
         // "AB" on the In & Out reports: a past working day with no punch at all
         // (neither IN nor OUT) and nothing else explaining it — not a holiday,
         // weekend, day off, leave or office visit, not in the future, and not
@@ -3202,20 +3273,22 @@ router.get('/present-absent', async (req, res) => {
 
     // Approved office visits
     const visitRes = await pool.query(`
-      SELECT employee_id, from_date, to_date FROM office_visits
+      SELECT employee_id, from_date, to_date, purpose FROM office_visits
       WHERE  status='approved' AND from_date <= $2 AND to_date >= $1
              ${effectiveEmployeeId ? 'AND employee_id = $3' : ''}
     `, effectiveEmployeeId ? [startDate, endDate, effectiveEmployeeId] : [startDate, endDate]);
 
     const visitMap = {};
+    const visitPurposePA = {};  // empId → { ds → visit type (purpose) }
     for (const v of visitRes.rows) {
       if (!visitMap[v.employee_id]) visitMap[v.employee_id] = new Set();
       const from = new Date(v.from_date), to = new Date(v.to_date);
       for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
         const ds = d.toISOString().split('T')[0];
-        if (ds >= startDate && ds <= endDate) visitMap[v.employee_id].add(ds);
+        if (ds >= startDate && ds <= endDate) { visitMap[v.employee_id].add(ds); (visitPurposePA[v.employee_id] ||= {})[ds] = v.purpose; }
       }
     }
+    const visitCountsOffDayPA = await loadVisitOffDayRule();
 
     // Approved OT total per employee for the period — "Sum Total OT" column
     const approvedOTSumMapPA = await loadApprovedOTSumMap(startDate, endDate);
@@ -3271,9 +3344,14 @@ router.get('/present-absent', async (req, res) => {
         const leaveOnOffDayPA = (leave || halfLeave) && !log?.hasIn
           && leaveCountsOffDayPA(leaveCodeMap[emp.id]?.[date], empIsWeekend, isHoliday);
 
+        // Same for an Office Visit whose type has Reduce Weekend / Reduce Public Holiday OFF.
+        const visitOnOffDayPA = !leaveOnOffDayPA && visit && !leave && !halfLeave && !log?.hasIn
+          && visitCountsOffDayPA(visitPurposePA[emp.id]?.[date], empIsWeekend, isHoliday);
+
         if (leaveOnOffDayPA) {
           if (leave) { st = 'L'; totalL++; } else { st = 'LH'; totalL += 0.5; }
         }
+        else if (visitOnOffDayPA) { st = 'OV'; totalOV++; }
         else if (empIsWeekend) {
           // Distinguish the roster's own Day Off/Night Off from the plain
           // company-wide weekend, same as the other reports. A plain weekend
