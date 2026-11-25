@@ -1023,7 +1023,6 @@ const StaffLedger = () => {
                 { f:'_holiday_punch', label:L('बिदामा उपस्थित','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
                 { f:'Weekend', label:L('सप्ताहन्त','Weekend'), value:days.filter(r=>r.isWeekend).length, c:'#f3f4f6', tc:'#6b7280' },
                 { f:'_weekend_punch', label:L('सप्ताहन्तमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
-                { label:L('जम्मा काम घण्टा','Total Work Hrs'), value:totalWorkHrs, c:'#e0f2fe', tc:'#0369a1' },
                 ...(emp?.eligibleForOt ? [
                   { label:L('जम्मा ओटी','Total OT'), value:totalOtHrs, c:'#d1fae5', tc:'#059669' },
                 ] : []),
