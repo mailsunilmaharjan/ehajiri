@@ -3,6 +3,10 @@ import './DataGrid.css';
 import { useLanguage } from '../../context/LanguageContext.jsx';
 import LoadingIndicator from '../Common/LoadingIndicator.jsx';
 
+/* A click / key inside an editable cell (input, select, textarea…) must not move focus to the grid
+   or trigger row navigation — otherwise the cell loses focus and can't be typed in. */
+const isEditable = (el) => !!el?.closest?.('input, select, textarea, [contenteditable="true"]');
+
 const DataGrid = ({
   columns = [],
   data = [],
@@ -176,6 +180,7 @@ const DataGrid = ({
   useEffect(() => { if (showSearch) searchRef.current?.focus(); }, []);
 
   const handleKeyDown = (e) => {
+    if (isEditable(e.target)) return;          // typing in a cell input — leave the keys to the input
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setFocusedRowIdx(prev => {
@@ -233,7 +238,7 @@ const DataGrid = ({
       key={row[rowKey] ?? ri}
       className={`dg-row ${(onRowClick || onRowDoubleClick) ? 'clickable' : ''} ${selectedRows.includes(row[rowKey]) ? 'selected' : ''} ${focusedRowIdx === ri ? 'kb-focus' : ''}`}
       ref={el => { if (focusedRowIdx === ri && el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }}
-      onClick={() => { setFocusedRowIdx(ri); scrollRef.current?.focus(); if (onRowClick) onRowClick(row); }}
+      onClick={(e) => { setFocusedRowIdx(ri); if (!isEditable(e.target)) scrollRef.current?.focus(); if (onRowClick) onRowClick(row); }}
       onDoubleClick={() => {
         if (onRowDoubleClick) onRowDoubleClick(row);
         else if (onRowClick)  onRowClick(row);
@@ -414,7 +419,7 @@ const DataGrid = ({
         ref={scrollRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
-        onClick={() => scrollRef.current?.focus()}
+        onClick={(e) => { if (!isEditable(e.target)) scrollRef.current?.focus(); }}
         style={{ outline: 'none', cursor: 'default' }}
       >
         <table className={`dg-table ${striped ? 'striped' : ''} ${compact ? 'compact' : ''} ${ultraCompact ? 'ultra-compact' : ''} ${autoWidth ? 'auto-width' : ''}`}

@@ -369,6 +369,13 @@ const StaffLedger = () => {
   const summary = data?.summary || {};
   const period  = data?.period  || {};
 
+  /* ── period totals: working hours + approved OT (sum of the day rows) ── */
+  const hhmm = (m) => { m = Math.round(Number(m) || 0); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
+  const sumWorkMins = days.reduce((a, r) => a + (Number(r.totalMins) || 0), 0);
+  const sumOtMins   = emp?.eligibleForOt ? days.reduce((a, r) => a + (Number(r.otApprovedMins) || 0), 0) : 0;
+  const totalWorkHrs = hhmm(sumWorkMins);
+  const totalOtHrs   = hhmm(sumOtMins);
+
   /* ── Staff navigation (respects the branch filter) ── */
   const currentIdx = empId ? branchFilteredEmps.findIndex(e => String(e.id) === String(empId)) : -1;
   const navTo = (idx) => {
@@ -631,6 +638,9 @@ const StaffLedger = () => {
                   <span>Present in Holiday: <strong style="color:#92400e">${presentInHoliday}</strong></span>
                   <span>·</span>
                   <span>Present in Weekend: <strong style="color:#6b7280">${presentInWeekend}</strong></span>
+                  <span>·</span>
+                  <span>Total Work Hrs: <strong style="color:#0369a1">${totalWorkHrs}</strong></span>
+                  ${emp?.eligibleForOt ? `<span>·</span><span>Total OT: <strong style="color:#059669">${totalOtHrs}</strong></span>` : ''}
                 </div>`;
 
               // Date column uses fd() to match the data grid display (BS if Nepali calendar)
@@ -664,6 +674,13 @@ const StaffLedger = () => {
                     <th style="padding:5px 6px;border:1px solid #dedede;background:#efefef;text-align:left">Remarks</th>
                   </tr></thead>
                   <tbody>${tableRows}</tbody>
+                  <tfoot><tr style="background:#eef6ff;font-weight:800">
+                    <td colspan="5" style="padding:5px 6px;border:1px solid #c7d2fe;text-align:right">Total</td>
+                    <td style="padding:5px 6px;border:1px solid #c7d2fe;text-align:center;color:#0369a1">${totalWorkHrs}</td>
+                    <td colspan="2" style="padding:5px 6px;border:1px solid #c7d2fe"></td>
+                    <td style="padding:5px 6px;border:1px solid #c7d2fe;text-align:center;color:#059669">${emp?.eligibleForOt ? totalOtHrs : ''}</td>
+                    <td colspan="2" style="padding:5px 6px;border:1px solid #c7d2fe"></td>
+                  </tr></tfoot>
                 </table>`;
               openPrintWindow(buildPrintDoc({ settings, language, reportTitle, reportSub, contentHtml, isLandscape:false,
                 extraStyle:`
@@ -700,7 +717,7 @@ const StaffLedger = () => {
               const presentInWeekend2 = days.filter(r => r.isWeekend      && r.timeIn).length;
               // Staff info + summary as extra CSV rows after company header
               const staffInfoRow = `"Staff Name: ${emp.fullName||''}","Post: ${emp.postShort||emp.position||''}","Dept: ${emp.deptShort||emp.department||''}","Grade: ${emp.grade||''}","Mode: ${emp.mode||''}","Branch: ${emp.branchShort||emp.branch||''}"`;
-              const summaryRow = `"Present: ${s.presentCount||0}  Absent: ${s.absentCount||0}  Leave: ${s.leaveCount||0}  Office Visit: ${visitCount2}  Late In: ${s.lateCount||0}  Early Out: ${s.earlyCount||0}  Att.Rate: ${s.attendanceRate||0}%  Present in Holiday: ${presentInHoliday2}  Present in Weekend: ${presentInWeekend2}${emp?.eligibleForOt ? `  Total OT: ${s.otApprovedFormatted||'0:00'}` : ''}"`;
+              const summaryRow = `"Present: ${s.presentCount||0}  Absent: ${s.absentCount||0}  Leave: ${s.leaveCount||0}  Office Visit: ${visitCount2}  Late In: ${s.lateCount||0}  Early Out: ${s.earlyCount||0}  Att.Rate: ${s.attendanceRate||0}%  Present in Holiday: ${presentInHoliday2}  Present in Weekend: ${presentInWeekend2}  Total Work Hrs: ${totalWorkHrs}${emp?.eligibleForOt ? `  Total OT: ${totalOtHrs}` : ''}"`;
               const header = ['SN','Date','Day',L('आएको','Time In'),L('गएको','Time Out'),'Total Hrs','IN Status','OUT Status','OT','Status','Remarks'];
               const dataRows = days.map(r => [
                 r.sn, fd(r.dateStr)||r.dateStr, r.dayFull,
@@ -711,7 +728,10 @@ const StaffLedger = () => {
                 r.earlyFormatted||'',
                 (emp?.eligibleForOt && r.otApprovedFormatted)||'',
                 r.status, r.remarks||''
-              ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+              ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
+                // totals row under Total Hrs and OT
+                + '\n' + ['', 'Total', '', '', '', totalWorkHrs, '', '', emp?.eligibleForOt ? totalOtHrs : '', '', '']
+                  .map(v=>`"${v}"`).join(',');
               const excelContent = getExcelHeaderRows(settings, language, reportTitle, periodLabel())
                 + staffInfoRow + '\n'
                 + summaryRow  + '\n'
@@ -926,8 +946,9 @@ const StaffLedger = () => {
                 { f:'_holiday_punch', label:L('बिदामा उपस्थित','P in Holiday'), value:days.filter(r=>r.isPublicHoliday&&r.timeIn).length, c:'#fef3c7', tc:'#92400e' },
                 { f:'Weekend', label:L('सप्ताहन्त','Weekend'), value:days.filter(r=>r.isWeekend).length, c:'#f3f4f6', tc:'#6b7280' },
                 { f:'_weekend_punch', label:L('सप्ताहन्तमा उपस्थित','P in Weekend'), value:days.filter(r=>r.isWeekend&&r.timeIn).length,       c:'#f3f4f6', tc:'#6b7280' },
+                { label:L('जम्मा काम घण्टा','Total Work Hrs'), value:totalWorkHrs, c:'#e0f2fe', tc:'#0369a1' },
                 ...(emp?.eligibleForOt ? [
-                  { label:L('जम्मा ओटी','Total OT'), value:summary.otApprovedFormatted || '0:00', c:'#d1fae5', tc:'#059669' },
+                  { label:L('जम्मा ओटी','Total OT'), value:totalOtHrs, c:'#d1fae5', tc:'#059669' },
                 ] : []),
               ].map(s=>{
                 const active = s.f !== undefined && statusFilter===s.f;
@@ -1058,6 +1079,18 @@ const StaffLedger = () => {
             ] : []),
           ]}
           toolbar={null}
+          footerLeft={emp && days.length > 0 ? (
+            <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+              <span style={{ background:'#e0f2fe', border:'1px solid #7dd3fc', color:'#0369a1', borderRadius:6, padding:'2px 10px', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
+                {L('जम्मा काम घण्टा','Total Working Hrs')} : {totalWorkHrs}
+              </span>
+              {emp.eligibleForOt && (
+                <span style={{ background:'#d1fae5', border:'1px solid #6ee7b7', color:'#059669', borderRadius:6, padding:'2px 10px', fontSize:12, fontWeight:700, whiteSpace:'nowrap' }}>
+                  {L('जम्मा ओटी','Total OT')} : {totalOtHrs}
+                </span>
+              )}
+            </div>
+          ) : null}
         />
       )}
     </div>
