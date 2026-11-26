@@ -4,11 +4,12 @@ import { Amount, Kbd, LastSaved } from '../components/inputs';
 import SerialDialog from '../components/SerialDialog';
 import ProductPanel from '../components/ProductPanel';
 import ContextMenu from '../components/ContextMenu';
+import ProductShareDialog from '../components/ProductShareDialog';
 import { useGrid } from '../components/DataGrid';
 import { api, fmtMoney } from '../lib/api';
 import { addToCart } from '../lib/cart';
 import { useShortcuts } from '../lib/keys';
-import { shareProductEmail, shareProductWhatsApp } from '../lib/productShare';
+import { shareProductEmail } from '../lib/productShare';
 
 const blank = (units) => ({
   name: '', code: '', name_np: '', item_type: 'goods', category_id: '', unit_id: units.find((u) => u.name === 'Pcs')?.id || units[0]?.id || '',
@@ -36,6 +37,7 @@ export default function Products() {
   const [catEdit, setCatEdit] = useState(null);
   const [serialDlg, setSerialDlg] = useState(false);
   const [menu, setMenu] = useState(null);          // right-click menu on a product row
+  const [share, setShare] = useState(null);        // product being shared on WhatsApp
 
   const load = async () => {
     const [i, c, u] = await Promise.all([api.get('/items', { include_inactive: true }), api.get('/categories'), api.get('/units')]);
@@ -88,7 +90,8 @@ export default function Products() {
     catch (err) { notify(err.message, 'err'); }
   };
   useShortcuts({ save, close: () => setEdit(null), del: remove }, !!edit && !serialDlg);
-  useShortcuts({ close: () => setSel(null) }, !!sel && !edit);
+  useShortcuts({ close: () => setSel(null) }, !!sel && !edit && !share);
+  useShortcuts({ close: () => setShare(null) }, !!share);
 
   const saveCat = async () => {
     try {
@@ -117,7 +120,7 @@ export default function Products() {
   const rowMenu = (e, i) => {
     e.preventDefault(); g.setCur(i.id);
     setMenu({ x: e.clientX, y: e.clientY, title: i.name, items: [
-      { label: 'Share on WhatsApp', icon: '💬', onClick: () => shareProductWhatsApp(i, company) },
+      { label: 'Share on WhatsApp', icon: '💬', onClick: () => setShare(i) },
       { label: 'Share by Email', icon: '✉️', onClick: () => shareProductEmail(i, company) },
       'divider',
       { label: 'View details', icon: '👁', onClick: () => setSel(i) },
@@ -207,7 +210,7 @@ export default function Products() {
               </div>
             </section>
           </div>
-          {sel && <ProductPanel item={sel} onClose={() => setSel(null)} onEdit={() => openEdit(sel)} onChanged={load} />}
+          {sel && <ProductPanel item={sel} onClose={() => setSel(null)} onEdit={() => openEdit(sel)} onChanged={load} onShare={setShare} />}
         </div>
       )}
 
@@ -407,6 +410,7 @@ export default function Products() {
         </div>
       )}
       {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
+      {share && <ProductShareDialog item={share} onClose={() => setShare(null)} />}
       {serialDlg && edit && (
         <SerialDialog item={{ id: edit.id || 0, name: edit.name || 'New product' }} mode="in" value={edit.opening_serials}
           qty={num(edit.opening_qty)} onClose={() => setSerialDlg(false)}

@@ -4,12 +4,12 @@ import { useApp } from '../context';
 import { api, fmtStamp } from '../lib/api';
 import { addToCart } from '../lib/cart';
 import { focusNext } from '../lib/keys';
-import { shareProductEmail, shareProductWhatsApp } from '../lib/productShare';
+import { shareProductEmail } from '../lib/productShare';
 
 const rs = (n) => `Rs.${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 /** Right-side product detail: photo, MRP / dealer / partner rates, VAT type, website, cart, features, specifications. */
-export default function ProductPanel({ item, onEdit, onClose, onChanged }) {
+export default function ProductPanel({ item, onEdit, onClose, onChanged, onShare }) {
   const { notify, canEdit, company } = useApp();
   const [qty, setQty] = useState(1);
   const [imgV, setImgV] = useState(0);
@@ -64,7 +64,7 @@ export default function ProductPanel({ item, onEdit, onClose, onChanged }) {
           <button onClick={add}>🛒 Add to Cart</button>
         </div>
         <div className="pp-share">
-          <button type="button" className="wa" onClick={() => shareProductWhatsApp(item, company)}>💬 Share on WhatsApp</button>
+          <button type="button" className="wa" onClick={() => onShare(item)}>💬 Share on WhatsApp</button>
           <button type="button" className="mail" onClick={() => shareProductEmail(item, company)}>✉️ Email</button>
         </div>
         <div className="pp-facts">

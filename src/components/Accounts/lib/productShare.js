@@ -16,20 +16,31 @@ export function productShareText(item, company) {
   return L.join('\n');
 }
 
-/** Opens the device's share sheet with the photo when it can; otherwise WhatsApp with the text ready. */
-export async function shareProductWhatsApp(item, company) {
-  const text = productShareText(item, company);
-  const viaText = () => window.open(waLink('', text), '_blank', 'noopener');
-  if (!item.has_image || !navigator.share || !navigator.canShare) { viaText(); return; }
-  try {
-    const r = await authFetch(`/items/${item.id}/image`);
-    if (!r.ok) throw new Error('no photo');
-    const blob = await r.blob();
-    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
-    const files = [new File([blob], `product.${ext}`, { type: blob.type || 'image/png' })];
-    if (navigator.canShare({ files })) await navigator.share({ files, text });
-    else viaText();
-  } catch (e) { if (e.name !== 'AbortError') viaText(); }
+/** Opens WhatsApp (app or web) with the message typed in, ready to pick the chat. */
+export const openProductChat = (item, company) => window.open(waLink('', productShareText(item, company)), '_blank', 'noopener');
+
+/** The product photo as a File, or null when there is none. */
+export async function productPhoto(item) {
+  if (!item.has_image) return null;
+  const r = await authFetch(`/items/${item.id}/image`);
+  if (!r.ok) return null;
+  const blob = await r.blob();
+  const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+  return new File([blob], `product-${item.code || item.id}.${ext}`, { type: blob.type || 'image/png' });
+}
+
+/** Put the photo on the clipboard so it can be pasted (Ctrl+V) into a chat. Browsers only accept PNG there. */
+export async function copyPhoto(file) {
+  const png = (async () => {
+    const bmp = await createImageBitmap(file);
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0);
+    return new Promise((res, rej) => c.toBlob((x) => (x ? res(x) : rej(new Error('photo'))), 'image/png'));
+  })();
+  await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': png })]);
 }
 
 export function shareProductEmail(item, company) {
