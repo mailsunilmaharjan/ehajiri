@@ -4,12 +4,13 @@ import { useApp } from '../context';
 import { api, fmtStamp } from '../lib/api';
 import { addToCart } from '../lib/cart';
 import { focusNext } from '../lib/keys';
+import { shareProductEmail, shareProductWhatsApp } from '../lib/productShare';
 
 const rs = (n) => `Rs.${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 /** Right-side product detail: photo, MRP / dealer / partner rates, VAT type, website, cart, features, specifications. */
 export default function ProductPanel({ item, onEdit, onClose, onChanged }) {
-  const { notify, canEdit } = useApp();
+  const { notify, canEdit, company } = useApp();
   const [qty, setQty] = useState(1);
   const [imgV, setImgV] = useState(0);
   const [broken, setBroken] = useState(false);
@@ -61,6 +62,10 @@ export default function ProductPanel({ item, onEdit, onClose, onChanged }) {
           <input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); focusNext(e.currentTarget); } }} />
           <button onClick={add}>🛒 Add to Cart</button>
+        </div>
+        <div className="pp-share">
+          <button type="button" className="wa" onClick={() => shareProductWhatsApp(item, company)}>💬 Share on WhatsApp</button>
+          <button type="button" className="mail" onClick={() => shareProductEmail(item, company)}>✉️ Email</button>
         </div>
         <div className="pp-facts">
           <span>Code <b>{item.code}</b></span>

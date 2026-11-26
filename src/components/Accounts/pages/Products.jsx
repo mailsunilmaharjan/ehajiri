@@ -3,10 +3,12 @@ import { useApp } from '../context';
 import { Amount, Kbd, LastSaved } from '../components/inputs';
 import SerialDialog from '../components/SerialDialog';
 import ProductPanel from '../components/ProductPanel';
+import ContextMenu from '../components/ContextMenu';
 import { useGrid } from '../components/DataGrid';
 import { api, fmtMoney } from '../lib/api';
 import { addToCart } from '../lib/cart';
 import { useShortcuts } from '../lib/keys';
+import { shareProductEmail, shareProductWhatsApp } from '../lib/productShare';
 
 const blank = (units) => ({
   name: '', code: '', name_np: '', item_type: 'goods', category_id: '', unit_id: units.find((u) => u.name === 'Pcs')?.id || units[0]?.id || '',
@@ -33,6 +35,7 @@ export default function Products() {
   const [edit, setEdit] = useState(null);
   const [catEdit, setCatEdit] = useState(null);
   const [serialDlg, setSerialDlg] = useState(false);
+  const [menu, setMenu] = useState(null);          // right-click menu on a product row
 
   const load = async () => {
     const [i, c, u] = await Promise.all([api.get('/items', { include_inactive: true }), api.get('/categories'), api.get('/units')]);
@@ -111,6 +114,17 @@ export default function Products() {
     const cost = num(edit?.purchase_price);
     return cost && price ? `${(((price - cost) / cost) * 100).toFixed(1)}%` : '';
   };
+  const rowMenu = (e, i) => {
+    e.preventDefault(); g.setCur(i.id);
+    setMenu({ x: e.clientX, y: e.clientY, title: i.name, items: [
+      { label: 'Share on WhatsApp', icon: '💬', onClick: () => shareProductWhatsApp(i, company) },
+      { label: 'Share by Email', icon: '✉️', onClick: () => shareProductEmail(i, company) },
+      'divider',
+      { label: 'View details', icon: '👁', onClick: () => setSel(i) },
+      canEdit && { label: 'Edit', icon: '✏️', onClick: () => openEdit(i) },
+      { label: 'Add to Cart', icon: '🛒', onClick: () => { addToCart(i, 1); notify(`${i.name} added to cart`); } },
+    ].filter(Boolean) });
+  };
   // standard grids: current row, ticks, ↑ / ↓ / Enter. Products: Enter shows the side panel, double-click edits.
   const g = useGrid({ rows: shown, onOpen: (i) => setSel(i) });
   const checked = g.sel; const setChecked = g.setSel;
@@ -173,7 +187,7 @@ export default function Products() {
                     {shown.length === 0 && <tr><td colSpan={12} className="muted">No products.{canEdit && <> Press <kbd className="kbd">F1</kbd> to add a new product.</>}</td></tr>}
                     {shown.map((i, idx) => (
                       <tr key={i.id} {...g.rowProps(i, i.active ? '' : 'inactive-row')}
-                        onClick={() => { g.rowProps(i).onClick(); setSel(i); }} onDoubleClick={() => canEdit && openEdit(i)}>
+                        onClick={() => { g.rowProps(i).onClick(); setSel(i); }} onDoubleClick={() => canEdit && openEdit(i)} onContextMenu={(e) => rowMenu(e, i)}>
                         {g.tickTd(i)}
                         <td className="sn">{idx + 1}</td>
                         <td className="pname">{i.name}{i.track_serial ? <span className="tag">S/N</span> : null}{i.item_type === 'service' && <span className="tag st-open">service</span>}</td>
@@ -392,6 +406,7 @@ export default function Products() {
           </form>
         </div>
       )}
+      {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       {serialDlg && edit && (
         <SerialDialog item={{ id: edit.id || 0, name: edit.name || 'New product' }} mode="in" value={edit.opening_serials}
           qty={num(edit.opening_qty)} onClose={() => setSerialDlg(false)}

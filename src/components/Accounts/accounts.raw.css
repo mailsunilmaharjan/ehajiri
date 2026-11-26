@@ -506,6 +506,10 @@ a.btn.ghost-a:hover { background: #e7fbef; }
 .pp-cart { padding: 8px 10px; gap: 8px; align-items: center; }
 .pp-cart input { width: 56px; height: 30px; padding: 2px 6px; font-size: 14px; border-radius: 6px; }
 .pp-cart button { height: 30px; padding: 0 12px; background: #1a56db; border-radius: 6px; font-size: 13px; font-weight: 600; }
+.pp-share { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.pp-share button { flex: 1; justify-content: center; height: 30px; padding: 0 12px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+.pp-share button.wa { background: #16a34a; border: 1px solid #16a34a; color: #fff; }
+.pp-share button.mail { background: #fff; border: 1px solid #1a56db; color: #1a56db; }
 .pp-facts { padding: 6px 10px; gap: 4px 12px; font-size: 11.5px; }
 .pp section { padding: 8px 10px 10px; }
 .pp h4 { margin: 0 0 5px; font-size: 11px; font-weight: 700; color: #94a3b8; }
